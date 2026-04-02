@@ -132,6 +132,33 @@
 
 <div class="main">
   <div class="card form-col" style="grid-column:1/3;">
+    <div class="card-title">Imagen Popup</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+      <div>
+        <div class="field">
+          <label>Imagen a mostrar al abrir la app</label>
+          <div class="drop-zone" id="dropZonePopup">
+            <input type="file" id="fFotoPopup" accept="image/*">
+            <div class="drop-icon">🖼️</div>
+            <div class="drop-text">Arrastrá o hacé clic para cargar</div>
+            <div class="drop-sub">JPG, PNG, WEBP — máx. 5MB</div>
+          </div>
+        </div>
+        <button class="btn-guardar" id="btnGuardarPopup" onclick="guardarPopup()" style="margin-bottom:8px">Publicar aviso</button>
+        <button class="btn-guardar" id="btnQuitarPopup" onclick="quitarPopup()" style="background:var(--muted)">Quitar popup</button>
+      </div>
+      <div>
+        <div class="field">
+          <label>Popup actual</label>
+          <div id="popupActualPreview" style="border-radius:12px;overflow:hidden;background:var(--card2);min-height:100px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;border:1px solid var(--border)">Sin popup activo</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="card form-col" style="grid-column:1/3;">
     <div class="card-title">Importador masivo (XLS / XLSX / CSV)</div>
     <div class="field">
       <label>Arrastrá o hacé clic para seleccionar un archivo</label>
@@ -305,6 +332,60 @@ async function subirFoto(file, codigo, progressFill, progressLabel, progressWrap
     throw e;
   }
 }
+
+// ── POPUP ──────────────────────────────────────────────────────
+let fotoArchivoPopup = null;
+const dropZonePopup = document.getElementById('dropZonePopup');
+const inputFotoPopup = document.getElementById('fFotoPopup');
+
+inputFotoPopup.addEventListener('change', e => { if(e.target.files[0]) setFotoPopupPreview(e.target.files[0]); });
+dropZonePopup.addEventListener('dragover', e => { e.preventDefault(); dropZonePopup.classList.add('drag-over'); });
+dropZonePopup.addEventListener('dragleave', () => dropZonePopup.classList.remove('drag-over'));
+dropZonePopup.addEventListener('drop', e => { e.preventDefault(); dropZonePopup.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if(f && f.type.startsWith('image/')) setFotoPopupPreview(f); });
+
+function setFotoPopupPreview(file) {
+  fotoArchivoPopup = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    dropZonePopup.classList.add('tiene-foto');
+    dropZonePopup.innerHTML = `<img src="${e.target.result}" alt="preview"><button class="btn-quitar-foto" onclick="fotoArchivoPopup=null;dropZonePopup.classList.remove('tiene-foto');dropZonePopup.innerHTML='<input type=\\'file\\' id=\\'fFotoPopup\\' accept=\\'image/*\\'><div class=\\'drop-icon\\'>🖼️</div><div class=\\'drop-text\\'>Arrastrá o hacé clic para cargar</div>';document.getElementById('fFotoPopup').addEventListener('change',e=>{if(e.target.files[0])setFotoPopupPreview(e.target.files[0]);})">✕</button>`;
+  };
+  reader.readAsDataURL(file);
+}
+
+// Cargar popup actual al iniciar
+onSnapshot(doc(db, 'config', 'popup'), snap => {
+  const prev = document.getElementById('popupActualPreview');
+  const url = snap.exists() ? snap.data().url : null;
+  if(url) prev.innerHTML = `<img src="${url}" style="width:100%;border-radius:10px;display:block">`;
+  else prev.innerHTML = '<span>Sin popup activo</span>';
+});
+
+window.guardarPopup = async () => {
+  if(!fotoArchivoPopup) { toast('Seleccioná una imagen primero', 'err'); return; }
+  const btn = document.getElementById('btnGuardarPopup');
+  btn.disabled = true; btn.textContent = 'Subiendo...';
+  try {
+    const formData = new FormData();
+    formData.append('file', fotoArchivoPopup);
+    formData.append('upload_preset', 'Corralon');
+    formData.append('public_id', 'popup_banner_' + Date.now());
+    const res = await fetch(CLOUDINARY_URL, { method: 'POST', body: formData });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error?.message || 'Error subiendo imagen');
+    await setDoc(doc(db, 'config', 'popup'), { url: data.secure_url });
+    toast('✅ Popup guardado', 'ok');
+    fotoArchivoPopup = null;
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+  btn.disabled = false; btn.textContent = 'Guardar popup';
+};
+
+window.quitarPopup = async () => {
+  try {
+    await setDoc(doc(db, 'config', 'popup'), { url: null });
+    toast('Popup eliminado', 'ok');
+  } catch(e) { toast('❌ ' + e.message, 'err'); }
+};
 
 window.guardarArticulo = async () => {
   const codigo  = document.getElementById('fCodigo').value.trim();
