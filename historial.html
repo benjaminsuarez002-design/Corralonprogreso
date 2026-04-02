@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Historial — Corralón Progreso</title>
+<link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --rojo: #e50000; --rojo2: #c0392b; --violeta: #6c4fc7;
+  --borde: #c8c0e8; --fila-header: #d0c8f0; --fila-body: #e8e4f8;
+  --texto-dark: #1a1a2e; --sombra: 0 2px 12px rgba(108,79,199,0.13);
+}
+html, body { height: 100%; }
+body { font-family: 'Barlow', sans-serif; background: #f0ece8; min-height: 100dvh; }
+body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8; background-image: radial-gradient(ellipse at 15% 25%, rgba(255,255,255,0.92) 0%, transparent 55%); z-index: 0; }
+
+/* ── LOGIN ── */
+#loginBg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
+.login-box { background: #fff; border-radius: 24px; padding: 32px 28px; width: 100%; max-width: 340px; box-shadow: 0 8px 40px rgba(108,79,199,0.15); text-align: center; position: relative; z-index: 1; }
+.login-logo { width: 120px; height: auto; margin-bottom: 16px; }
+.login-title { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 900; color: var(--texto-dark); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.login-sub { font-size: 13px; color: #aaa; margin-bottom: 24px; }
+.login-input { width: 100%; padding: 12px 16px; border: 2px solid var(--borde); border-radius: 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 700; outline: none; text-align: center; letter-spacing: 4px; color: var(--texto-dark); transition: border-color .2s; margin-bottom: 10px; }
+.login-input:focus { border-color: var(--violeta); }
+.login-error { font-size: 12px; color: var(--rojo); min-height: 18px; margin-bottom: 12px; }
+.btn-login { width: 100%; padding: 14px; background: var(--violeta); color: #fff; border: none; border-radius: 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; margin-bottom: 10px; }
+.btn-volver { width: 100%; padding: 12px; background: transparent; color: #aaa; border: 1.5px solid var(--borde); border-radius: 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; }
+
+/* ── APP ── */
+#appContent { display: none; flex-direction: column; min-height: 100dvh; position: relative; z-index: 1; }
+.header { background: #fff; border-bottom: 2px solid var(--borde); padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; box-shadow: var(--sombra); position: sticky; top: 0; z-index: 5; }
+.header img { height: 38px; width: auto; }
+.header-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; color: var(--rojo); text-transform: uppercase; letter-spacing: 1px; flex: 1; }
+.btn-back { background: var(--fila-header); border: none; color: var(--violeta); font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; padding: 7px 14px; border-radius: 20px; cursor: pointer; text-transform: uppercase; letter-spacing: .5px; }
+
+/* ── HISTORIAL LIST ── */
+.h-item { padding: 13px 16px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background .15s; background: #fff; }
+.h-item:nth-child(even) { background: var(--fila-body); }
+.h-item:hover { background: var(--fila-header); }
+.h-nro { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px; color: var(--violeta); min-width: 90px; }
+.h-info { flex: 1; min-width: 0; }
+.h-cliente { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; color: var(--texto-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h-meta { font-size: 11px; color: #999; margin-top: 2px; }
+.h-total { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; color: var(--violeta); flex-shrink: 0; }
+.h-empty { text-align: center; padding: 60px 20px; color: #bbb; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; }
+
+/* ── DETALLE ── */
+.detalle-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100; display: none; align-items: flex-end; }
+.detalle-bg.open { display: flex; }
+.detalle-panel { background: #fff; border-radius: 20px 20px 0 0; width: 100%; max-height: 90vh; display: flex; flex-direction: column; }
+.detalle-head { padding: 14px 16px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: var(--fila-header); border-radius: 20px 20px 0 0; }
+.detalle-nro { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 900; color: var(--violeta); }
+.detalle-body { overflow-y: auto; flex: 1; padding: 16px; }
+.detalle-info { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.detalle-campo { display: flex; flex-direction: column; gap: 2px; }
+.detalle-lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+.detalle-val { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; color: var(--texto-dark); }
+.detalle-tabla-head { display: grid; grid-template-columns: 45px 1fr 75px 80px; gap: 6px; background: var(--fila-header); padding: 6px 8px; border-radius: 8px 8px 0 0; }
+.detalle-th { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: var(--violeta); text-transform: uppercase; letter-spacing: .5px; }
+.detalle-fila { display: grid; grid-template-columns: 45px 1fr 75px 80px; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--borde); }
+.detalle-fila:nth-child(even) { background: var(--fila-body); }
+.detalle-td { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; color: var(--texto-dark); }
+.detalle-td.num { text-align: right; }
+.detalle-td.bold { font-weight: 700; color: var(--violeta); }
+.detalle-total { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 10px 8px 0; border-top: 2px solid var(--borde); margin-top: 2px; }
+.detalle-total-lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; color: #888; text-transform: uppercase; }
+.detalle-total-val { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 900; color: var(--violeta); }
+.detalle-acciones { display: flex; gap: 8px; padding: 14px 16px; border-top: 1px solid var(--borde); flex-shrink: 0; }
+.btn-det { flex: 1; padding: 11px; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.btn-det.pdf  { background: var(--violeta); color: #fff; }
+.btn-det.edit { background: #f5f3ff; color: var(--violeta); border: 1.5px solid var(--borde); }
+.btn-det.del  { background: #fff0f0; color: var(--rojo); border: 1.5px solid #fcc; }
+
+/* ── EDITAR ── */
+.edit-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200; display: none; align-items: flex-end; }
+.edit-bg.open { display: flex; }
+.edit-panel { background: #fff; border-radius: 20px 20px 0 0; width: 100%; max-height: 92vh; display: flex; flex-direction: column; }
+.edit-head { padding: 14px 16px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: var(--fila-header); border-radius: 20px 20px 0 0; }
+.edit-body { overflow-y: auto; flex: 1; padding: 14px; }
+.edit-section { margin-bottom: 14px; }
+.edit-lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.edit-inp { width: 100%; padding: 8px 12px; border: 1.5px solid var(--borde); border-radius: 8px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; color: var(--texto-dark); outline: none; transition: border-color .2s; }
+.edit-inp:focus { border-color: var(--violeta); }
+.edit-items-head { display: grid; grid-template-columns: 45px 1fr 75px 80px 28px; gap: 4px; background: var(--fila-header); padding: 5px 6px; border-radius: 6px 6px 0 0; }
+.edit-th { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: var(--violeta); text-transform: uppercase; }
+.edit-item-row { display: grid; grid-template-columns: 45px 1fr 75px 80px 28px; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--borde); align-items: center; }
+.edit-item-row:nth-child(even) { background: var(--fila-body); }
+.edit-item-inp { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; border: none; background: transparent; outline: none; width: 100%; padding: 2px 3px; border-radius: 4px; color: var(--texto-dark); }
+.edit-item-inp:focus { background: rgba(108,79,199,.08); }
+.edit-item-inp.num { text-align: right; }
+.edit-add-row { display: grid; grid-template-columns: 45px 1fr 75px 80px 28px; gap: 4px; padding: 4px 6px; background: rgba(108,79,199,.04); border-bottom: 1px dashed var(--borde); align-items: center; }
+.edit-footer { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--borde); flex-shrink: 0; }
+.btn-edit-cancel { flex: 1; padding: 11px; border: 1.5px solid var(--borde); border-radius: 10px; background: transparent; color: #888; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; }
+.btn-edit-save { flex: 2; padding: 11px; border: none; border-radius: 10px; background: var(--violeta); color: #fff; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; }
+.btn-add { background: var(--violeta); border: none; color: #fff; font-size: 18px; cursor: pointer; border-radius: 6px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; }
+.btn-del-item { background: none; border: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 2px; border-radius: 4px; }
+.btn-del-item:hover { color: var(--rojo); }
+
+/* ── CONFIRM ── */
+.confirm-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 300; display: none; align-items: center; justify-content: center; padding: 20px; }
+.confirm-bg.open { display: flex; }
+.confirm-box { background: #fff; border-radius: 18px; padding: 24px; width: 100%; max-width: 320px; text-align: center; box-shadow: var(--sombra); }
+.confirm-icon { font-size: 36px; margin-bottom: 10px; }
+.confirm-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; color: var(--texto-dark); text-transform: uppercase; margin-bottom: 8px; }
+.confirm-sub { font-size: 13px; color: #888; margin-bottom: 20px; line-height: 1.5; }
+.confirm-btns { display: flex; gap: 10px; }
+.btn-confirm-cancel { flex: 1; padding: 12px; border: 1.5px solid var(--borde); border-radius: 10px; background: transparent; color: #888; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; }
+.btn-confirm-ok { flex: 2; padding: 12px; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; color: #fff; }
+
+/* ── TOAST / LOADING ── */
+.toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--texto-dark); color: #fff; padding: 10px 20px; border-radius: 20px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; z-index: 999; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .3s; }
+.toast.show { opacity: 1; }
+.loading-overlay { position: fixed; inset: 0; background: rgba(240,236,232,0.9); display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 600; }
+.loading-overlay.show { display: flex; }
+.spinner { width: 40px; height: 40px; border: 4px solid #d0c8f0; border-top-color: var(--violeta); border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 16px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-txt { color: var(--violeta); font-size: 16px; letter-spacing: 1px; text-transform: uppercase; font-family: 'Barlow Condensed', sans-serif; }
+</style>
+</head>
+<body>
+
+<!-- ── PANTALLA DE CONTRASEÑA ── -->
+<div id="loginBg">
+  <div class="login-box">
+    <img class="login-logo" src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Logo">
+    <div class="login-title">📋 Historial</div>
+    <div class="login-sub">Ingresá la contraseña para continuar</div>
+    <input type="password" class="login-input" id="loginInput" placeholder="••••••••"
+      autocomplete="new-password"
+      onkeydown="if(event.key==='Enter')verificarPass()">
+    <div class="login-error" id="loginError"></div>
+    <button class="btn-login" onclick="verificarPass()">Acceder</button>
+    <button class="btn-volver" onclick="location.href='remitos.html'">← Volver a remitos</button>
+  </div>
+</div>
+
+<!-- ── CONTENIDO HISTORIAL ── -->
+<div id="appContent">
+  <div class="header">
+    <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Logo">
+    <div class="header-title">Historial</div>
+    <button class="btn-back" onclick="location.href='remitos.html'">← Volver</button>
+  </div>
+  <div id="historialBody"></div>
+</div>
+
+<!-- ── DETALLE ── -->
+<div class="detalle-bg" id="detalleBg" onclick="if(event.target===this)cerrarDetalle()">
+  <div class="detalle-panel">
+    <div class="detalle-head">
+      <span class="detalle-nro" id="detalleNro">—</span>
+      <button onclick="cerrarDetalle()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;">✕</button>
+    </div>
+    <div class="detalle-body" id="detalleBody"></div>
+    <div class="detalle-acciones">
+      <button class="btn-det pdf" onclick="verPDFDetalle()">📄 PDF</button>
+      <button class="btn-det edit" onclick="abrirEditar()">✏️ Editar</button>
+      <button class="btn-det del" onclick="confirmarEliminar()">🗑 Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── EDITAR ── -->
+<div class="edit-bg" id="editBg" onclick="if(event.target===this)cerrarEditar()">
+  <div class="edit-panel">
+    <div class="edit-head">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;color:var(--texto-dark);text-transform:uppercase;">✏️ Editar remito</span>
+      <button onclick="cerrarEditar()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;">✕</button>
+    </div>
+    <div class="edit-body" id="editBody"></div>
+    <div class="edit-footer">
+      <button class="btn-edit-cancel" onclick="cerrarEditar()">Cancelar</button>
+      <button class="btn-edit-save" onclick="guardarEdicion()">💾 Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── CONFIRM ── -->
+<div class="confirm-bg" id="confirmBg">
+  <div class="confirm-box">
+    <div class="confirm-icon" id="confirmIcon">⚠️</div>
+    <div class="confirm-title" id="confirmTitle">¿Confirmar?</div>
+    <div class="confirm-sub" id="confirmSub"></div>
+    <div class="confirm-btns">
+      <button class="btn-confirm-cancel" onclick="cerrarConfirm()">Cancelar</button>
+      <button class="btn-confirm-ok" id="confirmOkBtn" onclick="ejecutarConfirm()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── LOADING / TOAST ── -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-txt">Cargando...</div>
+</div>
+<div class="toast" id="toastEl"></div>
+
+<script>
+const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+const SUPABASE_BUCKET = 'Archivos';
+const ADMIN_PASS = 'Akashiya2301';
+
+let _remitoDetalleActual = null;
+let editItems = [];
+let _confirmCallback = null;
+
+// ── UTILS ──
+function toast(msg) {
+  const el = document.getElementById('toastEl');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+function loading(show) {
+  document.getElementById('loadingOverlay').classList.toggle('show', show);
+}
+function fmt(n) {
+  return '$' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+// ── LOGIN ──
+function verificarPass() {
+  const val = document.getElementById('loginInput').value;
+  if(val === ADMIN_PASS) {
+    document.getElementById('loginBg').style.display = 'none';
+    document.getElementById('appContent').style.display = 'flex';
+    document.getElementById('appContent').style.flexDirection = 'column';
+    document.getElementById('appContent').style.minHeight = '100dvh';
+    cargarHistorial();
+  } else {
+    document.getElementById('loginError').textContent = '❌ Contraseña incorrecta';
+    document.getElementById('loginInput').value = '';
+    document.getElementById('loginInput').focus();
+  }
+}
+
+// ── HISTORIAL ──
+async function cargarHistorial() {
+  const body = document.getElementById('historialBody');
+  body.innerHTML = '<div class="h-empty">Cargando...</div>';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=*&order=id.desc&limit=100`, {
+      headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
+    });
+    const data = await res.json();
+    if(!Array.isArray(data) || !data.length) {
+      body.innerHTML = '<div class="h-empty">Sin remitos todavía</div>';
+      return;
+    }
+    body.innerHTML = data.map(r => `
+      <div class="h-item" onclick="abrirDetalle(${r.id})">
+        <div class="h-nro">${r.nro||'—'}</div>
+        <div class="h-info">
+          <div class="h-cliente">${r.cliente||'—'}</div>
+          <div class="h-meta">${r.fecha||''}</div>
+        </div>
+        <div class="h-total">${fmt(r.total||0)}</div>
+        <span style="color:#ccc;font-size:18px;">›</span>
+      </div>`).join('');
+  } catch(e) {
+    body.innerHTML = '<div class="h-empty">Error cargando historial</div>';
+  }
+}
+
+// ── DETALLE ──
+async function abrirDetalle(id) {
+  loading(true);
+  try {
+    const [resR, resI] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${id}&select=*`, { headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY } }),
+      fetch(`${SUPABASE_URL}/rest/v1/items_remito?remito_id=eq.${id}&select=*&order=id.asc`, { headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY } })
+    ]);
+    const [remitos, itemsR] = await Promise.all([resR.json(), resI.json()]);
+    const r = remitos[0];
+    if(!r) { toast('❌ No se encontró el remito'); loading(false); return; }
+    _remitoDetalleActual = { ...r, items: itemsR || [] };
+    document.getElementById('detalleNro').textContent = r.nro || '—';
+    const body = document.getElementById('detalleBody');
+    body.innerHTML = `
+      <div class="detalle-info">
+        <div class="detalle-campo" style="grid-column:1/3">
+          <div class="detalle-lbl">Cliente</div>
+          <div class="detalle-val">${r.cliente||'—'}</div>
+        </div>
+        <div class="detalle-campo">
+          <div class="detalle-lbl">Fecha</div>
+          <div class="detalle-val">${r.fecha||'—'}</div>
+        </div>
+        <div class="detalle-campo">
+          <div class="detalle-lbl">N° Remito</div>
+          <div class="detalle-val">${r.nro||'—'}</div>
+        </div>
+      </div>
+      <div class="detalle-tabla-head">
+        <div class="detalle-th" style="text-align:center">Cant.</div>
+        <div class="detalle-th">Descripción</div>
+        <div class="detalle-th" style="text-align:right">Precio</div>
+        <div class="detalle-th" style="text-align:right">Subtotal</div>
+      </div>
+      ${(itemsR||[]).length ? itemsR.map(it => `
+        <div class="detalle-fila">
+          <div class="detalle-td" style="text-align:center">${it.cant}</div>
+          <div class="detalle-td">${it.descripcion||''}</div>
+          <div class="detalle-td num">$${Number(it.precio||0).toLocaleString('es-AR')}</div>
+          <div class="detalle-td num bold">$${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR')}</div>
+        </div>`).join('') : '<div style="padding:12px 8px;color:#bbb;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;">Sin ítems registrados</div>'}
+      <div class="detalle-total">
+        <div class="detalle-total-lbl">Total</div>
+        <div class="detalle-total-val">$${Number(r.total||0).toLocaleString('es-AR')}</div>
+      </div>`;
+    loading(false);
+    document.getElementById('detalleBg').classList.add('open');
+  } catch(e) {
+    loading(false);
+    toast('❌ Error: ' + e.message);
+  }
+}
+
+function cerrarDetalle() {
+  document.getElementById('detalleBg').classList.remove('open');
+  _remitoDetalleActual = null;
+}
+
+function verPDFDetalle() {
+  const r = _remitoDetalleActual;
+  if(!r) return;
+  const nroCorto = (r.nro||'').split('-').pop() || '00001';
+  const its = (r.items||[]).map(it => ({ cant: it.cant, desc: it.descripcion, precio: it.precio }));
+  const total = its.reduce((s,it) => s + (it.precio||0)*(it.cant||0), 0);
+  generarPDFDoc(r.cliente, r.fecha, nroCorto, total, its).save('Remito-' + r.nro + '-' + (r.cliente||'').replace(/\s+/g,'_') + '.pdf');
+}
+
+// ── ELIMINAR ──
+function confirmarEliminar() {
+  const r = _remitoDetalleActual;
+  if(!r) return;
+  pedirConfirm({
+    icon: '🗑', titulo: 'Eliminar remito',
+    sub: `¿Eliminar el remito ${r.nro} de ${r.cliente}? Esta acción no se puede deshacer.`,
+    color: 'var(--rojo)', btnTxt: 'Eliminar',
+    callback: async () => {
+      loading(true);
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${r.id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
+        });
+        loading(false);
+        cerrarDetalle();
+        toast('🗑 Remito eliminado');
+        cargarHistorial();
+      } catch(e) {
+        loading(false);
+        toast('❌ Error: ' + e.message);
+      }
+    }
+  });
+}
+
+// ── EDITAR ──
+function abrirEditar() {
+  const r = _remitoDetalleActual;
+  if(!r) return;
+  editItems = (r.items||[]).map(it => ({ id: it.id, cant: it.cant, desc: it.descripcion, precio: it.precio }));
+  renderEditForm();
+  document.getElementById('editBg').classList.add('open');
+}
+
+function cerrarEditar() {
+  document.getElementById('editBg').classList.remove('open');
+  editItems = [];
+}
+
+function renderEditForm() {
+  const r = _remitoDetalleActual;
+  const nroCorto = (r.nro||'').split('-').pop() || '';
+  document.getElementById('editBody').innerHTML = `
+    <div class="edit-section">
+      <div class="edit-lbl">Cliente</div>
+      <input class="edit-inp" id="editCliente" value="${r.cliente||''}" placeholder="Nombre del cliente" autocomplete="off">
+    </div>
+    <div class="edit-section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <div class="edit-lbl">Fecha</div>
+        <input class="edit-inp" id="editFecha" value="${r.fecha||''}" placeholder="DD/MM/AAAA" autocomplete="off">
+      </div>
+      <div>
+        <div class="edit-lbl">N° Remito</div>
+        <input class="edit-inp" id="editNro" value="${nroCorto}" placeholder="00001" autocomplete="off">
+      </div>
+    </div>
+    <div class="edit-section">
+      <div class="edit-lbl" style="margin-bottom:6px">Ítems</div>
+      <div class="edit-items-head">
+        <div class="edit-th" style="text-align:center">Cant.</div>
+        <div class="edit-th">Descripción</div>
+        <div class="edit-th" style="text-align:right">Precio</div>
+        <div class="edit-th" style="text-align:right">Subtotal</div>
+        <div></div>
+      </div>
+      <div id="editItemsRows"></div>
+      <div class="edit-add-row">
+        <input type="text" class="edit-item-inp num" id="eNuevoCant" placeholder="1" inputmode="numeric" autocomplete="off" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+        <input type="text" class="edit-item-inp" id="eNuevoDesc" placeholder="Descripción..." autocomplete="off">
+        <input type="text" class="edit-item-inp num" id="eNuevoPrecio" placeholder="0" inputmode="numeric" autocomplete="off">
+        <div></div>
+        <button class="btn-add" style="width:22px;height:22px;font-size:14px" onclick="editAgregarItem()">+</button>
+      </div>
+    </div>`;
+  renderEditItems();
+}
+
+function renderEditItems() {
+  const cont = document.getElementById('editItemsRows');
+  if(!cont) return;
+  cont.innerHTML = editItems.map((it, i) => `
+    <div class="edit-item-row">
+      <input type="text" class="edit-item-inp num" value="${it.cant}" inputmode="numeric" autocomplete="off"
+        oninput="this.value=this.value.replace(/[^0-9]/g,'')"
+        onchange="editItems[${i}].cant=parseFloat(this.value)||1;actualizarSubEdit()">
+      <input type="text" class="edit-item-inp" value="${it.desc||''}" autocomplete="off"
+        onchange="editItems[${i}].desc=this.value">
+      <input type="text" class="edit-item-inp num" value="${it.precio||0}" inputmode="numeric" autocomplete="off"
+        onchange="editItems[${i}].precio=parseFloat(this.value)||0;actualizarSubEdit()">
+      <div class="edit-item-inp num" id="editSub${i}" style="color:var(--violeta);font-weight:700;font-size:13px;text-align:right;padding:2px 3px">
+        $${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR')}
+      </div>
+      <button class="btn-del-item" style="font-size:13px" onclick="editItems.splice(${i},1);renderEditItems()">✕</button>
+    </div>`).join('');
+}
+
+function actualizarSubEdit() {
+  editItems.forEach((it, i) => {
+    const el = document.getElementById('editSub' + i);
+    if(el) el.textContent = '$' + Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR');
+  });
+}
+
+function editAgregarItem() {
+  const cant  = parseFloat(document.getElementById('eNuevoCant').value) || 1;
+  const desc  = document.getElementById('eNuevoDesc').value.trim();
+  const precio= parseFloat(document.getElementById('eNuevoPrecio').value) || 0;
+  if(!desc && !precio) return;
+  editItems.push({ cant, desc, precio });
+  document.getElementById('eNuevoCant').value = '';
+  document.getElementById('eNuevoDesc').value = '';
+  document.getElementById('eNuevoPrecio').value = '';
+  renderEditItems();
+  setTimeout(() => document.getElementById('eNuevoCant').focus(), 30);
+}
+
+async function guardarEdicion() {
+  const r = _remitoDetalleActual;
+  if(!r) return;
+  const cliente  = document.getElementById('editCliente').value.trim();
+  const fecha    = document.getElementById('editFecha').value.trim();
+  const nroCorto = document.getElementById('editNro').value.trim();
+  if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return; }
+  loading(true);
+  try {
+    const total = editItems.reduce((s,it) => s + (it.cant||0)*(it.precio||0), 0);
+    await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${r.id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ nro: '0001-' + nroCorto.padStart(5,'0'), cliente, fecha, total })
+    });
+    await fetch(`${SUPABASE_URL}/rest/v1/items_remito?remito_id=eq.${r.id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
+    });
+    if(editItems.length) {
+      await fetch(`${SUPABASE_URL}/rest/v1/items_remito`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify(editItems.map(it => ({ remito_id: r.id, cant: it.cant, descripcion: it.desc, precio: it.precio })))
+      });
+    }
+    loading(false);
+    cerrarEditar();
+    cerrarDetalle();
+    toast('✅ Remito actualizado');
+    cargarHistorial();
+  } catch(e) {
+    loading(false);
+    toast('❌ Error: ' + e.message);
+  }
+}
+
+// ── NAVEGACIÓN TECLADO EDITAR ──
+document.addEventListener('keydown', function(e) {
+  const active = document.activeElement;
+  if(!active) return;
+  const editBg = document.getElementById('editBg');
+  if(!editBg.classList.contains('open') || !editBg.contains(active)) return;
+  const rows = [...document.querySelectorAll('.edit-item-row')];
+  const agInputs = [document.getElementById('eNuevoCant'), document.getElementById('eNuevoDesc'), document.getElementById('eNuevoPrecio')];
+  const COL = 3;
+  function focusEditCell(rowIdx, colIdx) {
+    colIdx = Math.max(0, Math.min(COL-1, colIdx));
+    if(rowIdx === rows.length) { agInputs[colIdx] && agInputs[colIdx].focus(); }
+    else if(rowIdx >= 0 && rowIdx < rows.length) {
+      const ins = [...rows[rowIdx].querySelectorAll('input.edit-item-inp')];
+      ins[colIdx] && ins[colIdx].focus();
+    }
+  }
+  if(active.classList.contains('edit-item-inp') && active.closest('.edit-item-row')) {
+    const row = active.closest('.edit-item-row');
+    const rowIdx = rows.indexOf(row);
+    const inputs = [...row.querySelectorAll('input.edit-item-inp')];
+    const colIdx = inputs.indexOf(active);
+    if(e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); focusEditCell(rowIdx+1, colIdx); }
+    else if(e.key === 'ArrowUp') { e.preventDefault(); if(rowIdx>0) focusEditCell(rowIdx-1, colIdx); }
+    else if(e.key === 'ArrowRight' && active.selectionStart === active.value.length) { e.preventDefault(); if(colIdx<COL-1) focusEditCell(rowIdx, colIdx+1); else focusEditCell(rowIdx+1, 0); }
+    else if(e.key === 'ArrowLeft' && active.selectionStart === 0) { e.preventDefault(); if(colIdx>0) focusEditCell(rowIdx, colIdx-1); else if(rowIdx>0) focusEditCell(rowIdx-1, COL-1); }
+    return;
+  }
+  const agIdx = agInputs.indexOf(active);
+  if(agIdx !== -1) {
+    if(e.key === 'Enter' && agIdx === COL-1) { e.preventDefault(); editAgregarItem(); return; }
+    if(e.key === 'ArrowUp' && rows.length>0) { e.preventDefault(); focusEditCell(rows.length-1, agIdx); }
+    else if(e.key === 'ArrowRight' && active.selectionStart === active.value.length && agIdx < COL-1) { e.preventDefault(); agInputs[agIdx+1].focus(); }
+    else if(e.key === 'ArrowLeft' && active.selectionStart === 0 && agIdx > 0) { e.preventDefault(); agInputs[agIdx-1].focus(); }
+    return;
+  }
+  if(e.key === 'Enter') {
+    const headerInputs = ['editCliente','editFecha','editNro'].map(id => document.getElementById(id)).filter(Boolean);
+    const hi = headerInputs.indexOf(active);
+    if(hi !== -1) { e.preventDefault(); if(hi < headerInputs.length-1) headerInputs[hi+1].focus(); else if(agInputs[0]) agInputs[0].focus(); }
+  }
+});
+
+// ── CONFIRM ──
+function pedirConfirm(opts) {
+  document.getElementById('confirmIcon').textContent  = opts.icon || '⚠️';
+  document.getElementById('confirmTitle').textContent = opts.titulo || '¿Confirmar?';
+  document.getElementById('confirmSub').textContent   = opts.sub || '';
+  document.getElementById('confirmOkBtn').style.background = opts.color || 'var(--violeta)';
+  document.getElementById('confirmOkBtn').textContent = opts.btnTxt || 'Confirmar';
+  _confirmCallback = opts.callback;
+  document.getElementById('confirmBg').classList.add('open');
+}
+function cerrarConfirm() {
+  document.getElementById('confirmBg').classList.remove('open');
+  _confirmCallback = null;
+}
+function ejecutarConfirm() {
+  const cb = _confirmCallback;
+  cerrarConfirm();
+  if(cb) cb();
+}
+
+// ── PDF ──
+function generarPDFDoc(cliente, fecha, nro, total, its) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pageH = doc.internal.pageSize.getHeight();
+  doc.setFontSize(18); doc.setFont(undefined,'bold');
+  doc.text('CORRALÓN PROGRESO', 105, 18, {align:'center'});
+  doc.setFontSize(11); doc.setFont(undefined,'normal');
+  doc.text('Remito de venta', 105, 25, {align:'center'});
+  doc.text('Fecha: ' + fecha, 195, 18, {align:'right'});
+  doc.text('N° Remito: 0001-' + nro, 195, 25, {align:'right'});
+  doc.line(15, 30, 195, 30);
+  let y = 40;
+  doc.setFontSize(11); doc.setFont(undefined,'bold');
+  doc.text('Cliente: ' + cliente, 15, y); y += 12;
+  doc.setFillColor(208,200,240); doc.rect(15, y-6, 180, 8, 'F');
+  doc.setFontSize(10);
+  doc.text('Cant.', 17, y); doc.text('Descripción', 40, y);
+  doc.text('Precio unit.', 140, y, {align:'right'}); doc.text('Subtotal', 195, y, {align:'right'});
+  y += 4; doc.line(15, y, 195, y); y += 7;
+  doc.setFont(undefined,'normal');
+  its.forEach((it, i) => {
+    if(i%2===0) { doc.setFillColor(232,228,248); doc.rect(15, y-5, 180, 7, 'F'); }
+    doc.text(String(it.cant||1), 17, y);
+    doc.text((it.desc||'').substring(0,55), 40, y);
+    doc.text('$' + Number(it.precio||0).toLocaleString('es-AR'), 140, y, {align:'right'});
+    doc.text('$' + Number((it.precio||0)*(it.cant||1)).toLocaleString('es-AR'), 195, y, {align:'right'});
+    y += 8;
+  });
+  const totalY = pageH - 20;
+  doc.line(15, totalY-6, 195, totalY-6);
+  doc.setFontSize(13); doc.setFont(undefined,'bold');
+  doc.text('TOTAL: $' + Number(total).toLocaleString('es-AR'), 195, totalY, {align:'right'});
+  return doc;
+}
+
+// Foco en password al cargar
+document.getElementById('loginInput').focus();
+</script>
+</body>
+</html>
