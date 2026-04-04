@@ -279,18 +279,11 @@ window.doRegistro = async function() {
   setLoading('Registro', true);
   document.getElementById('lblRegistro').textContent = 'Verificando...';
 
-  // Buscar cliente por CUIT/DNI
-  const { data: clientes, error: errBusq } = await supabase
+  // Buscar cliente por CUIT/DNI (opcional, no bloquea el registro)
+  const { data: clientes } = await supabase
     .from('clientes').select('id_cliente, razon_social, cuit').eq('cuit', docNorm);
+  const cliente = clientes?.[0] || null;
 
-  if (errBusq || !clientes?.length) {
-    showMsg('msgRegistro', `No encontramos tu ${docTipo.toUpperCase()} en el sistema. Consultá con el local.`, 'error');
-    setLoading('Registro', false);
-    document.getElementById('lblRegistro').textContent = 'Crear cuenta';
-    return;
-  }
-
-  const cliente = clientes[0];
   document.getElementById('lblRegistro').textContent = 'Creando cuenta...';
 
   const { data: authData, error: errAuth } = await supabase.auth.signUp({ email, password: pass });
@@ -301,12 +294,12 @@ window.doRegistro = async function() {
     return;
   }
 
-  // Guardar perfil
+  // Guardar perfil (con o sin IDCliente)
   await supabase.from('usuarios').insert({
     id: authData.user.id, email,
     cuit: docNorm, tipo_doc: docTipo,
-    id_cliente: cliente.id_cliente,
-    razon_social: cliente.razon_social
+    id_cliente: cliente?.id_cliente || null,
+    razon_social: cliente?.razon_social || null
   });
 
   window.location.href = 'portal.html';
