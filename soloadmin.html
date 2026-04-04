@@ -229,6 +229,11 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL      = 'https://tizyjenayrcdkcodsjnc.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -601,7 +606,94 @@ function loadSheetJS(callback) {
 const importDropZone = document.getElementById('importDropZone');
 const importFile = document.getElementById('importFile');
 let importRows = [];
+let importClientesRows = [];
+let importFacturasRows = [];
 window.importCancelRequested = false;
+
+// ── Fecha Excel serial → DD/MM/YYYY ──
+function excelDateToStr(serial) {
+  if (!serial || isNaN(Number(serial))) return '';
+  const d = new Date(Math.round((Number(serial) - 25569) * 86400 * 1000));
+  return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'UTC' });
+}
+
+function normKey(k) {
+  return k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");
+}
+
+function parseHoja2(wb) {
+  if (!wb.SheetNames[1]) return [];
+  const ws = wb.Sheets[wb.SheetNames[1]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  return rows.map(r => {
+    const n = {};
+    Object.keys(r).forEach(k => { n[normKey(k)] = r[k]; });
+    const idCliente = parseInt(n['idproveedor'] || n['idcliente'] || 0);
+    const cuitRaw   = String(n['cuit'] || '').trim();
+    return {
+      id_cliente:   idCliente,
+      razon_social: String(n['razonsocial'] || n['razn'] || '').trim(),
+      cuit:         cuitRaw.replace(/[-\s]/g,''),
+      cuit_raw:     cuitRaw,
+      saldo_act:    parseFloat(n['saldoact'] || 0) || 0,
+      telefono:     String(n['telfono'] || n['telefono'] || '').trim()
+    };
+  }).filter(r => r.id_cliente > 0);
+}
+
+function parseHoja3(wb) {
+  if (!wb.SheetNames[2]) return [];
+  const ws = wb.Sheets[wb.SheetNames[2]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  return rows.map(r => {
+    const n = {};
+    Object.keys(r).forEach(k => { n[normKey(k)] = r[k]; });
+    const idCliente = parseInt(n['idcliente'] || 0);
+    const nroFac    = String(n['nrofactura'] || '').trim();
+    if (!idCliente || !nroFac) return null;
+    return {
+      id:           `${idCliente}_${nroFac.replace(/\//g,'-')}`,
+      id_cliente:   idCliente,
+      razon_social: String(n['razonsocial'] || '').trim(),
+      tipo_comp:    String(n['tipocomp'] || '').trim(),
+      fecha:        excelDateToStr(n['fecha']),
+      fecha_serial: parseFloat(n['fecha']) || 0,
+      total:        parseFloat(n['total']) || 0,
+      nro_factura:  nroFac,
+      tipo_pago:    String(n['tipopago'] || '').trim(),
+      vence:        excelDateToStr(n['vence']),
+      atraso:       parseFloat(n['atraso']) || 0,
+      saldo_fac:    parseFloat(n['saldofac'] || 0) || 0
+    };
+  }).filter(Boolean);
+}
+
+async function syncClientesYFacturas(clientes, facturas, setLabel) {
+  const CHUNK = 100;
+
+  // Deduplicar por id_cliente
+  const clientesMap = new Map();
+  clientes.forEach(c => clientesMap.set(c.id_cliente, c));
+  const clientesDedupe = Array.from(clientesMap.values());
+
+  // Deduplicar facturas por id
+  const facturasMap = new Map();
+  facturas.forEach(f => facturasMap.set(f.id, f));
+  const facturasDedupe = Array.from(facturasMap.values());
+
+  // Clientes
+  for (let i = 0; i < clientesDedupe.length; i += CHUNK) {
+    setLabel(`Clientes: ${Math.min(i + CHUNK, clientesDedupe.length)}/${clientesDedupe.length}...`);
+    const { error } = await supabase.from('clientes').upsert(clientesDedupe.slice(i, i + CHUNK), { onConflict: 'id_cliente' });
+    if (error) throw new Error('Supabase clientes: ' + error.message);
+  }
+  // Facturas
+  for (let i = 0; i < facturasDedupe.length; i += CHUNK) {
+    setLabel(`Facturas: ${Math.min(i + CHUNK, facturasDedupe.length)}/${facturasDedupe.length}...`);
+    const { error } = await supabase.from('facturas').upsert(facturasDedupe.slice(i, i + CHUNK), { onConflict: 'id' });
+    if (error) throw new Error('Supabase facturas: ' + error.message);
+  }
+}
 
 window.cancelImport = function() { window.importCancelRequested = true; const btn = document.getElementById('btnCancelImport'); if (btn) btn.disabled = true; toast('Cancelando...', 'err'); };
 
@@ -617,12 +709,13 @@ function handleImportFile(file) {
       try {
         const data = new Uint8Array(ev.target.result);
         const wb = XLSX.read(data, { type: 'array' });
-        const first = wb.SheetNames[0];
-        const ws = wb.Sheets[first];
-        const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        importRows = json.map(r => normalizeRow(r));
-        console.log('Import parsed, rows:', importRows.length, importRows.slice(0,3));
-        toast(importRows.length + ' filas cargadas');
+        // Hoja1 → artículos
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        importRows = XLSX.utils.sheet_to_json(ws, { defval: '' }).map(r => normalizeRow(r));
+        // Hoja2 → clientes, Hoja3 → facturas
+        importClientesRows = parseHoja2(wb);
+        importFacturasRows = parseHoja3(wb);
+        console.log('Artículos:', importRows.length, '| Clientes:', importClientesRows.length, '| Facturas:', importFacturasRows.length);
         openImportModal(importRows);
       } catch(err) { console.error(err); toast('Error leyendo el archivo','err'); }
     };
@@ -656,7 +749,9 @@ function normalizeRow(r) {
 
 window.openImportModal = function(rows) {
   const el = document.getElementById('modalImport');
-  document.getElementById('importSummary').innerHTML = `<b>${rows.length}</b> filas encontradas.`;
+  document.getElementById('importSummary').innerHTML =
+    `<b>${rows.length}</b> artículos encontrados.` +
+    (importClientesRows.length ? ` <span style="color:var(--verde)">+ <b>${importClientesRows.length}</b> clientes y <b>${importFacturasRows.length}</b> facturas (se sincronizarán a Supabase).</span>` : '');
   document.getElementById('importResults').innerHTML = '';
   el.classList.add('visible');
 };
@@ -706,10 +801,19 @@ async function doImport(modo) {
     });
     const url = await subirJSONaCloudinary(articulosLimpio);
     await setDoc(doc(db, "config", "listaActual"), { url, updatedAt: Date.now() });
+    if (fill) fill.style.width = '80%';
+    if (label) label.textContent = 'Sincronizando clientes y facturas...';
+
+    if (importClientesRows.length > 0) {
+      await syncClientesYFacturas(importClientesRows, importFacturasRows, txt => { if (label) label.textContent = txt; });
+    }
+
     if (fill) fill.style.width = '100%';
-    if (label) label.textContent = 'Subida completada';
-    document.getElementById('importResults').innerHTML = `Subido ${importRows.length} filas.`;
-    toast('Lista publicada correctamente');
+    if (label) label.textContent = 'Completado';
+    document.getElementById('importResults').innerHTML =
+      `✅ ${importRows.length} artículos publicados` +
+      (importClientesRows.length ? ` · ${importClientesRows.length} clientes y ${importFacturasRows.length} facturas sincronizados a Supabase.` : '.');
+    toast('Importación completada');
     cerrarModalImport();
   } catch(e) {
     console.error(e);
