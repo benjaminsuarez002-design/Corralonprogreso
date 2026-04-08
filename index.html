@@ -247,7 +247,7 @@
     <div class="wa-modal-title">Pedido confirmado</div>
     <div class="wa-modal-sub" id="waModalSub">Elegi como queres continuar:</div>
     <div class="wa-modal-btns">
-      <button class="wa-btn-cancelar" id="btnDescargarPdf">Descargar PDF</button>
+      <button class="wa-btn-cancelar" id="btnDescargarPdf">Ver PDF</button>
       <button class="wa-btn-enviar" id="waEnviar">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.114.553 4.1 1.523 5.828L0 24l6.336-1.502A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.818 9.818 0 01-5.007-1.371l-.36-.214-3.732.884.916-3.618-.235-.373A9.818 9.818 0 1112 21.818z"/></svg>
         Enviar WhatsApp
@@ -287,6 +287,7 @@ const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const SUPABASE_BUCKET = 'Archivos';
 const NUMERACION_SUCURSAL = '0001';
+const PRESUPUESTOS_STORAGE_KEY = 'historial_presupuestos_v1';
 let ultimoPedidoGenerado = null;
 
 async function obtenerSiguienteNumeroPedido() {
@@ -318,6 +319,27 @@ let sortActivo = '';
 function fmtPrecio(n) {
   if (!n && n !== 0) return '-';
   return '$ ' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function leerPresupuestosGuardados() {
+  try {
+    const raw = localStorage.getItem(PRESUPUESTOS_STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function guardarPresupuestoEnHistorial(registro) {
+  try {
+    const actuales = leerPresupuestosGuardados();
+    const sinDuplicado = actuales.filter(p => p.numero !== registro.numero);
+    sinDuplicado.unshift(registro);
+    localStorage.setItem(PRESUPUESTOS_STORAGE_KEY, JSON.stringify(sinDuplicado.slice(0, 500)));
+  } catch (e) {
+    console.warn('No se pudo guardar presupuesto en historial local:', e);
+  }
 }
 
 const placeholderData = 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="#00d4ff" stroke-width="1.5"><rect width="100%" height="100%" fill="#f4f4f4"/><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`);
@@ -603,6 +625,18 @@ async function crearPresupuesto() {
   });
   doc.line(15, y, 195, y); y += 10;
   doc.setFontSize(12); doc.text(`TOTAL: ${fmtPrecio(total)}`, 195, y, { align: "right" });
+  guardarPresupuestoEnHistorial({
+    numero: numeroPedido,
+    fecha: fechaStr,
+    fechaIso: fecha.toISOString(),
+    total,
+    items: items.map(it => ({
+      codigo: it.codigo || '',
+      nombre: it.nombre || '',
+      cantidad: Number(it.cantidad) || 0,
+      precio: Number(it.precio) || 0
+    }))
+  });
   const mensaje = `Hola, me gustaria pedir el presupuesto Nro ${numeroPedido}.`;
   ultimoPedidoGenerado = { mensaje, nombreArchivo, doc };
   carrito = {}; guardarCarrito(); actualizarVistaCarrito(); cerrarPanel();
@@ -614,7 +648,10 @@ async function crearPresupuesto() {
   };
   document.getElementById('btnDescargarPdf').onclick = () => {
     document.getElementById('waModal').classList.add('hidden');
-    if (ultimoPedidoGenerado?.doc) ultimoPedidoGenerado.doc.save(ultimoPedidoGenerado.nombreArchivo);
+    if (ultimoPedidoGenerado?.doc) {
+      const pdfUrl = ultimoPedidoGenerado.doc.output('bloburl');
+      window.open(pdfUrl, '_blank');
+    }
   };
   document.getElementById('waCloseBtn').onclick = () => { document.getElementById('waModal').classList.add('hidden'); };
   document.body.removeChild(overlay);
