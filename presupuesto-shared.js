@@ -123,10 +123,11 @@
   }
 
   function drawPageHeader(doc, opts) {
+    const headerName = String(opts.headerName || 'CORRALON PROGRESO').trim() || 'CORRALON PROGRESO';
     if (opts.logoDataUrl) doc.addImage(opts.logoDataUrl, 'PNG', 20, 12, 50, 20);
     doc.setFont(undefined, 'normal');
     doc.setFontSize(18);
-    doc.text('CORRALON PROGRESO', 105, 24, { align: 'center' });
+    doc.text(headerName.substring(0, 38), 105, 24, { align: 'center' });
 
     doc.setFontSize(11);
     if (opts.subtitle) {
@@ -210,6 +211,7 @@
   function generarPDFPresupuestoDoc(data) {
     return generarPDFDocumentoBase({
       ...data,
+      headerName: data.headerName || data.tipo || 'Presupuesto web',
       subtitle: data.subtitle || 'Presupuesto a clientes',
       numberLabel: data.numberLabel || data.etiquetaNumero || 'Pedido Nro: ',
       importeLabel: 'Importe',
@@ -220,6 +222,7 @@
   function generarPDFRemitoDoc(data) {
     return generarPDFDocumentoBase({
       ...data,
+      headerName: data.headerName || data.cliente || 'CORRALON PROGRESO',
       subtitle: data.subtitle || 'Remito a proveedores',
       numberLabel: data.numberLabel || 'Nro Remito: ',
       importeLabel: 'Importe',
