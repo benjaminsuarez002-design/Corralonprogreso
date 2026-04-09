@@ -7,6 +7,7 @@
 <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="presupuesto-shared.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -191,9 +192,8 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 <div class="franja-roja">
   <button class="btn-f" onclick="limpiarTodo()">🗑 Nuevo</button>
   <button class="btn-f" onclick="location.href='historial.html'">📋 Historial</button>
-  <button class="btn-f" onclick="descargarPDF()">⬇ PDF</button>
+  <button class="btn-f" onclick="verPDF()">⬇ PDF</button>
   <button class="btn-f" onclick="enviarWhatsapp()">💬 WhatsApp</button>
-  <button class="btn-f prim" onclick="imprimir()">🖨 Imprimir</button>
 </div>
 
 <!-- CONFIRM POPUP -->
@@ -237,6 +237,7 @@ const ADMIN_PASS       = 'Akashiya2301';
 
 // ── ESTADO ──────────────────────────────────────────────────────
 let items = [];
+let logoCacheData = null;
 
 // ── UTILS ──────────────────────────────────────────────────────
 function fmt(n) {
@@ -327,6 +328,19 @@ function updatePreview() {
   const sub = document.getElementById('nSub');
   if(p) { sub.textContent = fmt(p*c); sub.style.color = 'var(--violeta)'; }
   else  { sub.textContent = '—';      sub.style.color = '#bbb'; }
+}
+
+function hayArticuloPendiente() {
+  const cant = document.getElementById('nCant').value.trim();
+  const desc = document.getElementById('nDesc').value.trim();
+  const precio = document.getElementById('nPrecio').value.trim();
+  return Boolean(cant || desc || precio);
+}
+
+function confirmarArticuloPendiente() {
+  if (!hayArticuloPendiente()) return false;
+  agregarItem();
+  return true;
 }
 
 function agregarItem() {
@@ -489,44 +503,19 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar)
 
 // ── GENERAR PDF ──────────────────────────────────────────────────
 function generarPDFDoc(cliente, fecha, nro, total, itsOverride) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const pageH = doc.internal.pageSize.getHeight();
-
-  if(window._logo) doc.addImage(window._logo, 'PNG', 15, 10, 40, 16);
-  doc.setFontSize(18); doc.setFont(undefined,'bold');
-  doc.text('CORRALÓN PROGRESO', 105, 18, {align:'center'});
-  doc.setFontSize(11); doc.setFont(undefined,'normal');
-  doc.text('Remito de venta', 105, 25, {align:'center'});
-  doc.text('Fecha: ' + fecha, 195, 18, {align:'right'});
-  doc.text('N° Remito: 0001-' + nro, 195, 25, {align:'right'});
-  doc.line(15, 30, 195, 30);
-  let y = 40;
-  doc.setFontSize(11); doc.setFont(undefined,'bold');
-  doc.text('Cliente: ' + cliente, 15, y); y += 12;
-  doc.setFillColor(208,200,240); doc.rect(15, y-6, 180, 8, 'F');
-  doc.setFontSize(10);
-  doc.text('Cant.', 17, y); doc.text('Descripción', 40, y);
-  doc.text('Precio unit.', 140, y, {align:'right'}); doc.text('Subtotal', 195, y, {align:'right'});
-  y += 4; doc.line(15, y, 195, y); y += 7;
-  doc.setFont(undefined,'normal');
-  const lista = itsOverride || items;
-  lista.forEach((it, i) => {
-    if(i%2===0) { doc.setFillColor(232,228,248); doc.rect(15, y-5, 180, 7, 'F'); }
-    doc.text(String(it.cant), 17, y);
-    doc.text((it.desc||'').substring(0,55), 40, y);
-    doc.text('$' + Number(it.precio).toLocaleString('es-AR'), 140, y, {align:'right'});
-    doc.text('$' + Number(it.precio*it.cant).toLocaleString('es-AR'), 195, y, {align:'right'});
-    y += 8;
+  const lista = (itsOverride || items).map(it => ({
+    cantidad: Number(it.cant ?? it.cantidad) || 0,
+    nombre: it.desc || it.nombre || it.descripcion || '',
+    codigo: it.codigo || '',
+    precio: Number(it.precio) || 0
+  }));
+  return window.PresupuestoShared.generarPDFRemitoDoc({
+    numero: '0001-' + nro,
+    fecha,
+    total,
+    items: lista,
+    logoDataUrl: logoCacheData
   });
-
-  // Total al pie de página
-  const totalY = pageH - 20;
-  doc.line(15, totalY - 6, 195, totalY - 6);
-  doc.setFontSize(13); doc.setFont(undefined,'bold');
-  doc.text('TOTAL: $' + Number(total).toLocaleString('es-AR'), 195, totalY, {align:'right'});
-
-  return doc;
 }
 
 // ── CONFIRM POPUP ──────────────────────────────────────────────
@@ -573,13 +562,18 @@ function imprimir() {
     const fecha  = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
     const nro    = document.getElementById('nroRemito').textContent || '00001';
     const total  = items.reduce((s,it) => s + it.precio*it.cant, 0);
-    window.print();
+    const doc = generarPDFDoc(cliente, fecha, nro, total);
+    window.PresupuestoShared.openPdfPreview(
+      doc,
+      `${cliente || 'Cliente'} - 0001-${nro} - ${fecha}`,
+      `${cliente || 'Cliente'}-0001-${nro}-${fecha}`
+    );
     try { await guardarRemito(nro, cliente, fecha, total, null, items); } catch(e) {}
     setTimeout(_hacerLimpiar, 800);
   }});
 }
 
-async function _hacerDescargarPDF() {
+async function _hacerVerPDF() {
   const cliente = document.getElementById('cliente').value.trim();
   const fecha   = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
   const nro     = document.getElementById('nroRemito').textContent || '00001';
@@ -587,17 +581,21 @@ async function _hacerDescargarPDF() {
   loading(true);
   try {
     const doc = generarPDFDoc(cliente, fecha, nro, total);
-    doc.save('Remito-0001-' + nro + '-' + cliente.replace(/\s+/g,'_') + '.pdf');
+    window.PresupuestoShared.openPdfPreview(
+      doc,
+      `${cliente || 'Cliente'} - 0001-${nro} - ${fecha}`,
+      `${cliente || 'Cliente'}-0001-${nro}-${fecha}`
+    );
     await guardarRemito(nro, cliente, fecha, total, null, items);
   } catch(e) { toast('❌ Error guardando: ' + e.message); }
   loading(false);
   setTimeout(_hacerLimpiar, 400);
 }
-async function descargarPDF() {
+async function verPDF() {
   const cliente = document.getElementById('cliente').value.trim();
   if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return; }
   if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return; }
-  pedirConfirm({ icon:'⬇️', titulo:'Descargar PDF', sub:'Esta acción dará el remito como terminado. ¿Descargamos el PDF?', color:'var(--rojo)', btnTxt:'Descargar', callback: _hacerDescargarPDF });
+  pedirConfirm({ icon:'📄', titulo:'Ver PDF', sub:'Esta acción dará el remito como terminado. ¿Abrimos el PDF?', color:'var(--rojo)', btnTxt:'Ver PDF', callback: _hacerVerPDF });
 }
 
 async function _hacerEnviarWhatsapp() {
@@ -607,21 +605,11 @@ async function _hacerEnviarWhatsapp() {
   loading(true);
   try {
     const total = items.reduce((s,it) => s + it.precio*it.cant, 0);
-    const doc = generarPDFDoc(cliente, fecha, nro, total);
-    const pdfBlob = doc.output('blob', {type:'application/pdf'});
-    const nombreArchivo = 'remitos/Remito-0001-' + nro + '-' + cliente.replace(/\s+/g,'_') + '.pdf';
-    const resUp = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${nombreArchivo}`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/pdf', 'x-upsert': 'true' },
-      body: pdfBlob
-    });
-    if(!resUp.ok) throw new Error('Error subiendo PDF');
-    const linkPDF = `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${nombreArchivo}`;
-    await guardarRemito(nro, cliente, fecha, total, linkPDF, items);
-    const msg = '🏗 *Remito N° 0001-' + nro + '*\n📅 ' + fecha + '\n👤 ' + cliente + '\n\n📄 Ver remito:\n' + linkPDF + '\n\n*TOTAL: $' + Number(total).toLocaleString('es-AR') + '*';
+    await guardarRemito(nro, cliente, fecha, total, null, items);
+    const msg = 'Realice el siguiente remito: 0001-' + nro + '.';
     loading(false);
     window.open('https://wa.me/' + WA_NUM + '?text=' + encodeURIComponent(msg), '_blank');
-    setTimeout(() => { limpiarTodo(); }, 600);
+    setTimeout(() => { _hacerLimpiar('✅ Remito guardado'); }, 600);
   } catch(e) {
     loading(false);
     toast('❌ Error: ' + e.message);
@@ -632,7 +620,7 @@ async function enviarWhatsapp() {
   const cliente = document.getElementById('cliente').value.trim();
   if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return; }
   if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return; }
-  pedirConfirm({ icon:'💬', titulo:'Enviar por WhatsApp', sub:'Esta acción dará el remito como terminado y lo enviará por WhatsApp.', color:'#25d366', btnTxt:'Enviar', callback: _hacerEnviarWhatsapp });
+  pedirConfirm({ icon:'💬', titulo:'Enviar por WhatsApp', sub:'Esta acción dará el remito como terminado y avisará el número por WhatsApp.', color:'#25d366', btnTxt:'Enviar', callback: _hacerEnviarWhatsapp });
 }
 
 // ── INIT ──────────────────────────────────────────────────────
@@ -641,17 +629,21 @@ renderItems();
 cargarNroRemito();
 
 // Precargar logo
-(function() {
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    const c = document.createElement('canvas');
-    c.width = img.width; c.height = img.height;
-    c.getContext('2d').drawImage(img, 0, 0);
-    window._logo = c.toDataURL('image/png');
-  };
-  img.src = document.querySelector('.header img').src;
-})();
+window.PresupuestoShared.ensureLogoDataUrl(document.querySelector('.header img').src).then(dataUrl => {
+  logoCacheData = dataUrl;
+});
+
+document.addEventListener('focusin', e => {
+  const filaAgregar = document.getElementById('filaAgregar');
+  if(!filaAgregar || filaAgregar.contains(e.target)) return;
+  confirmarArticuloPendiente();
+});
+
+document.addEventListener('pointerdown', e => {
+  const filaAgregar = document.getElementById('filaAgregar');
+  if(!filaAgregar || filaAgregar.contains(e.target)) return;
+  confirmarArticuloPendiente();
+}, true);
 </script>
 </body>
 </html>

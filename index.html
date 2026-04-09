@@ -257,6 +257,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="presupuesto-shared.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -287,7 +288,7 @@ const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const SUPABASE_BUCKET = 'Archivos';
 const NUMERACION_SUCURSAL = '0001';
-const PRESUPUESTOS_STORAGE_KEY = 'historial_presupuestos_v1';
+const PRESUPUESTOS_TABLE = 'presupuestos_web';
 let ultimoPedidoGenerado = null;
 
 async function obtenerSiguienteNumeroPedido() {
@@ -321,24 +322,20 @@ function fmtPrecio(n) {
   return '$ ' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function leerPresupuestosGuardados() {
-  try {
-    const raw = localStorage.getItem(PRESUPUESTOS_STORAGE_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function guardarPresupuestoEnHistorial(registro) {
-  try {
-    const actuales = leerPresupuestosGuardados();
-    const sinDuplicado = actuales.filter(p => p.numero !== registro.numero);
-    sinDuplicado.unshift(registro);
-    localStorage.setItem(PRESUPUESTOS_STORAGE_KEY, JSON.stringify(sinDuplicado.slice(0, 500)));
-  } catch (e) {
-    console.warn('No se pudo guardar presupuesto en historial local:', e);
+async function guardarPresupuestoEnSupabase(registro) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${PRESUPUESTOS_TABLE}?on_conflict=numero`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'apikey': SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    },
+    body: JSON.stringify([registro])
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(errText || 'No se pudo guardar el presupuesto en Supabase');
   }
 }
 
@@ -589,8 +586,6 @@ async function crearPresupuesto() {
   overlay.style.cssText = 'position:fixed;inset:0;background:#f0ece8;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:99999;';
   overlay.innerHTML = `<div style="width:40px;height:40px;border:4px solid #d0c8f0;border-top-color:#6c4fc7;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:16px;"></div><div style="color:#6c4fc7;font-size:16px;letter-spacing:1px;text-transform:uppercase;">Generando presupuesto...</div>`;
   document.body.appendChild(overlay);
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
   const fecha = new Date();
   let numeroPedidoData;
   try {
@@ -603,32 +598,24 @@ async function crearPresupuesto() {
   const numeroPedido = numeroPedidoData.numero_completo;
   const fechaStr = fecha.toLocaleDateString('es-AR');
   const nombreArchivo = `Pedido-${numeroPedido}.pdf`;
-  if (logoCacheData) doc.addImage(logoCacheData, 'PNG', 15, 10, 50, 20);
-  doc.setFontSize(18); doc.text("CORRALON PROGRESO", 105, 18, { align: "center" });
-  doc.setFontSize(11); doc.text(`Fecha: ${fechaStr}`, 195, 28, { align: "right" });
-  doc.text(`Pedido Nro: ${numeroPedido}`, 15, 33);
-  doc.line(15, 40, 195, 40);
-  let y = 50;
-  const col = { cantidad: 15, descripcion: 35, idart: 115, precio: 150, importe: 185 };
-  doc.setFillColor(230,230,230); doc.rect(15, y-6, 180, 8, 'F'); doc.setFontSize(10);
-  doc.text("Cantidad", col.cantidad, y); doc.text("Descripcion", col.descripcion, y); doc.text("IDArt", col.idart, y); doc.text("Prec. Uni.", col.precio, y); doc.text("Importe", col.importe, y, { align: "right" });
-  y += 4; doc.line(15, y, 195, y); y += 6;
   let total = 0;
-  items.forEach(it => {
-    const importe = it.precio * it.cantidad; total += importe;
-    doc.text(Number(it.cantidad).toFixed(2), col.cantidad, y);
-    doc.text(it.nombre.substring(0,40), col.descripcion, y);
-    doc.text(it.codigo, col.idart, y);
-    doc.text(fmtPrecio(it.precio), col.precio, y, { align: "right" });
-    doc.text(fmtPrecio(importe), col.importe, y, { align: "right" });
-    y += 8;
-  });
-  doc.line(15, y, 195, y); y += 10;
-  doc.setFontSize(12); doc.text(`TOTAL: ${fmtPrecio(total)}`, 195, y, { align: "right" });
-  guardarPresupuestoEnHistorial({
+  items.forEach(it => { total += it.precio * it.cantidad; });
+  const doc = window.PresupuestoShared.generarPDFPresupuestoDoc({
     numero: numeroPedido,
     fecha: fechaStr,
-    fechaIso: fecha.toISOString(),
+    total,
+    items: items.map(it => ({
+      codigo: it.codigo || '',
+      nombre: it.nombre || '',
+      cantidad: Number(it.cantidad) || 0,
+      precio: Number(it.precio) || 0
+    })),
+    logoDataUrl: logoCacheData
+  });
+  await guardarPresupuestoEnSupabase({
+    numero: numeroPedido,
+    fecha: fechaStr,
+    fecha_iso: fecha.toISOString(),
     total,
     items: items.map(it => ({
       codigo: it.codigo || '',
@@ -649,8 +636,11 @@ async function crearPresupuesto() {
   document.getElementById('btnDescargarPdf').onclick = () => {
     document.getElementById('waModal').classList.add('hidden');
     if (ultimoPedidoGenerado?.doc) {
-      const pdfUrl = ultimoPedidoGenerado.doc.output('bloburl');
-      window.open(pdfUrl, '_blank');
+      window.PresupuestoShared.openPdfPreview(
+        ultimoPedidoGenerado.doc,
+        `Presupuesto ${numeroPedido} - ${fechaStr}`,
+        `Presupuesto-${numeroPedido}-${fechaStr}`
+      );
     }
   };
   document.getElementById('waCloseBtn').onclick = () => { document.getElementById('waModal').classList.add('hidden'); };
@@ -662,15 +652,9 @@ document.getElementById('buyButton').addEventListener('click', crearPresupuesto)
 let logoCacheData = null;
 (function precacheLogo() {
   const url = document.querySelector('.logo-img').src;
-  const img = new Image();
-  img.crossOrigin = "anonymous";
-  img.onload = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width; canvas.height = img.height;
-    canvas.getContext('2d').drawImage(img, 0, 0);
-    logoCacheData = canvas.toDataURL('image/png');
-  };
-  img.src = url;
+  window.PresupuestoShared.ensureLogoDataUrl(url).then(dataUrl => {
+    logoCacheData = dataUrl;
+  });
 })();
 
 cargarCarrito();

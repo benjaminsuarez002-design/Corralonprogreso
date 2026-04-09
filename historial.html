@@ -7,6 +7,7 @@
 <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="presupuesto-shared.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -27,6 +28,9 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .login-input { width: 100%; padding: 12px 16px; border: 2px solid var(--borde); border-radius: 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 700; outline: none; text-align: center; letter-spacing: 4px; color: var(--texto-dark); transition: border-color .2s; margin-bottom: 10px; }
 .login-input:focus { border-color: var(--violeta); }
 .login-error { font-size: 12px; color: var(--rojo); min-height: 18px; margin-bottom: 12px; }
+.login-remember { display: flex; align-items: center; gap: 8px; justify-content: flex-start; margin: 0 0 14px; color: #666; font-size: 13px; }
+.login-remember input { width: 16px; height: 16px; accent-color: var(--violeta); cursor: pointer; }
+.login-remember label { cursor: pointer; user-select: none; }
 .btn-login { width: 100%; padding: 14px; background: var(--violeta); color: #fff; border: none; border-radius: 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; margin-bottom: 10px; }
 .btn-volver { width: 100%; padding: 12px; background: transparent; color: #aaa; border: 1.5px solid var(--borde); border-radius: 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; }
 
@@ -154,6 +158,10 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
       autocomplete="new-password"
       onkeydown="if(event.key==='Enter')verificarPass()">
     <div class="login-error" id="loginError"></div>
+    <div class="login-remember">
+      <input type="checkbox" id="rememberLogin">
+      <label for="rememberLogin">Mantenerme logueado</label>
+    </div>
     <button class="btn-login" onclick="verificarPass()">Acceder</button>
     <button class="btn-volver" onclick="location.href='remitos.html'">← Volver a remitos</button>
   </div>
@@ -164,6 +172,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
   <div class="header">
     <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Logo">
     <div class="header-title">Historial</div>
+    <button class="btn-back" onclick="cerrarSesion()">Salir</button>
     <button class="btn-back" onclick="location.href='remitos.html'">← Volver</button>
   </div>
   <div class="hist-tabs">
@@ -234,7 +243,8 @@ const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const SUPABASE_BUCKET = 'Archivos';
 const ADMIN_PASS = 'Akashiya2301';
-const PRESUPUESTOS_STORAGE_KEY = 'historial_presupuestos_v1';
+const PRESUPUESTOS_TABLE = 'presupuestos_web';
+const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
 
 let _remitoDetalleActual = null;
 let _presupuestoDetalleActual = null;
@@ -242,6 +252,7 @@ let _presupuestosCache = [];
 let _detalleTipoActual = 'remito';
 let editItems = [];
 let _confirmCallback = null;
+let logoCacheData = null;
 
 // ── UTILS ──
 function toast(msg) {
@@ -257,20 +268,56 @@ function fmt(n) {
   return '$' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
+(function precacheLogo() {
+  const imgEl = document.querySelector('.header img') || document.querySelector('.login-logo');
+  const url = imgEl?.src;
+  if (!url) return;
+  window.PresupuestoShared.ensureLogoDataUrl(url).then(dataUrl => {
+    logoCacheData = dataUrl;
+  });
+})();
+
 // ── LOGIN ──
+function mostrarApp() {
+  document.getElementById('loginBg').style.display = 'none';
+  document.getElementById('appContent').style.display = 'flex';
+  document.getElementById('appContent').style.flexDirection = 'column';
+  document.getElementById('appContent').style.minHeight = '100dvh';
+}
+
+function recordarSesion(activar) {
+  if (activar) localStorage.setItem(HISTORIAL_LOGIN_STORAGE_KEY, '1');
+  else localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
+}
+
+function tieneSesionRecordada() {
+  return localStorage.getItem(HISTORIAL_LOGIN_STORAGE_KEY) === '1';
+}
+
 function verificarPass() {
   const val = document.getElementById('loginInput').value;
   if(val === ADMIN_PASS) {
-    document.getElementById('loginBg').style.display = 'none';
-    document.getElementById('appContent').style.display = 'flex';
-    document.getElementById('appContent').style.flexDirection = 'column';
-    document.getElementById('appContent').style.minHeight = '100dvh';
+    recordarSesion(document.getElementById('rememberLogin').checked);
+    mostrarApp();
     inicializarHistorial();
   } else {
     document.getElementById('loginError').textContent = '❌ Contraseña incorrecta';
     document.getElementById('loginInput').value = '';
     document.getElementById('loginInput').focus();
   }
+}
+
+function cerrarSesion() {
+  localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
+  document.getElementById('appContent').style.display = 'none';
+  document.getElementById('loginBg').style.display = 'flex';
+  document.getElementById('loginInput').value = '';
+  document.getElementById('loginError').textContent = '';
+  document.getElementById('rememberLogin').checked = false;
+  cerrarDetalle();
+  cerrarEditar();
+  cerrarConfirm();
+  document.getElementById('loginInput').focus();
 }
 
 // ── HISTORIAL ──
@@ -295,16 +342,6 @@ function activarTabHistorial(tab) {
   else cargarPresupuestos();
 }
 
-function leerPresupuestosGuardados() {
-  try {
-    const raw = localStorage.getItem(PRESUPUESTOS_STORAGE_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) {
-    return [];
-  }
-}
-
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -314,34 +351,44 @@ function esc(s) {
     .replace(/'/g, '&#39;');
 }
 
-function cargarPresupuestos() {
+async function cargarPresupuestos() {
   const body = document.getElementById('presupuestosBody');
   if (!body) return;
-  const presupuestos = leerPresupuestosGuardados().sort((a, b) => {
-    const fa = new Date(a.fechaIso || 0).getTime() || 0;
-    const fb = new Date(b.fechaIso || 0).getTime() || 0;
-    return fb - fa;
-  });
-  _presupuestosCache = presupuestos;
-  if (!presupuestos.length) {
-    body.innerHTML = '<div class="h-empty">Sin presupuestos todavia</div>';
-    return;
-  }
+  body.innerHTML = '<div class="h-empty">Cargando...</div>';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${PRESUPUESTOS_TABLE}?select=*&order=fecha_iso.desc.nullslast,id.desc&limit=100`, {
+      headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || 'No se pudieron cargar los presupuestos');
+    }
+    const presupuestos = await res.json();
+    _presupuestosCache = Array.isArray(presupuestos) ? presupuestos : [];
+    if (!_presupuestosCache.length) {
+      body.innerHTML = '<div class="h-empty">Sin presupuestos todavia</div>';
+      return;
+    }
 
-  body.innerHTML = presupuestos.map((p, idx) => {
-    const cantItems = Array.isArray(p.items) ? p.items.length : 0;
-    const fechaTxt = p.fecha || (p.fechaIso ? new Date(p.fechaIso).toLocaleDateString('es-AR') : '');
-    return `
-      <div class="h-item" onclick="abrirDetallePresupuesto(${idx})">
-        <div class="h-nro">${esc(p.numero || '-')}</div>
-        <div class="h-info">
-          <div class="h-cliente">Presupuesto web</div>
-          <div class="h-meta">${esc(fechaTxt)} - ${cantItems} item(s)</div>
-        </div>
-        <div class="h-total">${fmt(p.total || 0)}</div>
-        <span style="color:#ccc;font-size:18px;">›</span>
-      </div>`;
-  }).join('');
+    body.innerHTML = _presupuestosCache.map((p, idx) => {
+      const cantItems = Array.isArray(p.items) ? p.items.length : 0;
+      const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '');
+      return `
+        <div class="h-item" onclick="abrirDetallePresupuesto(${idx})">
+          <div class="h-nro">${esc(p.numero || '-')}</div>
+          <div class="h-info">
+            <div class="h-cliente">Presupuesto web</div>
+            <div class="h-meta">${esc(fechaTxt)} - ${cantItems} item(s)</div>
+          </div>
+          <div class="h-total">${fmt(p.total || 0)}</div>
+          <span style="color:#ccc;font-size:18px;">›</span>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    _presupuestosCache = [];
+    body.innerHTML = '<div class="h-empty">Error cargando presupuestos</div>';
+    console.error('Error cargando presupuestos desde Supabase:', e);
+  }
 }
 
 function setAccionesDetalleModo(modo) {
@@ -349,7 +396,7 @@ function setAccionesDetalleModo(modo) {
   const btnPdf = document.getElementById('btnDetallePdf');
   const btnEdit = document.getElementById('btnDetalleEdit');
   const btnDel = document.getElementById('btnDetalleDel');
-  if (btnPdf) btnPdf.textContent = esRemito ? '?? PDF' : 'Ver PDF';
+  if (btnPdf) btnPdf.textContent = esRemito ? 'PDF' : 'Ver PDF';
   if (btnEdit) btnEdit.style.display = esRemito ? '' : 'none';
   if (btnDel) btnDel.style.display = esRemito ? '' : 'none';
 }
@@ -369,7 +416,7 @@ function abrirDetallePresupuesto(index) {
   const total = Number(
     p.total ?? items.reduce((s, it) => s + (Number(it.cantidad) || 0) * (Number(it.precio) || 0), 0)
   ) || 0;
-  const fechaTxt = p.fecha || (p.fechaIso ? new Date(p.fechaIso).toLocaleDateString('es-AR') : '-');
+  const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '-');
 
   document.getElementById('detalleNro').textContent = p.numero || '-';
   const body = document.getElementById('detalleBody');
@@ -511,17 +558,30 @@ function verPDFDetalle() {
     const p = _presupuestoDetalleActual;
     if(!p) return;
     const doc = generarPDFPresupuestoDoc(p);
-    const pdfUrl = doc.output('bloburl');
-    window.open(pdfUrl, '_blank');
+    const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '-');
+    window.PresupuestoShared.openPdfPreview(
+      doc,
+      `Presupuesto ${p.numero || '-'} - ${fechaTxt}`,
+      `Presupuesto-${p.numero || '-'}-${fechaTxt}`
+    );
     return;
   }
 
   const r = _remitoDetalleActual;
   if(!r) return;
-  const nroCorto = (r.nro||'').split('-').pop() || '00001';
-  const its = (r.items||[]).map(it => ({ cant: it.cant, desc: it.descripcion, precio: it.precio }));
-  const total = its.reduce((s,it) => s + (it.precio||0)*(it.cant||0), 0);
-  generarPDFDoc(r.cliente, r.fecha, nroCorto, total, its).save('Remito-' + r.nro + '-' + (r.cliente||'').replace(/\s+/g,'_') + '.pdf');
+  const its = (r.items||[]).map(it => ({
+    cantidad: it.cant,
+    nombre: it.descripcion,
+    codigo: it.codigo || '',
+    precio: it.precio
+  }));
+  const total = its.reduce((s,it) => s + (it.precio||0)*(it.cantidad||0), 0);
+  const doc = generarPDFDoc(r.cliente, r.fecha, r.nro || '-', total, its);
+  window.PresupuestoShared.openPdfPreview(
+    doc,
+    `${r.cliente || 'Cliente'} - ${r.nro || '-'} - ${r.fecha || '-'}`,
+    `${r.cliente || 'Cliente'}-${r.nro || '-'}-${r.fecha || '-'}`
+  );
 }
 
 // ── ELIMINAR ──
@@ -745,105 +805,29 @@ function ejecutarConfirm() {
 
 // ── PDF ──
 function generarPDFDoc(cliente, fecha, nro, total, its) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const pageH = doc.internal.pageSize.getHeight();
-  doc.setFontSize(18); doc.setFont(undefined,'bold');
-  doc.text('CORRALÓN PROGRESO', 105, 18, {align:'center'});
-  doc.setFontSize(11); doc.setFont(undefined,'normal');
-  doc.text('Remito de venta', 105, 25, {align:'center'});
-  doc.text('Fecha: ' + fecha, 195, 18, {align:'right'});
-  doc.text('N° Remito: 0001-' + nro, 195, 25, {align:'right'});
-  doc.line(15, 30, 195, 30);
-  let y = 40;
-  doc.setFontSize(11); doc.setFont(undefined,'bold');
-  doc.text('Cliente: ' + cliente, 15, y); y += 12;
-  doc.setFillColor(208,200,240); doc.rect(15, y-6, 180, 8, 'F');
-  doc.setFontSize(10);
-  doc.text('Cant.', 17, y); doc.text('Descripción', 40, y);
-  doc.text('Precio unit.', 140, y, {align:'right'}); doc.text('Subtotal', 195, y, {align:'right'});
-  y += 4; doc.line(15, y, 195, y); y += 7;
-  doc.setFont(undefined,'normal');
-  its.forEach((it, i) => {
-    if(i%2===0) { doc.setFillColor(232,228,248); doc.rect(15, y-5, 180, 7, 'F'); }
-    doc.text(String(it.cant||1), 17, y);
-    doc.text((it.desc||'').substring(0,55), 40, y);
-    doc.text('$' + Number(it.precio||0).toLocaleString('es-AR'), 140, y, {align:'right'});
-    doc.text('$' + Number((it.precio||0)*(it.cant||1)).toLocaleString('es-AR'), 195, y, {align:'right'});
-    y += 8;
+  return window.PresupuestoShared.generarPDFRemitoDoc({
+    numero: nro,
+    fecha,
+    total,
+    items: its,
+    logoDataUrl: logoCacheData
   });
-  const totalY = pageH - 20;
-  doc.line(15, totalY-6, 195, totalY-6);
-  doc.setFontSize(13); doc.setFont(undefined,'bold');
-  doc.text('TOTAL: $' + Number(total).toLocaleString('es-AR'), 195, totalY, {align:'right'});
-  return doc;
 }
 
 function generarPDFPresupuestoDoc(p) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const items = Array.isArray(p.items) ? p.items : [];
-  const fechaTxt = p.fecha || (p.fechaIso ? new Date(p.fechaIso).toLocaleDateString('es-AR') : '');
-  const total = Number(
-    p.total ?? items.reduce((s, it) => s + (Number(it.cantidad) || 0) * (Number(it.precio) || 0), 0)
-  ) || 0;
-
-  doc.setFontSize(18);
-  doc.setFont(undefined, 'bold');
-  doc.text('CORRALON PROGRESO', 105, 18, { align: 'center' });
-
-  doc.setFontSize(11);
-  doc.setFont(undefined, 'normal');
-  doc.text('Presupuesto web', 105, 25, { align: 'center' });
-  doc.text('Fecha: ' + (fechaTxt || '-'), 195, 18, { align: 'right' });
-  doc.text('Pedido Nro: ' + (p.numero || '-'), 195, 25, { align: 'right' });
-  doc.line(15, 30, 195, 30);
-
-  let y = 40;
-  doc.setFillColor(208,200,240);
-  doc.rect(15, y - 6, 180, 8, 'F');
-  doc.setFontSize(10);
-  doc.setFont(undefined, 'bold');
-  doc.text('Cant.', 17, y);
-  doc.text('Descripcion', 40, y);
-  doc.text('Codigo', 122, y);
-  doc.text('Precio unit.', 155, y, { align: 'right' });
-  doc.text('Subtotal', 195, y, { align: 'right' });
-  y += 4;
-  doc.line(15, y, 195, y);
-  y += 7;
-
-  doc.setFont(undefined, 'normal');
-  items.forEach((it, i) => {
-    const cant = Number(it.cantidad) || 0;
-    const precio = Number(it.precio) || 0;
-    const subtotal = cant * precio;
-    if(i % 2 === 0) {
-      doc.setFillColor(232,228,248);
-      doc.rect(15, y - 5, 180, 7, 'F');
-    }
-    doc.text(String(cant), 17, y);
-    doc.text(String(it.nombre || '').substring(0, 36), 40, y);
-    doc.text(String(it.codigo || '').substring(0, 10), 122, y);
-    doc.text('$' + precio.toLocaleString('es-AR'), 155, y, { align: 'right' });
-    doc.text('$' + subtotal.toLocaleString('es-AR'), 195, y, { align: 'right' });
-    y += 8;
-    if (y > 270) {
-      doc.addPage();
-      y = 20;
-    }
+  return window.PresupuestoShared.generarPDFPresupuestoDoc({
+    ...p,
+    logoDataUrl: logoCacheData
   });
-
-  const pageH = doc.internal.pageSize.getHeight();
-  const totalY = pageH - 20;
-  doc.line(15, totalY - 6, 195, totalY - 6);
-  doc.setFontSize(13);
-  doc.setFont(undefined, 'bold');
-  doc.text('TOTAL: $' + Number(total).toLocaleString('es-AR'), 195, totalY, { align: 'right' });
-  return doc;
 }
-// Foco en password al cargar
-document.getElementById('loginInput').focus();
+// Estado inicial de login
+document.getElementById('rememberLogin').checked = tieneSesionRecordada();
+if (tieneSesionRecordada()) {
+  mostrarApp();
+  inicializarHistorial();
+} else {
+  document.getElementById('loginInput').focus();
+}
 </script>
 </body>
 </html>
