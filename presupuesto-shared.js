@@ -11,6 +11,19 @@
   function normalizarFecha(fecha) {
     if (!fecha) return '-';
     if (typeof fecha !== 'string') return String(fecha);
+
+    // Prioridad formato local: dd/mm/yyyy (o d/m/yy, con / o -)
+    const m = fecha.trim().match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+    if (m) {
+      const dia = Number(m[1]);
+      const mes = Number(m[2]);
+      let anio = Number(m[3]);
+      if (anio < 100) anio += 2000;
+      if (dia >= 1 && dia <= 31 && mes >= 1 && mes <= 12) {
+        return `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${anio}`;
+      }
+    }
+
     const parsed = new Date(fecha);
     return Number.isNaN(parsed.getTime()) ? fecha : parsed.toLocaleDateString('es-AR');
   }
