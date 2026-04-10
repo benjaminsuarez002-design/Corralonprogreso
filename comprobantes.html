@@ -68,6 +68,19 @@
 
     .panel { display: none; flex: 1; min-height: 0; }
     .panel.active { display: flex; flex-direction: column; }
+    #panelResumen {
+      align-items: center;
+      width: 100%;
+      background: #fff;
+    }
+    #panelResumen .resumen-nav,
+    #panelResumen .resumen-wrap {
+      width: 33.3333vw;
+      min-width: 33.3333vw;
+      max-width: 33.3333vw;
+      margin-left: auto;
+      margin-right: auto;
+    }
 
     .resumen-wrap {
       flex: 1;
@@ -81,11 +94,21 @@
       justify-content: space-between;
       gap: 8px;
       padding: 10px 12px;
-      border-bottom: 1px solid var(--borde);
       background: #fff;
       position: sticky;
       top: 0;
       z-index: 2;
+      border-bottom: none;
+    }
+    .resumen-nav::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 0;
+      width: 100vw;
+      height: 1px;
+      background: var(--borde);
     }
     .resumen-fecha {
       font-weight: 800;
@@ -251,7 +274,7 @@
     }
 
     .fila, .fila-agregar {
-      min-width: 1080px;
+      min-width: 0;
       border-bottom: 1px solid var(--borde);
       padding: 6px 10px;
       display: grid;
@@ -492,6 +515,17 @@
     @media (max-width: 760px) {
       html, body {
         overflow: auto;
+      }
+      #panelResumen {
+        align-items: stretch;
+        width: 100%;
+        background: #fff;
+      }
+      #panelResumen .resumen-nav,
+      #panelResumen .resumen-wrap {
+        width: 100%;
+        min-width: 100%;
+        max-width: 100%;
       }
       .header {
         padding: 7px 10px;
@@ -736,6 +770,8 @@
     let resumenRows = [];
     let resumenDias = [];
     let resumenFechaIso = isoHoy();
+    let resumenSource = 'table';
+    let resumenDraftRows = [];
     let guardando = false;
     let loadingDraftFromSupabase = false;
     let draftSaving = false;
@@ -1070,6 +1106,18 @@
       localStorage.setItem(ALIAS_KEY, JSON.stringify(aliases));
     }
 
+    function normTxt(v) {
+      return String(v || '').trim().toLowerCase();
+    }
+
+    function proveedorNombreDesdeValor(v) {
+      const raw = String(v || '').trim();
+      if (!raw) return '';
+      const nraw = normTxt(raw);
+      const found = aliases.find((a) => normTxt(a.alias) === nraw || normTxt(a.nombre) === nraw);
+      return found?.nombre || raw;
+    }
+
     function renderAliases() {
       if (!aliases.length) {
         els.aliasList.innerHTML = '<div class="alias-row"><div class="alias-name" style="color:#888;font-weight:400">Sin alias cargados</div></div>';
@@ -1140,6 +1188,52 @@
       return hh * 60 + mm;
     }
 
+    function rowHasDraftData(r) {
+      return !!(
+        String(r?.monto || '').trim() ||
+        String(r?.maquina || '').trim() ||
+        String(r?.transfer || r?.transferencia || '').trim() ||
+        String(r?.cliente || '').trim() ||
+        (r?.comprobante && (r.comprobante.url || r.comprobante_name || r.comprobante_nombre))
+      );
+    }
+
+    function mapDraftRowToResumen(r) {
+      const fechaTxt = String(r?.fecha || r?.fecha_texto || '').trim();
+      const fechaIso = isoDesdeFecha(fechaTxt || fechaHoy());
+      const compUrl = r?.comprobante_url || r?.comprobante?.url || null;
+      const compName = r?.comprobante_nombre || r?.comprobante?.name || null;
+      const compType = r?.comprobante_tipo || r?.comprobante?.type || null;
+      return {
+        id: r?.id || null,
+        fecha_iso: fechaIso,
+        fecha_texto: fechaTxt || fechaDesdeIso(fechaIso),
+        hora: String(r?.hora || '').trim(),
+        cliente: String(r?.cliente || '').trim(),
+        maquina: String(r?.maquina || '').trim(),
+        transferencia: String(r?.transferencia || r?.transfer || '').trim(),
+        monto: parseMonto(r?.monto),
+        comprobante_url: compUrl,
+        comprobante_nombre: compName,
+        comprobante_tipo: compType
+      };
+    }
+
+    async function cargarDraftResumenDesdeSupabase() {
+      const d = await sbRequest(draftObjectApiPath());
+      const draftRows = [];
+      if (Array.isArray(d?.rows)) {
+        d.rows.forEach((r) => {
+          if (rowHasDraftData(r)) draftRows.push(mapDraftRowToResumen(r));
+        });
+      }
+      if (d?.newRow && rowHasDraftData(d.newRow)) {
+        draftRows.push(mapDraftRowToResumen(d.newRow));
+      }
+      resumenDraftRows = draftRows;
+      return draftRows;
+    }
+
     function renderResumen() {
       if (!els.resumenBody) return;
       if (!resumenRows.length) {
@@ -1149,7 +1243,7 @@
 
       const grupos = new Map();
       resumenRows.forEach((r, idx) => {
-        const alias = String(r.transferencia || '').trim() || 'Sin alias';
+        const alias = proveedorNombreDesdeValor(r.transferencia) || 'Sin proveedor';
         if (!grupos.has(alias)) grupos.set(alias, []);
         grupos.get(alias).push({ ...r, __idx: idx });
       });
@@ -1202,7 +1296,7 @@
       const idx = resumenDias.indexOf(resumenFechaIso);
       const cur = idx >= 0 ? resumenDias[idx] : resumenDias[resumenDias.length - 1];
       resumenFechaIso = cur;
-      els.resumenFechaLabel.textContent = fechaDesdeIso(cur);
+      els.resumenFechaLabel.textContent = `${fechaDesdeIso(cur)}${resumenSource === 'draft' ? ' (borrador)' : ''}`;
       els.btnDiaPrev.disabled = idx <= 0;
       els.btnDiaNext.disabled = idx < 0 || idx >= resumenDias.length - 1;
     }
@@ -1214,7 +1308,19 @@
         const iso = String(r.fecha_iso || '').trim();
         if (iso) uniq.add(iso);
       });
-      resumenDias = [...uniq];
+      const diasTabla = [...uniq];
+
+      if (diasTabla.length) {
+        resumenSource = 'table';
+        resumenDraftRows = [];
+        resumenDias = diasTabla;
+      } else {
+        const draftRows = await cargarDraftResumenDesdeSupabase();
+        const diasDraft = [...new Set(draftRows.map((r) => String(r.fecha_iso || '').trim()).filter(Boolean))].sort();
+        resumenSource = diasDraft.length ? 'draft' : 'table';
+        resumenDias = diasDraft;
+      }
+
       if (!resumenDias.includes(resumenFechaIso)) {
         resumenFechaIso = resumenDias.length ? resumenDias[resumenDias.length - 1] : isoHoy();
       }
@@ -1222,9 +1328,20 @@
     }
 
     async function cargarResumenDia(iso) {
-      const q = encodeURIComponent(iso);
-      const data = await sbRequest(`/rest/v1/${COMPROBANTES_TABLE}?select=id,fecha_iso,fecha_texto,hora,cliente,maquina,transferencia,monto,comprobante_url,comprobante_nombre,comprobante_tipo&fecha_iso=eq.${q}&order=hora.asc.nullslast,id.asc`);
-      resumenRows = Array.isArray(data) ? data : [];
+      if (resumenSource === 'draft') {
+        resumenRows = resumenDraftRows
+          .filter((r) => String(r.fecha_iso || '') === String(iso || ''))
+          .sort((a, b) => {
+            const ka = horaToKey(a.hora);
+            const kb = horaToKey(b.hora);
+            if (ka !== kb) return ka - kb;
+            return 0;
+          });
+      } else {
+        const q = encodeURIComponent(iso);
+        const data = await sbRequest(`/rest/v1/${COMPROBANTES_TABLE}?select=id,fecha_iso,fecha_texto,hora,cliente,maquina,transferencia,monto,comprobante_url,comprobante_nombre,comprobante_tipo&fecha_iso=eq.${q}&order=hora.asc.nullslast,id.asc`);
+        resumenRows = Array.isArray(data) ? data : [];
+      }
       renderResumen();
     }
 
@@ -1259,7 +1376,7 @@
         <div class="fila">
           <input class="inp num" value="${fmtMontoCampo(r.monto)}" onchange="upd(${i}, 'monto', this.value)">
           <input class="inp" value="${r.maquina}" onchange="upd(${i}, 'maquina', this.value)">
-          <input class="inp alias-pick" value="${r.transfer}" readonly onclick="pickRowAlias(${i})" placeholder="Elegir alias">
+          <input class="inp alias-pick" value="${proveedorNombreDesdeValor(r.transfer)}" readonly onclick="pickRowAlias(${i})" placeholder="Elegir alias">
           <input class="inp" value="${r.fecha}" onchange="upd(${i}, 'fecha', this.value)">
           <input class="inp" value="${r.hora}" onchange="upd(${i}, 'hora', this.value)">
           <input class="inp" value="${r.cliente}" onchange="upd(${i}, 'cliente', this.value)">
@@ -1290,9 +1407,12 @@
 
     window.pickRowAlias = (idx) => {
       abrirPicker((alias) => {
-        rows[idx].transfer = alias;
+        rows[idx].transfer = proveedorNombreDesdeValor(alias);
         render();
         syncAfterUpdate();
+        if (isMobileView()) {
+          els.nCliente.focus();
+        }
       });
     };
 
@@ -1699,8 +1819,20 @@
 
     function abrirPickerNuevoConFoco() {
       abrirPicker((alias) => {
-        els.nTransfer.value = alias;
+        els.nTransfer.value = proveedorNombreDesdeValor(alias);
         syncAfterUpdate();
+        if (isMobileView()) {
+          const r = buildRowFromInputs();
+          const hasCoreData = !!(
+            String(r?.cliente || '').trim() ||
+            String(r?.maquina || '').trim() ||
+            String(r?.monto || '').trim()
+          );
+          if (hasCoreData) {
+            addRow();
+            return;
+          }
+        }
         els.nCliente.focus();
       });
     }
