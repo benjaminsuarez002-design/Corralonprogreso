@@ -62,6 +62,49 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .hist-panel { display: none; }
 .hist-panel.active { display: block; }
 
+.resumen-wrap { padding: 12px; }
+.resumen-card {
+  background: #fff;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  box-shadow: var(--sombra);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.resumen-head {
+  background: var(--fila-header);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.resumen-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--violeta);
+}
+.resumen-total {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--texto-dark);
+}
+.resumen-body { padding: 10px 12px; }
+.resumen-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borde);
+}
+.resumen-row:last-child { border-bottom: none; }
+.resumen-row span:first-child { color: #777; }
+.resumen-row span:last-child { font-weight: 700; color: var(--texto-dark); }
+
 /* ── HISTORIAL LIST ── */
 .h-item { padding: 13px 16px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background .15s; background: #fff; }
 .h-item:nth-child(even) { background: var(--fila-body); }
@@ -178,12 +221,16 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
   <div class="hist-tabs">
     <button class="hist-tab active" id="tabRemitos" onclick="activarTabHistorial('remitos')">Remitos</button>
     <button class="hist-tab" id="tabPresupuestos" onclick="activarTabHistorial('presupuestos')">Presupuestos</button>
+    <button class="hist-tab" id="tabResumen" onclick="activarTabHistorial('resumen')">Resumen</button>
   </div>
   <div class="hist-panel active" id="panelRemitos">
     <div id="historialBody"></div>
   </div>
   <div class="hist-panel" id="panelPresupuestos">
     <div id="presupuestosBody"></div>
+  </div>
+  <div class="hist-panel" id="panelResumen">
+    <div class="resumen-wrap" id="resumenBody"></div>
   </div>
 </div>
 
@@ -249,6 +296,7 @@ const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
 let _remitoDetalleActual = null;
 let _presupuestoDetalleActual = null;
 let _presupuestosCache = [];
+let _remitosCache = [];
 let _detalleTipoActual = 'remito';
 let editItems = [];
 let _confirmCallback = null;
@@ -328,18 +376,29 @@ function inicializarHistorial() {
 
 function activarTabHistorial(tab) {
   const isRemitos = tab === 'remitos';
+  const isPresupuestos = tab === 'presupuestos';
+  const isResumen = tab === 'resumen';
   const remitosTab = document.getElementById('tabRemitos');
   const presupuestosTab = document.getElementById('tabPresupuestos');
+  const resumenTab = document.getElementById('tabResumen');
   const remitosPanel = document.getElementById('panelRemitos');
   const presupuestosPanel = document.getElementById('panelPresupuestos');
+  const resumenPanel = document.getElementById('panelResumen');
 
   if (remitosTab) remitosTab.classList.toggle('active', isRemitos);
-  if (presupuestosTab) presupuestosTab.classList.toggle('active', !isRemitos);
+  if (presupuestosTab) presupuestosTab.classList.toggle('active', isPresupuestos);
+  if (resumenTab) resumenTab.classList.toggle('active', isResumen);
   if (remitosPanel) remitosPanel.classList.toggle('active', isRemitos);
-  if (presupuestosPanel) presupuestosPanel.classList.toggle('active', !isRemitos);
+  if (presupuestosPanel) presupuestosPanel.classList.toggle('active', isPresupuestos);
+  if (resumenPanel) resumenPanel.classList.toggle('active', isResumen);
 
-  if (isRemitos) cargarHistorial();
-  else cargarPresupuestos();
+  if (isRemitos) {
+    cargarHistorial();
+  } else if (isPresupuestos) {
+    cargarPresupuestos();
+  } else if (isResumen) {
+    Promise.all([cargarHistorial(), cargarPresupuestos()]).then(renderResumenHistorial);
+  }
 }
 
 function esc(s) {
@@ -367,6 +426,7 @@ async function cargarPresupuestos() {
     _presupuestosCache = Array.isArray(presupuestos) ? presupuestos : [];
     if (!_presupuestosCache.length) {
       body.innerHTML = '<div class="h-empty">Sin presupuestos todavia</div>';
+      renderResumenHistorial();
       return;
     }
 
@@ -389,6 +449,47 @@ async function cargarPresupuestos() {
     body.innerHTML = '<div class="h-empty">Error cargando presupuestos</div>';
     console.error('Error cargando presupuestos desde Supabase:', e);
   }
+  renderResumenHistorial();
+}
+
+function renderResumenHistorial() {
+  const body = document.getElementById('resumenBody');
+  if (!body) return;
+
+  const remitos = Array.isArray(_remitosCache) ? _remitosCache : [];
+  const presupuestos = Array.isArray(_presupuestosCache) ? _presupuestosCache : [];
+  const totalRemitos = remitos.reduce((s, r) => s + Number(r.total || 0), 0);
+  const totalPresupuestos = presupuestos.reduce((s, p) => s + Number(p.total || 0), 0);
+  const totalGeneral = totalRemitos + totalPresupuestos;
+
+  body.innerHTML = `
+    <div class="resumen-card">
+      <div class="resumen-head">
+        <div class="resumen-title">Remitos</div>
+        <div class="resumen-total">${fmt(totalRemitos)}</div>
+      </div>
+      <div class="resumen-body">
+        <div class="resumen-row"><span>Cantidad</span><span>${remitos.length}</span></div>
+        <div class="resumen-row"><span>Último</span><span>${remitos[0]?.nro || '-'}</span></div>
+      </div>
+    </div>
+    <div class="resumen-card">
+      <div class="resumen-head">
+        <div class="resumen-title">Presupuestos</div>
+        <div class="resumen-total">${fmt(totalPresupuestos)}</div>
+      </div>
+      <div class="resumen-body">
+        <div class="resumen-row"><span>Cantidad</span><span>${presupuestos.length}</span></div>
+        <div class="resumen-row"><span>Último</span><span>${presupuestos[0]?.numero || '-'}</span></div>
+      </div>
+    </div>
+    <div class="resumen-card">
+      <div class="resumen-head">
+        <div class="resumen-title">Total General</div>
+        <div class="resumen-total">${fmt(totalGeneral)}</div>
+      </div>
+    </div>
+  `;
 }
 
 function setAccionesDetalleModo(modo) {
@@ -469,8 +570,10 @@ async function cargarHistorial() {
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
     });
     const data = await res.json();
+    _remitosCache = Array.isArray(data) ? data : [];
     if(!Array.isArray(data) || !data.length) {
       body.innerHTML = '<div class="h-empty">Sin remitos todavía</div>';
+      renderResumenHistorial();
       return;
     }
     body.innerHTML = data.map(r => `
@@ -483,8 +586,11 @@ async function cargarHistorial() {
         <div class="h-total">${fmt(r.total||0)}</div>
         <span style="color:#ccc;font-size:18px;">›</span>
       </div>`).join('');
+    renderResumenHistorial();
   } catch(e) {
+    _remitosCache = [];
     body.innerHTML = '<div class="h-empty">Error cargando historial</div>';
+    renderResumenHistorial();
   }
 }
 
@@ -832,6 +938,7 @@ if (tieneSesionRecordada()) {
   document.getElementById('loginInput').focus();
 }
 </script>
+<a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:9999;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>
 </body>
 </html>
 
