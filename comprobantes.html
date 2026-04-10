@@ -488,6 +488,101 @@
         width: 100%;
       }
     }
+
+    @media (max-width: 760px) {
+      html, body {
+        overflow: auto;
+      }
+      .header {
+        padding: 10px 12px;
+      }
+      .header-title {
+        font-size: 18px;
+      }
+      .tabs .tab {
+        padding: 11px 8px;
+        font-size: 14px;
+      }
+
+      .tabla-header {
+        display: none;
+      }
+      .lista {
+        padding-bottom: 180px;
+      }
+      .fila, .fila-agregar {
+        min-width: 0;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        padding: 10px;
+      }
+      .fila .inp, .fila-agregar .inp {
+        font-size: 15px;
+        min-height: 38px;
+      }
+      .fila > :nth-child(1),
+      .fila-agregar > :nth-child(1) {
+        grid-column: 1 / -1;
+      }
+      .fila > :nth-child(2),
+      .fila-agregar > :nth-child(2) {
+        grid-column: 1 / -1;
+      }
+      .fila > :nth-child(3),
+      .fila-agregar > :nth-child(3) {
+        grid-column: 1 / -1;
+      }
+      .fila > :nth-child(6),
+      .fila-agregar > :nth-child(6) {
+        grid-column: 1 / -1;
+      }
+      .fila > :nth-child(7),
+      .fila-agregar > :nth-child(7),
+      .fila > :nth-child(8),
+      .fila-agregar > :nth-child(8) {
+        width: 100%;
+        min-height: 36px;
+      }
+      .btn-add {
+        width: 100%;
+        height: 36px;
+      }
+      .btn-comp {
+        width: 100%;
+        text-align: center;
+      }
+
+      .resumen-row {
+        grid-template-columns: 72px 1fr;
+        gap: 6px;
+      }
+      .resumen-comp {
+        grid-column: 1 / -1;
+        text-align: left;
+      }
+
+      .totales {
+        bottom: 64px;
+        padding: 8px 10px;
+      }
+      .totales-label {
+        font-size: 12px;
+      }
+      .totales-valor {
+        font-size: 22px;
+      }
+      .franja {
+        height: 64px;
+        padding: 0 8px;
+      }
+      .btn-f {
+        flex: 1;
+        min-width: 0;
+        text-align: center;
+        padding: 9px 8px;
+        font-size: 11px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -587,6 +682,7 @@
     const COMPROBANTES_TABLE = 'comprobantes';
     const ALIAS_KEY = 'comprobantes_aliases_v1';
     const LAST_TAB_KEY = 'comprobantes_last_tab_v1';
+    const DRAFT_OBJECT_PATH = 'comprobantes/drafts/comprobantes_draft.json';
 
     const rows = [];
     let aliases = [];
@@ -599,6 +695,9 @@
     let resumenDias = [];
     let resumenFechaIso = isoHoy();
     let guardando = false;
+    let loadingDraftFromSupabase = false;
+    let draftSaving = false;
+    let draftSavePending = false;
 
     const els = {
       tabAlias: document.getElementById('tabAlias'),
@@ -662,6 +761,17 @@
       }
       if (!text) return null;
       try { return JSON.parse(text); } catch (_) { return text; }
+    }
+
+    function encodeStoragePath(path) {
+      return String(path || '')
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/');
+    }
+
+    function draftObjectApiPath() {
+      return `/storage/v1/object/${SUPABASE_BUCKET}/${encodeStoragePath(DRAFT_OBJECT_PATH)}`;
     }
 
     function isoHoy() {
@@ -759,6 +869,106 @@
 
     function safeRevoke(url) {
       if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+    }
+
+    function normalizarRowDraft(r) {
+      return {
+        monto: String(r?.monto || ''),
+        maquina: String(r?.maquina || ''),
+        transfer: String(r?.transfer || ''),
+        fecha: String(r?.fecha || ''),
+        hora: String(r?.hora || ''),
+        cliente: String(r?.cliente || ''),
+        comprobante: r?.comprobante && r.comprobante.url && !String(r.comprobante.url).startsWith('blob:')
+          ? {
+              name: String(r.comprobante.name || ''),
+              url: String(r.comprobante.url || ''),
+              type: String(r.comprobante.type || '')
+            }
+          : null
+      };
+    }
+
+    function buildDraftPayload() {
+      return {
+        rows: rows.map(normalizarRowDraft),
+        newRow: {
+          monto: String(els.nMonto?.value || ''),
+          maquina: String(els.nMaquina?.value || ''),
+          transfer: String(els.nTransfer?.value || ''),
+          fecha: String(els.nFecha?.value || ''),
+          hora: String(els.nHora?.value || ''),
+          cliente: String(els.nCliente?.value || '')
+        },
+        updated_at: new Date().toISOString()
+      };
+    }
+
+    async function persistDraftSupabase() {
+      const draft = buildDraftPayload();
+      await sbRequest(draftObjectApiPath(), {
+        method: 'POST',
+        rawBody: JSON.stringify(draft),
+        headers: {
+          'x-upsert': 'true',
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+
+    async function persistDraftSupabaseSafe() {
+      if (loadingDraftFromSupabase) return;
+      if (draftSaving) {
+        draftSavePending = true;
+        return;
+      }
+      draftSaving = true;
+      try {
+        await persistDraftSupabase();
+      } finally {
+        draftSaving = false;
+        if (draftSavePending) {
+          draftSavePending = false;
+          await persistDraftSupabaseSafe();
+        }
+      }
+    }
+
+    async function saveDraftNow() {
+      if (loadingDraftFromSupabase) return;
+      await persistDraftSupabaseSafe();
+    }
+
+    function syncAfterUpdate() {
+      saveDraftNow().catch((e) => {
+        console.error('[COMPROBANTES] Sync afterupdate falló', e);
+      });
+    }
+
+    async function loadDraft() {
+      loadingDraftFromSupabase = true;
+      try {
+        const d = await sbRequest(draftObjectApiPath());
+        if (!d || typeof d !== 'object') return;
+        const loadedRows = Array.isArray(d?.rows) ? d.rows.map(normalizarRowDraft) : [];
+        rows.length = 0;
+        loadedRows.forEach((r) => rows.push(r));
+        if (d?.newRow) {
+          els.nMonto.value = String(d.newRow.monto || '');
+          els.nMaquina.value = String(d.newRow.maquina || '');
+          els.nTransfer.value = String(d.newRow.transfer || '');
+          els.nFecha.value = String(d.newRow.fecha || '');
+          els.nHora.value = String(d.newRow.hora || '');
+          els.nCliente.value = String(d.newRow.cliente || '');
+        }
+      } catch (e) {
+        const msg = String(e?.message || e || '');
+        if (!/404|not found|NoSuchKey|Object not found/i.test(msg)) {
+          console.error('[COMPROBANTES] Error cargando borrador desde Supabase', e);
+        }
+      } finally {
+        loadingDraftFromSupabase = false;
+      }
     }
 
     function activarTab(tab) {
@@ -1005,6 +1215,7 @@
     window.upd = (idx, key, val) => {
       rows[idx][key] = key === 'maquina' ? formatearMaquina(val) : val;
       recalcTotal();
+      syncAfterUpdate();
       if (key === 'maquina') render();
     };
 
@@ -1012,12 +1223,14 @@
       safeRevoke(rows[idx]?.comprobante?.url);
       rows.splice(idx, 1);
       render();
+      syncAfterUpdate();
     };
 
     window.pickRowAlias = (idx) => {
       abrirPicker((alias) => {
         rows[idx].transfer = alias;
         render();
+        syncAfterUpdate();
       });
     };
 
@@ -1060,6 +1273,7 @@
         safeRevoke(nuevoComprobante?.url);
         nuevoComprobante = comp;
         actualizarBotonNuevoComp();
+        syncAfterUpdate();
         return;
       }
       if (target.type === 'row') {
@@ -1068,6 +1282,7 @@
           safeRevoke(rows[idx].comprobante?.url);
           rows[idx].comprobante = comp;
           render();
+          syncAfterUpdate();
         }
       }
     }
@@ -1105,6 +1320,17 @@
     }
 
     function addRow() {
+      const r = buildRowFromInputs();
+      if (!rowHasMeaningfulData(r)) return;
+
+      rows.push(r);
+      limpiarInputsNuevaFila();
+      render();
+      syncAfterUpdate();
+      els.nMonto.focus();
+    }
+
+    function buildRowFromInputs() {
       const r = {
         monto: els.nMonto.value.trim(),
         maquina: formatearMaquina(els.nMaquina.value.trim()),
@@ -1114,10 +1340,20 @@
         cliente: els.nCliente.value.trim(),
         comprobante: nuevoComprobante ? { ...nuevoComprobante } : null
       };
-      const hasAny = Object.values(r).some((v) => v !== '');
-      if (!hasAny) return;
+      return r;
+    }
 
-      rows.push(r);
+    function rowHasMeaningfulData(r) {
+      return !!(
+        String(r?.monto || '').trim() ||
+        String(r?.maquina || '').trim() ||
+        String(r?.transfer || '').trim() ||
+        String(r?.cliente || '').trim() ||
+        r?.comprobante
+      );
+    }
+
+    function limpiarInputsNuevaFila() {
       els.nMonto.value = '';
       els.nMaquina.value = '';
       els.nTransfer.value = '';
@@ -1126,8 +1362,16 @@
       els.nCliente.value = '';
       nuevoComprobante = null;
       actualizarBotonNuevoComp();
+    }
+
+    function appendPendingNewRowIfAny() {
+      const r = buildRowFromInputs();
+      if (!rowHasMeaningfulData(r)) return false;
+      rows.push(r);
+      limpiarInputsNuevaFila();
       render();
-      els.nMonto.focus();
+      syncAfterUpdate();
+      return true;
     }
 
     function limpiarBorrador() {
@@ -1137,6 +1381,7 @@
       nuevoComprobante = null;
       actualizarBotonNuevoComp();
       render();
+      syncAfterUpdate();
       els.nMonto.focus();
     }
 
@@ -1193,9 +1438,21 @@
       if (!rows.length) throw new Error('No hay comprobantes para guardar.');
 
       const payload = [];
+      const erroresAdjuntos = [];
       for (let i = 0; i < rows.length; i += 1) {
         const r = rows[i];
-        const compUrl = await subirComprobanteASupabase(r.comprobante, i);
+        let compUrl = null;
+        try {
+          compUrl = await subirComprobanteASupabase(r.comprobante, i);
+        } catch (e) {
+          console.error('[COMPROBANTES] Fallo subida adjunto fila', i + 1, e);
+          erroresAdjuntos.push({
+            fila: i + 1,
+            maquina: r.maquina || '',
+            motivo: String(e?.message || e || 'Error de subida')
+          });
+          compUrl = null;
+        }
         const fechaIso = isoDesdeFecha(r.fecha);
         payload.push({
           fecha_iso: fechaIso,
@@ -1216,15 +1473,26 @@
         body: payload,
         headers: { Prefer: 'return=minimal' }
       });
+
+      return { total: payload.length, erroresAdjuntos };
     }
 
     async function confirmarGuardarYNuevo() {
       setGuardandoState(true);
       try {
-        await guardarRowsSupabase();
+        appendPendingNewRowIfAny();
+        const result = await guardarRowsSupabase();
         limpiarBorrador();
         await refrescarResumen();
-        alert('Comprobantes guardados en Supabase.');
+        if (result.erroresAdjuntos.length) {
+          const detalle = result.erroresAdjuntos
+            .slice(0, 3)
+            .map((e) => `Fila ${e.fila}${e.maquina ? ` (${e.maquina})` : ''}`)
+            .join(', ');
+          alert(`Guardado OK (${result.total} filas). ${result.erroresAdjuntos.length} comprobante(s) no se pudieron subir: ${detalle}.`);
+        } else {
+          alert(`Comprobantes guardados en Supabase (${result.total} filas).`);
+        }
       } finally {
         setGuardandoState(false);
       }
@@ -1306,6 +1574,7 @@
     function abrirPickerNuevoConFoco() {
       abrirPicker((alias) => {
         els.nTransfer.value = alias;
+        syncAfterUpdate();
         els.nCliente.focus();
       });
     }
@@ -1336,6 +1605,7 @@
 
       if (e.key === 'Enter') {
         e.preventDefault();
+        saveDraftNow().catch((err) => console.error('[COMPROBANTES] Sync en Enter falló', err));
         if (isAdd) {
           if (target === els.nMaquina) {
             abrirPickerNuevoConFoco();
@@ -1400,8 +1670,14 @@
 
     els.nMaquina.addEventListener('blur', () => {
       els.nMaquina.value = formatearMaquina(els.nMaquina.value);
+      syncAfterUpdate();
     });
     els.nTransfer.addEventListener('click', abrirPickerNuevoConFoco);
+
+    [els.nMonto, els.nMaquina, els.nTransfer, els.nFecha, els.nHora, els.nCliente].forEach((inp) => {
+      inp.addEventListener('change', syncAfterUpdate);
+      inp.addEventListener('blur', syncAfterUpdate);
+    });
 
     els.pickerList.addEventListener('click', (e) => {
       const btn = e.target.closest('.picker-item');
@@ -1457,6 +1733,7 @@
 
     async function init() {
       cargarAliases();
+      await loadDraft();
       autocompletarFechaHora();
       setInterval(autocompletarFechaHora, 30000);
       actualizarBotonNuevoComp();
@@ -1477,4 +1754,5 @@
   </script>
 </body>
 </html>
+
 
