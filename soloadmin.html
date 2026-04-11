@@ -71,6 +71,8 @@
   .search-admin { display: flex; align-items: center; background: var(--card2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; gap: 8px; margin-bottom: 14px; }
   .search-admin input { flex: 1; background: transparent; border: none; outline: none; color: var(--texto); font-family: 'Barlow', sans-serif; font-size: 13px; }
   .search-admin svg { color: var(--muted); flex-shrink: 0; }
+  .admin-chip-filters { margin: -4px 0 10px; }
+  .admin-chip-filters .chip-toggle { padding: 6px 10px; font-size: 11px; }
   .art-contador { font-size: 12px; color: var(--muted); text-align: right; margin-bottom: 10px; }
   .art-contador b { color: var(--rojo2); }
   .empty-lista { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 13px; }
@@ -179,6 +181,11 @@
     <div class="search-admin">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input type="text" id="searchAdmin" placeholder="Buscar..." oninput="filtrarLista()">
+    </div>
+    <div class="chip-row admin-chip-filters" id="adminChipFilters">
+      <button class="chip-toggle admin-filter-chip" type="button" data-chip="oferta">En oferta</button>
+      <button class="chip-toggle admin-filter-chip" type="button" data-chip="destacado">Destacado</button>
+      <button class="chip-toggle admin-filter-chip" type="button" data-chip="masVendido">Más vendido</button>
     </div>
     <div class="art-contador" id="artContador"></div>
     <div id="listaArticulos"><div class="empty-lista">Cargando...</div></div>
@@ -339,6 +346,7 @@ let fotoArchivoEdit  = null;
 let jsonListaUrl = '';
 let currentItems = [];
 let currentPage = 1;
+let adminChipActivo = '';
 const pageSize = 20;
 const TODAY_ISO = () => {
   const now = new Date();
@@ -854,8 +862,31 @@ window.filtrarLista = () => {
       return d !== 0 ? d : normAdm(a.nombre||'').localeCompare(normAdm(b.nombre||''),'es');
     });
   }
+  if (adminChipActivo === 'oferta') {
+    lista = lista.filter(a => ofertaVigente({
+      oferta: toBool(a.oferta ?? a.enOferta ?? a.tagOferta),
+      ofertaPct: clampPct(a.ofertaPct ?? a.oferta_pct ?? a.ofertaPorcentaje ?? a.descuentoOferta ?? 0),
+      ofertaHasta: sanitizeIsoDate(a.ofertaHasta ?? a.oferta_hasta ?? a.fechaOfertaHasta ?? '')
+    }));
+  }
+  if (adminChipActivo === 'destacado') lista = lista.filter(a => toBool(a.destacado ?? a.tagDestacado));
+  if (adminChipActivo === 'masVendido') lista = lista.filter(a => toBool(a.masVendido ?? a.mas_vendido ?? a.tagMasVendido));
   renderLista(lista);
 };
+
+function actualizarChipsAdminUI() {
+  document.querySelectorAll('#adminChipFilters .admin-filter-chip').forEach((chip) => {
+    chip.classList.toggle('active', chip.dataset.chip === adminChipActivo);
+  });
+}
+
+document.querySelectorAll('#adminChipFilters .admin-filter-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    adminChipActivo = adminChipActivo === chip.dataset.chip ? '' : chip.dataset.chip;
+    actualizarChipsAdminUI();
+    filtrarLista();
+  });
+});
 
 // -- LISTENER FIRESTORE --
 onSnapshot(doc(db, "config", "listaActual"), async snap => {
@@ -877,7 +908,7 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
       destacado: toBool(a.destacado ?? a.tagDestacado),
       masVendido: toBool(a.masVendido ?? a.mas_vendido ?? a.tagMasVendido)
     }));
-    renderLista(todosArticulos);
+    filtrarLista();
   } catch(e) {
     console.error(e);
     document.getElementById('listaArticulos').innerHTML = '<div class="empty-lista" style="color:#e50000">Error: ' + e.message + '</div>';
