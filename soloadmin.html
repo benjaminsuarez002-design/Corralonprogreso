@@ -85,6 +85,60 @@
   .btn-guardar-edit { flex: 2; padding: 12px; background: var(--amarillo); color: #000; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; transition: opacity .2s; }
   .btn-guardar-edit:hover { opacity: 0.85; }
   .btn-guardar-edit:disabled { opacity: 0.4; cursor: not-allowed; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-toggle {
+    border: 1px solid var(--border);
+    background: var(--card2);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    cursor: pointer;
+    transition: .18s ease;
+  }
+  .chip-toggle.active {
+    color: #fff;
+    border-color: var(--rojo2);
+    background: linear-gradient(90deg, #ef2d2d 0%, var(--rojo) 100%);
+    box-shadow: 0 0 0 2px rgba(229,0,0,.18);
+  }
+  .chip-toggle[data-chip="destacado"].active {
+    border-color: var(--amarillo);
+    background: linear-gradient(90deg, #ffce4f 0%, var(--amarillo) 100%);
+    color: #1a1a1a;
+    box-shadow: 0 0 0 2px rgba(255,171,0,.22);
+  }
+  .chip-toggle[data-chip="masVendido"].active {
+    border-color: var(--verde);
+    background: linear-gradient(90deg, #31d981 0%, var(--verde) 100%);
+    box-shadow: 0 0 0 2px rgba(0,200,83,.2);
+  }
+  .oferta-summary {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card2);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .oferta-summary b { color: var(--texto); }
+  .offer-preview {
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--muted);
+    display: grid;
+    gap: 4px;
+  }
+  .offer-preview b { color: var(--texto); }
+  .offer-preview .oferta-valor { color: var(--verde); font-weight: 700; font-size: 14px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -102,6 +156,7 @@
     <div class="field"><label>Código de artículo</label><input type="text" id="fCodigo" placeholder="Ej: 1234"></div>
     <div class="field"><label>Nombre del artículo</label><input type="text" id="fNombre" placeholder="Ej: Cemento Portland 50kg"></div>
     <div class="field"><label>Detalle / descripción</label><textarea id="fDetalle" placeholder="Descripción, medidas, marca, etc."></textarea></div>
+    <div class="field"><label>Rubro</label><input type="text" id="fRubro" placeholder="Ej: Ferretería"></div>
     <div class="field"><label>Precio de venta</label><input type="number" id="fPrecio" placeholder="Ej: 12500" min="0" step="0.01"></div>
     <div class="field">
       <label>Foto del artículo</label>
@@ -180,6 +235,16 @@
     <div class="field"><label>Código</label><input type="text" id="editCodigo"></div>
     <div class="field"><label>Nombre</label><input type="text" id="editNombre"></div>
     <div class="field"><label>Detalle</label><textarea id="editDetalle"></textarea></div>
+    <div class="field"><label>Rubro</label><input type="text" id="editRubro"></div>
+    <div class="field">
+      <label>Etiquetas</label>
+      <div class="chip-row">
+        <button class="chip-toggle" type="button" data-chip="oferta" id="editChipOferta">En oferta</button>
+        <button class="chip-toggle" type="button" data-chip="destacado" id="editChipDestacado">Destacado</button>
+        <button class="chip-toggle" type="button" data-chip="masVendido" id="editChipMasVendido">Más vendido</button>
+      </div>
+      <div class="oferta-summary" id="ofertaSummary" style="display:none;"></div>
+    </div>
     <div class="field"><label>Precio</label><input type="number" id="editPrecio" min="0" step="0.01"></div>
     <div class="field">
       <label>Foto (arrastrá o hacé clic para cambiar)</label>
@@ -197,6 +262,25 @@
     <div class="modal-acciones">
       <button class="btn-cancelar" onclick="cerrarModal()">Cancelar</button>
       <button class="btn-guardar-edit" id="btnGuardarEdit" onclick="guardarEdicion()">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOferta">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-title">Configurar oferta <button class="btn-cerrar-modal" onclick="cerrarModalOferta()">✕</button></div>
+    <div class="offer-preview" id="offerPreview"></div>
+    <div class="field">
+      <label>Porcentaje de descuento</label>
+      <input type="number" id="ofertaPctInput" min="1" max="99" step="0.01" placeholder="Ej: 10">
+    </div>
+    <div class="field">
+      <label>Hasta</label>
+      <input type="date" id="ofertaHastaInput">
+    </div>
+    <div class="modal-acciones">
+      <button class="btn-cancelar" type="button" onclick="cancelarModalOferta()">Cancelar</button>
+      <button class="btn-guardar-edit" type="button" onclick="guardarModalOferta()">Guardar oferta</button>
     </div>
   </div>
 </div>
@@ -256,6 +340,68 @@ let jsonListaUrl = '';
 let currentItems = [];
 let currentPage = 1;
 const pageSize = 20;
+const TODAY_ISO = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+let editMeta = {
+  oferta: false,
+  destacado: false,
+  masVendido: false,
+  ofertaPct: 0,
+  ofertaHasta: ''
+};
+let ofertaModalSnapshot = null;
+
+function toBool(value) {
+  if (typeof value === 'boolean') return value;
+  const raw = String(value ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'si' || raw === 'sí' || raw === 'on';
+}
+
+function clampPct(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(99, Math.max(0, parsed));
+}
+
+function sanitizeIsoDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+
+function extraerMetaOferta(articulo) {
+  return {
+    oferta: toBool(articulo?.oferta ?? articulo?.enOferta ?? articulo?.tagOferta),
+    destacado: toBool(articulo?.destacado ?? articulo?.tagDestacado),
+    masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido),
+    ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
+    ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? '')
+  };
+}
+
+function precioOferta(precioLista, pct) {
+  const base = Number(precioLista || 0);
+  const pctOk = clampPct(pct);
+  const factor = (100 - pctOk) / 100;
+  return Math.round(base * factor * 100) / 100;
+}
+
+function fmtFecha(iso) {
+  const clean = sanitizeIsoDate(iso);
+  if (!clean) return '-';
+  const [y, m, d] = clean.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function ofertaVigente(meta) {
+  return !!(meta.oferta && meta.ofertaPct > 0 && meta.ofertaHasta && meta.ofertaHasta >= TODAY_ISO());
+}
 
 function toast(msg, tipo='ok') {
   const el = document.getElementById('toast');
@@ -263,6 +409,104 @@ function toast(msg, tipo='ok') {
   el.className = `toast show ${tipo}`;
   setTimeout(() => el.className = 'toast', 3000);
 }
+
+function renderEditChips() {
+  document.getElementById('editChipOferta').classList.toggle('active', !!editMeta.oferta);
+  document.getElementById('editChipDestacado').classList.toggle('active', !!editMeta.destacado);
+  document.getElementById('editChipMasVendido').classList.toggle('active', !!editMeta.masVendido);
+  const summary = document.getElementById('ofertaSummary');
+  if (editMeta.oferta) {
+    const precioLista = Number(document.getElementById('editPrecio').value || 0);
+    const precioFinal = precioOferta(precioLista, editMeta.ofertaPct);
+    const vigente = ofertaVigente(editMeta);
+    summary.style.display = 'block';
+    summary.innerHTML = `Descuento: <b>${editMeta.ofertaPct || 0}%</b> · Precio oferta: <b>${fmtPrecio(precioFinal)}</b> · Hasta: <b>${fmtFecha(editMeta.ofertaHasta)}</b> ${vigente ? '✅' : '⚠️'} · <button type="button" style="border:none;background:transparent;color:var(--amarillo);font-weight:700;cursor:pointer;" onclick="abrirModalOferta()">Editar oferta</button>`;
+  } else {
+    summary.style.display = 'none';
+    summary.innerHTML = '';
+  }
+}
+
+function renderOfferPreview() {
+  const precioLista = Number(document.getElementById('editPrecio').value || 0);
+  const pct = clampPct(document.getElementById('ofertaPctInput').value);
+  const hasta = sanitizeIsoDate(document.getElementById('ofertaHastaInput').value);
+  const precioFinal = precioOferta(precioLista, pct);
+  document.getElementById('offerPreview').innerHTML = `
+    <div>Precio lista: <b>${fmtPrecio(precioLista)}</b></div>
+    <div>Descuento: <b>${pct}%</b></div>
+    <div class="oferta-valor">Precio de oferta: ${fmtPrecio(precioFinal)}</div>
+    <div>Hasta: <b>${fmtFecha(hasta)}</b></div>
+  `;
+}
+
+window.abrirModalOferta = function () {
+  ofertaModalSnapshot = { ...editMeta };
+  document.getElementById('ofertaPctInput').value = editMeta.ofertaPct || '';
+  document.getElementById('ofertaHastaInput').value = editMeta.ofertaHasta || '';
+  renderOfferPreview();
+  document.getElementById('modalOferta').classList.add('visible');
+};
+
+window.cerrarModalOferta = function () {
+  document.getElementById('modalOferta').classList.remove('visible');
+};
+
+window.cancelarModalOferta = function () {
+  if (ofertaModalSnapshot) editMeta = { ...ofertaModalSnapshot };
+  renderEditChips();
+  window.cerrarModalOferta();
+};
+
+window.guardarModalOferta = function () {
+  const pct = clampPct(document.getElementById('ofertaPctInput').value);
+  const hasta = sanitizeIsoDate(document.getElementById('ofertaHastaInput').value);
+  if (pct <= 0) {
+    toast('Ingresá un porcentaje mayor a 0 para la oferta', 'err');
+    return;
+  }
+  if (!hasta) {
+    toast('Elegí la fecha hasta de la oferta', 'err');
+    return;
+  }
+  editMeta.oferta = true;
+  editMeta.ofertaPct = pct;
+  editMeta.ofertaHasta = hasta;
+  renderEditChips();
+  window.cerrarModalOferta();
+};
+
+document.getElementById('ofertaPctInput').addEventListener('input', renderOfferPreview);
+document.getElementById('ofertaHastaInput').addEventListener('change', renderOfferPreview);
+document.getElementById('editPrecio').addEventListener('input', () => {
+  renderEditChips();
+  if (document.getElementById('modalOferta').classList.contains('visible')) renderOfferPreview();
+});
+
+document.getElementById('editChipOferta').addEventListener('click', () => {
+  if (!editMeta.oferta) {
+    editMeta.oferta = true;
+    renderEditChips();
+    window.abrirModalOferta();
+    return;
+  }
+  editMeta.oferta = false;
+  renderEditChips();
+});
+
+document.getElementById('editChipDestacado').addEventListener('click', () => {
+  editMeta.destacado = !editMeta.destacado;
+  renderEditChips();
+});
+
+document.getElementById('editChipMasVendido').addEventListener('click', () => {
+  editMeta.masVendido = !editMeta.masVendido;
+  renderEditChips();
+});
+
+document.getElementById('modalOferta').addEventListener('click', (event) => {
+  if (event.target === document.getElementById('modalOferta')) window.cancelarModalOferta();
+});
 
 const dropZone  = document.getElementById('dropZone');
 const inputFoto = document.getElementById('fFoto');
@@ -397,6 +641,7 @@ window.guardarArticulo = async () => {
   const codigo  = document.getElementById('fCodigo').value.trim();
   const nombre  = document.getElementById('fNombre').value.trim();
   const detalle = document.getElementById('fDetalle').value.trim();
+  const rubro   = document.getElementById('fRubro').value.trim();
   const precio  = parseFloat(document.getElementById('fPrecio').value);
   if (!codigo || !nombre || isNaN(precio)) { toast('Completá código, nombre y precio', 'err'); return; }
   const btn = document.getElementById('btnGuardar');
@@ -406,10 +651,24 @@ window.guardarArticulo = async () => {
     if (fotoArchivoNuevo) {
       fotoUrl = await subirFoto(fotoArchivoNuevo, codigo, document.getElementById('progressFill'), document.getElementById('progressLabel'), document.getElementById('progressWrap'));
     }
-    await addDoc(collection(db, 'articulos'), { codigo, nombre, detalle, precio, fotoUrl, timestamp: Date.now() });
+    await addDoc(collection(db, 'articulos'), {
+      codigo,
+      nombre,
+      detalle,
+      rubro,
+      precio,
+      fotoUrl,
+      oferta: false,
+      ofertaPct: 0,
+      ofertaHasta: '',
+      destacado: false,
+      masVendido: false,
+      timestamp: Date.now()
+    });
     document.getElementById('fCodigo').value = '';
     document.getElementById('fNombre').value = '';
     document.getElementById('fDetalle').value = '';
+    document.getElementById('fRubro').value = '';
     document.getElementById('fPrecio').value = '';
     fotoArchivoNuevo = null;
     dropZone.classList.remove('tiene-foto');
@@ -427,7 +686,10 @@ window.abrirEditar = codigo => {
   document.getElementById('editCodigo').value  = art.codigo  || '';
   document.getElementById('editNombre').value  = art.nombre  || '';
   document.getElementById('editDetalle').value = art.detalle || '';
+  document.getElementById('editRubro').value   = art.rubro   || '';
   document.getElementById('editPrecio').value  = art.precio  || '';
+  editMeta = extraerMetaOferta(art);
+  renderEditChips();
   fotoArchivoEdit = null;
   dropZoneEdit.innerHTML = `<input type="file" id="editFoto" accept="image/*">
     ${art.fotoUrl ? `<img src="${art.fotoUrl}" alt="foto actual">` : `<div class="art-foto-placeholder" style="display:flex;">📷</div>`}
@@ -438,7 +700,12 @@ window.abrirEditar = codigo => {
   document.getElementById('modalOverlay').classList.add('visible');
 };
 
-window.cerrarModal = () => { document.getElementById('modalOverlay').classList.remove('visible'); fotoArchivoEdit = null; };
+window.cerrarModal = () => {
+  document.getElementById('modalOverlay').classList.remove('visible');
+  window.cerrarModalOferta();
+  ofertaModalSnapshot = null;
+  fotoArchivoEdit = null;
+};
 
 async function subirJSONaCloudinary(jsonArray) {
   const jsonStr = JSON.stringify(jsonArray);
@@ -458,8 +725,13 @@ window.guardarEdicion = async () => {
   const codigo  = document.getElementById('editCodigo').value.trim();
   const nombre  = document.getElementById('editNombre').value.trim();
   const detalle = document.getElementById('editDetalle').value.trim();
+  const rubro   = document.getElementById('editRubro').value.trim();
   const precio  = parseFloat(document.getElementById('editPrecio').value);
   if (!codigo || !nombre || isNaN(precio)) { toast('Completá los campos obligatorios', 'err'); return; }
+  if (editMeta.oferta) {
+    if (clampPct(editMeta.ofertaPct) <= 0) { toast('La oferta necesita porcentaje válido', 'err'); return; }
+    if (!sanitizeIsoDate(editMeta.ofertaHasta)) { toast('La oferta necesita fecha hasta', 'err'); return; }
+  }
   const btn = document.getElementById('btnGuardarEdit');
   btn.disabled = true; btn.textContent = 'Guardando...';
   try {
@@ -472,7 +744,20 @@ window.guardarEdicion = async () => {
     if (fotoArchivoEdit) {
       fotoUrl = await subirFoto(fotoArchivoEdit, codigo, document.getElementById('progressFillEdit'), document.getElementById('progressLabelEdit'), document.getElementById('progressWrapEdit'));
     }
-    articulosArray[indice] = { ...articulosArray[indice], codigo, nombre, detalle, precio: parseFloat(precio), fotoUrl };
+    articulosArray[indice] = {
+      ...articulosArray[indice],
+      codigo,
+      nombre,
+      detalle,
+      rubro,
+      precio: parseFloat(precio),
+      fotoUrl,
+      oferta: !!editMeta.oferta,
+      ofertaPct: clampPct(editMeta.ofertaPct),
+      ofertaHasta: sanitizeIsoDate(editMeta.ofertaHasta),
+      destacado: !!editMeta.destacado,
+      masVendido: !!editMeta.masVendido
+    };
     const nuevoJsonUrl = await subirJSONaCloudinary(articulosArray);
     await setDoc(doc(db, 'config', 'listaActual'), { url: nuevoJsonUrl, updatedAt: Date.now() });
     fotoArchivoEdit = null;
@@ -508,7 +793,10 @@ function renderPage() {
       <div class="art-info">
         <div class="art-nombre">${a.nombre || '-'}</div>
         <div class="art-cod">Cód: ${a.codigo || '-'}</div>
-        <div class="art-precio">${fmtPrecio(a.precio)}</div>
+        <div class="art-cod">Rubro: ${a.rubro || '-'}</div>
+        <div class="art-cod">${a.oferta ? `Oferta ${clampPct(a.ofertaPct)}% hasta ${fmtFecha(a.ofertaHasta)}` : 'Oferta inactiva'}</div>
+        <div class="art-cod">Etiquetas: ${a.destacado ? '⭐ Destacado ' : ''}${a.masVendido ? '🔥 Más vendido' : (!a.destacado ? '-' : '')}</div>
+        <div class="art-precio">${fmtPrecio(a.precio)}${a.oferta ? ` · ${fmtPrecio(precioOferta(a.precio, a.ofertaPct))}` : ''}</div>
       </div>
       <div class="art-acciones">
         <button class="btn-edit" onclick="abrirEditar('${a.codigo}')" title="Editar">✏️</button>
@@ -581,8 +869,15 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
     if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
     const data = await res.json();
     if (!Array.isArray(data)) throw new Error('JSON inválido');
-    todosArticulos = data;
-    renderLista(data);
+    todosArticulos = data.map((a) => ({
+      ...a,
+      oferta: toBool(a.oferta ?? a.enOferta ?? a.tagOferta),
+      ofertaPct: clampPct(a.ofertaPct ?? a.oferta_pct ?? a.ofertaPorcentaje ?? a.descuentoOferta ?? 0),
+      ofertaHasta: sanitizeIsoDate(a.ofertaHasta ?? a.oferta_hasta ?? a.fechaOfertaHasta ?? ''),
+      destacado: toBool(a.destacado ?? a.tagDestacado),
+      masVendido: toBool(a.masVendido ?? a.mas_vendido ?? a.tagMasVendido)
+    }));
+    renderLista(todosArticulos);
   } catch(e) {
     console.error(e);
     document.getElementById('listaArticulos').innerHTML = '<div class="empty-lista" style="color:#e50000">Error: ' + e.message + '</div>';
@@ -742,6 +1037,11 @@ function normalizeRow(r) {
     else if (['detalle','detalle_largo','description_long','notas'].includes(key)) out.detalle = v;
     else if (['rubros_descripcion','rubro_descripcion','rubros','rubro','category','categoria'].includes(key)) out.rubro = v;
     else if (['stock','stockact','stock_act','existencia','cantidad','stkact'].includes(key)) out.stock = v;
+    else if (['oferta','enoferta','tagoferta'].includes(key)) out.oferta = v;
+    else if (['ofertapct','oferta_pct','ofertaporcentaje','descuentooferta'].includes(key)) out.ofertaPct = v;
+    else if (['ofertahasta','oferta_hasta','fechaofertahasta'].includes(key)) out.ofertaHasta = v;
+    else if (['destacado','tagdestacado'].includes(key)) out.destacado = v;
+    else if (['masvendido','mas_vendido','tagmasvendido'].includes(key)) out.masVendido = v;
     else out[key] = v;
   });
   return out;
@@ -774,6 +1074,25 @@ function parsePrecio(row) {
   return isNaN(n) ? null : n;
 }
 
+function buildImportArticle(r, viejo = {}) {
+  const code = String(r.codigo || r.idart || '').trim();
+  const parsedPrecio = parsePrecio(r);
+  return {
+    codigo: code,
+    nombre: r.nombre || viejo.nombre || '',
+    detalle: r.detalle || viejo.detalle || '',
+    precio: parsedPrecio !== null ? parsedPrecio : Number(viejo.precio || 0),
+    fotoUrl: viejo.fotoUrl || '',
+    rubro: r.rubro || viejo.rubro || '',
+    stock: (r.stock !== undefined && r.stock !== '') ? r.stock : (viejo.stock !== undefined ? viejo.stock : ''),
+    oferta: toBool(r.oferta ?? viejo.oferta ?? viejo.enOferta ?? viejo.tagOferta),
+    ofertaPct: clampPct(r.ofertaPct ?? viejo.ofertaPct ?? viejo.oferta_pct ?? viejo.ofertaPorcentaje ?? viejo.descuentoOferta ?? 0),
+    ofertaHasta: sanitizeIsoDate(r.ofertaHasta ?? viejo.ofertaHasta ?? viejo.oferta_hasta ?? viejo.fechaOfertaHasta ?? ''),
+    destacado: toBool(r.destacado ?? viejo.destacado ?? viejo.tagDestacado),
+    masVendido: toBool(r.masVendido ?? viejo.masVendido ?? viejo.mas_vendido ?? viejo.tagMasVendido)
+  };
+}
+
 async function doImport(modo) {
   if (!importRows.length) return toast('No hay datos para procesar','err');
   window.importCancelRequested = false;
@@ -785,20 +1104,49 @@ async function doImport(modo) {
   if (cancelBtn) cancelBtn.disabled = false;
   try {
     if (fill) fill.style.width = '0%';
+    if (label) label.textContent = 'Preparando artículos...';
+
+    const byCode = new Map((todosArticulos || []).map(a => [String(a.codigo || '').trim(), a]));
+    let articulosLimpio = [];
+    let existentesActualizados = 0;
+    let faltantesAgregados = 0;
+
+    if (modo === 'update') {
+      articulosLimpio = (todosArticulos || []).map(a => ({ ...a }));
+      importRows.forEach((r) => {
+        const code = String(r.codigo || r.idart || '').trim();
+        if (!code || !byCode.has(code)) return;
+        const idx = articulosLimpio.findIndex(x => String(x.codigo || '').trim() === code);
+        if (idx === -1) return;
+        articulosLimpio[idx] = buildImportArticle(r, articulosLimpio[idx]);
+        existentesActualizados += 1;
+      });
+    } else if (modo === 'missing') {
+      articulosLimpio = (todosArticulos || []).map(a => ({ ...a }));
+      importRows.forEach((r) => {
+        const code = String(r.codigo || r.idart || '').trim();
+        if (!code || byCode.has(code)) return;
+        articulosLimpio.push(buildImportArticle(r, {}));
+        faltantesAgregados += 1;
+      });
+    } else {
+      articulosLimpio = importRows
+        .map((r) => {
+          const code = String(r.codigo || r.idart || '').trim();
+          const viejo = byCode.get(code) || {};
+          return buildImportArticle(r, viejo);
+        })
+        .filter((a) => !!a.codigo);
+    }
+
+    if (modo === 'update' && existentesActualizados === 0) {
+      throw new Error('No se encontraron códigos coincidentes para actualizar precios');
+    }
+    if (modo === 'missing' && faltantesAgregados === 0) {
+      throw new Error('No se encontraron artículos faltantes para importar');
+    }
+
     if (label) label.textContent = 'Subiendo JSON a Cloudinary...';
-    const articulosLimpio = importRows.map(r => {
-      const code = r.codigo || r.idart || '';
-      const viejo = todosArticulos.find(a => a.codigo === code) || {};
-      return {
-        codigo: code,
-        nombre: r.nombre || viejo.nombre || '',
-        detalle: r.detalle || viejo.detalle || '',
-        precio: parseFloat(r.precio) || viejo.precio || 0,
-        fotoUrl: viejo.fotoUrl || '',
-        rubro: r.rubro || viejo.rubro || '',
-        stock: (r.stock !== undefined && r.stock !== '') ? r.stock : (viejo.stock !== undefined ? viejo.stock : '')
-      };
-    });
     const url = await subirJSONaCloudinary(articulosLimpio);
     await setDoc(doc(db, "config", "listaActual"), { url, updatedAt: Date.now() });
     if (fill) fill.style.width = '80%';
@@ -810,8 +1158,14 @@ async function doImport(modo) {
 
     if (fill) fill.style.width = '100%';
     if (label) label.textContent = 'Completado';
+    const msgArticulos =
+      modo === 'update'
+        ? `✅ Precios actualizados en ${existentesActualizados} artículos`
+        : modo === 'missing'
+          ? `✅ Importados ${faltantesAgregados} artículos faltantes`
+          : `✅ ${articulosLimpio.length} artículos sincronizados`;
     document.getElementById('importResults').innerHTML =
-      `✅ ${importRows.length} artículos publicados` +
+      msgArticulos +
       (importClientesRows.length ? ` · ${importClientesRows.length} clientes y ${importFacturasRows.length} facturas sincronizados a Supabase.` : '.');
     toast('Importación completada');
     cerrarModalImport();
