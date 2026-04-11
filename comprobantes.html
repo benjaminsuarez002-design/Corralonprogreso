@@ -1085,6 +1085,7 @@
         draft: createDraft(),
         editingId: null,
         isSavingDraft: false,
+        isUploadingDraftAttachment: false,
         unsubAliases: null,
         unsubRecords: null,
         allRecords: []
@@ -1292,9 +1293,12 @@
         el.draftTransfer.classList.toggle("ok", !!state.draft.transfer);
         el.draftDate.textContent = state.draft.dateText;
         el.draftTime.textContent = state.draft.timeText;
-        el.draftUpload.textContent = state.draft.attachment ? "Cambiar comprobante" : "Subir comprobante";
+        el.draftUpload.textContent = state.isUploadingDraftAttachment
+          ? "Subiendo comprobante..."
+          : (state.draft.attachment ? "Cambiar comprobante" : "Subir comprobante");
         el.draftUpload.classList.toggle("ok", !!state.draft.attachment);
-        el.draftOpenFile.disabled = !(state.draft.attachment && state.draft.attachment.url);
+        el.draftUpload.disabled = state.isUploadingDraftAttachment || state.isSavingDraft;
+        el.draftOpenFile.disabled = state.isUploadingDraftAttachment || !(state.draft.attachment && state.draft.attachment.url);
         el.draftTitle.textContent = state.editingId ? "Editar movimiento" : "Cargar movimiento";
         el.draftAdd.textContent = state.isSavingDraft
           ? "Guardando..."
@@ -2145,15 +2149,20 @@
       function applySelectedFile(file, target) {
         if (!file || !target) return Promise.resolve();
         if (target.type === "draft") {
-          state.draft.attachment = {
-            file,
-            url: URL.createObjectURL(file),
-            name: file.name || "Comprobante",
-            type: file.type || ""
-          };
+          state.isUploadingDraftAttachment = true;
           syncDraftToInputs();
-          el.draftAdd.focus();
-          return Promise.resolve();
+          return uploadFileToSupabase(file, state.draft.machine || "draft").then((uploaded) => {
+            state.draft.attachment = {
+              file: null,
+              url: uploaded.url,
+              name: uploaded.name || file.name || "Comprobante",
+              type: uploaded.type || file.type || ""
+            };
+            el.draftAdd.focus();
+          }).finally(() => {
+            state.isUploadingDraftAttachment = false;
+            syncDraftToInputs();
+          });
         }
         return updateRecordAttachment(target.id, file);
       }
