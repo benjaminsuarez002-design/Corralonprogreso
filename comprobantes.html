@@ -7,6 +7,8 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -343,6 +345,33 @@
       align-items: center;
     }
 
+    .save-loading {
+      display: none;
+      margin-top: 8px;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--purple-dark);
+    }
+
+    .save-loading.active {
+      display: inline-flex;
+    }
+
+    .save-loading .spinner {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(108,79,199,.25);
+      border-top-color: var(--purple);
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
     .record-link {
       color: var(--purple);
       font-size: 11px;
@@ -580,7 +609,7 @@
       margin: 0 auto;
       padding: 9px 14px 10px;
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: 1fr auto auto auto auto;
       gap: 10px;
       align-items: center;
     }
@@ -887,6 +916,10 @@
               <button class="ghost-btn" id="draft-clear" type="button">Limpiar fila</button>
               <button class="action-btn" id="draft-add" type="button">+ Guardar movimiento</button>
             </div>
+            <div class="save-loading" id="draft-saving-indicator" aria-live="polite">
+              <span class="spinner" aria-hidden="true"></span>
+              <span>Guardando comprobante...</span>
+            </div>
           </div>
         </div>
       </section>
@@ -935,6 +968,8 @@
           <span class="total-label">Total del día</span>
           <strong class="total-value" id="day-total">$ 0</strong>
         </div>
+        <button class="ghost-btn" id="excel-download" type="button">Excel descargar</button>
+        <button class="ghost-btn" id="pdf-download" type="button">PDF descargar</button>
         <button class="ghost-btn" id="save-new" type="button">Guardar y nuevo</button>
         <button class="danger-btn" id="clear-all" type="button">Limpiar</button>
       </div>
@@ -982,6 +1017,7 @@
       const SUPABASE_BUCKET = "Archivos";
       const ALIASES_COLLECTION = "aliases";
       const COMPROBANTES_COLLECTION = "comprobantes";
+      const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1";
 
       const $ = (selector) => document.querySelector(selector);
       const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -1004,6 +1040,7 @@
         draftOpenFile: $("#draft-open-file"),
         draftClear: $("#draft-clear"),
         draftAdd: $("#draft-add"),
+        draftSavingIndicator: $("#draft-saving-indicator"),
         draftTitle: $("#draft-title"),
         aliasName: $("#alias-name"),
         aliasAlias: $("#alias-alias"),
@@ -1018,6 +1055,8 @@
         summaryViewTime: $("#summary-view-time"),
         summaryList: $("#summary-list"),
         dayTotal: $("#day-total"),
+        excelDownload: $("#excel-download"),
+        pdfDownload: $("#pdf-download"),
         saveNew: $("#save-new"),
         clearAll: $("#clear-all"),
         aliasModalBg: $("#alias-modal-bg"),
@@ -1045,6 +1084,7 @@
         lastErrorAt: 0,
         draft: createDraft(),
         editingId: null,
+        isSavingDraft: false,
         unsubAliases: null,
         unsubRecords: null,
         allRecords: []
@@ -1062,6 +1102,88 @@
           timeText: currentTime(),
           attachment: null
         };
+      }
+
+      function saveDraftToStorage() {
+        try {
+          if (!state.editingId && !hasDraftData()) {
+            localStorage.removeItem(DRAFT_STORAGE_KEY);
+            return;
+          }
+          const payload = {
+            editingId: state.editingId ? String(state.editingId) : "",
+            draft: {
+              client: String(state.draft.client || ""),
+              machine: String(state.draft.machine || ""),
+              amountInput: String(state.draft.amountInput || ""),
+              amountNumber: Number(state.draft.amountNumber || 0),
+              transfer: state.draft.transfer ? {
+                id: String(state.draft.transfer.id || ""),
+                nombre: String(state.draft.transfer.nombre || ""),
+                alias: String(state.draft.transfer.alias || ""),
+                cuit: String(state.draft.transfer.cuit || "")
+              } : null,
+              dateIso: String(state.draft.dateIso || todayIso()),
+              dateText: String(state.draft.dateText || formatDate(todayIso())),
+              timeText: String(state.draft.timeText || currentTime()),
+              attachment: (state.draft.attachment && isUsableRemoteUrl(state.draft.attachment.url)) ? {
+                url: String(state.draft.attachment.url || ""),
+                name: String(state.draft.attachment.name || "Comprobante"),
+                type: String(state.draft.attachment.type || "")
+              } : null
+            }
+          };
+          localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
+        } catch (error) {
+          console.warn("No se pudo guardar borrador local", error);
+        }
+      }
+
+      function clearDraftStorage() {
+        try {
+          localStorage.removeItem(DRAFT_STORAGE_KEY);
+        } catch (error) {
+          console.warn("No se pudo limpiar borrador local", error);
+        }
+      }
+
+      function restoreDraftFromStorage() {
+        try {
+          const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return;
+          const draft = parsed.draft && typeof parsed.draft === "object" ? parsed.draft : null;
+          if (!draft) return;
+          state.editingId = parsed.editingId ? String(parsed.editingId) : null;
+          state.draft = createDraft();
+          state.draft.client = String(draft.client || "").trim();
+          state.draft.machine = formatMachine(draft.machine || "");
+          state.draft.amountInput = formatAmountInput(draft.amountInput || "");
+          state.draft.amountNumber = Number(draft.amountNumber || parseAmount(draft.amountInput || "")) || 0;
+          state.draft.transfer = (draft.transfer && draft.transfer.nombre)
+            ? {
+                id: String(draft.transfer.id || ""),
+                nombre: String(draft.transfer.nombre || ""),
+                alias: String(draft.transfer.alias || ""),
+                cuit: String(draft.transfer.cuit || "")
+              }
+            : null;
+          const restoredIso = parseDateToIso(draft.dateIso || "");
+          state.draft.dateIso = restoredIso || todayIso();
+          state.draft.dateText = formatDate(state.draft.dateIso);
+          state.draft.timeText = String(draft.timeText || currentTime());
+          state.draft.attachment = (draft.attachment && isUsableRemoteUrl(draft.attachment.url))
+            ? {
+                file: null,
+                url: String(draft.attachment.url || ""),
+                name: String(draft.attachment.name || "Comprobante"),
+                type: String(draft.attachment.type || "")
+              }
+            : null;
+        } catch (error) {
+          console.warn("No se pudo restaurar borrador local", error);
+        }
       }
 
       function todayIso() {
@@ -1159,6 +1281,7 @@
         state.draft.machine = formatMachine(el.draftMachine.value || "");
         state.draft.amountInput = formatAmountInput(el.draftAmount.value || "");
         state.draft.amountNumber = parseAmount(el.draftAmount.value || "");
+        saveDraftToStorage();
       }
 
       function syncDraftToInputs() {
@@ -1173,13 +1296,28 @@
         el.draftUpload.classList.toggle("ok", !!state.draft.attachment);
         el.draftOpenFile.disabled = !(state.draft.attachment && state.draft.attachment.url);
         el.draftTitle.textContent = state.editingId ? "Editar movimiento" : "Cargar movimiento";
-        el.draftAdd.textContent = state.editingId ? "Guardar cambios" : "+ Guardar movimiento";
+        el.draftAdd.textContent = state.isSavingDraft
+          ? "Guardando..."
+          : (state.editingId ? "Guardar cambios" : "+ Guardar movimiento");
         el.saveNew.textContent = state.editingId ? "Guardar y cerrar" : "Guardar y nuevo";
+        saveDraftToStorage();
+      }
+
+      function setDraftSaving(isSaving) {
+        state.isSavingDraft = !!isSaving;
+        el.draftAdd.disabled = !!isSaving;
+        el.saveNew.disabled = !!isSaving;
+        el.draftClear.disabled = !!isSaving;
+        el.draftUpload.disabled = !!isSaving;
+        el.draftTransfer.disabled = !!isSaving;
+        el.draftSavingIndicator.classList.toggle("active", !!isSaving);
+        syncDraftToInputs();
       }
 
       function resetDraft() {
         state.draft = createDraft();
         state.editingId = null;
+        clearDraftStorage();
         syncDraftToInputs();
       }
 
@@ -1393,6 +1531,217 @@
         el.summaryNext.disabled = safeIndex >= state.summaryDates.length - 1;
       }
 
+      function buildPdfRowsByAlias(items) {
+        const groups = new Map();
+        items.forEach((item) => {
+          const key = String(item.transferName || "Sin proveedor");
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(item);
+        });
+        return Array.from(groups.entries()).map(([aliasName, group]) => ({
+          aliasName,
+          total: group.reduce((sum, entry) => sum + Number(entry.amountNumber || 0), 0),
+          rows: group
+        }));
+      }
+
+      function drawPdfHeader(doc, title, subtitle) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.text(title, 14, 14);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.text(subtitle, 14, 20);
+      }
+
+      function ensurePdfSpace(doc, y, needed) {
+        if (y + needed <= 285) return y;
+        doc.addPage();
+        return 16;
+      }
+
+      function drawPdfRow(doc, y, item) {
+        const time = String(item.timeText || "--:--");
+        const client = String(item.client || "Sin cliente");
+        const fact = String(item.machine || item.attachmentName || "Sin comprobante");
+        const amount = formatAmount(item.amountNumber || 0, false);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(time, 14, y);
+        doc.text(client.slice(0, 56), 34, y);
+        if (item.attachmentUrl) {
+          doc.setTextColor(36, 83, 200);
+          doc.textWithLink(fact.slice(0, 34), 112, y, { url: item.attachmentUrl });
+          doc.setTextColor(0, 0, 0);
+        } else {
+          doc.text(fact.slice(0, 34), 112, y);
+        }
+        doc.text(amount, 196, y, { align: "right" });
+        return y + 6;
+      }
+
+      function createSummaryPdfDoc() {
+        const items = state.summaryRecords.slice().sort(recordSort);
+        if (!items.length) return null;
+        const jsPdfCtor = window.jspdf && window.jspdf.jsPDF;
+        if (!jsPdfCtor) throw new Error("No se pudo cargar la librería de PDF.");
+        const doc = new jsPdfCtor({ unit: "mm", format: "a4" });
+        const subtitle = `Fecha: ${formatDate(state.summaryDateIso)} | Generado: ${new Date().toLocaleString("es-AR")}`;
+
+        drawPdfHeader(doc, "Comprobantes - Hoja 1 (por alias)", subtitle);
+        let y = 28;
+        const aliasSections = buildPdfRowsByAlias(items);
+        aliasSections.forEach((section) => {
+          y = ensurePdfSpace(doc, y, 12);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.text(`${section.aliasName}  |  ${formatAmount(section.total, false)}`, 14, y);
+          y += 4;
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(8);
+          doc.text("Hora", 14, y);
+          doc.text("Cliente", 34, y);
+          doc.text("N° fact/comprobante", 112, y);
+          doc.text("Monto", 196, y, { align: "right" });
+          y += 4;
+          section.rows.forEach((item) => {
+            y = ensurePdfSpace(doc, y, 8);
+            y = drawPdfRow(doc, y, item);
+          });
+          y += 2;
+        });
+        const dayTotalAlias = items.reduce((sum, item) => sum + Number(item.amountNumber || 0), 0);
+        y = ensurePdfSpace(doc, y, 10);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text(`TOTAL DEL DÍA: ${formatAmount(dayTotalAlias, false)}`, 196, y, { align: "right" });
+
+        doc.addPage();
+        drawPdfHeader(doc, "Comprobantes - Hoja 2 (por hora)", subtitle);
+        y = 28;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("Hora", 14, y);
+        doc.text("Alias", 34, y);
+        doc.text("Cliente", 84, y);
+        doc.text("N° fact/comprobante", 132, y);
+        doc.text("Monto", 196, y, { align: "right" });
+        y += 5;
+        items.forEach((item) => {
+          y = ensurePdfSpace(doc, y, 8);
+          const time = String(item.timeText || "--:--");
+          const alias = String(item.transferName || "Sin proveedor");
+          const client = String(item.client || "Sin cliente");
+          const fact = String(item.machine || item.attachmentName || "Sin comprobante");
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.text(time, 14, y);
+          doc.text(alias.slice(0, 28), 34, y);
+          doc.text(client.slice(0, 28), 84, y);
+          if (item.attachmentUrl) {
+            doc.setTextColor(36, 83, 200);
+            doc.textWithLink(fact.slice(0, 24), 132, y, { url: item.attachmentUrl });
+            doc.setTextColor(0, 0, 0);
+          } else {
+            doc.text(fact.slice(0, 24), 132, y);
+          }
+          doc.text(formatAmount(item.amountNumber || 0, false), 196, y, { align: "right" });
+          y += 6;
+        });
+        const dayTotalTime = items.reduce((sum, item) => sum + Number(item.amountNumber || 0), 0);
+        y = ensurePdfSpace(doc, y, 10);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text(`TOTAL DEL DÍA: ${formatAmount(dayTotalTime, false)}`, 196, y, { align: "right" });
+
+        return doc;
+      }
+
+      function downloadSummaryPdf() {
+        const doc = createSummaryPdfDoc();
+        if (!doc) {
+          alert("No hay comprobantes para exportar en esta fecha.");
+          return;
+        }
+        const fileDate = String(state.summaryDateIso || todayIso()).replace(/-/g, "");
+        doc.save(`comprobantes_${fileDate}.pdf`);
+      }
+
+      function buildExcelAliasSheet(items) {
+        const rows = [["RESUMEN POR ALIAS", "", "", "", ""], [`Fecha: ${formatDate(state.summaryDateIso)}`, "", "", "", ""], ["", "", "", "", ""]];
+        const sections = buildPdfRowsByAlias(items);
+        sections.forEach((section) => {
+          rows.push([section.aliasName, "", "", "", formatAmount(section.total, false)]);
+          rows.push(["Hora", "Cliente", "N° fact/comprobante", "URL", "Monto"]);
+          section.rows.forEach((item) => {
+            rows.push([
+              String(item.timeText || "--:--"),
+              String(item.client || "Sin cliente"),
+              String(item.machine || item.attachmentName || "Sin comprobante"),
+              String(item.attachmentUrl || ""),
+              formatAmount(item.amountNumber || 0, false)
+            ]);
+          });
+          rows.push(["", "", "", "", ""]);
+        });
+        const dayTotal = items.reduce((sum, item) => sum + Number(item.amountNumber || 0), 0);
+        rows.push(["TOTAL DEL DÍA", "", "", "", formatAmount(dayTotal, false)]);
+        return rows;
+      }
+
+      function buildExcelTimeSheet(items) {
+        const rows = [["RESUMEN POR HORA", "", "", "", "", ""], [`Fecha: ${formatDate(state.summaryDateIso)}`, "", "", "", "", ""], ["", "", "", "", "", ""]];
+        rows.push(["Hora", "Alias", "Cliente", "N° fact/comprobante", "URL", "Monto"]);
+        items.forEach((item) => {
+          rows.push([
+            String(item.timeText || "--:--"),
+            String(item.transferName || "Sin proveedor"),
+            String(item.client || "Sin cliente"),
+            String(item.machine || item.attachmentName || "Sin comprobante"),
+            String(item.attachmentUrl || ""),
+            formatAmount(item.amountNumber || 0, false)
+          ]);
+        });
+        rows.push(["", "", "", "", "", ""]);
+        const dayTotal = items.reduce((sum, item) => sum + Number(item.amountNumber || 0), 0);
+        rows.push(["TOTAL DEL DÍA", "", "", "", "", formatAmount(dayTotal, false)]);
+        return rows;
+      }
+
+      function addExcelLinks(sheet, rows, urlColumnIndex) {
+        for (let row = 0; row < rows.length; row += 1) {
+          const url = String(rows[row][urlColumnIndex] || "").trim();
+          if (!url) continue;
+          const linkTextCol = urlColumnIndex - 1;
+          const cellAddress = window.XLSX.utils.encode_cell({ r: row, c: linkTextCol });
+          if (sheet[cellAddress]) {
+            sheet[cellAddress].l = { Target: url, Tooltip: "Abrir comprobante" };
+          }
+        }
+      }
+
+      function downloadSummaryExcel() {
+        const items = state.summaryRecords.slice().sort(recordSort);
+        if (!items.length) {
+          alert("No hay comprobantes para exportar en esta fecha.");
+          return;
+        }
+        if (!window.XLSX) throw new Error("No se pudo cargar la librería de Excel.");
+        const wb = window.XLSX.utils.book_new();
+        const aliasRows = buildExcelAliasSheet(items);
+        const timeRows = buildExcelTimeSheet(items);
+        const aliasSheet = window.XLSX.utils.aoa_to_sheet(aliasRows);
+        const timeSheet = window.XLSX.utils.aoa_to_sheet(timeRows);
+        addExcelLinks(aliasSheet, aliasRows, 3);
+        addExcelLinks(timeSheet, timeRows, 4);
+        aliasSheet["!cols"] = [{ wch: 10 }, { wch: 30 }, { wch: 26 }, { wch: 50 }, { wch: 16 }];
+        timeSheet["!cols"] = [{ wch: 10 }, { wch: 24 }, { wch: 24 }, { wch: 24 }, { wch: 50 }, { wch: 16 }];
+        window.XLSX.utils.book_append_sheet(wb, aliasSheet, "Por alias");
+        window.XLSX.utils.book_append_sheet(wb, timeSheet, "Por hora");
+        const fileDate = String(state.summaryDateIso || todayIso()).replace(/-/g, "");
+        window.XLSX.writeFile(wb, `comprobantes_${fileDate}.xlsx`);
+      }
+
       function findRecord(id, source) {
         return source.find((item) => String(item.id) === String(id)) || null;
       }
@@ -1412,6 +1761,36 @@
           if (parsed) return parsed;
         }
         return 0;
+      }
+
+      function isUsableRemoteUrl(value) {
+        const raw = String(value || "").trim();
+        return /^https?:\/\//i.test(raw);
+      }
+
+      function sanitizeAttachmentUrl(value) {
+        const raw = String(value || "").trim();
+        if (!raw || raw === "[object Object]") return "";
+        if (isUsableRemoteUrl(raw)) return raw;
+        return "";
+      }
+
+      function pickAttachmentUrl(data) {
+        return sanitizeAttachmentUrl(
+          firstText(
+            data.attachmentUrl,
+            data.comprobante_url,
+            data.comprobanteUrl,
+            data.attachment_url,
+            data.urlComprobante,
+            data.url_comprobante,
+            data.archivo_url,
+            data.archivoUrl,
+            data.attachment && data.attachment.url,
+            data.comprobante && data.comprobante.url,
+            data.archivo && data.archivo.url
+          )
+        );
       }
 
       function mapDoc(doc) {
@@ -1449,7 +1828,7 @@
             data.hora_texto,
             createdAtMs ? new Date(createdAtMs).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false }) : ""
           ),
-          attachmentUrl: firstText(data.attachmentUrl, data.comprobante_url, data.comprobanteUrl),
+          attachmentUrl: pickAttachmentUrl(data),
           attachmentName: firstText(data.attachmentName, data.comprobante_nombre, data.comprobanteNombre),
           attachmentType: firstText(data.attachmentType, data.comprobante_tipo, data.comprobanteTipo),
           createdClientMs: Number(data.createdClientMs || data.created_client_ms || data.timestamp || createdAtMs || 0)
@@ -1530,6 +1909,7 @@
       }
 
       async function saveDraft() {
+        if (state.isSavingDraft) return;
         syncDraftFromInputs();
         if (!hasDraftData()) {
           el.draftClient.focus();
@@ -1555,29 +1935,34 @@
           openAliasModal({ type: "draft" });
           return;
         }
-        const payload = buildDraftPayload();
-        if (state.draft.attachment && state.draft.attachment.file) {
-          const uploaded = await uploadFileToSupabase(state.draft.attachment.file, state.draft.machine || "draft");
-          payload.attachmentUrl = uploaded.url;
-          payload.attachmentName = uploaded.name;
-          payload.attachmentType = uploaded.type;
-        } else if (state.draft.attachment && state.draft.attachment.url) {
-          payload.attachmentUrl = state.draft.attachment.url;
-          payload.attachmentName = state.draft.attachment.name || "";
-          payload.attachmentType = state.draft.attachment.type || "";
-        } else {
-          payload.attachmentUrl = "";
-          payload.attachmentName = "";
-          payload.attachmentType = "";
+        setDraftSaving(true);
+        try {
+          const payload = buildDraftPayload();
+          if (state.draft.attachment && state.draft.attachment.file) {
+            const uploaded = await uploadFileToSupabase(state.draft.attachment.file, state.draft.machine || "draft");
+            payload.attachmentUrl = uploaded.url;
+            payload.attachmentName = uploaded.name;
+            payload.attachmentType = uploaded.type;
+          } else if (state.draft.attachment && isUsableRemoteUrl(state.draft.attachment.url)) {
+            payload.attachmentUrl = state.draft.attachment.url;
+            payload.attachmentName = state.draft.attachment.name || "";
+            payload.attachmentType = state.draft.attachment.type || "";
+          } else {
+            payload.attachmentUrl = "";
+            payload.attachmentName = "";
+            payload.attachmentType = "";
+          }
+          if (state.editingId) {
+            await recordRef(state.editingId).update(payload);
+          } else {
+            payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+            await state.db.collection(COMPROBANTES_COLLECTION).add(payload);
+          }
+          resetDraft();
+          activateTab("resumen");
+        } finally {
+          setDraftSaving(false);
         }
-        if (state.editingId) {
-          await recordRef(state.editingId).update(payload);
-        } else {
-          payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-          await state.db.collection(COMPROBANTES_COLLECTION).add(payload);
-        }
-        resetDraft();
-        activateTab("resumen");
       }
 
       async function updateRecordField(id, field, value) {
@@ -1710,7 +2095,23 @@
 
       function openFileFromDraft() {
         const attachment = state.draft.attachment;
-        if (attachment && attachment.url) window.open(attachment.url, "_blank", "noopener");
+        if (attachment && attachment.url) openAttachmentUrl(attachment.url);
+      }
+
+      function openAttachmentUrl(url) {
+        const raw = String(url || "").trim();
+        if (!raw) return;
+        if (!isUsableRemoteUrl(raw)) {
+          alert("Este comprobante tiene una URL inválida o local. Volvé a subir el comprobante.");
+          return;
+        }
+        const anchor = document.createElement("a");
+        anchor.href = raw;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
       }
 
       function handlePickedAlias(aliasId) {
@@ -1815,29 +2216,42 @@
       }
 
       function bindDraftSection() {
+        el.draftClient.addEventListener("input", () => {
+          syncDraftFromInputs();
+        });
         el.draftClient.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
             el.draftMachine.focus();
           }
         });
+        el.draftMachine.addEventListener("input", () => {
+          syncDraftFromInputs();
+        });
         el.draftMachine.addEventListener("blur", () => {
           el.draftMachine.value = formatMachine(el.draftMachine.value);
+          syncDraftFromInputs();
         });
         el.draftMachine.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
             el.draftMachine.value = formatMachine(el.draftMachine.value);
+            syncDraftFromInputs();
             el.draftAmount.focus();
           }
         });
+        el.draftAmount.addEventListener("input", () => {
+          syncDraftFromInputs();
+        });
         el.draftAmount.addEventListener("blur", () => {
           el.draftAmount.value = formatAmountInput(el.draftAmount.value);
+          syncDraftFromInputs();
         });
         el.draftAmount.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
             el.draftAmount.value = formatAmountInput(el.draftAmount.value);
+            syncDraftFromInputs();
             openAliasModal({ type: "draft" });
           }
         });
@@ -1894,7 +2308,7 @@
           if (action === "upload-row-file") openFilePicker({ type: "record", id });
           if (action === "open-row-file") {
             const item = findRecord(id, state.todayRecords);
-            if (item && item.attachmentUrl) window.open(item.attachmentUrl, "_blank", "noopener");
+            if (item && item.attachmentUrl) openAttachmentUrl(item.attachmentUrl);
           }
           if (action === "delete-row") {
             deleteRecord(id).catch((error) => throttleError("No se pudo borrar comprobante", error));
@@ -1930,7 +2344,7 @@
           const item = findRecord(button.dataset.id, state.summaryRecords);
           if (!item) return;
           if (action === "open-summary-file" && item.attachmentUrl) {
-            window.open(item.attachmentUrl, "_blank", "noopener");
+            openAttachmentUrl(item.attachmentUrl);
             return;
           }
           if (action === "edit-summary") {
@@ -1966,6 +2380,20 @@
       }
 
       function bindFooter() {
+        el.excelDownload.addEventListener("click", () => {
+          try {
+            downloadSummaryExcel();
+          } catch (error) {
+            throttleError("No se pudo generar Excel", error);
+          }
+        });
+        el.pdfDownload.addEventListener("click", () => {
+          try {
+            downloadSummaryPdf();
+          } catch (error) {
+            throttleError("No se pudo generar PDF", error);
+          }
+        });
         el.saveNew.addEventListener("click", () => openConfirm("saveNew"));
         el.clearAll.addEventListener("click", () => openConfirm("clear"));
       }
@@ -2006,6 +2434,7 @@
       }
 
       function initStaticUi() {
+        restoreDraftFromStorage();
         activateTab("comp");
         syncDraftToInputs();
         renderAliases();
