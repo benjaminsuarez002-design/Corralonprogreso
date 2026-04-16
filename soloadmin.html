@@ -11,22 +11,25 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root { --bg: #0f1117; --card: #1a1d27; --card2: #22263a; --border: #2e3248; --rojo: #e50000; --rojo2: #ff3333; --verde: #00c853; --amarillo: #ffab00; --texto: #f0f0f0; --muted: #6b7280; --accent: #e50000; }
-  body { background: var(--bg); color: var(--texto); font-family: 'Barlow', sans-serif; min-height: 100vh; padding-bottom: 40px; }
+  body { background: var(--bg); color: var(--texto); font-family: 'Barlow', sans-serif; min-height: 100vh; padding-bottom: 40px; overflow-x: hidden; }
   header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
   header img { height: 44px; width: auto; mix-blend-mode: screen; }
   header h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; color: var(--texto); letter-spacing: 1px; text-transform: uppercase; }
   .header-badge { margin-left: auto; margin-right: 138px; background: rgba(229,0,0,0.15); border: 1px solid rgba(229,0,0,0.4); color: var(--rojo2); font-size: 11px; font-weight: 700; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 1px; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; }
-  .main { max-width: 960px; margin: 0 auto; padding: 24px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .main { width: min(100%, 960px); max-width: 960px; margin: 0 auto; padding: 24px 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
   @media (max-width: 700px) { .main { grid-template-columns: 1fr; } }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; min-width: 0; }
   .card-title { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
   .card-title::before { content: ''; display: inline-block; width: 3px; height: 14px; background: var(--rojo); border-radius: 2px; }
   .form-col { grid-column: 1; }
+  .span-full { grid-column: 1 / -1; }
+  .popup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; min-width: 0; }
   .field { margin-bottom: 14px; }
   label { display: block; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
   input[type=text], input[type=number], textarea { width: 100%; background: var(--card2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--texto); font-family: 'Barlow', sans-serif; font-size: 14px; outline: none; transition: border-color .2s; }
   input:focus, textarea:focus { border-color: var(--rojo); }
   textarea { resize: vertical; min-height: 80px; }
+  .field-help { margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.35; }
   .drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 24px 16px; text-align: center; cursor: pointer; transition: all .2s; background: var(--card2); position: relative; }
   .drop-zone.drag-over { border-color: var(--rojo); background: rgba(229,0,0,0.06); }
   .drop-zone.tiene-foto { border-color: var(--verde); padding: 0; overflow: hidden; }
@@ -44,18 +47,18 @@
   .progress-bar-bg { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; }
   .progress-bar-fill { height: 100%; background: var(--rojo); border-radius: 4px; width: 0%; transition: width .2s; }
   .progress-label { font-size: 11px; color: var(--muted); margin-top: 4px; text-align: center; }
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--card2); border: 1px solid var(--border); color: var(--texto); padding: 12px 24px; border-radius: 12px; font-size: 14px; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: 0.5px; z-index: 999; transition: transform .3s ease; white-space: nowrap; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--card2); border: 1px solid var(--border); color: var(--texto); padding: 12px 24px; border-radius: 12px; font-size: 14px; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: 0.5px; z-index: 999; transition: transform .3s ease; max-width: min(92vw, 520px); white-space: normal; text-align: center; }
   .toast.show { transform: translateX(-50%) translateY(0); }
   .toast.ok { border-color: var(--verde); color: var(--verde); }
   .toast.err { border-color: var(--rojo); color: var(--rojo2); }
-  .lista-col { grid-column: 2; }
+  .lista-col { grid-column: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   @media (max-width: 700px) { .lista-col { grid-column: 1; } }
   .art-item { background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 10px; display: flex; gap: 12px; align-items: flex-start; transition: border-color .2s; }
   .art-item:hover { border-color: #3e4260; }
   .art-foto { width: 56px; height: 56px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: var(--border); }
   .art-foto-placeholder { width: 56px; height: 56px; border-radius: 8px; background: var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 22px; }
   .art-info { flex: 1; min-width: 0; }
-  #listaArticulos { overflow-y: auto; max-height: 400px; }
+  #listaArticulos { overflow-y: auto; flex: 1 1 auto; min-height: 0; max-height: none; }
   .art-nombre { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 14px; color: var(--texto); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .art-cod { font-size: 11px; color: var(--muted); margin-top: 2px; }
   .art-precio { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 14px; color: var(--rojo2); margin-top: 4px; }
@@ -87,6 +90,9 @@
   .btn-guardar-edit { flex: 2; padding: 12px; background: var(--amarillo); color: #000; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; transition: opacity .2s; }
   .btn-guardar-edit:hover { opacity: 0.85; }
   .btn-guardar-edit:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-aplicar-relacionados { flex: 1.7; padding: 12px; background: #5b439a; color: #fff; border: 1px solid rgba(91,67,154,.45); border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; transition: opacity .2s, transform .15s; }
+  .btn-aplicar-relacionados:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-aplicar-relacionados:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
   .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip-toggle {
     border: 1px solid var(--border);
@@ -141,6 +147,54 @@
   }
   .offer-preview b { color: var(--texto); }
   .offer-preview .oferta-valor { color: var(--verde); font-weight: 700; font-size: 14px; }
+  .sync-indicator { margin-top: 8px; min-height: 18px; font-size: 12px; color: var(--muted); }
+  .sync-indicator.is-pending { color: var(--amarillo); }
+  .sync-indicator.is-syncing { color: #8fc4ff; }
+  .sync-indicator.is-ok { color: var(--verde); }
+  .sync-indicator.is-error { color: var(--rojo2); }
+  .modal-subtitle { font-size: 12px; color: var(--muted); line-height: 1.45; margin: -6px 0 12px; }
+  .modal-search { margin-bottom: 12px; }
+  .apply-targets-list { max-height: min(54vh, 430px); overflow-y: auto; display: grid; gap: 10px; padding-right: 4px; }
+  .apply-targets-list::-webkit-scrollbar { width: 6px; }
+  .apply-targets-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  .apply-target-item { width: 100%; border: 1px solid var(--border); border-radius: 14px; background: var(--card2); padding: 10px; display: grid; grid-template-columns: 56px minmax(0, 1fr) 32px; gap: 12px; align-items: center; cursor: pointer; text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+  .apply-target-item:hover { border-color: #4a5070; transform: translateY(-1px); }
+  .apply-target-item.is-selected { border-color: rgba(0,200,83,.62); box-shadow: 0 0 0 2px rgba(0,200,83,.16); }
+  .apply-target-main { min-width: 0; }
+  .apply-target-name { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; color: var(--texto); text-transform: uppercase; line-height: 1.08; }
+  .apply-target-meta { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.25; }
+  .apply-target-check { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); color: transparent; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; background: rgba(255,255,255,0.04); transition: .18s ease; }
+  .apply-target-item.is-selected .apply-target-check { background: var(--verde); border-color: var(--verde); color: #fff; box-shadow: 0 0 0 2px rgba(0,200,83,.18); }
+  .apply-targets-status { text-align: center; font-size: 11px; color: var(--muted); padding: 2px 4px 10px; }
+  .apply-fields-grid { display: grid; gap: 10px; margin: 14px 0 8px; }
+  .apply-field-chip { width: 100%; justify-content: center; padding: 12px; font-size: 13px; }
+  .apply-empty { text-align: center; padding: 28px 14px; color: var(--muted); border: 1px dashed var(--border); border-radius: 14px; background: rgba(255,255,255,0.02); }
+  @media (max-width: 700px) {
+    header { padding: 12px 14px; gap: 10px; }
+    header img { height: 36px; }
+    header h1 { font-size: 17px; }
+    .header-badge { margin-right: 0; font-size: 10px; padding: 4px 8px; }
+    .main { width: 100%; max-width: 100%; grid-template-columns: minmax(0, 1fr); padding: 14px 8px; gap: 12px; }
+    .card { padding: 14px; border-radius: 14px; }
+    .span-full { grid-column: 1; }
+    .popup-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .search-admin { padding: 8px 10px; }
+    #listaArticulos { max-height: none; overflow: visible; }
+    .art-item { display: grid; grid-template-columns: 52px minmax(0, 1fr) 32px; gap: 10px; padding: 10px; }
+    .art-foto, .art-foto-placeholder { width: 52px; height: 52px; }
+    .art-nombre { white-space: normal; line-height: 1.05; }
+    .art-cod { font-size: 10px; }
+    .art-precio { font-size: 13px; }
+    .art-acciones { gap: 8px; align-self: stretch; justify-content: center; }
+    .pagination { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .pagination button { margin: 0; min-width: 34px; }
+    .modal-overlay { padding: 12px; }
+    .modal { padding: 18px 14px; border-radius: 16px; max-height: 92vh; }
+    .modal-acciones { flex-direction: column; }
+    .btn-cancelar, .btn-guardar-edit, .btn-aplicar-relacionados { width: 100%; }
+    .apply-target-item { grid-template-columns: 48px minmax(0, 1fr) 30px; gap: 10px; }
+    .apply-target-name { font-size: 13px; }
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -152,13 +206,18 @@
   <span class="header-badge">• Administrador</span>
 </header>
 
-<div class="main">
+<div class="main top-panels">
   <div class="card form-col">
     <div class="card-title">Nuevo artículo</div>
     <div class="field"><label>Código de artículo</label><input type="text" id="fCodigo" placeholder="Ej: 1234"></div>
     <div class="field"><label>Nombre del artículo</label><input type="text" id="fNombre" placeholder="Ej: Cemento Portland 50kg"></div>
     <div class="field"><label>Detalle / descripción</label><textarea id="fDetalle" placeholder="Descripción, medidas, marca, etc."></textarea></div>
     <div class="field"><label>Rubro</label><input type="text" id="fRubro" placeholder="Ej: Ferretería"></div>
+    <div class="field">
+      <label>Tags invisibles</label>
+      <textarea id="fTagsOcultos" placeholder="Ej: portland, obra gruesa, pegamento"></textarea>
+      <div class="field-help">No se muestran al cliente. Separalos por coma, salto de línea o punto y coma.</div>
+    </div>
     <div class="field"><label>Precio de venta</label><input type="number" id="fPrecio" placeholder="Ej: 12500" min="0" step="0.01"></div>
     <div class="field">
       <label>Foto del artículo</label>
@@ -174,6 +233,7 @@
       <div class="progress-label" id="progressLabel">Subiendo foto...</div>
     </div>
     <button class="btn-guardar" id="btnGuardar" onclick="guardarArticulo()">Guardar artículo</button>
+    <div class="sync-indicator" id="syncIndicator"></div>
   </div>
 
   <div class="card lista-col">
@@ -194,9 +254,9 @@
 </div>
 
 <div class="main">
-  <div class="card form-col" style="grid-column:1/3;">
+  <div class="card form-col span-full">
     <div class="card-title">Imagen Popup</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+    <div class="popup-grid">
       <div>
         <div class="field">
           <label>Imagen a mostrar al abrir la app</label>
@@ -221,7 +281,7 @@
 </div>
 
 <div class="main">
-  <div class="card form-col" style="grid-column:1/3;">
+  <div class="card form-col span-full">
     <div class="card-title">Importador masivo (XLS / XLSX / CSV)</div>
     <div class="field">
       <label>Arrastrá o hacé clic para seleccionar un archivo</label>
@@ -243,6 +303,11 @@
     <div class="field"><label>Nombre</label><input type="text" id="editNombre"></div>
     <div class="field"><label>Detalle</label><textarea id="editDetalle"></textarea></div>
     <div class="field"><label>Rubro</label><input type="text" id="editRubro"></div>
+    <div class="field">
+      <label>Tags invisibles</label>
+      <textarea id="editTagsOcultos" placeholder="Ej: portland, obra gruesa, pegamento"></textarea>
+      <div class="field-help">Solo se usan para búsqueda. No aparecen en la web pública.</div>
+    </div>
     <div class="field">
       <label>Etiquetas</label>
       <div class="chip-row">
@@ -268,6 +333,7 @@
     </div>
     <div class="modal-acciones">
       <button class="btn-cancelar" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn-aplicar-relacionados" id="btnAplicarRelacionados" type="button" onclick="abrirModalAplicarTargets()">Aplicar cambios también a</button>
       <button class="btn-guardar-edit" id="btnGuardarEdit" onclick="guardarEdicion()">Guardar cambios</button>
     </div>
   </div>
@@ -288,6 +354,40 @@
     <div class="modal-acciones">
       <button class="btn-cancelar" type="button" onclick="cancelarModalOferta()">Cancelar</button>
       <button class="btn-guardar-edit" type="button" onclick="guardarModalOferta()">Guardar oferta</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalApplyTargets">
+  <div class="modal" style="max-width:680px;">
+    <div class="modal-title">Aplicar cambios también a <button class="btn-cerrar-modal" type="button" onclick="cerrarModalAplicarTargets()">✕</button></div>
+    <div class="modal-subtitle">Marcá los artículos a los que querés copiar cambios desde el artículo que estás editando.</div>
+    <div class="search-admin modal-search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="applyTargetsSearch" placeholder="Buscar artículos para aplicar..." autocomplete="off">
+    </div>
+    <div class="art-contador" id="applyTargetsCounter">0 seleccionados</div>
+    <div class="apply-targets-list" id="applyTargetsList"></div>
+    <div class="modal-acciones">
+      <button class="btn-cancelar" type="button" onclick="cerrarModalAplicarTargets()">Cancelar</button>
+      <button class="btn-guardar-edit" type="button" id="btnContinuarApplyTargets" onclick="abrirModalAplicarCampos()">Aplicar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalApplyFields">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-title">Qué aplicar <button class="btn-cerrar-modal" type="button" onclick="cancelarModalAplicarCampos()">✕</button></div>
+    <div class="modal-subtitle">Elegí qué cambios querés copiar a los artículos seleccionados.</div>
+    <div class="apply-fields-grid" id="applyFieldsGrid">
+      <button class="chip-toggle apply-field-chip" type="button" data-field="etiquetas">Etiquetas</button>
+      <button class="chip-toggle apply-field-chip" type="button" data-field="detalle">Detalle</button>
+      <button class="chip-toggle apply-field-chip" type="button" data-field="tags">Tags</button>
+      <button class="chip-toggle apply-field-chip" type="button" data-field="foto">Foto</button>
+    </div>
+    <div class="modal-acciones">
+      <button class="btn-cancelar" type="button" onclick="cancelarModalAplicarCampos()">Cancelar</button>
+      <button class="btn-guardar-edit" type="button" id="btnAplicarCamposSeleccionados" onclick="aplicarCambiosSeleccionados()">Aplicar</button>
     </div>
   </div>
 </div>
@@ -363,6 +463,59 @@ let editMeta = {
   ofertaHasta: ''
 };
 let ofertaModalSnapshot = null;
+let applyTargetsSelection = new Set();
+let applyFieldsSelection = new Set();
+let applyTargetsFiltered = [];
+let applyTargetsVisibleCount = 0;
+let syncTimer = null;
+let syncInFlight = false;
+let syncQueued = false;
+let syncLoadedOnce = false;
+let localStateDirty = false;
+const SYNC_DEBOUNCE_MS = 900;
+const APPLY_TARGETS_BATCH_SIZE = 50;
+const topPanelsWrap = document.querySelector('.top-panels');
+const topFormCard = topPanelsWrap?.querySelector('.card.form-col');
+const topListCard = topPanelsWrap?.querySelector('.card.lista-col');
+const topFormImageZone = document.getElementById('dropZone');
+const EXTRA_ITEM_HEIGHT_FALLBACK = 92;
+
+function getExtraAdminItemHeight() {
+  const firstItem = document.querySelector('#listaArticulos .art-item');
+  if (!firstItem) return EXTRA_ITEM_HEIGHT_FALLBACK;
+  const styles = window.getComputedStyle(firstItem);
+  const marginBottom = parseFloat(styles.marginBottom || '0') || 0;
+  return Math.ceil(firstItem.getBoundingClientRect().height + marginBottom);
+}
+
+function syncTopPanelsHeight() {
+  if (!topFormCard || !topListCard) return;
+  if (window.matchMedia('(max-width: 700px)').matches) {
+    topListCard.style.height = '';
+    return;
+  }
+  topListCard.style.height = '';
+  const listTop = topListCard.getBoundingClientRect().top;
+  const imageBottom = topFormImageZone?.getBoundingClientRect().bottom || 0;
+  const targetHeight = Math.ceil(imageBottom - listTop + getExtraAdminItemHeight());
+  if (targetHeight > 0) {
+    topListCard.style.height = `${targetHeight}px`;
+    return;
+  }
+  const formHeight = Math.ceil(topFormCard.getBoundingClientRect().height);
+  if (formHeight > 0) {
+    topListCard.style.height = `${formHeight}px`;
+  }
+}
+
+if (typeof ResizeObserver !== 'undefined') {
+  const topPanelsObserver = new ResizeObserver(() => syncTopPanelsHeight());
+  if (topFormCard) topPanelsObserver.observe(topFormCard);
+  if (topFormImageZone) topPanelsObserver.observe(topFormImageZone);
+}
+
+window.addEventListener('resize', syncTopPanelsHeight);
+syncTopPanelsHeight();
 
 function toBool(value) {
   if (typeof value === 'boolean') return value;
@@ -391,6 +544,154 @@ function extraerMetaOferta(articulo) {
     ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? '')
   };
+}
+
+function normalizarTagsOcultos(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(/[\n,;|]+/);
+  const vistos = new Set();
+  return source
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const clave = item.toLowerCase();
+      if (vistos.has(clave)) return false;
+      vistos.add(clave);
+      return true;
+    });
+}
+
+function obtenerTagsOcultosArticulo(articulo) {
+  return normalizarTagsOcultos(
+    articulo?.tagsOcultos ??
+    articulo?.tagsBusqueda ??
+    articulo?.tags ??
+    articulo?.palabrasClave ??
+    ''
+  );
+}
+
+function tagsOcultosComoTexto(value) {
+  return normalizarTagsOcultos(value).join(', ');
+}
+
+function normalizarArticuloAdmin(articulo = {}) {
+  return {
+    ...articulo,
+    codigo: String(articulo?.codigo ?? articulo?.idart ?? '').trim(),
+    nombre: String(articulo?.nombre ?? articulo?.descripcion ?? '').trim(),
+    detalle: String(articulo?.detalle ?? '').trim(),
+    rubro: String(articulo?.rubro ?? '').trim(),
+    tagsOcultos: obtenerTagsOcultosArticulo(articulo),
+    precio: Number(articulo?.precio || 0),
+    fotoUrl: String(articulo?.fotoUrl || '').trim(),
+    stock: articulo?.stock ?? '',
+    oferta: toBool(articulo?.oferta ?? articulo?.enOferta ?? articulo?.tagOferta),
+    ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
+    ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? ''),
+    destacado: toBool(articulo?.destacado ?? articulo?.tagDestacado),
+    masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido)
+  };
+}
+
+function serializarArticuloPublicable(articulo) {
+  const normalizado = normalizarArticuloAdmin(articulo);
+  return {
+    ...articulo,
+    codigo: normalizado.codigo,
+    nombre: normalizado.nombre,
+    detalle: normalizado.detalle,
+    rubro: normalizado.rubro,
+    tagsOcultos: [...normalizado.tagsOcultos],
+    precio: Number(normalizado.precio || 0),
+    fotoUrl: normalizado.fotoUrl || '',
+    stock: normalizado.stock ?? '',
+    oferta: !!normalizado.oferta,
+    ofertaPct: normalizado.ofertaPct,
+    ofertaHasta: normalizado.ofertaHasta,
+    destacado: !!normalizado.destacado,
+    masVendido: !!normalizado.masVendido
+  };
+}
+
+function setTodosArticulos(lista, { render = true } = {}) {
+  todosArticulos = (lista || []).map(normalizarArticuloAdmin);
+  if (render) filtrarLista();
+}
+
+function setSyncIndicator(state = 'idle', message = '') {
+  const el = document.getElementById('syncIndicator');
+  if (!el) return;
+  el.className = 'sync-indicator';
+  if (!message) {
+    el.textContent = '';
+    return;
+  }
+  el.textContent = message;
+  if (state === 'pending') el.classList.add('is-pending');
+  else if (state === 'syncing') el.classList.add('is-syncing');
+  else if (state === 'ok') el.classList.add('is-ok');
+  else if (state === 'error') el.classList.add('is-error');
+}
+
+async function publicarListaArticulos(lista) {
+  const payload = (lista || []).map(serializarArticuloPublicable);
+  const url = await subirJSONaCloudinary(payload);
+  await setDoc(doc(db, 'config', 'listaActual'), { url, updatedAt: Date.now() });
+  jsonListaUrl = url;
+  return url;
+}
+
+async function sincronizarArticulosAhora(reason = 'cambios') {
+  if (syncInFlight) {
+    syncQueued = true;
+    return;
+  }
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+  syncInFlight = true;
+  setSyncIndicator('syncing', `Sincronizando ${reason}...`);
+  let syncConError = false;
+  try {
+    await publicarListaArticulos(todosArticulos);
+  } catch (error) {
+    console.error(error);
+    syncConError = true;
+    localStateDirty = true;
+    syncQueued = true;
+    setSyncIndicator('error', 'Error al sincronizar. Reintentando...');
+    toast('Cambios listos en admin, pero falló la sincronización', 'err');
+  } finally {
+    syncInFlight = false;
+  }
+  if (syncConError) {
+    syncQueued = false;
+    syncTimer = setTimeout(() => sincronizarArticulosAhora('reintento'), SYNC_DEBOUNCE_MS * 2);
+    return;
+  }
+  if (syncQueued) {
+    syncQueued = false;
+    localStateDirty = true;
+    setSyncIndicator('pending', 'Hay cambios pendientes de sincronizar...');
+    syncTimer = setTimeout(() => sincronizarArticulosAhora('pendientes'), SYNC_DEBOUNCE_MS);
+  } else {
+    localStateDirty = false;
+    setSyncIndicator('ok', 'Sincronizado');
+  }
+}
+
+function programarSincronizacion(reason = 'cambios') {
+  localStateDirty = true;
+  setSyncIndicator('pending', 'Cambios pendientes de sincronizar...');
+  if (syncInFlight) {
+    syncQueued = true;
+    return;
+  }
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => sincronizarArticulosAhora(reason), SYNC_DEBOUNCE_MS);
 }
 
 function precioOferta(precioLista, pct) {
@@ -434,6 +735,128 @@ function renderEditChips() {
     summary.innerHTML = '';
   }
 }
+
+function renderApplyFieldChips() {
+  document.querySelectorAll('#applyFieldsGrid .apply-field-chip').forEach((chip) => {
+    chip.classList.toggle('active', applyFieldsSelection.has(chip.dataset.field));
+  });
+}
+
+function getApplyTargetsFilteredList() {
+  const sourceCode = document.getElementById('editId').value.trim();
+  const q = normAdm(document.getElementById('applyTargetsSearch').value);
+  let lista = [...todosArticulos].filter((articulo) => String(articulo.codigo || '').trim() !== sourceCode);
+  if (q) {
+    const palabras = q.split(' ').filter(Boolean);
+    lista = lista.filter((articulo) => {
+      const texto = normAdm([
+        articulo.nombre || '',
+        articulo.codigo || '',
+        articulo.detalle || '',
+        articulo.rubro || '',
+        tagsOcultosComoTexto(obtenerTagsOcultosArticulo(articulo))
+      ].join(' '));
+      return palabras.every((palabra) => texto.includes(palabra));
+    });
+  }
+  lista.sort((a, b) => normAdm(a.nombre || '').localeCompare(normAdm(b.nombre || ''), 'es'));
+  return lista;
+}
+
+function renderApplyTargetItem(articulo) {
+  const codigo = String(articulo.codigo || '').trim();
+  const marcado = applyTargetsSelection.has(codigo);
+  return `<button class="apply-target-item${marcado ? ' is-selected' : ''}" type="button" data-code="${codigo}">
+    ${articulo.fotoUrl ? `<img class="art-foto" src="${articulo.fotoUrl}" alt="${articulo.nombre || codigo}">` : `<div class="art-foto-placeholder">📷</div>`}
+    <div class="apply-target-main">
+      <div class="apply-target-name">${articulo.nombre || '-'}</div>
+      <div class="apply-target-meta">Cód: ${articulo.codigo || '-'} · Rubro: ${articulo.rubro || '-'}</div>
+    </div>
+    <div class="apply-target-check">${marcado ? '✓' : ''}</div>
+  </button>`;
+}
+
+function updateApplyTargetsSummary() {
+  const seleccionados = applyTargetsSelection.size;
+  const visibles = Math.min(applyTargetsVisibleCount, applyTargetsFiltered.length);
+  const detalleCarga = applyTargetsFiltered.length ? ` · <b>${visibles}</b> de ${applyTargetsFiltered.length} cargados` : '';
+  document.getElementById('applyTargetsCounter').innerHTML = `<b>${seleccionados}</b> seleccionado${seleccionados === 1 ? '' : 's'}${detalleCarga}`;
+  document.getElementById('btnContinuarApplyTargets').disabled = seleccionados === 0;
+}
+
+function renderApplyTargetsVisible({ resetScroll = false, appendOnly = false, startIndex = 0 } = {}) {
+  const el = document.getElementById('applyTargetsList');
+  updateApplyTargetsSummary();
+  if (!applyTargetsFiltered.length) {
+    el.innerHTML = '<div class="apply-empty">No se encontraron artículos para aplicar cambios.</div>';
+    if (resetScroll) el.scrollTop = 0;
+    return;
+  }
+  const visibleItems = applyTargetsFiltered.slice(0, applyTargetsVisibleCount);
+  const hasMore = applyTargetsVisibleCount < applyTargetsFiltered.length;
+  const statusHtml = `<div class="apply-targets-status">${hasMore ? `Mostrando ${visibleItems.length} de ${applyTargetsFiltered.length}. Deslizá hasta el final para cargar más.` : `Mostrando ${visibleItems.length} de ${applyTargetsFiltered.length}.`}</div>`;
+  if (appendOnly) {
+    const nuevos = applyTargetsFiltered.slice(startIndex, applyTargetsVisibleCount).map(renderApplyTargetItem).join('');
+    el.querySelectorAll('.apply-targets-status').forEach((node) => node.remove());
+    el.insertAdjacentHTML('beforeend', nuevos + statusHtml);
+    return;
+  }
+  el.innerHTML = visibleItems.map(renderApplyTargetItem).join('') + statusHtml;
+  if (resetScroll) el.scrollTop = 0;
+}
+
+function renderApplyTargetsList(resetVisible = true) {
+  applyTargetsFiltered = getApplyTargetsFilteredList();
+  if (resetVisible) applyTargetsVisibleCount = Math.min(APPLY_TARGETS_BATCH_SIZE, applyTargetsFiltered.length);
+  else applyTargetsVisibleCount = Math.min(Math.max(applyTargetsVisibleCount, APPLY_TARGETS_BATCH_SIZE), applyTargetsFiltered.length);
+  renderApplyTargetsVisible({ resetScroll: true });
+}
+
+function loadMoreApplyTargets() {
+  if (applyTargetsVisibleCount >= applyTargetsFiltered.length) return;
+  const previousCount = applyTargetsVisibleCount;
+  applyTargetsVisibleCount = Math.min(applyTargetsVisibleCount + APPLY_TARGETS_BATCH_SIZE, applyTargetsFiltered.length);
+  renderApplyTargetsVisible({ appendOnly: true, startIndex: previousCount });
+}
+
+window.abrirModalAplicarTargets = function() {
+  if (!document.getElementById('editId').value.trim()) {
+    toast('Abrí un artículo primero', 'err');
+    return;
+  }
+  applyTargetsSelection = new Set();
+  applyTargetsFiltered = [];
+  applyTargetsVisibleCount = 0;
+  document.getElementById('applyTargetsSearch').value = '';
+  renderApplyTargetsList();
+  document.getElementById('modalApplyTargets').classList.add('visible');
+};
+
+window.cerrarModalAplicarTargets = function() {
+  document.getElementById('modalApplyTargets').classList.remove('visible');
+};
+
+window.abrirModalAplicarCampos = function() {
+  if (!applyTargetsSelection.size) {
+    toast('Seleccioná al menos un artículo', 'err');
+    return;
+  }
+  applyFieldsSelection = new Set();
+  renderApplyFieldChips();
+  document.getElementById('modalApplyTargets').classList.remove('visible');
+  document.getElementById('modalApplyFields').classList.add('visible');
+};
+
+window.cerrarModalAplicarCampos = function(reopenTargets = true) {
+  document.getElementById('modalApplyFields').classList.remove('visible');
+  if (reopenTargets && document.getElementById('modalOverlay').classList.contains('visible')) {
+    document.getElementById('modalApplyTargets').classList.add('visible');
+  }
+};
+
+window.cancelarModalAplicarCampos = function() {
+  window.cerrarModalAplicarCampos(true);
+};
 
 function renderOfferPreview() {
   const precioLista = Number(document.getElementById('editPrecio').value || 0);
@@ -514,6 +937,76 @@ document.getElementById('editChipMasVendido').addEventListener('click', () => {
 
 document.getElementById('modalOferta').addEventListener('click', (event) => {
   if (event.target === document.getElementById('modalOferta')) window.cancelarModalOferta();
+});
+
+document.getElementById('applyTargetsSearch').addEventListener('input', () => renderApplyTargetsList(true));
+document.getElementById('applyTargetsList').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-code]');
+  if (!item) return;
+  const codigo = String(item.dataset.code || '').trim();
+  if (!codigo) return;
+  const marcado = applyTargetsSelection.has(codigo);
+  if (marcado) applyTargetsSelection.delete(codigo);
+  else applyTargetsSelection.add(codigo);
+  item.classList.toggle('is-selected', !marcado);
+  const check = item.querySelector('.apply-target-check');
+  if (check) check.textContent = !marcado ? '✓' : '';
+  updateApplyTargetsSummary();
+});
+document.getElementById('applyTargetsList').addEventListener('scroll', (event) => {
+  const el = event.currentTarget;
+  if (!el || applyTargetsVisibleCount >= applyTargetsFiltered.length) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) loadMoreApplyTargets();
+});
+
+document.querySelectorAll('#applyFieldsGrid .apply-field-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    const field = chip.dataset.field;
+    if (!field) return;
+    if (applyFieldsSelection.has(field)) applyFieldsSelection.delete(field);
+    else applyFieldsSelection.add(field);
+    renderApplyFieldChips();
+  });
+});
+
+window.aplicarCambiosSeleccionados = async function() {
+  if (!applyTargetsSelection.size) {
+    toast('Seleccioná al menos un artículo', 'err');
+    return;
+  }
+  if (!applyFieldsSelection.size) {
+    toast('Elegí qué cambios querés aplicar', 'err');
+    return;
+  }
+  const btn = document.getElementById('btnAplicarCamposSeleccionados');
+  const btnGuardar = document.getElementById('btnGuardarEdit');
+  const btnAplicar = document.getElementById('btnAplicarRelacionados');
+  btn.disabled = true;
+  btnGuardar.disabled = true;
+  btnAplicar.disabled = true;
+  btn.textContent = 'Aplicando...';
+  try {
+    await guardarEdicionInterna({
+      selectedCodes: [...applyTargetsSelection],
+      fields: [...applyFieldsSelection]
+    });
+  } catch (error) {
+    console.error(error);
+    toast('❌ Error: ' + error.message, 'err');
+    document.getElementById('modalApplyFields').classList.add('visible');
+  }
+  btn.disabled = false;
+  btnGuardar.disabled = false;
+  btnAplicar.disabled = false;
+  btn.textContent = 'Aplicar';
+};
+
+document.getElementById('modalApplyTargets').addEventListener('click', (event) => {
+  if (event.target === document.getElementById('modalApplyTargets')) window.cerrarModalAplicarTargets();
+});
+
+document.getElementById('modalApplyFields').addEventListener('click', (event) => {
+  if (event.target === document.getElementById('modalApplyFields')) window.cancelarModalAplicarCampos();
 });
 
 const dropZone  = document.getElementById('dropZone');
@@ -650,8 +1143,10 @@ window.guardarArticulo = async () => {
   const nombre  = document.getElementById('fNombre').value.trim();
   const detalle = document.getElementById('fDetalle').value.trim();
   const rubro   = document.getElementById('fRubro').value.trim();
+  const tagsOcultos = normalizarTagsOcultos(document.getElementById('fTagsOcultos').value);
   const precio  = parseFloat(document.getElementById('fPrecio').value);
   if (!codigo || !nombre || isNaN(precio)) { toast('Completá código, nombre y precio', 'err'); return; }
+  if (todosArticulos.some(a => String(a.codigo || '').trim() === codigo)) { toast('Ya existe un artículo con ese código', 'err'); return; }
   const btn = document.getElementById('btnGuardar');
   btn.disabled = true; btn.textContent = 'Guardando...';
   try {
@@ -659,11 +1154,12 @@ window.guardarArticulo = async () => {
     if (fotoArchivoNuevo) {
       fotoUrl = await subirFoto(fotoArchivoNuevo, codigo, document.getElementById('progressFill'), document.getElementById('progressLabel'), document.getElementById('progressWrap'));
     }
-    await addDoc(collection(db, 'articulos'), {
+    const nuevoArticulo = normalizarArticuloAdmin({
       codigo,
       nombre,
       detalle,
       rubro,
+      tagsOcultos,
       precio,
       fotoUrl,
       oferta: false,
@@ -673,16 +1169,19 @@ window.guardarArticulo = async () => {
       masVendido: false,
       timestamp: Date.now()
     });
+    setTodosArticulos([...todosArticulos, nuevoArticulo]);
     document.getElementById('fCodigo').value = '';
     document.getElementById('fNombre').value = '';
     document.getElementById('fDetalle').value = '';
     document.getElementById('fRubro').value = '';
+    document.getElementById('fTagsOcultos').value = '';
     document.getElementById('fPrecio').value = '';
     fotoArchivoNuevo = null;
     dropZone.classList.remove('tiene-foto');
     dropZone.innerHTML = `<input type="file" id="fFoto" accept="image/*"><div class="drop-icon">📷</div><div class="drop-text">Arrastrá una foto o hacé clic</div><div class="drop-sub">JPG, PNG, WEBP - máx. 5MB</div>`;
     document.getElementById('fFoto').addEventListener('change', ev => { if (ev.target.files[0]) setFotoPreview(ev.target.files[0], dropZone, 'nuevo'); });
-    toast('✅ Artículo guardado');
+    programarSincronizacion('artículos');
+    toast('✅ Artículo guardado. Se sincroniza en segundo plano');
   } catch(e) { toast('❌ Error: ' + e.message, 'err'); }
   btn.disabled = false; btn.textContent = 'Guardar artículo';
 };
@@ -690,11 +1189,23 @@ window.guardarArticulo = async () => {
 window.abrirEditar = codigo => {
   const art = todosArticulos.find(a => a.codigo === codigo);
   if (!art) { console.error('No se encontró artículo:', codigo); return; }
+  applyTargetsSelection = new Set();
+  applyFieldsSelection = new Set();
+  applyTargetsFiltered = [];
+  applyTargetsVisibleCount = 0;
+  document.getElementById('btnGuardarEdit').disabled = false;
+  document.getElementById('btnGuardarEdit').textContent = 'Guardar cambios';
+  document.getElementById('btnAplicarRelacionados').disabled = false;
+  document.getElementById('btnAplicarCamposSeleccionados').textContent = 'Aplicar';
+  document.getElementById('applyTargetsSearch').value = '';
+  window.cerrarModalAplicarTargets();
+  window.cerrarModalAplicarCampos(false);
   document.getElementById('editId').value      = codigo;
   document.getElementById('editCodigo').value  = art.codigo  || '';
   document.getElementById('editNombre').value  = art.nombre  || '';
   document.getElementById('editDetalle').value = art.detalle || '';
   document.getElementById('editRubro').value   = art.rubro   || '';
+  document.getElementById('editTagsOcultos').value = tagsOcultosComoTexto(obtenerTagsOcultosArticulo(art));
   document.getElementById('editPrecio').value  = art.precio  || '';
   editMeta = extraerMetaOferta(art);
   renderEditChips();
@@ -711,7 +1222,13 @@ window.abrirEditar = codigo => {
 window.cerrarModal = () => {
   document.getElementById('modalOverlay').classList.remove('visible');
   window.cerrarModalOferta();
+  window.cerrarModalAplicarTargets();
+  window.cerrarModalAplicarCampos(false);
   ofertaModalSnapshot = null;
+  applyTargetsSelection = new Set();
+  applyFieldsSelection = new Set();
+  applyTargetsFiltered = [];
+  applyTargetsVisibleCount = 0;
   fotoArchivoEdit = null;
 };
 
@@ -728,57 +1245,115 @@ async function subirJSONaCloudinary(jsonArray) {
   return data.secure_url;
 }
 
-window.guardarEdicion = async () => {
-  const id      = document.getElementById('editId').value;
+function obtenerIndiceArticuloPorCodigo(codigo) {
+  return todosArticulos.findIndex(a => String(a.codigo || '').trim() === String(codigo || '').trim());
+}
+
+function aplicarCamposMasivosEnDestino(destino, fuente, campos) {
+  const actualizado = { ...destino };
+  if (campos.has('etiquetas')) {
+    actualizado.oferta = fuente.oferta;
+    actualizado.ofertaPct = fuente.ofertaPct;
+    actualizado.ofertaHasta = fuente.ofertaHasta;
+    actualizado.destacado = fuente.destacado;
+    actualizado.masVendido = fuente.masVendido;
+  }
+  if (campos.has('detalle')) {
+    actualizado.detalle = fuente.detalle;
+  }
+  if (campos.has('tags')) {
+    actualizado.tagsOcultos = [...obtenerTagsOcultosArticulo(fuente)];
+  }
+  if (campos.has('foto')) {
+    actualizado.fotoUrl = fuente.fotoUrl || '';
+  }
+  return normalizarArticuloAdmin(actualizado);
+}
+
+async function guardarEdicionInterna({ selectedCodes = [], fields = [] } = {}) {
+  const originalCode = document.getElementById('editId').value.trim();
   const codigo  = document.getElementById('editCodigo').value.trim();
   const nombre  = document.getElementById('editNombre').value.trim();
   const detalle = document.getElementById('editDetalle').value.trim();
   const rubro   = document.getElementById('editRubro').value.trim();
+  const tagsOcultos = normalizarTagsOcultos(document.getElementById('editTagsOcultos').value);
   const precio  = parseFloat(document.getElementById('editPrecio').value);
-  if (!codigo || !nombre || isNaN(precio)) { toast('Completá los campos obligatorios', 'err'); return; }
+  if (!originalCode || !codigo || !nombre || isNaN(precio)) throw new Error('Completá los campos obligatorios');
+  const repetido = todosArticulos.find(a => String(a.codigo || '').trim() === codigo && String(a.codigo || '').trim() !== originalCode);
+  if (repetido) throw new Error('Ya existe otro artículo con ese código');
   if (editMeta.oferta) {
-    if (clampPct(editMeta.ofertaPct) <= 0) { toast('La oferta necesita porcentaje válido', 'err'); return; }
-    if (!sanitizeIsoDate(editMeta.ofertaHasta)) { toast('La oferta necesita fecha hasta', 'err'); return; }
+    if (clampPct(editMeta.ofertaPct) <= 0) throw new Error('La oferta necesita porcentaje válido');
+    if (!sanitizeIsoDate(editMeta.ofertaHasta)) throw new Error('La oferta necesita fecha hasta');
   }
-  const btn = document.getElementById('btnGuardarEdit');
-  btn.disabled = true; btn.textContent = 'Guardando...';
+  const indiceOriginal = obtenerIndiceArticuloPorCodigo(originalCode);
+  if (indiceOriginal === -1) throw new Error('Artículo no encontrado en la lista');
+  const original = todosArticulos[indiceOriginal];
+  let fotoUrl = original.fotoUrl || '';
+  if (fotoArchivoEdit) {
+    fotoUrl = await subirFoto(fotoArchivoEdit, codigo, document.getElementById('progressFillEdit'), document.getElementById('progressLabelEdit'), document.getElementById('progressWrapEdit'));
+  }
+  const fuenteActualizada = normalizarArticuloAdmin({
+    ...original,
+    codigo,
+    nombre,
+    detalle,
+    rubro,
+    tagsOcultos,
+    precio: parseFloat(precio),
+    fotoUrl,
+    oferta: !!editMeta.oferta,
+    ofertaPct: clampPct(editMeta.ofertaPct),
+    ofertaHasta: sanitizeIsoDate(editMeta.ofertaHasta),
+    destacado: !!editMeta.destacado,
+    masVendido: !!editMeta.masVendido
+  });
+
+  const camposSeleccionados = new Set(fields || []);
+  const seleccion = new Set((selectedCodes || []).map(code => String(code || '').trim()).filter(Boolean));
+  let listaActualizada = todosArticulos.map((articulo) => {
+    const code = String(articulo.codigo || '').trim();
+    if (code === originalCode) return fuenteActualizada;
+    if (!seleccion.has(code)) return articulo;
+    return aplicarCamposMasivosEnDestino(articulo, fuenteActualizada, camposSeleccionados);
+  });
+
+  setTodosArticulos(listaActualizada);
+  fotoArchivoEdit = null;
+  applyTargetsSelection = new Set();
+  applyFieldsSelection = new Set();
+  programarSincronizacion(seleccion.size ? 'cambios masivos' : 'edición');
+  toast(
+    seleccion.size
+      ? `✅ Cambios aplicados a ${seleccion.size + 1} artículos. Se sincronizan en segundo plano`
+      : '✅ Artículo actualizado. Se sincroniza en segundo plano'
+  );
+  cerrarModal();
+}
+
+window.guardarEdicion = async () => {
+  const btnGuardar = document.getElementById('btnGuardarEdit');
+  const btnAplicar = document.getElementById('btnAplicarRelacionados');
+  btnGuardar.disabled = true;
+  btnAplicar.disabled = true;
+  btnGuardar.textContent = 'Guardando...';
   try {
-    if (!jsonListaUrl) throw new Error('No hay URL de lista disponible');
-    const resJson = await fetch(jsonListaUrl + '?t=' + Date.now());
-    let articulosArray = await resJson.json();
-    const indice = articulosArray.findIndex(a => a.codigo === codigo);
-    if (indice === -1) throw new Error('Artículo no encontrado en la lista');
-    let fotoUrl = articulosArray[indice].fotoUrl || '';
-    if (fotoArchivoEdit) {
-      fotoUrl = await subirFoto(fotoArchivoEdit, codigo, document.getElementById('progressFillEdit'), document.getElementById('progressLabelEdit'), document.getElementById('progressWrapEdit'));
-    }
-    articulosArray[indice] = {
-      ...articulosArray[indice],
-      codigo,
-      nombre,
-      detalle,
-      rubro,
-      precio: parseFloat(precio),
-      fotoUrl,
-      oferta: !!editMeta.oferta,
-      ofertaPct: clampPct(editMeta.ofertaPct),
-      ofertaHasta: sanitizeIsoDate(editMeta.ofertaHasta),
-      destacado: !!editMeta.destacado,
-      masVendido: !!editMeta.masVendido
-    };
-    const nuevoJsonUrl = await subirJSONaCloudinary(articulosArray);
-    await setDoc(doc(db, 'config', 'listaActual'), { url: nuevoJsonUrl, updatedAt: Date.now() });
-    fotoArchivoEdit = null;
-    toast('✅ Artículo actualizado');
-    cerrarModal();
-  } catch(e) { console.error(e); toast('❌ Error: ' + e.message, 'err'); }
-  btn.disabled = false; btn.textContent = 'Guardar cambios';
+    await guardarEdicionInterna();
+  } catch(e) {
+    console.error(e);
+    toast('❌ Error: ' + e.message, 'err');
+  }
+  btnGuardar.disabled = false;
+  btnAplicar.disabled = false;
+  btnGuardar.textContent = 'Guardar cambios';
 };
 
-window.eliminarArticulo = async id => {
+window.eliminarArticulo = async codigo => {
   if (!confirm('¿Eliminar este artículo?')) return;
-  try { await deleteDoc(doc(db, 'articulos', id)); toast('🗑️ Artículo eliminado'); }
-  catch(e) { toast('❌ Error al eliminar', 'err'); }
+  const nuevos = todosArticulos.filter(a => String(a.codigo || '').trim() !== String(codigo || '').trim());
+  setTodosArticulos(nuevos);
+  if (document.getElementById('editId').value.trim() === String(codigo || '').trim()) cerrarModal();
+  programarSincronizacion('eliminaciones');
+  toast('🗑️ Artículo eliminado. Se sincroniza en segundo plano');
 };
 
 function fmtPrecio(n) {
@@ -792,7 +1367,12 @@ function renderPage() {
   const el = document.getElementById('listaArticulos');
   const total = currentItems.length;
   document.getElementById('artContador').innerHTML = `<b>${total}</b> artículo${total !== 1 ? 's' : ''}`;
-  if (!total) { el.innerHTML = '<div class="empty-lista">Sin artículos todavía</div>'; document.getElementById('pagination').innerHTML = ''; return; }
+  if (!total) {
+    el.innerHTML = '<div class="empty-lista">Sin artículos todavía</div>';
+    document.getElementById('pagination').innerHTML = '';
+    syncTopPanelsHeight();
+    return;
+  }
   const start = (currentPage - 1) * pageSize;
   const pageItems = currentItems.slice(start, start + pageSize);
   el.innerHTML = pageItems.map(a => `
@@ -802,6 +1382,7 @@ function renderPage() {
         <div class="art-nombre">${a.nombre || '-'}</div>
         <div class="art-cod">Cód: ${a.codigo || '-'}</div>
         <div class="art-cod">Rubro: ${a.rubro || '-'}</div>
+        <div class="art-cod">Tags invisibles: ${tagsOcultosComoTexto(obtenerTagsOcultosArticulo(a)) || '-'}</div>
         <div class="art-cod">${a.oferta ? `Oferta ${clampPct(a.ofertaPct)}% hasta ${fmtFecha(a.ofertaHasta)}` : 'Oferta inactiva'}</div>
         <div class="art-cod">Etiquetas: ${a.destacado ? '⭐ Destacado ' : ''}${a.masVendido ? '🔥 Más vendido' : (!a.destacado ? '-' : '')}</div>
         <div class="art-precio">${fmtPrecio(a.precio)}${a.oferta ? ` · ${fmtPrecio(precioOferta(a.precio, a.ofertaPct))}` : ''}</div>
@@ -812,6 +1393,7 @@ function renderPage() {
       </div>
     </div>`).join('');
   updatePaginationControls();
+  syncTopPanelsHeight();
 }
 
 function updatePaginationControls() {
@@ -848,7 +1430,7 @@ window.filtrarLista = () => {
   } else {
     const palabras = q.split(' ').filter(Boolean);
     lista = todosArticulos.filter(a => {
-      const texto = normAdm((a.nombre||'')+' '+(a.codigo||'')+' '+(a.detalle||''));
+      const texto = normAdm((a.nombre||'')+' '+(a.codigo||'')+' '+(a.detalle||'')+' '+tagsOcultosComoTexto(obtenerTagsOcultosArticulo(a)));
       return palabras.every(p => texto.includes(p));
     });
     function prio(nombre) {
@@ -896,22 +1478,21 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
     const url = snap.data().url;
     if (!url) throw new Error('URL no definida');
     jsonListaUrl = url;
+    if (syncLoadedOnce && localStateDirty) {
+      if (loader) loader.style.display = 'none';
+      return;
+    }
     const res = await fetch(url + "?t=" + Date.now());
     if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
     const data = await res.json();
     if (!Array.isArray(data)) throw new Error('JSON inválido');
-    todosArticulos = data.map((a) => ({
-      ...a,
-      oferta: toBool(a.oferta ?? a.enOferta ?? a.tagOferta),
-      ofertaPct: clampPct(a.ofertaPct ?? a.oferta_pct ?? a.ofertaPorcentaje ?? a.descuentoOferta ?? 0),
-      ofertaHasta: sanitizeIsoDate(a.ofertaHasta ?? a.oferta_hasta ?? a.fechaOfertaHasta ?? ''),
-      destacado: toBool(a.destacado ?? a.tagDestacado),
-      masVendido: toBool(a.masVendido ?? a.mas_vendido ?? a.tagMasVendido)
-    }));
-    filtrarLista();
+    setTodosArticulos(data);
+    syncLoadedOnce = true;
+    if (!localStateDirty) setSyncIndicator('ok', 'Sincronizado');
   } catch(e) {
     console.error(e);
     document.getElementById('listaArticulos').innerHTML = '<div class="empty-lista" style="color:#e50000">Error: ' + e.message + '</div>';
+    setSyncIndicator('error', 'Error al cargar la lista');
   } finally {
     if (loader) loader.style.display = 'none';
   }
@@ -1067,6 +1648,7 @@ function normalizeRow(r) {
     else if (['preciovta3','preciovta_3','preciovta2','preciovta_2','preciovta1','preciovta_1','preciovta','precio','price','valor','amount','importe'].includes(key)) out.precio = v;
     else if (['detalle','detalle_largo','description_long','notas'].includes(key)) out.detalle = v;
     else if (['rubros_descripcion','rubro_descripcion','rubros','rubro','category','categoria'].includes(key)) out.rubro = v;
+    else if (['tagsocultos','tagoculto','tagsbusqueda','palabrasclave','palabras_clave','keywords','tags'].includes(key)) out.tagsOcultos = v;
     else if (['stock','stockact','stock_act','existencia','cantidad','stkact'].includes(key)) out.stock = v;
     else if (['oferta','enoferta','tagoferta'].includes(key)) out.oferta = v;
     else if (['ofertapct','oferta_pct','ofertaporcentaje','descuentooferta'].includes(key)) out.ofertaPct = v;
@@ -1112,6 +1694,7 @@ function buildImportArticle(r, viejo = {}) {
     codigo: code,
     nombre: r.nombre || viejo.nombre || '',
     detalle: r.detalle || viejo.detalle || '',
+    tagsOcultos: normalizarTagsOcultos(r.tagsOcultos ?? r.tagsBusqueda ?? r.tags ?? r.keywords ?? viejo.tagsOcultos ?? viejo.tagsBusqueda ?? viejo.tags ?? viejo.palabrasClave ?? ''),
     precio: parsedPrecio !== null ? parsedPrecio : Number(viejo.precio || 0),
     fotoUrl: viejo.fotoUrl || '',
     rubro: r.rubro || viejo.rubro || '',
@@ -1134,6 +1717,15 @@ async function doImport(modo) {
   if (wrap) wrap.classList.add('visible');
   if (cancelBtn) cancelBtn.disabled = false;
   try {
+    while (syncInFlight) {
+      if (label) label.textContent = 'Esperando sincronización previa...';
+      await new Promise(resolve => setTimeout(resolve, 180));
+    }
+    if (syncTimer) {
+      clearTimeout(syncTimer);
+      syncTimer = null;
+    }
+    syncQueued = false;
     if (fill) fill.style.width = '0%';
     if (label) label.textContent = 'Preparando artículos...';
 
@@ -1178,8 +1770,11 @@ async function doImport(modo) {
     }
 
     if (label) label.textContent = 'Subiendo JSON a Cloudinary...';
-    const url = await subirJSONaCloudinary(articulosLimpio);
-    await setDoc(doc(db, "config", "listaActual"), { url, updatedAt: Date.now() });
+    setTodosArticulos(articulosLimpio);
+    await publicarListaArticulos(todosArticulos);
+    localStateDirty = false;
+    syncLoadedOnce = true;
+    setSyncIndicator('ok', 'Sincronizado');
     if (fill) fill.style.width = '80%';
     if (label) label.textContent = 'Sincronizando clientes y facturas...';
 
