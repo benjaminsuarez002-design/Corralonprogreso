@@ -585,6 +585,39 @@
       color: var(--muted);
     }
 
+    /* Layout for alias and arrow icon */
+    .summary-alias-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Style for the arrow that indicates collapsible state */
+    .summary-toggle-icon {
+      font-size: 12px;
+      color: var(--muted);
+      transition: transform .2s ease;
+    }
+
+    /* When a summary section is collapsed, rotate the arrow 180 degrees */
+    .summary-card.collapsed .summary-toggle-icon {
+      transform: rotate(180deg);
+    }
+
+    /* Hide detail rows and remove bottom border when a summary-card is collapsed */
+    .summary-card.collapsed .summary-row {
+      display: none !important;
+    }
+    .summary-card.collapsed .summary-head {
+      border-bottom: none !important;
+    }
+
+    /* Prevent the currency value from wrapping to the next line so that the $ sign stays next to the number */
+    .total-value,
+    .summary-day-total strong {
+      white-space: nowrap;
+    }
+
     .empty {
       padding: 22px 12px;
       text-align: center;
@@ -616,7 +649,7 @@
 
     .total-box {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       gap: 8px;
       min-width: 0;
     }
@@ -734,6 +767,9 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: start;
+      /* Ensure the header (and the close button) stays above the viewer content */
+      position: relative;
+      z-index: 2;
     }
 
     .viewer-modal .modal-head > div {
@@ -885,6 +921,7 @@
       font-size: 20px;
       font-weight: 800;
       cursor: pointer;
+      z-index: 3;
     }
 
     .viewer-full-img {
@@ -1288,6 +1325,40 @@
       const ALIASES_COLLECTION = "aliases";
       const COMPROBANTES_COLLECTION = "comprobantes";
       const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1";
+
+      // Key used to persist collapsed state of summary sections in localStorage.
+      // Stores an object where each property is an encoded alias name and the value is a boolean
+      // indicating whether that alias group is collapsed. This ensures that when a user
+      // collapses a section and recarga la página, the section remains collapsed.
+      const SUMMARY_COLLAPSED_KEY = "corralon_summary_collapsed_v1";
+
+      /**
+       * Load the collapsed state mapping from localStorage.
+       * Returns an object with encoded alias names as keys and booleans as values.
+       */
+      function loadSummaryCollapsed() {
+        try {
+          const raw = localStorage.getItem(SUMMARY_COLLAPSED_KEY);
+          if (!raw) return {};
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") return parsed;
+          return {};
+        } catch (error) {
+          return {};
+        }
+      }
+
+      /**
+       * Persist the collapsed state mapping to localStorage.
+       * Accepts an object where keys are encoded alias names and values are booleans.
+       */
+      function saveSummaryCollapsed(obj) {
+        try {
+          localStorage.setItem(SUMMARY_COLLAPSED_KEY, JSON.stringify(obj || {}));
+        } catch (error) {
+          // ignore errors (e.g. storage quota exceeded)
+        }
+      }
 
       const $ = (selector) => document.querySelector(selector);
       const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -1752,14 +1823,24 @@
           groups.get(key).push(item);
         });
 
+        // Load collapsed mapping once and reuse for each group. Each key corresponds to an encoded alias name.
+        const collapsedMapping = loadSummaryCollapsed();
+
         let dayTotal = 0;
         const groupedHtml = Array.from(groups.entries()).map(([name, group]) => {
           const total = group.reduce((sum, item) => sum + Number(item.amountNumber || 0), 0);
           dayTotal += total;
+          // Create a safe key for use as a dataset attribute and in localStorage.
+          const aliasKey = encodeURIComponent(String(name));
+          // Determine if this group should start collapsed based on persisted state.
+          const isCollapsed = collapsedMapping && collapsedMapping[aliasKey];
           return `
-            <section class="summary-card">
+            <section class="summary-card${isCollapsed ? " collapsed" : ""}" data-alias="${aliasKey}">
               <div class="summary-head">
-                <div class="summary-alias">${esc(name)}</div>
+                <div class="summary-alias-wrapper">
+                  <div class="summary-alias">${esc(name)}</div>
+                  <span class="summary-toggle-icon">▼</span>
+                </div>
                 <div class="summary-total">${formatAmount(total, false)}</div>
               </div>
               ${group.map((item) => `
@@ -2781,6 +2862,22 @@
           });
         });
         el.summaryList.addEventListener("click", (event) => {
+          // First handle clicks on summary headers to toggle collapse/expand in alias view
+          const head = event.target.closest(".summary-head");
+          if (head && state.summaryView !== "time") {
+            const card = head.closest(".summary-card");
+            if (card) {
+              const aliasName = card.dataset.alias;
+              const collapsedMapping = loadSummaryCollapsed();
+              // Toggle collapsed class on the card
+              const isCollapsed = card.classList.toggle("collapsed");
+              if (aliasName) {
+                collapsedMapping[aliasName] = isCollapsed;
+                saveSummaryCollapsed(collapsedMapping);
+              }
+            }
+            return;
+          }
           const button = event.target.closest("[data-action]");
           if (!button) return;
           const action = button.dataset.action;
