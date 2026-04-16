@@ -434,10 +434,11 @@
     transform: rotate(180deg);
   }
   .sort-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
+    position: fixed;
+    top: var(--sort-menu-top, 0px);
+    left: var(--sort-menu-left, 0px);
     min-width: 190px;
+    max-width: calc(100vw - 16px);
     padding: 6px;
     border: 1.4px solid rgba(108,79,199,.18);
     border-radius: 16px;
@@ -499,7 +500,11 @@
     flex-wrap: nowrap;
     position: relative;
     z-index: 60;
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
     scrollbar-width: none;
   }
   #chipsPanel::-webkit-scrollbar { display: none; }
@@ -782,7 +787,8 @@
     .top-cart-count { min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
     .top-nav-desktop { gap: 6px; }
     .top-nav-link { font-size: 12px; padding: 4px 2px; }
-    #chipsPanel { gap: 10px; }
+    #chipsPanel { gap: 10px; justify-content: flex-start; }
+    .chips-grupo-der { margin-left: 6px; }
     .producto-inner { grid-template-columns: 68px 1fr auto; padding: 7px; gap: 7px; }
     .foto-wrap { width: 68px; }
     .foto-real, .foto-placeholder { width: 64px; height: 64px; }
@@ -1211,6 +1217,36 @@ function sanitizeIsoDate(value) {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
 }
 
+function normalizarTagsOcultos(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(/[\n,;|]+/);
+  const vistos = new Set();
+  return source
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const clave = item.toLowerCase();
+      if (vistos.has(clave)) return false;
+      vistos.add(clave);
+      return true;
+    });
+}
+
+function obtenerTagsOcultosArticulo(articulo) {
+  return normalizarTagsOcultos(
+    articulo?.tagsOcultos ??
+    articulo?.tagsBusqueda ??
+    articulo?.tags ??
+    articulo?.palabrasClave ??
+    ''
+  );
+}
+
+function obtenerTextoTagsOcultos(articulo) {
+  return obtenerTagsOcultosArticulo(articulo).join(' ');
+}
+
 function precioOferta(precioLista, ofertaPct) {
   const base = Number(precioLista || 0);
   const pct = clampPct(ofertaPct);
@@ -1230,6 +1266,7 @@ function normalizarArticulo(raw) {
   return {
     ...raw,
     codigoArticulo,
+    tagsOcultos: obtenerTagsOcultosArticulo(raw),
     precio: precioLista,
     oferta,
     destacado,
@@ -1429,7 +1466,8 @@ function construirIndiceBusquedaArticulo(articulo) {
   const secundaria = obtenerIndiceTokens([descripcion.secundaria, articulo.nombre || '', articulo.detalle || ''].filter(Boolean).join(' '));
   const codigo = obtenerIndiceTokens(obtenerIdArticulo(articulo));
   const rubro = obtenerIndiceTokens(articulo.rubro || '');
-  const full = obtenerIndiceTokens([principal.texto, secundaria.texto, codigo.texto, rubro.texto].filter(Boolean).join(' '));
+  const tagsOcultos = obtenerIndiceTokens(obtenerTextoTagsOcultos(articulo));
+  const full = obtenerIndiceTokens([principal.texto, secundaria.texto, codigo.texto, rubro.texto, tagsOcultos.texto].filter(Boolean).join(' '));
   return {
     codigoArticulo: obtenerIdArticulo(articulo),
     descripcionPrincipal: descripcion.principal,
@@ -1439,6 +1477,7 @@ function construirIndiceBusquedaArticulo(articulo) {
       secondary: secundaria.texto,
       code: codigo.texto,
       rubro: rubro.texto,
+      hiddenTags: tagsOcultos.texto,
       full: full.texto
     },
     tokens: {
@@ -1446,6 +1485,7 @@ function construirIndiceBusquedaArticulo(articulo) {
       secondary: secundaria.tokens,
       code: codigo.tokens,
       rubro: rubro.tokens,
+      hiddenTags: tagsOcultos.tokens,
       full: full.tokens
     }
   };
@@ -1605,8 +1645,9 @@ function encontrarMejorMatchTermino(articulo, termino) {
     { name: 'code', text: articulo._searchFields?.code || '', tokens: articulo._searchTokens?.code || [], weights: { exact: 0, start: 2, word: 4, include: 6 }, fuzzyBase: null },
     { name: 'principal', text: articulo._searchFields?.principal || '', tokens: articulo._searchTokens?.principal || [], weights: { exact: 10, start: 12, word: 15, include: 20 }, fuzzyBase: 34 },
     { name: 'secondary', text: articulo._searchFields?.secondary || '', tokens: articulo._searchTokens?.secondary || [], weights: { exact: 28, start: 30, word: 34, include: 40 }, fuzzyBase: 54 },
-    { name: 'rubro', text: articulo._searchFields?.rubro || '', tokens: articulo._searchTokens?.rubro || [], weights: { exact: 46, start: 48, word: 51, include: 56 }, fuzzyBase: 68 },
-    { name: 'full', text: articulo._searchFields?.full || '', tokens: articulo._searchTokens?.full || [], weights: { exact: 60, start: 62, word: 65, include: 70 }, fuzzyBase: null }
+    { name: 'hiddenTags', text: articulo._searchFields?.hiddenTags || '', tokens: articulo._searchTokens?.hiddenTags || [], weights: { exact: 42, start: 44, word: 46, include: 50 }, fuzzyBase: 62 },
+    { name: 'rubro', text: articulo._searchFields?.rubro || '', tokens: articulo._searchTokens?.rubro || [], weights: { exact: 52, start: 54, word: 57, include: 62 }, fuzzyBase: 74 },
+    { name: 'full', text: articulo._searchFields?.full || '', tokens: articulo._searchTokens?.full || [], weights: { exact: 66, start: 68, word: 71, include: 76 }, fuzzyBase: null }
   ];
 
   let mejor = null;
@@ -1664,12 +1705,14 @@ function evaluarArticuloBusqueda(articulo, parsed) {
     const code = articulo._searchFields?.code || '';
     const principal = articulo._searchFields?.principal || '';
     const secondary = articulo._searchFields?.secondary || '';
+    const hiddenTags = articulo._searchFields?.hiddenTags || '';
     if (code === phrase) score -= 18;
     else if (code.startsWith(phrase)) score -= 10;
     else if (principal === phrase) score -= 14;
     else if (principal.startsWith(phrase)) score -= 9;
     else if (incluyePalabraCompleta(principal, phrase)) score -= 5;
     else if (secondary && secondary.includes(phrase)) score -= 2;
+    else if (hiddenTags && incluyePalabraCompleta(hiddenTags, phrase)) score -= 3;
   }
 
   return { score: Math.max(0, score), highlightTerms: [...highlightTerms], matchedFields: [...matchedFields] };
@@ -2041,6 +2084,24 @@ function actualizarOrdenEtiqueta() {
   });
 }
 
+function posicionarMenuOrden() {
+  const sortMenu = document.getElementById('sortMenu');
+  const sortButton = document.getElementById('sortButton');
+  if (!sortMenu || !sortButton) return;
+  const margen = 8;
+  const rect = sortButton.getBoundingClientRect();
+  const menuWidth = Math.min(sortMenu.offsetWidth || 190, Math.max(180, window.innerWidth - (margen * 2)));
+  const menuHeight = sortMenu.offsetHeight || 0;
+  let left = rect.right - menuWidth;
+  left = Math.max(margen, Math.min(left, window.innerWidth - menuWidth - margen));
+  let top = rect.bottom + 8;
+  if (menuHeight && top + menuHeight > window.innerHeight - margen) {
+    top = Math.max(margen, rect.top - menuHeight - 8);
+  }
+  sortMenu.style.setProperty('--sort-menu-left', `${left}px`);
+  sortMenu.style.setProperty('--sort-menu-top', `${top}px`);
+}
+
 function cerrarMenuOrden() {
   const sortWrap = document.getElementById('sortWrap');
   const sortButton = document.getElementById('sortButton');
@@ -2058,6 +2119,8 @@ window.cambiarPagina = function(direccion) {
 let debounce;
 const searchInput = document.getElementById('searchInput');
 const searchAssist = document.getElementById('searchAssist');
+const chipsPanel = document.getElementById('chipsPanel');
+const scrollBody = document.getElementById('scrollBody');
 const sortWrap = document.getElementById('sortWrap');
 const sortButton = document.getElementById('sortButton');
 searchAssist.addEventListener('mousedown', (e) => e.preventDefault());
@@ -2102,6 +2165,7 @@ sortButton.addEventListener('click', (e) => {
   const abierto = !sortWrap.classList.contains('open');
   sortWrap.classList.toggle('open', abierto);
   sortButton.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+  if (abierto) requestAnimationFrame(posicionarMenuOrden);
 });
 document.querySelectorAll('#sortMenu .sort-option').forEach((option) => {
   option.addEventListener('click', () => {
@@ -2113,6 +2177,15 @@ document.querySelectorAll('#sortMenu .sort-option').forEach((option) => {
     cerrarMenuOrden();
   });
 });
+window.addEventListener('resize', () => {
+  if (sortWrap.classList.contains('open')) posicionarMenuOrden();
+});
+chipsPanel.addEventListener('scroll', () => {
+  if (sortWrap.classList.contains('open')) posicionarMenuOrden();
+}, { passive: true });
+scrollBody.addEventListener('scroll', () => {
+  if (sortWrap.classList.contains('open')) cerrarMenuOrden();
+}, { passive: true });
 document.addEventListener('click', e => {
   if (!sortWrap.contains(e.target)) cerrarMenuOrden();
   if (!document.getElementById('searchWrap').contains(e.target)) {
