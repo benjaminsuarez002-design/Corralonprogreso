@@ -71,11 +71,23 @@
   .btn-edit { background: rgba(255,171,0,0.15); color: var(--amarillo); }
   .btn-del { background: rgba(229,0,0,0.12); color: var(--rojo2); }
   .btn-edit:hover, .btn-del:hover { opacity: 0.7; }
+  .search-admin-wrap { position: relative; margin-bottom: 14px; }
+  .search-admin-wrap .search-admin { margin-bottom: 0; position: relative; z-index: 2; }
   .search-admin { display: flex; align-items: center; background: var(--card2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; gap: 8px; margin-bottom: 14px; }
   .search-admin input { flex: 1; background: transparent; border: none; outline: none; color: var(--texto); font-family: 'Barlow', sans-serif; font-size: 13px; }
   .search-admin svg { color: var(--muted); flex-shrink: 0; }
+  .admin-search-assist { position: absolute; top: calc(100% + 8px); left: 0; right: 0; border: 1px solid var(--border); border-radius: 14px; background: rgba(34,38,58,.98); box-shadow: 0 16px 40px rgba(0,0,0,.26); padding: 10px; display: grid; gap: 8px; z-index: 30; max-height: min(42vh, 340px); overflow-y: auto; }
+  .admin-search-assist.hidden { display: none; }
+  .admin-search-assist-title { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .8px; }
+  .admin-search-assist-list { display: grid; gap: 8px; }
+  .admin-search-assist-item { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); color: var(--texto); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; cursor: pointer; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+  .admin-search-assist-item:hover { border-color: #4a5070; transform: translateY(-1px); }
+  .admin-search-assist-item.is-active { border-color: rgba(255,171,0,.65); box-shadow: 0 0 0 2px rgba(255,171,0,.16); }
+  .admin-search-assist-label { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; color: var(--texto); line-height: 1.1; }
+  .admin-search-assist-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
   .admin-chip-filters { margin: -4px 0 10px; }
   .admin-chip-filters .chip-toggle { padding: 6px 10px; font-size: 11px; }
+  .apply-targets-filters { margin-top: -2px; }
   .art-contador { font-size: 12px; color: var(--muted); text-align: right; margin-bottom: 10px; }
   .art-contador b { color: var(--rojo2); }
   .empty-lista { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 13px; }
@@ -178,6 +190,7 @@
     .card { padding: 14px; border-radius: 14px; }
     .span-full { grid-column: 1; }
     .popup-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .admin-search-assist { max-height: min(38vh, 280px); }
     .search-admin { padding: 8px 10px; }
     #listaArticulos { max-height: none; overflow: visible; }
     .art-item { display: grid; grid-template-columns: 52px minmax(0, 1fr) 32px; gap: 10px; padding: 10px; }
@@ -238,9 +251,12 @@
 
   <div class="card lista-col">
     <div class="card-title">Artículos cargados</div>
-    <div class="search-admin">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input type="text" id="searchAdmin" placeholder="Buscar..." oninput="filtrarLista()">
+    <div class="search-admin-wrap" id="searchAdminWrap">
+      <div class="search-admin">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="searchAdmin" placeholder="Buscar, oferta, rubro:pinturas, precio<10000..." oninput="filtrarLista()">
+      </div>
+      <div id="searchAdminAssist" class="admin-search-assist hidden"></div>
     </div>
     <div class="chip-row admin-chip-filters" id="adminChipFilters">
       <button class="chip-toggle admin-filter-chip" type="button" data-chip="oferta">En oferta</button>
@@ -362,9 +378,17 @@
   <div class="modal" style="max-width:680px;">
     <div class="modal-title">Aplicar cambios también a <button class="btn-cerrar-modal" type="button" onclick="cerrarModalAplicarTargets()">✕</button></div>
     <div class="modal-subtitle">Marcá los artículos a los que querés copiar cambios desde el artículo que estás editando.</div>
-    <div class="search-admin modal-search">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input type="text" id="applyTargetsSearch" placeholder="Buscar artículos para aplicar..." autocomplete="off">
+    <div class="search-admin-wrap modal-search" id="applyTargetsSearchWrap">
+      <div class="search-admin">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="applyTargetsSearch" placeholder="Buscar, oferta, rubro:pinturas, precio<10000..." autocomplete="off">
+      </div>
+      <div id="applyTargetsAssist" class="admin-search-assist hidden"></div>
+    </div>
+    <div class="chip-row admin-chip-filters apply-targets-filters" id="applyTargetsFilters">
+      <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="oferta">En oferta</button>
+      <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="destacado">Destacado</button>
+      <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="masVendido">Más vendido</button>
     </div>
     <div class="art-contador" id="applyTargetsCounter">0 seleccionados</div>
     <div class="apply-targets-list" id="applyTargetsList"></div>
@@ -470,6 +494,9 @@ let applyTargetsSelection = new Set();
 let applyFieldsSelection = new Set();
 let applyTargetsFiltered = [];
 let applyTargetsVisibleCount = 0;
+let applyTargetsChipActivo = '';
+let adminRubroActivo = '';
+let applyTargetsRubroActivo = '';
 let syncTimer = null;
 let syncInFlight = false;
 let syncQueued = false;
@@ -685,7 +712,7 @@ function serializarMetadatosArticulos(lista = []) {
 }
 
 function setTodosArticulos(lista, { render = true } = {}) {
-  todosArticulos = (lista || []).map(normalizarArticuloAdmin);
+  todosArticulos = (lista || []).map(enriquecerArticuloAdminBusqueda);
   articulosMetaMap = construirMapaMetadatos(todosArticulos);
   if (render) filtrarLista();
 }
@@ -831,6 +858,473 @@ function toast(msg, tipo='ok') {
   setTimeout(() => el.className = 'toast', 3000);
 }
 
+const ADMIN_SEARCH_SYNONYM_GROUPS = [
+  ['cemento', 'portland'],
+  ['hierro', 'perfil'],
+  ['membrana', 'aislante'],
+  ['1/2', 'media', 'medio', '0.5'],
+  ['3/4', '0.75'],
+  ['4mm', '4 mm', '4 milimetros', '4milimetros'],
+  ['6mm', '6 mm', '6 milimetros', '6milimetros'],
+  ['8mm', '8 mm', '8 milimetros', '8milimetros']
+];
+
+function normalizarTextoAdmin(texto) {
+  return String(texto ?? '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[-_]/g, " ").replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function escaparHtmlAdmin(texto) {
+  return String(texto ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function escapeRegExpAdmin(texto) {
+  return String(texto ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizarSeparadoresBusquedaAdmin(texto) {
+  return normalizarTextoAdmin(texto).replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2').replace(/\s+/g, ' ').trim();
+}
+
+function obtenerVariantesTerminoAdmin(termino) {
+  const base = normalizarSeparadoresBusquedaAdmin(termino);
+  const variantes = new Set();
+  if (!base) return variantes;
+  variantes.add(base);
+  const unido = base.replace(/\s+/g, '');
+  if (unido && unido !== base) variantes.add(unido);
+  const separado = unido.replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2').replace(/\s+/g, ' ').trim();
+  if (separado && separado !== base) variantes.add(separado);
+  return variantes;
+}
+
+function construirMapaSinonimosAdmin(grupos) {
+  const mapa = new Map();
+  grupos.forEach((grupo) => {
+    const variantes = new Set();
+    grupo.forEach((entrada) => {
+      obtenerVariantesTerminoAdmin(entrada).forEach((variante) => variantes.add(variante));
+    });
+    const lista = [...variantes];
+    lista.forEach((item) => {
+      if (!mapa.has(item)) mapa.set(item, new Set());
+      lista.filter((otro) => otro !== item).forEach((otro) => mapa.get(item).add(otro));
+    });
+  });
+  return mapa;
+}
+
+const ADMIN_SEARCH_SYNONYM_MAP = construirMapaSinonimosAdmin(ADMIN_SEARCH_SYNONYM_GROUPS);
+
+function agruparTerminosBusquedaAdmin(texto) {
+  const terminos = new Map();
+  normalizarTextoAdmin(texto).split(' ').filter(Boolean).forEach((termino) => {
+    terminos.set(termino, (terminos.get(termino) || 0) + 1);
+  });
+  return terminos;
+}
+
+function contarCoincidenciasAdmin(texto, termino) {
+  if (!texto || !termino) return 0;
+  let total = 0;
+  let inicio = 0;
+  while (inicio < texto.length) {
+    const idx = texto.indexOf(termino, inicio);
+    if (idx === -1) break;
+    total++;
+    inicio = idx + termino.length;
+  }
+  return total;
+}
+
+function normalizarNumeroConsultaAdmin(valor) {
+  let raw = String(valor ?? '').trim().replace(/\$/g, '').replace(/\s+/g, '');
+  if (!raw) return NaN;
+  if (raw.includes(',') && raw.includes('.')) {
+    raw = raw.lastIndexOf(',') > raw.lastIndexOf('.') ? raw.replace(/\./g, '').replace(',', '.') : raw.replace(/,/g, '');
+  } else if (raw.includes(',')) {
+    raw = raw.replace(/\./g, '').replace(',', '.');
+  }
+  return Number(raw);
+}
+
+function obtenerIndiceTokensAdmin(texto) {
+  const normalizado = normalizarSeparadoresBusquedaAdmin(texto);
+  const tokens = new Set();
+  if (normalizado) {
+    normalizado.split(' ').filter(Boolean).forEach((token) => {
+      tokens.add(token);
+      const compacto = token.replace(/\s+/g, '');
+      if (compacto && compacto !== token) tokens.add(compacto);
+      const partes = compacto.match(/[a-z]+|\d+/g);
+      if (partes && partes.length > 1) partes.forEach((parte) => tokens.add(parte));
+    });
+    const unido = normalizado.replace(/\s+/g, '');
+    if (unido && unido !== normalizado) tokens.add(unido);
+  }
+  return { texto: normalizado, tokens: [...tokens] };
+}
+
+function construirIndiceBusquedaAdmin(articulo) {
+  const principal = obtenerIndiceTokensAdmin(articulo.nombre || '');
+  const secundaria = obtenerIndiceTokensAdmin(articulo.detalle || '');
+  const codigo = obtenerIndiceTokensAdmin(articulo.codigo || '');
+  const rubro = obtenerIndiceTokensAdmin(articulo.rubro || '');
+  const tagsOcultos = obtenerIndiceTokensAdmin(tagsOcultosComoTexto(obtenerTagsOcultosArticulo(articulo)));
+  const full = obtenerIndiceTokensAdmin([principal.texto, secundaria.texto, codigo.texto, rubro.texto, tagsOcultos.texto].filter(Boolean).join(' '));
+  return {
+    fields: {
+      principal: principal.texto,
+      secondary: secundaria.texto,
+      code: codigo.texto,
+      rubro: rubro.texto,
+      hiddenTags: tagsOcultos.texto,
+      full: full.texto
+    },
+    tokens: {
+      principal: principal.tokens,
+      secondary: secundaria.tokens,
+      code: codigo.tokens,
+      rubro: rubro.tokens,
+      hiddenTags: tagsOcultos.tokens,
+      full: full.tokens
+    }
+  };
+}
+
+function enriquecerArticuloAdminBusqueda(articulo = {}) {
+  const normalizado = normalizarArticuloAdmin(articulo);
+  const indice = construirIndiceBusquedaAdmin(normalizado);
+  return {
+    ...normalizado,
+    _adminSearchFields: indice.fields,
+    _adminSearchTokens: indice.tokens
+  };
+}
+
+function obtenerRelacionTerminoAdmin(termino) {
+  const directos = new Set(obtenerVariantesTerminoAdmin(termino));
+  const sinonimos = new Set();
+  [...directos].forEach((variante) => {
+    const relacionados = ADMIN_SEARCH_SYNONYM_MAP.get(variante);
+    if (relacionados) relacionados.forEach((otro) => sinonimos.add(otro));
+  });
+  [...directos].forEach((variante) => sinonimos.delete(variante));
+  return { directos, sinonimos };
+}
+
+function incluyePalabraCompletaAdmin(texto, termino) {
+  if (!texto || !termino) return false;
+  const re = new RegExp(`(^| )${escapeRegExpAdmin(termino)}( |$)`);
+  return re.test(texto);
+}
+
+function evaluarCoincidenciaCampoTextoAdmin(texto, termino, esCodigo) {
+  if (!texto || !termino) return null;
+  if (texto === termino) return 'exact';
+  if (texto.startsWith(termino)) return 'start';
+  if (!esCodigo && incluyePalabraCompletaAdmin(texto, termino)) return 'word';
+  if (texto.includes(termino)) return 'include';
+  return null;
+}
+
+function esDistanciaMaxUnoAdmin(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let cambios = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    cambios++;
+    if (cambios > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else {
+      i++;
+      j++;
+    }
+  }
+  if (i < a.length || j < b.length) cambios++;
+  return cambios <= 1;
+}
+
+function buscarCoincidenciaFuzzyAdmin(tokens, variantes) {
+  for (const variante of variantes) {
+    if (!variante || variante.length < 4) continue;
+    for (const token of tokens || []) {
+      if (!token || token.length < 4) continue;
+      if (esDistanciaMaxUnoAdmin(variante, token)) return token;
+    }
+  }
+  return '';
+}
+
+function parsearBusquedaAvanzadaAdmin(rawInput) {
+  const raw = String(rawInput ?? '').trim();
+  const tokensRaw = raw.split(/\s+/).filter(Boolean);
+  const libres = [];
+  const filtros = {
+    oferta: false,
+    destacado: false,
+    masVendido: false,
+    stock: '',
+    rubro: '',
+    codigo: '',
+    precio: []
+  };
+
+  tokensRaw.forEach((tokenOriginal) => {
+    const token = normalizarTextoAdmin(tokenOriginal);
+    if (!token) return;
+    if (token === 'oferta') { filtros.oferta = true; return; }
+    if (token === 'destacado') { filtros.destacado = true; return; }
+    if (token === 'masvendido' || token === 'mas vendido' || token === 'top') { filtros.masVendido = true; return; }
+    if (token === 'stock') { filtros.stock = 'available'; return; }
+    if (token === 'sinstock' || token === 'agotado') { filtros.stock = 'empty'; return; }
+    const rubroMatch = tokenOriginal.match(/^rubro:(.+)$/i);
+    if (rubroMatch) { filtros.rubro = normalizarTextoAdmin(rubroMatch[1]); return; }
+    const codigoMatch = tokenOriginal.match(/^(?:codigo|idart):(.+)$/i);
+    if (codigoMatch) { filtros.codigo = normalizarTextoAdmin(codigoMatch[1]); return; }
+    const priceMatch = tokenOriginal.replace(/\$/g, '').match(/^precio(<=|>=|=|<|>)(.+)$/i);
+    if (priceMatch) {
+      const numero = normalizarNumeroConsultaAdmin(priceMatch[2]);
+      if (Number.isFinite(numero)) {
+        filtros.precio.push({ op: priceMatch[1], value: numero });
+        return;
+      }
+    }
+    libres.push(tokenOriginal);
+  });
+
+  const freeText = libres.join(' ');
+  const normalizedFreeText = normalizarTextoAdmin(freeText);
+  const termCounts = agruparTerminosBusquedaAdmin(freeText);
+  const hasText = !!normalizedFreeText;
+  const hasFilters = !!(filtros.oferta || filtros.destacado || filtros.masVendido || filtros.stock || filtros.rubro || filtros.codigo || filtros.precio.length);
+  return {
+    raw,
+    freeText,
+    normalizedFreeText,
+    termCounts,
+    hasText,
+    hasFilters,
+    filtros
+  };
+}
+
+function cumpleFiltrosBusquedaAdmin(articulo, parsed) {
+  const filtros = parsed.filtros;
+  if (filtros.oferta && !ofertaVigente({
+    oferta: articulo.oferta,
+    ofertaPct: articulo.ofertaPct,
+    ofertaHasta: articulo.ofertaHasta
+  })) return false;
+  if (filtros.destacado && !articulo.destacado) return false;
+  if (filtros.masVendido && !articulo.masVendido) return false;
+  const stock = Number(articulo.stock || 0);
+  if (filtros.stock === 'available' && !(Number.isFinite(stock) && stock > 0)) return false;
+  if (filtros.stock === 'empty' && Number.isFinite(stock) && stock > 0) return false;
+  if (filtros.rubro && !normalizarTextoAdmin(articulo.rubro || '').includes(filtros.rubro)) return false;
+  if (filtros.codigo && !String(articulo._adminSearchFields?.code || '').includes(filtros.codigo)) return false;
+  if (filtros.precio.length) {
+    const precioActual = ofertaVigente({
+      oferta: articulo.oferta,
+      ofertaPct: articulo.ofertaPct,
+      ofertaHasta: articulo.ofertaHasta
+    }) ? precioOferta(articulo.precio, articulo.ofertaPct) : Number(articulo.precio || 0);
+    const cumplePrecio = filtros.precio.every((filtro) => {
+      if (filtro.op === '<') return precioActual < filtro.value;
+      if (filtro.op === '>') return precioActual > filtro.value;
+      if (filtro.op === '<=') return precioActual <= filtro.value;
+      if (filtro.op === '>=') return precioActual >= filtro.value;
+      return precioActual === filtro.value;
+    });
+    if (!cumplePrecio) return false;
+  }
+  return true;
+}
+
+function cumpleRepeticionesBusquedaAdmin(articulo, termCounts) {
+  return [...termCounts.entries()].every(([termino, cantidad]) => {
+    const textoBase = termino.length === 1 && cantidad > 1 ? articulo._adminSearchFields?.principal || '' : articulo._adminSearchFields?.full || '';
+    return contarCoincidenciasAdmin(textoBase, termino) >= cantidad;
+  });
+}
+
+function encontrarMejorMatchTerminoAdmin(articulo, termino) {
+  const { directos, sinonimos } = obtenerRelacionTerminoAdmin(termino);
+  const campos = [
+    { name: 'code', text: articulo._adminSearchFields?.code || '', tokens: articulo._adminSearchTokens?.code || [], weights: { exact: 0, start: 2, word: 4, include: 6 }, fuzzyBase: null },
+    { name: 'principal', text: articulo._adminSearchFields?.principal || '', tokens: articulo._adminSearchTokens?.principal || [], weights: { exact: 10, start: 12, word: 15, include: 20 }, fuzzyBase: 34 },
+    { name: 'secondary', text: articulo._adminSearchFields?.secondary || '', tokens: articulo._adminSearchTokens?.secondary || [], weights: { exact: 28, start: 30, word: 34, include: 40 }, fuzzyBase: 54 },
+    { name: 'hiddenTags', text: articulo._adminSearchFields?.hiddenTags || '', tokens: articulo._adminSearchTokens?.hiddenTags || [], weights: { exact: 42, start: 44, word: 46, include: 50 }, fuzzyBase: 62 },
+    { name: 'rubro', text: articulo._adminSearchFields?.rubro || '', tokens: articulo._adminSearchTokens?.rubro || [], weights: { exact: 52, start: 54, word: 57, include: 62 }, fuzzyBase: 74 },
+    { name: 'full', text: articulo._adminSearchFields?.full || '', tokens: articulo._adminSearchTokens?.full || [], weights: { exact: 66, start: 68, word: 71, include: 76 }, fuzzyBase: null }
+  ];
+
+  let mejor = null;
+
+  function evaluarVariantes(variantes, esSinonimo) {
+    variantes.forEach((variante) => {
+      campos.forEach((campo) => {
+        const tipo = evaluarCoincidenciaCampoTextoAdmin(campo.text, variante, campo.name === 'code');
+        if (!tipo) return;
+        const puntaje = campo.weights[tipo] + (esSinonimo ? 8 : 0);
+        if (!mejor || puntaje < mejor.score) {
+          mejor = { field: campo.name, score: puntaje };
+        }
+      });
+    });
+  }
+
+  evaluarVariantes([...directos], false);
+  evaluarVariantes([...sinonimos], true);
+  if (mejor) return mejor;
+
+  campos.filter((campo) => campo.fuzzyBase !== null).forEach((campo) => {
+    const token = buscarCoincidenciaFuzzyAdmin(campo.tokens, directos);
+    if (token) {
+      const puntaje = campo.fuzzyBase;
+      if (!mejor || puntaje < mejor.score) {
+        mejor = { field: campo.name, score: puntaje };
+      }
+    }
+  });
+
+  return mejor;
+}
+
+function evaluarArticuloBusquedaAdmin(articulo, parsed) {
+  if (!cumpleFiltrosBusquedaAdmin(articulo, parsed)) return null;
+  if (!parsed.hasText) return { score: 0 };
+  if (!cumpleRepeticionesBusquedaAdmin(articulo, parsed.termCounts)) return null;
+
+  let score = 0;
+
+  for (const [termino, cantidad] of parsed.termCounts.entries()) {
+    const match = encontrarMejorMatchTerminoAdmin(articulo, termino);
+    if (!match) return null;
+    score += match.score + Math.max(0, cantidad - 1) * 3;
+  }
+
+  const phrase = parsed.normalizedFreeText;
+  if (phrase) {
+    const code = articulo._adminSearchFields?.code || '';
+    const principal = articulo._adminSearchFields?.principal || '';
+    const secondary = articulo._adminSearchFields?.secondary || '';
+    const hiddenTags = articulo._adminSearchFields?.hiddenTags || '';
+    if (code === phrase) score -= 18;
+    else if (code.startsWith(phrase)) score -= 10;
+    else if (principal === phrase) score -= 14;
+    else if (principal.startsWith(phrase)) score -= 9;
+    else if (incluyePalabraCompletaAdmin(principal, phrase)) score -= 5;
+    else if (secondary && secondary.includes(phrase)) score -= 2;
+    else if (hiddenTags && incluyePalabraCompletaAdmin(hiddenTags, phrase)) score -= 3;
+  }
+
+  return { score: Math.max(0, score) };
+}
+
+function procesarBusquedaAdminEnLista(listaFuente, rawInput) {
+  const parsed = parsearBusquedaAvanzadaAdmin(rawInput);
+  const listaBase = [...(listaFuente || [])];
+
+  if (!parsed.hasText && !parsed.hasFilters) {
+    return listaBase.sort((a, b) => (a.nombre || '').localeCompare((b.nombre || ''), 'es'));
+  }
+
+  return listaBase
+    .map((articulo) => ({ articulo, meta: evaluarArticuloBusquedaAdmin(articulo, parsed) }))
+    .filter((item) => !!item.meta)
+    .sort((a, b) => {
+      if (a.meta.score !== b.meta.score) return a.meta.score - b.meta.score;
+      return (a.articulo.nombre || '').localeCompare((b.articulo.nombre || ''), 'es');
+    })
+    .map((item) => item.articulo);
+}
+
+function obtenerRubrosSugeridosAdmin(lista = []) {
+  const rubroConteo = new Map();
+  (lista || []).forEach((articulo) => {
+    const rubro = String(articulo.rubro || '').trim();
+    if (!rubro) return;
+    rubroConteo.set(rubro, (rubroConteo.get(rubro) || 0) + 1);
+  });
+  return [...rubroConteo.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'))
+    .slice(0, 8)
+    .map(([rubro, cantidad]) => ({ rubro, cantidad }));
+}
+
+function toggleAdminAssistPanel(panelId, shouldShow) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  panel.classList.toggle('hidden', !shouldShow);
+}
+
+function renderRubrosAssistPanel({ panelId, inputId, rubros = [], rubroActivo = '' }) {
+  const panel = document.getElementById(panelId);
+  const input = document.getElementById(inputId);
+  if (!panel || !input) return;
+  if (!rubros.length) {
+    panel.innerHTML = '';
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.innerHTML = `<div class="admin-search-assist-title">Rubros sugeridos</div>
+    <div class="admin-search-assist-list">
+      ${rubros.map((item) => `<button class="admin-search-assist-item${item.rubro === rubroActivo ? ' is-active' : ''}" type="button" data-rubro-value="${escaparHtmlAdmin(item.rubro)}">
+        <span class="admin-search-assist-label">${escaparHtmlAdmin(item.rubro)}</span>
+        <span class="admin-search-assist-meta">${item.cantidad} resultado${item.cantidad === 1 ? '' : 's'}</span>
+      </button>`).join('')}
+    </div>`;
+  const shouldShow = document.activeElement === input || !!String(input.value || '').trim() || !!rubroActivo;
+  toggleAdminAssistPanel(panelId, shouldShow);
+}
+
+function obtenerAdminListaBase() {
+  const q = document.getElementById('searchAdmin').value;
+  let lista = procesarBusquedaAdminEnLista(todosArticulos, q);
+  if (adminChipActivo === 'oferta') {
+    lista = lista.filter(a => ofertaVigente({
+      oferta: toBool(a.oferta ?? a.enOferta ?? a.tagOferta),
+      ofertaPct: clampPct(a.ofertaPct ?? a.oferta_pct ?? a.ofertaPorcentaje ?? a.descuentoOferta ?? 0),
+      ofertaHasta: sanitizeIsoDate(a.ofertaHasta ?? a.oferta_hasta ?? a.fechaOfertaHasta ?? '')
+    }));
+  }
+  if (adminChipActivo === 'destacado') lista = lista.filter(a => toBool(a.destacado ?? a.tagDestacado));
+  if (adminChipActivo === 'masVendido') lista = lista.filter(a => toBool(a.masVendido ?? a.mas_vendido ?? a.tagMasVendido));
+  return lista;
+}
+
+function obtenerApplyTargetsListaBase() {
+  const sourceCode = document.getElementById('editId').value.trim();
+  const q = document.getElementById('applyTargetsSearch').value;
+  let lista = procesarBusquedaAdminEnLista(
+    [...todosArticulos].filter((articulo) => String(articulo.codigo || '').trim() !== sourceCode),
+    q
+  );
+  if (applyTargetsChipActivo === 'oferta') {
+    lista = lista.filter((articulo) => ofertaVigente({
+      oferta: toBool(articulo.oferta ?? articulo.enOferta ?? articulo.tagOferta),
+      ofertaPct: clampPct(articulo.ofertaPct ?? articulo.oferta_pct ?? articulo.ofertaPorcentaje ?? articulo.descuentoOferta ?? 0),
+      ofertaHasta: sanitizeIsoDate(articulo.ofertaHasta ?? articulo.oferta_hasta ?? articulo.fechaOfertaHasta ?? '')
+    }));
+  }
+  if (applyTargetsChipActivo === 'destacado') {
+    lista = lista.filter((articulo) => toBool(articulo.destacado ?? articulo.tagDestacado));
+  }
+  if (applyTargetsChipActivo === 'masVendido') {
+    lista = lista.filter((articulo) => toBool(articulo.masVendido ?? articulo.mas_vendido ?? articulo.tagMasVendido));
+  }
+  return lista;
+}
+
 function renderEditChips() {
   document.getElementById('editChipOferta').classList.toggle('active', !!editMeta.oferta);
   document.getElementById('editChipDestacado').classList.toggle('active', !!editMeta.destacado);
@@ -854,24 +1348,28 @@ function renderApplyFieldChips() {
   });
 }
 
+function renderApplyTargetsFilterChips() {
+  document.querySelectorAll('#applyTargetsFilters .apply-targets-filter-chip').forEach((chip) => {
+    chip.classList.toggle('active', chip.dataset.chip === applyTargetsChipActivo);
+  });
+}
+
 function getApplyTargetsFilteredList() {
-  const sourceCode = document.getElementById('editId').value.trim();
-  const q = normAdm(document.getElementById('applyTargetsSearch').value);
-  let lista = [...todosArticulos].filter((articulo) => String(articulo.codigo || '').trim() !== sourceCode);
-  if (q) {
-    const palabras = q.split(' ').filter(Boolean);
-    lista = lista.filter((articulo) => {
-      const texto = normAdm([
-        articulo.nombre || '',
-        articulo.codigo || '',
-        articulo.detalle || '',
-        articulo.rubro || '',
-        tagsOcultosComoTexto(obtenerTagsOcultosArticulo(articulo))
-      ].join(' '));
-      return palabras.every((palabra) => texto.includes(palabra));
-    });
+  const listaBase = obtenerApplyTargetsListaBase();
+  const rubros = obtenerRubrosSugeridosAdmin(listaBase);
+  if (applyTargetsRubroActivo && !rubros.some((item) => item.rubro === applyTargetsRubroActivo)) {
+    applyTargetsRubroActivo = '';
   }
-  lista.sort((a, b) => normAdm(a.nombre || '').localeCompare(normAdm(b.nombre || ''), 'es'));
+  renderRubrosAssistPanel({
+    panelId: 'applyTargetsAssist',
+    inputId: 'applyTargetsSearch',
+    rubros,
+    rubroActivo: applyTargetsRubroActivo
+  });
+  let lista = [...listaBase];
+  if (applyTargetsRubroActivo) {
+    lista = lista.filter((articulo) => String(articulo.rubro || '').trim() === applyTargetsRubroActivo);
+  }
   return lista;
 }
 
@@ -939,7 +1437,10 @@ window.abrirModalAplicarTargets = function() {
   applyTargetsSelection = new Set();
   applyTargetsFiltered = [];
   applyTargetsVisibleCount = 0;
+  applyTargetsChipActivo = '';
+  applyTargetsRubroActivo = '';
   document.getElementById('applyTargetsSearch').value = '';
+  renderApplyTargetsFilterChips();
   renderApplyTargetsList();
   document.getElementById('modalApplyTargets').classList.add('visible');
 };
@@ -1052,6 +1553,31 @@ document.getElementById('modalOferta').addEventListener('click', (event) => {
 });
 
 document.getElementById('applyTargetsSearch').addEventListener('input', () => renderApplyTargetsList(true));
+document.getElementById('searchAdmin').addEventListener('focus', () => filtrarLista());
+document.getElementById('applyTargetsSearch').addEventListener('focus', () => renderApplyTargetsList(true));
+document.getElementById('searchAdminAssist').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-rubro-value]');
+  if (!item) return;
+  const rubro = String(item.dataset.rubroValue || '').trim();
+  if (!rubro) return;
+  adminRubroActivo = adminRubroActivo === rubro ? '' : rubro;
+  filtrarLista();
+});
+document.getElementById('applyTargetsAssist').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-rubro-value]');
+  if (!item) return;
+  const rubro = String(item.dataset.rubroValue || '').trim();
+  if (!rubro) return;
+  applyTargetsRubroActivo = applyTargetsRubroActivo === rubro ? '' : rubro;
+  renderApplyTargetsList(true);
+});
+document.querySelectorAll('#applyTargetsFilters .apply-targets-filter-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    applyTargetsChipActivo = applyTargetsChipActivo === chip.dataset.chip ? '' : chip.dataset.chip;
+    renderApplyTargetsFilterChips();
+    renderApplyTargetsList(true);
+  });
+});
 document.getElementById('applyTargetsList').addEventListener('click', (event) => {
   const item = event.target.closest('[data-code]');
   if (!item) return;
@@ -1305,11 +1831,15 @@ window.abrirEditar = codigo => {
   applyFieldsSelection = new Set();
   applyTargetsFiltered = [];
   applyTargetsVisibleCount = 0;
+  applyTargetsChipActivo = '';
+  applyTargetsRubroActivo = '';
   document.getElementById('btnGuardarEdit').disabled = false;
   document.getElementById('btnGuardarEdit').textContent = 'Guardar cambios';
   document.getElementById('btnAplicarRelacionados').disabled = false;
   document.getElementById('btnAplicarCamposSeleccionados').textContent = 'Aplicar';
   document.getElementById('applyTargetsSearch').value = '';
+  renderApplyTargetsFilterChips();
+  toggleAdminAssistPanel('applyTargetsAssist', false);
   window.cerrarModalAplicarTargets();
   window.cerrarModalAplicarCampos(false);
   document.getElementById('editId').value      = codigo;
@@ -1341,6 +1871,9 @@ window.cerrarModal = () => {
   applyFieldsSelection = new Set();
   applyTargetsFiltered = [];
   applyTargetsVisibleCount = 0;
+  applyTargetsChipActivo = '';
+  applyTargetsRubroActivo = '';
+  toggleAdminAssistPanel('applyTargetsAssist', false);
   fotoArchivoEdit = null;
 };
 
@@ -1530,41 +2063,20 @@ window.goPage = function(page) {
 };
 
 // -- BUSCADOR CON PRIORIDAD (igual que el público) --
-function normAdm(t) {
-  return (t||'').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[-_]/g," ").replace(/[^\w\s]/g,"").replace(/\s+/g," ").trim();
-}
-
 window.filtrarLista = () => {
-  const q = normAdm(document.getElementById('searchAdmin').value);
-  let lista;
-  if (!q) {
-    lista = [...todosArticulos].sort((a,b) => (a.nombre||'').localeCompare(b.nombre||'','es'));
-  } else {
-    const palabras = q.split(' ').filter(Boolean);
-    lista = todosArticulos.filter(a => {
-      const texto = normAdm((a.nombre||'')+' '+(a.codigo||'')+' '+(a.detalle||'')+' '+tagsOcultosComoTexto(obtenerTagsOcultosArticulo(a)));
-      return palabras.every(p => texto.includes(p));
-    });
-    function prio(nombre) {
-      const n = normAdm(nombre||'');
-      if (n.startsWith(q)) return 0;
-      const exactas = palabras.every(p => new RegExp('(^| )'+p+'( |$)').test(n));
-      return exactas ? 1 : 2;
-    }
-    lista.sort((a,b) => {
-      const d = prio(a.nombre) - prio(b.nombre);
-      return d !== 0 ? d : normAdm(a.nombre||'').localeCompare(normAdm(b.nombre||''),'es');
-    });
+  const listaBase = obtenerAdminListaBase();
+  const rubros = obtenerRubrosSugeridosAdmin(listaBase);
+  if (adminRubroActivo && !rubros.some((item) => item.rubro === adminRubroActivo)) {
+    adminRubroActivo = '';
   }
-  if (adminChipActivo === 'oferta') {
-    lista = lista.filter(a => ofertaVigente({
-      oferta: toBool(a.oferta ?? a.enOferta ?? a.tagOferta),
-      ofertaPct: clampPct(a.ofertaPct ?? a.oferta_pct ?? a.ofertaPorcentaje ?? a.descuentoOferta ?? 0),
-      ofertaHasta: sanitizeIsoDate(a.ofertaHasta ?? a.oferta_hasta ?? a.fechaOfertaHasta ?? '')
-    }));
-  }
-  if (adminChipActivo === 'destacado') lista = lista.filter(a => toBool(a.destacado ?? a.tagDestacado));
-  if (adminChipActivo === 'masVendido') lista = lista.filter(a => toBool(a.masVendido ?? a.mas_vendido ?? a.tagMasVendido));
+  renderRubrosAssistPanel({
+    panelId: 'searchAdminAssist',
+    inputId: 'searchAdmin',
+    rubros,
+    rubroActivo: adminRubroActivo
+  });
+  let lista = [...listaBase];
+  if (adminRubroActivo) lista = lista.filter(a => String(a.rubro || '').trim() === adminRubroActivo);
   renderLista(lista);
 };
 
