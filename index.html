@@ -1128,7 +1128,7 @@
 <script src="presupuesto-shared.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -1141,6 +1141,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
+const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
 
 // POPUP AL ABRIR
 onSnapshot(doc(db, 'config', 'popup'), snap => {
@@ -1245,6 +1246,87 @@ function obtenerTagsOcultosArticulo(articulo) {
 
 function obtenerTextoTagsOcultos(articulo) {
   return obtenerTagsOcultosArticulo(articulo).join(' ');
+}
+
+async function cargarJsonRemoto(url) {
+  if (!url) return [];
+  const res = await fetch(url + "?t=" + Date.now());
+  if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) throw new Error('JSON inválido');
+  return data;
+}
+
+function extraerMetadatosArticulo(raw = {}) {
+  const codigo = String(raw?.codigo ?? raw?.idart ?? raw?.idArt ?? raw?.id ?? '').trim();
+  if (!codigo) return null;
+  const meta = {
+    codigo,
+    detalle: String(raw?.detalle ?? '').trim(),
+    tagsOcultos: obtenerTagsOcultosArticulo(raw),
+    fotoUrl: String(raw?.fotoUrl || '').trim(),
+    oferta: toBool(raw?.oferta ?? raw?.enOferta ?? raw?.tagOferta),
+    destacado: toBool(raw?.destacado ?? raw?.tagDestacado),
+    masVendido: toBool(raw?.masVendido ?? raw?.mas_vendido ?? raw?.tagMasVendido),
+    ofertaPct: clampPct(raw?.ofertaPct ?? raw?.oferta_pct ?? raw?.ofertaPorcentaje ?? raw?.descuentoOferta ?? 0),
+    ofertaHasta: sanitizeIsoDate(raw?.ofertaHasta ?? raw?.oferta_hasta ?? raw?.fechaOfertaHasta ?? '')
+  };
+  const tieneContenido = !!(
+    meta.detalle ||
+    meta.tagsOcultos.length ||
+    meta.fotoUrl ||
+    meta.oferta ||
+    meta.ofertaPct > 0 ||
+    meta.ofertaHasta ||
+    meta.destacado ||
+    meta.masVendido
+  );
+  return tieneContenido ? meta : null;
+}
+
+function construirMapaMetadatos(lista = []) {
+  const mapa = new Map();
+  (lista || []).forEach((item) => {
+    const meta = extraerMetadatosArticulo(item);
+    if (meta?.codigo) mapa.set(meta.codigo, meta);
+  });
+  return mapa;
+}
+
+function aplicarMetadatosArticulo(raw = {}, meta = null) {
+  if (!meta) return raw;
+  return {
+    ...raw,
+    detalle: meta.detalle ?? raw.detalle ?? '',
+    tagsOcultos: meta.tagsOcultos ?? raw.tagsOcultos ?? raw.tagsBusqueda ?? raw.tags ?? raw.palabrasClave ?? '',
+    fotoUrl: meta.fotoUrl ?? raw.fotoUrl ?? '',
+    oferta: meta.oferta ?? raw.oferta ?? raw.enOferta ?? raw.tagOferta,
+    ofertaPct: meta.ofertaPct ?? raw.ofertaPct ?? raw.oferta_pct ?? raw.ofertaPorcentaje ?? raw.descuentoOferta ?? 0,
+    ofertaHasta: meta.ofertaHasta ?? raw.ofertaHasta ?? raw.oferta_hasta ?? raw.fechaOfertaHasta ?? '',
+    destacado: meta.destacado ?? raw.destacado ?? raw.tagDestacado,
+    masVendido: meta.masVendido ?? raw.masVendido ?? raw.mas_vendido ?? raw.tagMasVendido
+  };
+}
+
+async function cargarListaConMetadatos(baseUrl) {
+  const [baseData, metaSnap] = await Promise.all([
+    cargarJsonRemoto(baseUrl),
+    getDoc(doc(db, 'config', ARTICULOS_META_DOC_ID))
+  ]);
+  const metaUrl = metaSnap.exists() ? String(metaSnap.data()?.url || '').trim() : '';
+  let metaData = [];
+  if (metaUrl) {
+    try {
+      metaData = await cargarJsonRemoto(metaUrl);
+    } catch (error) {
+      console.warn('No se pudieron cargar los metadatos separados de artículos', error);
+    }
+  }
+  const metaMap = construirMapaMetadatos(metaData);
+  return baseData.map((item) => {
+    const codigo = String(item?.codigo ?? item?.idart ?? item?.idArt ?? item?.id ?? '').trim();
+    return aplicarMetadatosArticulo(item, metaMap.get(codigo));
+  });
 }
 
 function precioOferta(precioLista, ofertaPct) {
@@ -2258,8 +2340,7 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
   }
   try {
     const url = snap.data().url;
-    const res = await fetch(url + "?t=" + Date.now());
-    const data = await res.json();
+    const data = await cargarListaConMetadatos(url);
     todosArticulos = data.map(a => {
       const normalizado = normalizarArticulo(a);
       const indice = construirIndiceBusquedaArticulo(normalizado);

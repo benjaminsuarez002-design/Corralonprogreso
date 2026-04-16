@@ -419,7 +419,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL      = 'https://tizyjenayrcdkcodsjnc.supabase.co';
@@ -444,10 +444,13 @@ let todosArticulos = [];
 let fotoArchivoNuevo = null;
 let fotoArchivoEdit  = null;
 let jsonListaUrl = '';
+let jsonListaMetaUrl = '';
+let articulosMetaMap = new Map();
 let currentItems = [];
 let currentPage = 1;
 let adminChipActivo = '';
 const pageSize = 20;
+const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
 const TODAY_ISO = () => {
   const now = new Date();
   const y = now.getFullYear();
@@ -595,28 +598,95 @@ function normalizarArticuloAdmin(articulo = {}) {
   };
 }
 
-function serializarArticuloPublicable(articulo) {
+function serializarArticuloBase(articulo) {
   const normalizado = normalizarArticuloAdmin(articulo);
   return {
-    ...articulo,
     codigo: normalizado.codigo,
+    idart: normalizado.codigo,
     nombre: normalizado.nombre,
-    detalle: normalizado.detalle,
+    descripcion: normalizado.nombre,
     rubro: normalizado.rubro,
-    tagsOcultos: [...normalizado.tagsOcultos],
     precio: Number(normalizado.precio || 0),
+    stock: normalizado.stock ?? ''
+  };
+}
+
+function extraerMetadatosPersistentes(articulo = {}) {
+  const normalizado = normalizarArticuloAdmin(articulo);
+  if (!normalizado.codigo) return null;
+  const meta = {
+    codigo: normalizado.codigo,
+    detalle: normalizado.detalle,
+    tagsOcultos: [...normalizado.tagsOcultos],
     fotoUrl: normalizado.fotoUrl || '',
-    stock: normalizado.stock ?? '',
     oferta: !!normalizado.oferta,
     ofertaPct: normalizado.ofertaPct,
     ofertaHasta: normalizado.ofertaHasta,
     destacado: !!normalizado.destacado,
     masVendido: !!normalizado.masVendido
   };
+  const tieneContenido = !!(
+    meta.detalle ||
+    meta.tagsOcultos.length ||
+    meta.fotoUrl ||
+    meta.oferta ||
+    meta.ofertaPct > 0 ||
+    meta.ofertaHasta ||
+    meta.destacado ||
+    meta.masVendido
+  );
+  return tieneContenido ? meta : null;
+}
+
+function construirMapaMetadatos(lista = []) {
+  const mapa = new Map();
+  (lista || []).forEach((articulo) => {
+    const meta = extraerMetadatosPersistentes(articulo);
+    if (meta?.codigo) mapa.set(meta.codigo, meta);
+  });
+  return mapa;
+}
+
+function mapearMetadatosPorCodigo(lista = []) {
+  const mapa = new Map();
+  (lista || []).forEach((item) => {
+    const meta = extraerMetadatosPersistentes(item);
+    if (meta?.codigo) mapa.set(meta.codigo, meta);
+  });
+  return mapa;
+}
+
+function aplicarMetadatosArticulo(articulo = {}, meta = null) {
+  if (!meta) return normalizarArticuloAdmin(articulo);
+  return normalizarArticuloAdmin({
+    ...articulo,
+    detalle: meta.detalle ?? articulo.detalle ?? '',
+    tagsOcultos: meta.tagsOcultos ?? articulo.tagsOcultos ?? articulo.tagsBusqueda ?? articulo.tags ?? articulo.palabrasClave ?? '',
+    fotoUrl: meta.fotoUrl ?? articulo.fotoUrl ?? '',
+    oferta: meta.oferta ?? articulo.oferta ?? articulo.enOferta ?? articulo.tagOferta,
+    ofertaPct: meta.ofertaPct ?? articulo.ofertaPct ?? articulo.oferta_pct ?? articulo.ofertaPorcentaje ?? articulo.descuentoOferta ?? 0,
+    ofertaHasta: meta.ofertaHasta ?? articulo.ofertaHasta ?? articulo.oferta_hasta ?? articulo.fechaOfertaHasta ?? '',
+    destacado: meta.destacado ?? articulo.destacado ?? articulo.tagDestacado,
+    masVendido: meta.masVendido ?? articulo.masVendido ?? articulo.mas_vendido ?? articulo.tagMasVendido
+  });
+}
+
+function aplicarMetadatosLista(lista = [], metaMap = articulosMetaMap) {
+  return (lista || []).map((articulo) => {
+    const codigo = String(articulo?.codigo ?? articulo?.idart ?? '').trim();
+    return aplicarMetadatosArticulo(articulo, metaMap.get(codigo));
+  });
+}
+
+function serializarMetadatosArticulos(lista = []) {
+  return (lista || [])
+    .map(extraerMetadatosPersistentes)
+    .filter(Boolean);
 }
 
 function setTodosArticulos(lista, { render = true } = {}) {
   todosArticulos = (lista || []).map(normalizarArticuloAdmin);
+  articulosMetaMap = construirMapaMetadatos(todosArticulos);
   if (render) filtrarLista();
 }
 
@@ -635,12 +705,54 @@ function setSyncIndicator(state = 'idle', message = '') {
   else if (state === 'error') el.classList.add('is-error');
 }
 
+async function subirListaBaseArticulos(lista) {
+  const payload = (lista || []).map(serializarArticuloBase);
+  return subirJSONaCloudinary(payload);
+}
+
+async function subirMetadatosArticulos(lista) {
+  const payload = serializarMetadatosArticulos(lista);
+  return subirJSONaCloudinary(payload);
+}
+
 async function publicarListaArticulos(lista) {
-  const payload = (lista || []).map(serializarArticuloPublicable);
-  const url = await subirJSONaCloudinary(payload);
-  await setDoc(doc(db, 'config', 'listaActual'), { url, updatedAt: Date.now() });
-  jsonListaUrl = url;
-  return url;
+  const [baseUrl, metaUrl] = await Promise.all([
+    subirListaBaseArticulos(lista),
+    subirMetadatosArticulos(lista)
+  ]);
+  await setDoc(doc(db, 'config', ARTICULOS_META_DOC_ID), { url: metaUrl, updatedAt: Date.now() });
+  await setDoc(doc(db, 'config', 'listaActual'), { url: baseUrl, updatedAt: Date.now() });
+  jsonListaMetaUrl = metaUrl;
+  jsonListaUrl = baseUrl;
+  return { baseUrl, metaUrl };
+}
+
+async function cargarJsonRemoto(url) {
+  if (!url) return [];
+  const res = await fetch(url + "?t=" + Date.now());
+  if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) throw new Error('JSON inválido');
+  return data;
+}
+
+async function cargarListaPublicada(baseUrl) {
+  const [baseData, metaSnap] = await Promise.all([
+    cargarJsonRemoto(baseUrl),
+    getDoc(doc(db, 'config', ARTICULOS_META_DOC_ID))
+  ]);
+  const metaUrl = metaSnap.exists() ? String(metaSnap.data()?.url || '').trim() : '';
+  let metaData = [];
+  if (metaUrl) {
+    try {
+      metaData = await cargarJsonRemoto(metaUrl);
+    } catch (error) {
+      console.warn('No se pudieron cargar los metadatos separados de artículos', error);
+    }
+  }
+  jsonListaMetaUrl = metaUrl;
+  articulosMetaMap = mapearMetadatosPorCodigo(metaData);
+  return aplicarMetadatosLista(baseData, articulosMetaMap);
 }
 
 async function sincronizarArticulosAhora(reason = 'cambios') {
@@ -1482,10 +1594,7 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
       if (loader) loader.style.display = 'none';
       return;
     }
-    const res = await fetch(url + "?t=" + Date.now());
-    if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
-    const data = await res.json();
-    if (!Array.isArray(data)) throw new Error('JSON inválido');
+    const data = await cargarListaPublicada(url);
     setTodosArticulos(data);
     syncLoadedOnce = true;
     if (!localStateDirty) setSyncIndicator('ok', 'Sincronizado');
@@ -1690,21 +1799,16 @@ function parsePrecio(row) {
 function buildImportArticle(r, viejo = {}) {
   const code = String(r.codigo || r.idart || '').trim();
   const parsedPrecio = parsePrecio(r);
-  return {
+  const metaExistente = articulosMetaMap.get(code) || extraerMetadatosPersistentes(viejo);
+  const base = {
     codigo: code,
     nombre: r.nombre || viejo.nombre || '',
-    detalle: r.detalle || viejo.detalle || '',
-    tagsOcultos: normalizarTagsOcultos(r.tagsOcultos ?? r.tagsBusqueda ?? r.tags ?? r.keywords ?? viejo.tagsOcultos ?? viejo.tagsBusqueda ?? viejo.tags ?? viejo.palabrasClave ?? ''),
     precio: parsedPrecio !== null ? parsedPrecio : Number(viejo.precio || 0),
-    fotoUrl: viejo.fotoUrl || '',
     rubro: r.rubro || viejo.rubro || '',
-    stock: (r.stock !== undefined && r.stock !== '') ? r.stock : (viejo.stock !== undefined ? viejo.stock : ''),
-    oferta: toBool(r.oferta ?? viejo.oferta ?? viejo.enOferta ?? viejo.tagOferta),
-    ofertaPct: clampPct(r.ofertaPct ?? viejo.ofertaPct ?? viejo.oferta_pct ?? viejo.ofertaPorcentaje ?? viejo.descuentoOferta ?? 0),
-    ofertaHasta: sanitizeIsoDate(r.ofertaHasta ?? viejo.ofertaHasta ?? viejo.oferta_hasta ?? viejo.fechaOfertaHasta ?? ''),
-    destacado: toBool(r.destacado ?? viejo.destacado ?? viejo.tagDestacado),
-    masVendido: toBool(r.masVendido ?? viejo.masVendido ?? viejo.mas_vendido ?? viejo.tagMasVendido)
   };
+  if (r.stock !== undefined && r.stock !== '') base.stock = r.stock;
+  else if (viejo.stock !== undefined) base.stock = viejo.stock;
+  return aplicarMetadatosArticulo(base, metaExistente);
 }
 
 async function doImport(modo) {
