@@ -78,7 +78,25 @@
   .search-admin svg { color: var(--muted); flex-shrink: 0; }
   .admin-search-assist { position: absolute; top: calc(100% + 8px); left: 0; right: 0; border: 1px solid var(--border); border-radius: 14px; background: rgba(34,38,58,.98); box-shadow: 0 16px 40px rgba(0,0,0,.26); padding: 10px; display: grid; gap: 8px; z-index: 30; max-height: min(42vh, 340px); overflow-y: auto; }
   .admin-search-assist.hidden { display: none; }
+  .admin-search-assist-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .admin-search-assist-title { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .8px; }
+  .admin-search-assist-close {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.04);
+    color: var(--texto);
+    padding: 6px 10px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    cursor: pointer;
+    transition: .18s ease;
+  }
+  .admin-search-assist-close:hover {
+    border-color: #4a5070;
+    background: rgba(255,255,255,0.08);
+  }
   .admin-search-assist-list { display: grid; gap: 8px; }
   .admin-search-assist-item { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); color: var(--texto); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; cursor: pointer; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
   .admin-search-assist-item:hover { border-color: #4a5070; transform: translateY(-1px); }
@@ -266,6 +284,18 @@
     <div class="art-contador" id="artContador"></div>
     <div id="listaArticulos"><div class="empty-lista">Cargando...</div></div>
     <div id="pagination" class="pagination"></div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="card form-col span-full">
+    <div class="card-title">Nota inferior web</div>
+    <div class="field">
+      <label>Mensaje de la franja roja</label>
+      <textarea id="fNotaInferior" placeholder="Ej: Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo."></textarea>
+      <div class="field-help">Se muestra al público en la franja roja fija de abajo del sitio.</div>
+    </div>
+    <button class="btn-guardar" id="btnGuardarNotaInferior" onclick="guardarNotaInferior()" style="max-width:280px">Guardar nota inferior</button>
   </div>
 </div>
 
@@ -475,6 +505,8 @@ let currentPage = 1;
 let adminChipActivo = '';
 const pageSize = 20;
 const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
+const STOCK_NOTICE_DOC_ID = 'stockNotice';
+const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo.';
 const TODAY_ISO = () => {
   const now = new Date();
   const y = now.getFullYear();
@@ -1276,14 +1308,18 @@ function renderRubrosAssistPanel({ panelId, inputId, rubros = [], rubroActivo = 
     panel.classList.add('hidden');
     return;
   }
-  panel.innerHTML = `<div class="admin-search-assist-title">Rubros sugeridos</div>
+  panel.innerHTML = `<div class="admin-search-assist-head">
+      <div class="admin-search-assist-title">Rubros sugeridos</div>
+      <button class="admin-search-assist-close" type="button" data-close-admin-assist="1">Contraer</button>
+    </div>
     <div class="admin-search-assist-list">
       ${rubros.map((item) => `<button class="admin-search-assist-item${item.rubro === rubroActivo ? ' is-active' : ''}" type="button" data-rubro-value="${escaparHtmlAdmin(item.rubro)}">
         <span class="admin-search-assist-label">${escaparHtmlAdmin(item.rubro)}</span>
         <span class="admin-search-assist-meta">${item.cantidad} resultado${item.cantidad === 1 ? '' : 's'}</span>
       </button>`).join('')}
     </div>`;
-  const shouldShow = document.activeElement === input || !!String(input.value || '').trim() || !!rubroActivo;
+  const wrap = input.closest('.search-admin-wrap');
+  const shouldShow = !!wrap && wrap.contains(document.activeElement);
   toggleAdminAssistPanel(panelId, shouldShow);
 }
 
@@ -1552,24 +1588,61 @@ document.getElementById('modalOferta').addEventListener('click', (event) => {
   if (event.target === document.getElementById('modalOferta')) window.cancelarModalOferta();
 });
 
-document.getElementById('applyTargetsSearch').addEventListener('input', () => renderApplyTargetsList(true));
-document.getElementById('searchAdmin').addEventListener('focus', () => filtrarLista());
-document.getElementById('applyTargetsSearch').addEventListener('focus', () => renderApplyTargetsList(true));
-document.getElementById('searchAdminAssist').addEventListener('click', (event) => {
+const searchAdminInput = document.getElementById('searchAdmin');
+const applyTargetsSearchInput = document.getElementById('applyTargetsSearch');
+const searchAdminWrap = document.getElementById('searchAdminWrap');
+const applyTargetsSearchWrap = document.getElementById('applyTargetsSearchWrap');
+const searchAdminAssist = document.getElementById('searchAdminAssist');
+const applyTargetsAssist = document.getElementById('applyTargetsAssist');
+
+function ocultarAdminAssist(panelId, input = null) {
+  toggleAdminAssistPanel(panelId, false);
+  if (input) input.blur();
+}
+
+function ocultarAdminAssistSiPerdioFoco(wrap, panelId) {
+  requestAnimationFrame(() => {
+    if (!wrap.contains(document.activeElement)) toggleAdminAssistPanel(panelId, false);
+  });
+}
+
+searchAdminAssist.addEventListener('mousedown', (event) => event.preventDefault());
+applyTargetsAssist.addEventListener('mousedown', (event) => event.preventDefault());
+
+applyTargetsSearchInput.addEventListener('input', () => renderApplyTargetsList(true));
+searchAdminInput.addEventListener('focus', () => filtrarLista());
+applyTargetsSearchInput.addEventListener('focus', () => renderApplyTargetsList(true));
+searchAdminWrap.addEventListener('focusout', () => ocultarAdminAssistSiPerdioFoco(searchAdminWrap, 'searchAdminAssist'));
+applyTargetsSearchWrap.addEventListener('focusout', () => ocultarAdminAssistSiPerdioFoco(applyTargetsSearchWrap, 'applyTargetsAssist'));
+searchAdminAssist.addEventListener('click', (event) => {
+  if (event.target.closest('[data-close-admin-assist]')) {
+    ocultarAdminAssist('searchAdminAssist', searchAdminInput);
+    return;
+  }
   const item = event.target.closest('[data-rubro-value]');
   if (!item) return;
   const rubro = String(item.dataset.rubroValue || '').trim();
   if (!rubro) return;
   adminRubroActivo = adminRubroActivo === rubro ? '' : rubro;
   filtrarLista();
+  toggleAdminAssistPanel('searchAdminAssist', false);
 });
-document.getElementById('applyTargetsAssist').addEventListener('click', (event) => {
+applyTargetsAssist.addEventListener('click', (event) => {
+  if (event.target.closest('[data-close-admin-assist]')) {
+    ocultarAdminAssist('applyTargetsAssist', applyTargetsSearchInput);
+    return;
+  }
   const item = event.target.closest('[data-rubro-value]');
   if (!item) return;
   const rubro = String(item.dataset.rubroValue || '').trim();
   if (!rubro) return;
   applyTargetsRubroActivo = applyTargetsRubroActivo === rubro ? '' : rubro;
   renderApplyTargetsList(true);
+  toggleAdminAssistPanel('applyTargetsAssist', false);
+});
+document.addEventListener('click', (event) => {
+  if (!searchAdminWrap.contains(event.target)) toggleAdminAssistPanel('searchAdminAssist', false);
+  if (!applyTargetsSearchWrap.contains(event.target)) toggleAdminAssistPanel('applyTargetsAssist', false);
 });
 document.querySelectorAll('#applyTargetsFilters .apply-targets-filter-chip').forEach((chip) => {
   chip.addEventListener('click', () => {
@@ -1775,6 +1848,33 @@ window.quitarPopup = async () => {
     toast('Popup eliminado', 'ok');
   } catch(e) { toast('O ' + e.message, 'err'); }
 };
+
+window.guardarNotaInferior = async () => {
+  const input = document.getElementById('fNotaInferior');
+  const btn = document.getElementById('btnGuardarNotaInferior');
+  const texto = String(input?.value || '').trim() || DEFAULT_STOCK_NOTICE;
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  try {
+    await setDoc(doc(db, 'config', STOCK_NOTICE_DOC_ID), {
+      text: texto,
+      updatedAt: Date.now()
+    });
+    if (input) input.value = texto;
+    toast('Nota inferior guardada', 'ok');
+  } catch (e) {
+    toast('O ' + e.message, 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = 'Guardar nota inferior';
+};
+
+onSnapshot(doc(db, 'config', STOCK_NOTICE_DOC_ID), (snap) => {
+  const input = document.getElementById('fNotaInferior');
+  if (!input) return;
+  const texto = snap.exists() ? String(snap.data()?.text || '').trim() : '';
+  input.value = texto || DEFAULT_STOCK_NOTICE;
+}, () => {});
 
 window.guardarArticulo = async () => {
   const codigo  = document.getElementById('fCodigo').value.trim();
