@@ -974,6 +974,18 @@ function contarCoincidenciasAdmin(texto, termino) {
   return total;
 }
 
+function contarCoincidenciasConVariantesAdmin(texto, termino) {
+  if (!texto || !termino) return 0;
+  const base = normalizarSeparadoresBusquedaAdmin(texto);
+  const variantes = [...obtenerVariantesTerminoAdmin(termino)].filter(Boolean);
+  if (!variantes.length) return contarCoincidenciasAdmin(base, termino);
+  let mejor = 0;
+  variantes.forEach((variante) => {
+    mejor = Math.max(mejor, contarCoincidenciasAdmin(base, normalizarSeparadoresBusquedaAdmin(variante)));
+  });
+  return mejor;
+}
+
 function normalizarNumeroConsultaAdmin(valor) {
   let raw = String(valor ?? '').trim().replace(/\$/g, '').replace(/\s+/g, '');
   if (!raw) return NaN;
@@ -1214,7 +1226,7 @@ function cumpleFiltrosBusquedaAdmin(articulo, parsed) {
 function cumpleRepeticionesBusquedaAdmin(articulo, termCounts) {
   return [...termCounts.entries()].every(([termino, cantidad]) => {
     const textoBase = termino.length === 1 && cantidad > 1 ? articulo._adminSearchFields?.principal || '' : articulo._adminSearchFields?.full || '';
-    return contarCoincidenciasAdmin(textoBase, termino) >= cantidad;
+    return contarCoincidenciasConVariantesAdmin(textoBase, termino) >= cantidad;
   });
 }
 
