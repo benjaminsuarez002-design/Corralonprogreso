@@ -529,6 +529,7 @@ let applyTargetsVisibleCount = 0;
 let applyTargetsChipActivo = '';
 let adminRubroActivo = '';
 let applyTargetsRubroActivo = '';
+let articuloPendienteAbrir = '';
 let syncTimer = null;
 let syncInFlight = false;
 let syncQueued = false;
@@ -541,6 +542,11 @@ const topFormCard = topPanelsWrap?.querySelector('.card.form-col');
 const topListCard = topPanelsWrap?.querySelector('.card.lista-col');
 const topFormImageZone = document.getElementById('dropZone');
 const EXTRA_ITEM_HEIGHT_FALLBACK = 92;
+
+try {
+  const params = new URLSearchParams(window.location.search || '');
+  articuloPendienteAbrir = String(params.get('edit') || '').trim();
+} catch (e) {}
 
 function getExtraAdminItemHeight() {
   const firstItem = document.querySelector('#listaArticulos .art-item');
@@ -1096,6 +1102,30 @@ function buscarCoincidenciaFuzzyAdmin(tokens, variantes) {
   return '';
 }
 
+function compactarTextoBusquedaAdmin(texto) {
+  return normalizarSeparadoresBusquedaAdmin(texto).replace(/\s+/g, '');
+}
+
+function dividirTokensBusquedaAdmin(texto) {
+  return normalizarSeparadoresBusquedaAdmin(texto).split(' ').filter(Boolean);
+}
+
+function contarTokensPresentesEnTextoAdmin(texto, tokens) {
+  if (!texto || !tokens.length) return 0;
+  const base = normalizarSeparadoresBusquedaAdmin(texto);
+  const compacto = compactarTextoBusquedaAdmin(texto);
+  let total = 0;
+  tokens.forEach((token) => {
+    const t = normalizarSeparadoresBusquedaAdmin(token);
+    if (!t) return;
+    const tCompacto = t.replace(/\s+/g, '');
+    if (incluyePalabraCompletaAdmin(base, t) || base.includes(t) || (tCompacto && compacto.includes(tCompacto))) {
+      total++;
+    }
+  });
+  return total;
+}
+
 function parsearBusquedaAvanzadaAdmin(rawInput) {
   const raw = String(rawInput ?? '').trim();
   const tokensRaw = raw.split(/\s+/).filter(Boolean);
@@ -1191,12 +1221,12 @@ function cumpleRepeticionesBusquedaAdmin(articulo, termCounts) {
 function encontrarMejorMatchTerminoAdmin(articulo, termino) {
   const { directos, sinonimos } = obtenerRelacionTerminoAdmin(termino);
   const campos = [
-    { name: 'code', text: articulo._adminSearchFields?.code || '', tokens: articulo._adminSearchTokens?.code || [], weights: { exact: 0, start: 2, word: 4, include: 6 }, fuzzyBase: null },
-    { name: 'principal', text: articulo._adminSearchFields?.principal || '', tokens: articulo._adminSearchTokens?.principal || [], weights: { exact: 10, start: 12, word: 15, include: 20 }, fuzzyBase: 34 },
-    { name: 'secondary', text: articulo._adminSearchFields?.secondary || '', tokens: articulo._adminSearchTokens?.secondary || [], weights: { exact: 28, start: 30, word: 34, include: 40 }, fuzzyBase: 54 },
-    { name: 'hiddenTags', text: articulo._adminSearchFields?.hiddenTags || '', tokens: articulo._adminSearchTokens?.hiddenTags || [], weights: { exact: 42, start: 44, word: 46, include: 50 }, fuzzyBase: 62 },
-    { name: 'rubro', text: articulo._adminSearchFields?.rubro || '', tokens: articulo._adminSearchTokens?.rubro || [], weights: { exact: 52, start: 54, word: 57, include: 62 }, fuzzyBase: 74 },
-    { name: 'full', text: articulo._adminSearchFields?.full || '', tokens: articulo._adminSearchTokens?.full || [], weights: { exact: 66, start: 68, word: 71, include: 76 }, fuzzyBase: null }
+    { name: 'principal', text: articulo._adminSearchFields?.principal || '', tokens: articulo._adminSearchTokens?.principal || [], weights: { exact: 0, start: 2, word: 4, include: 8 }, fuzzyBase: 16 },
+    { name: 'secondary', text: articulo._adminSearchFields?.secondary || '', tokens: articulo._adminSearchTokens?.secondary || [], weights: { exact: 20, start: 22, word: 25, include: 30 }, fuzzyBase: 38 },
+    { name: 'hiddenTags', text: articulo._adminSearchFields?.hiddenTags || '', tokens: articulo._adminSearchTokens?.hiddenTags || [], weights: { exact: 42, start: 45, word: 48, include: 54 }, fuzzyBase: 62 },
+    { name: 'rubro', text: articulo._adminSearchFields?.rubro || '', tokens: articulo._adminSearchTokens?.rubro || [], weights: { exact: 58, start: 60, word: 63, include: 68 }, fuzzyBase: 78 },
+    { name: 'code', text: articulo._adminSearchFields?.code || '', tokens: articulo._adminSearchTokens?.code || [], weights: { exact: 72, start: 74, word: 77, include: 82 }, fuzzyBase: null },
+    { name: 'full', text: articulo._adminSearchFields?.full || '', tokens: articulo._adminSearchTokens?.full || [], weights: { exact: 86, start: 88, word: 91, include: 96 }, fuzzyBase: null }
   ];
 
   let mejor = null;
@@ -1250,13 +1280,34 @@ function evaluarArticuloBusquedaAdmin(articulo, parsed) {
     const principal = articulo._adminSearchFields?.principal || '';
     const secondary = articulo._adminSearchFields?.secondary || '';
     const hiddenTags = articulo._adminSearchFields?.hiddenTags || '';
-    if (code === phrase) score -= 18;
-    else if (code.startsWith(phrase)) score -= 10;
-    else if (principal === phrase) score -= 14;
-    else if (principal.startsWith(phrase)) score -= 9;
-    else if (incluyePalabraCompletaAdmin(principal, phrase)) score -= 5;
-    else if (secondary && secondary.includes(phrase)) score -= 2;
-    else if (hiddenTags && incluyePalabraCompletaAdmin(hiddenTags, phrase)) score -= 3;
+    const rubro = articulo._adminSearchFields?.rubro || '';
+    const phraseCompacta = compactarTextoBusquedaAdmin(phrase);
+    const principalCompacto = compactarTextoBusquedaAdmin(principal);
+    const secondaryCompacto = compactarTextoBusquedaAdmin(secondary);
+    const alphaTokens = dividirTokensBusquedaAdmin(phrase).filter((token) => /[a-z]/.test(token));
+    const numericTokens = dividirTokensBusquedaAdmin(phrase).filter((token) => /\d/.test(token));
+    const principalAlphaMatches = contarTokensPresentesEnTextoAdmin(principal, alphaTokens);
+    const principalNumericMatches = contarTokensPresentesEnTextoAdmin(principal, numericTokens);
+    const secondaryAlphaMatches = contarTokensPresentesEnTextoAdmin(secondary, alphaTokens);
+
+    if (principal === phrase) score -= 38;
+    else if (phraseCompacta && principalCompacto === phraseCompacta) score -= 32;
+    else if (principal.startsWith(phrase)) score -= 26;
+    else if (incluyePalabraCompletaAdmin(principal, phrase)) score -= 21;
+    else if (phraseCompacta && principalCompacto.includes(phraseCompacta)) score -= 17;
+    else if (alphaTokens.length && principalAlphaMatches === alphaTokens.length && alphaTokens.length > 1) score -= 13;
+    else if (alphaTokens.length && principalAlphaMatches >= Math.max(1, alphaTokens.length - 1) && numericTokens.length && principalNumericMatches) score -= 9;
+    else if (secondary && secondary.startsWith(phrase)) score -= 6;
+    else if (secondary && incluyePalabraCompletaAdmin(secondary, phrase)) score -= 4;
+    else if (phraseCompacta && secondaryCompacto.includes(phraseCompacta)) score -= 3;
+    else if (hiddenTags && incluyePalabraCompletaAdmin(hiddenTags, phrase)) score -= 2;
+    else if (rubro && incluyePalabraCompletaAdmin(rubro, phrase)) score -= 1;
+    else if (code === phrase) score -= 1;
+
+    if (alphaTokens.length && numericTokens.length) {
+      if (!principal.includes(phrase) && principalAlphaMatches === 0 && principalNumericMatches > 0) score += 20;
+      else if (!principal.includes(phrase) && principalAlphaMatches < Math.ceil(alphaTokens.length / 2) && secondaryAlphaMatches === 0) score += 10;
+    }
   }
 
   return { score: Math.max(0, score) };
@@ -2208,6 +2259,18 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
     }
     const data = await cargarListaPublicada(url);
     setTodosArticulos(data);
+    if (articuloPendienteAbrir) {
+      const existe = (todosArticulos || []).some((articulo) => String(articulo.codigo || '').trim() === articuloPendienteAbrir);
+      if (existe) {
+        abrirEditar(articuloPendienteAbrir);
+        articuloPendienteAbrir = '';
+        try {
+          const limpia = new URL(window.location.href);
+          limpia.searchParams.delete('edit');
+          window.history.replaceState({}, '', limpia.toString());
+        } catch (e) {}
+      }
+    }
     syncLoadedOnce = true;
     if (!localStateDirty) setSyncIndicator('ok', 'Sincronizado');
   } catch(e) {

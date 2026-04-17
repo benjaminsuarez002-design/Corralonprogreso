@@ -1419,7 +1419,7 @@
         </div>
         <div class="product-detail-actions">
           <div class="product-detail-controls">
-            <input class="product-detail-qty" id="productDetailQty" type="number" min="1" value="1" inputmode="numeric">
+            <input class="product-detail-qty" id="productDetailQty" type="number" min="1" value="" inputmode="numeric">
             <button class="agregar-btn" id="productDetailAddCart" type="button" aria-label="Agregar al carrito">🛒 Agregar</button>
             <button class="product-detail-btn-secondary" id="productDetailOpenCart" type="button">Mi Carrito</button>
             <button class="product-detail-btn-secondary" id="productDetailBack" type="button">Volver</button>
@@ -1865,6 +1865,8 @@ function guardarBusquedaReciente(valor) {
 let busquedasRecientes = cargarBusquedasRecientes();
 let ultimaBusquedaInfo = { parsed: null, resultados: [], highlightTerms: [] };
 let asistenteBusquedaVisible = false;
+let productDetailAdminCode = '';
+let secretAltSequence = '';
 
 function obtenerIdArticulo(articulo) {
   return String(articulo?._codigoArticulo ?? articulo?.codigoArticulo ?? articulo?.idart ?? articulo?.codigo ?? articulo?.idArt ?? articulo?.id ?? '').trim() || '-';
@@ -1999,6 +2001,30 @@ function buscarCoincidenciaFuzzy(tokens, variantes) {
   return '';
 }
 
+function compactarTextoBusqueda(texto) {
+  return normalizarSeparadoresBusqueda(texto).replace(/\s+/g, '');
+}
+
+function dividirTokensBusqueda(texto) {
+  return normalizarSeparadoresBusqueda(texto).split(' ').filter(Boolean);
+}
+
+function contarTokensPresentesEnTexto(texto, tokens) {
+  if (!texto || !tokens.length) return 0;
+  const base = normalizarSeparadoresBusqueda(texto);
+  const compacto = compactarTextoBusqueda(texto);
+  let total = 0;
+  tokens.forEach((token) => {
+    const t = normalizarSeparadoresBusqueda(token);
+    if (!t) return;
+    const tCompacto = t.replace(/\s+/g, '');
+    if (incluyePalabraCompleta(base, t) || base.includes(t) || (tCompacto && compacto.includes(tCompacto))) {
+      total++;
+    }
+  });
+  return total;
+}
+
 function parsearBusquedaAvanzada(rawInput) {
   const raw = String(rawInput ?? '').trim();
   const tokensRaw = raw.split(/\s+/).filter(Boolean);
@@ -2087,12 +2113,12 @@ function cumpleRepeticionesBusqueda(articulo, termCounts) {
 function encontrarMejorMatchTermino(articulo, termino) {
   const { directos, sinonimos } = obtenerRelacionTermino(termino);
   const campos = [
-    { name: 'code', text: articulo._searchFields?.code || '', tokens: articulo._searchTokens?.code || [], weights: { exact: 0, start: 2, word: 4, include: 6 }, fuzzyBase: null },
-    { name: 'principal', text: articulo._searchFields?.principal || '', tokens: articulo._searchTokens?.principal || [], weights: { exact: 10, start: 12, word: 15, include: 20 }, fuzzyBase: 34 },
-    { name: 'secondary', text: articulo._searchFields?.secondary || '', tokens: articulo._searchTokens?.secondary || [], weights: { exact: 28, start: 30, word: 34, include: 40 }, fuzzyBase: 54 },
-    { name: 'hiddenTags', text: articulo._searchFields?.hiddenTags || '', tokens: articulo._searchTokens?.hiddenTags || [], weights: { exact: 42, start: 44, word: 46, include: 50 }, fuzzyBase: 62 },
-    { name: 'rubro', text: articulo._searchFields?.rubro || '', tokens: articulo._searchTokens?.rubro || [], weights: { exact: 52, start: 54, word: 57, include: 62 }, fuzzyBase: 74 },
-    { name: 'full', text: articulo._searchFields?.full || '', tokens: articulo._searchTokens?.full || [], weights: { exact: 66, start: 68, word: 71, include: 76 }, fuzzyBase: null }
+    { name: 'principal', text: articulo._searchFields?.principal || '', tokens: articulo._searchTokens?.principal || [], weights: { exact: 0, start: 2, word: 4, include: 8 }, fuzzyBase: 16 },
+    { name: 'secondary', text: articulo._searchFields?.secondary || '', tokens: articulo._searchTokens?.secondary || [], weights: { exact: 20, start: 22, word: 25, include: 30 }, fuzzyBase: 38 },
+    { name: 'hiddenTags', text: articulo._searchFields?.hiddenTags || '', tokens: articulo._searchTokens?.hiddenTags || [], weights: { exact: 42, start: 45, word: 48, include: 54 }, fuzzyBase: 62 },
+    { name: 'rubro', text: articulo._searchFields?.rubro || '', tokens: articulo._searchTokens?.rubro || [], weights: { exact: 58, start: 60, word: 63, include: 68 }, fuzzyBase: 78 },
+    { name: 'code', text: articulo._searchFields?.code || '', tokens: articulo._searchTokens?.code || [], weights: { exact: 72, start: 74, word: 77, include: 82 }, fuzzyBase: null },
+    { name: 'full', text: articulo._searchFields?.full || '', tokens: articulo._searchTokens?.full || [], weights: { exact: 86, start: 88, word: 91, include: 96 }, fuzzyBase: null }
   ];
 
   let mejor = null;
@@ -2151,13 +2177,34 @@ function evaluarArticuloBusqueda(articulo, parsed) {
     const principal = articulo._searchFields?.principal || '';
     const secondary = articulo._searchFields?.secondary || '';
     const hiddenTags = articulo._searchFields?.hiddenTags || '';
-    if (code === phrase) score -= 18;
-    else if (code.startsWith(phrase)) score -= 10;
-    else if (principal === phrase) score -= 14;
-    else if (principal.startsWith(phrase)) score -= 9;
-    else if (incluyePalabraCompleta(principal, phrase)) score -= 5;
-    else if (secondary && secondary.includes(phrase)) score -= 2;
-    else if (hiddenTags && incluyePalabraCompleta(hiddenTags, phrase)) score -= 3;
+    const rubro = articulo._searchFields?.rubro || '';
+    const phraseCompacta = compactarTextoBusqueda(phrase);
+    const principalCompacto = compactarTextoBusqueda(principal);
+    const secondaryCompacto = compactarTextoBusqueda(secondary);
+    const alphaTokens = dividirTokensBusqueda(phrase).filter((token) => /[a-z]/.test(token));
+    const numericTokens = dividirTokensBusqueda(phrase).filter((token) => /\d/.test(token));
+    const principalAlphaMatches = contarTokensPresentesEnTexto(principal, alphaTokens);
+    const principalNumericMatches = contarTokensPresentesEnTexto(principal, numericTokens);
+    const secondaryAlphaMatches = contarTokensPresentesEnTexto(secondary, alphaTokens);
+
+    if (principal === phrase) score -= 38;
+    else if (phraseCompacta && principalCompacto === phraseCompacta) score -= 32;
+    else if (principal.startsWith(phrase)) score -= 26;
+    else if (incluyePalabraCompleta(principal, phrase)) score -= 21;
+    else if (phraseCompacta && principalCompacto.includes(phraseCompacta)) score -= 17;
+    else if (alphaTokens.length && principalAlphaMatches === alphaTokens.length && alphaTokens.length > 1) score -= 13;
+    else if (alphaTokens.length && principalAlphaMatches >= Math.max(1, alphaTokens.length - 1) && numericTokens.length && principalNumericMatches) score -= 9;
+    else if (secondary && secondary.startsWith(phrase)) score -= 6;
+    else if (secondary && incluyePalabraCompleta(secondary, phrase)) score -= 4;
+    else if (phraseCompacta && secondaryCompacto.includes(phraseCompacta)) score -= 3;
+    else if (hiddenTags && incluyePalabraCompleta(hiddenTags, phrase)) score -= 2;
+    else if (rubro && incluyePalabraCompleta(rubro, phrase)) score -= 1;
+    else if (code === phrase) score -= 1;
+
+    if (alphaTokens.length && numericTokens.length) {
+      if (!principal.includes(phrase) && principalAlphaMatches === 0 && principalNumericMatches > 0) score += 20;
+      else if (!principal.includes(phrase) && principalAlphaMatches < Math.ceil(alphaTokens.length / 2) && secondaryAlphaMatches === 0) score += 10;
+    }
   }
 
   return { score: Math.max(0, score), highlightTerms: [...highlightTerms], matchedFields: [...matchedFields] };
@@ -2241,6 +2288,8 @@ function cerrarDetalleProducto() {
   const modal = document.getElementById('productDetailModal');
   modal.classList.add('hidden');
   modal.classList.remove('visible');
+  productDetailAdminCode = '';
+  secretAltSequence = '';
 }
 
 let cartInlineNoticeTimer = null;
@@ -2298,7 +2347,9 @@ function abrirDetalleProducto(codigo) {
   document.getElementById('productDetailDescription').textContent = descripcion.secundaria || 'Sin detalle disponible.';
   renderDetalleProductoFoto(articulo, descripcion.principal);
   const addBtn = document.getElementById('productDetailAddCart');
-  document.getElementById('productDetailQty').value = '1';
+  const qtyInput = document.getElementById('productDetailQty');
+  qtyInput.value = '';
+  productDetailAdminCode = obtenerIdArticulo(articulo);
   addBtn.dataset.codigo = obtenerIdArticulo(articulo);
   addBtn.dataset.nombre = descripcion.principal;
   addBtn.dataset.precio = String(precioVigente);
@@ -2306,6 +2357,10 @@ function abrirDetalleProducto(codigo) {
   const modal = document.getElementById('productDetailModal');
   modal.classList.remove('hidden');
   modal.classList.add('visible');
+  requestAnimationFrame(() => {
+    qtyInput.focus();
+    qtyInput.select();
+  });
 }
 
 function renderProductos(lista) {
@@ -2897,8 +2952,15 @@ document.getElementById('productDetailAddCart').addEventListener('click', () => 
   }
   guardarCarrito();
   actualizarVistaCarrito();
-  document.getElementById('productDetailQty').value = '1';
+  const qtyInput = document.getElementById('productDetailQty');
+  qtyInput.value = '';
   mostrarAvisoCarrito(cantidad > 1 ? `Agregados ${cantidad} al carrito✅` : 'Agregado al carrito✅');
+  cerrarDetalleProducto();
+});
+document.getElementById('productDetailQty').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  document.getElementById('productDetailAddCart').click();
 });
 document.getElementById('productDetailOpenCart').addEventListener('click', () => {
   cerrarDetalleProducto();
@@ -2918,6 +2980,11 @@ document.getElementById('modalAddCart').addEventListener('click', () => {
   document.getElementById('quantityModal').classList.add('hidden');
   document.getElementById('darkOverlay').classList.add('hidden');
 });
+document.getElementById('modalCantidad').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  document.getElementById('modalAddCart').click();
+});
 
 document.getElementById('cartIcon').addEventListener('click', abrirPanel);
 const cartIconDesktop = document.getElementById('cartIconDesktop');
@@ -2925,6 +2992,18 @@ if (cartIconDesktop) cartIconDesktop.addEventListener('click', abrirPanel);
 document.getElementById('closeCartPanel').addEventListener('click', cerrarPanel);
 document.getElementById('darkOverlay').addEventListener('click', () => { cerrarPanel(); document.getElementById('quantityModal').classList.add('hidden'); });
 document.addEventListener('keydown', (e) => {
+  if (document.getElementById('productDetailModal').classList.contains('visible') && e.altKey) {
+    if (/^Numpad\d$/.test(e.code)) {
+      secretAltSequence += e.code.replace('Numpad', '');
+      if (secretAltSequence.length > 4) secretAltSequence = secretAltSequence.slice(-4);
+      if (secretAltSequence === '0160' && productDetailAdminCode) {
+        window.open(`soloadmin.html?edit=${encodeURIComponent(productDetailAdminCode)}`, '_blank', 'noopener');
+        return;
+      }
+    } else if (e.key === 'Alt') {
+      secretAltSequence = '';
+    }
+  }
   if (e.key !== 'Escape') return;
   if (!document.getElementById('popupZoom').classList.contains('hidden')) {
     document.getElementById('popupZoom').classList.add('hidden');
@@ -2933,6 +3012,9 @@ document.addEventListener('keydown', (e) => {
   if (document.getElementById('productDetailModal').classList.contains('visible')) {
     cerrarDetalleProducto();
   }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Alt') secretAltSequence = '';
 });
 document.getElementById('cartItems').addEventListener('click', e => {
   const codigo = e.target.dataset.codigo;
