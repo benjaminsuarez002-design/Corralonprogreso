@@ -699,7 +699,8 @@
     border-radius: 999px;
     padding: 6px 12px;
     height: 34px;
-    width: 120px;
+    width: auto;
+    white-space: nowrap;
     font-family:'Barlow Condensed',sans-serif;
     font-size: 12px;
     font-weight: 700;
@@ -790,11 +791,19 @@
     padding: 18px 16px 22px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
     flex-wrap: nowrap;
     position: relative;
     z-index: 60;
+    overflow: visible;
+  }
+  .chips-grupo-izq {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    flex: 1 1 0;
+    min-width: 0;
     overflow-x: auto;
     overflow-y: visible;
     -webkit-overflow-scrolling: touch;
@@ -802,7 +811,7 @@
     touch-action: pan-x;
     scrollbar-width: none;
   }
-  #chipsPanel::-webkit-scrollbar { display: none; }
+  .chips-grupo-izq::-webkit-scrollbar { display: none; }
   .chips-grupo {
     display: flex;
     align-items: center;
@@ -811,12 +820,11 @@
     min-width: max-content;
   }
   .chips-grupo-der {
-    position: sticky;
-    right: 0;
-    z-index: 70;
     flex-shrink: 0;
-    background: linear-gradient(to right, transparent 0%, #f0ece8 18px);
-    padding-left: 18px;
+    z-index: 70;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .filtro-chip {
     border: 1.4px solid var(--borde);
@@ -1387,6 +1395,9 @@
   .home-slide {
     width: clamp(224px, 76vw, 290px);
     flex: 0 0 auto;
+  }
+  .home-slide-compact {
+    width: 100%;
   }
   .home-strip-shell {
     position: relative;
@@ -2767,13 +2778,39 @@ function renderHomeSectionCard(articulo, index) {
   </article>`;
 }
 
+function renderHomeCompactItem(articulo, idxLocal) {
+  const descripcion = obtenerDescripcionArticulo(articulo);
+  const codigo = obtenerIdArticulo(articulo);
+  const { stockText } = obtenerStockInfo(articulo);
+  const precioLista = Number(articulo.precio || 0);
+  const precioVigente = Number(articulo.precioVigente ?? precioLista);
+  return `<article class="home-spotlight" data-detail-code="${codigo}" style="--spotlight-index:${idxLocal};">
+    <div class="home-spotlight-media">${renderHomeArticuloFoto(articulo, descripcion.principal)}</div>
+    <div class="home-spotlight-copy">
+      ${construirTagsArticulo(articulo)}
+      <div class="home-spotlight-title">${escaparHtml(descripcion.principal)}</div>
+      <div class="home-spotlight-meta">Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}</div>
+      <div class="home-spotlight-price">${articulo.ofertaVigente ? `<span style="font-size:12px;text-decoration:line-through;color:#aaa;margin-right:4px;">${fmtPrecio(precioLista)}</span>` : ''}${fmtPrecio(precioVigente)}</div>
+    </div>
+  </article>`;
+}
+
 function renderHomeSection({ kicker, title, subtitle, chip, items }) {
+  const isMobile = window.matchMedia('(max-width: 640px)').matches;
+  let slides;
+  if (isMobile) {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += 3) chunks.push(items.slice(i, i + 3));
+    slides = chunks.map((grupo) => `<li class="splide__slide home-slide home-slide-compact"><div class="home-spotlights">${grupo.map((a, i) => renderHomeCompactItem(a, i)).join('')}</div></li>`).join('');
+  } else {
+    slides = items.map((articulo, index) => `<li class="splide__slide home-slide">${renderHomeSectionCard(articulo, index)}</li>`).join('');
+  }
   const contenido = items.length
     ? `<div class="home-strip-shell">
         <button class="home-strip-arrow" type="button" data-home-carousel-move="-1" data-home-carousel-target="${escaparHtml(chip)}" aria-label="Ver anteriores">‹</button>
         <div class="home-carousel splide" data-home-carousel="${escaparHtml(chip)}">
           <div class="splide__track">
-            <ul class="splide__list home-strip">${items.map((articulo, index) => `<li class="splide__slide home-slide">${renderHomeSectionCard(articulo, index)}</li>`).join('')}</ul>
+            <ul class="splide__list home-strip">${slides}</ul>
           </div>
         </div>
         <button class="home-strip-arrow" type="button" data-home-carousel-move="1" data-home-carousel-target="${escaparHtml(chip)}" aria-label="Ver siguientes">›</button>
@@ -2917,22 +2954,25 @@ function initHomeCarousels(force = false) {
   roots.forEach((root) => {
     const key = String(root.dataset.homeCarousel || '').trim();
     if (!key) return;
+    const isMobileCarousel = window.matchMedia('(max-width: 640px)').matches;
     const splide = new window.Splide(root, {
       type: 'loop',
-      autoWidth: true,
+      autoWidth: !isMobileCarousel,
       arrows: false,
       pagination: false,
       drag: true,
       snap: true,
-      gap: window.matchMedia('(max-width: 640px)').matches ? '10px' : '12px',
-      speed: 1500,
+      gap: isMobileCarousel ? '10px' : '12px',
+      speed: 520,
       interval: 4000,
       autoplay: true,
       pauseOnHover: true,
       pauseOnFocus: true,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+      flickPower: 300,
+      flickMaxPages: 1,
       updateOnMove: true,
-      waitForTransition: true
+      waitForTransition: false
     });
     splide.mount();
     homeCarouselInstances.set(key, splide);
