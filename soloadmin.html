@@ -1012,6 +1012,12 @@ let articulosMetaMap = new Map();
 let currentItems = [];
 let currentPage = 1;
 let adminChipActivo = '';
+const ADMIN_FIRST_PAINT_BATCH = 80;
+const ADMIN_BACKGROUND_BATCH = 320;
+const ADMIN_CACHE_DB = 'corralon-soloadmin-cache';
+const ADMIN_CACHE_VERSION = 1;
+const ADMIN_CACHE_META_KEY = 'listaActualMeta';
+const ADMIN_CACHE_DATA_KEY = 'listaActualData';
 const pageSize = 20;
 const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
 const HOME_LANDING_DOC_ID = 'homeLanding';
@@ -1056,6 +1062,7 @@ let syncInFlight = false;
 let syncQueued = false;
 let syncLoadedOnce = false;
 let localStateDirty = false;
+let adminCacheDbPromise = null;
 const SYNC_DEBOUNCE_MS = 900;
 const APPLY_TARGETS_BATCH_SIZE = 50;
 const topPanelsWrap = document.querySelector('.top-panels');
@@ -1312,6 +1319,33 @@ function setTodosArticulos(lista, { render = true } = {}) {
     filtrarLista();
     renderPortadaAdmin();
   }
+}
+
+function setTodosArticulosEnriquecidos(lista, { render = true } = {}) {
+  todosArticulos = lista || [];
+  articulosMetaMap = construirMapaMetadatos(todosArticulos);
+  if (render) {
+    filtrarLista();
+    renderPortadaAdmin();
+  }
+}
+
+function waitAdminBatchTurn() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function setAdminLoaderState({ visible = true, title = 'Cargando articulos...', percent = null } = {}) {
+  const loader = document.getElementById('loadingOverlay');
+  const label = document.getElementById('loadingOverlayLabel');
+  const pct = document.getElementById('loadingOverlayPct');
+  const bar = document.getElementById('loadingOverlayBar');
+  if (!loader || !label || !pct || !bar) return;
+  loader.style.display = visible ? 'flex' : 'none';
+  if (!visible) return;
+  label.textContent = title;
+  const safePercent = percent == null ? null : Math.max(0, Math.min(100, Math.round(percent)));
+  pct.textContent = safePercent == null ? '' : `${safePercent}%`;
+  bar.style.width = safePercent == null ? '18%' : `${safePercent}%`;
 }
 
 function obtenerPortadaSectionMeta(sectionKey) {
@@ -1589,11 +1623,93 @@ async function publicarListaArticulos(lista) {
 
 async function cargarJsonRemoto(url) {
   if (!url) return [];
-  const res = await fetch(url + "?t=" + Date.now());
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
   const data = await res.json();
   if (!Array.isArray(data)) throw new Error('JSON inválido');
   return data;
+}
+
+function getAdminVersionKey(data = {}) {
+  return JSON.stringify({
+    url: String(data?.url || ''),
+    updatedAt: Number(data?.updatedAt || 0)
+  });
+}
+
+function openAdminCacheDb() {
+  if (adminCacheDbPromise) return adminCacheDbPromise;
+  adminCacheDbPromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) {
+      resolve(null);
+      return;
+    }
+    const request = window.indexedDB.open(ADMIN_CACHE_DB, ADMIN_CACHE_VERSION);
+    request.onupgradeneeded = () => {
+      const dbRef = request.result;
+      if (!dbRef.objectStoreNames.contains('meta')) dbRef.createObjectStore('meta');
+      if (!dbRef.objectStoreNames.contains('data')) dbRef.createObjectStore('data');
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('No se pudo abrir la cache del admin.'));
+  }).catch((error) => {
+    console.warn('Cache local de admin deshabilitada:', error);
+    return null;
+  });
+  return adminCacheDbPromise;
+}
+
+async function readAdminCacheValue(storeName, key) {
+  const dbRef = await openAdminCacheDb();
+  if (!dbRef) return null;
+  return new Promise((resolve, reject) => {
+    const tx = dbRef.transaction(storeName, 'readonly');
+    const request = tx.objectStore(storeName).get(key);
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => reject(request.error || new Error('No se pudo leer la cache del admin.'));
+  }).catch(() => null);
+}
+
+async function writeAdminCacheValue(storeName, key, value) {
+  const dbRef = await openAdminCacheDb();
+  if (!dbRef) return false;
+  return new Promise((resolve, reject) => {
+    const tx = dbRef.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).put(value, key);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error('No se pudo guardar la cache del admin.'));
+  }).catch(() => false);
+}
+
+async function clearAdminCache() {
+  const dbRef = await openAdminCacheDb();
+  if (!dbRef) return false;
+  return new Promise((resolve, reject) => {
+    const tx = dbRef.transaction(['meta', 'data'], 'readwrite');
+    tx.objectStore('meta').clear();
+    tx.objectStore('data').clear();
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error('No se pudo limpiar la cache del admin.'));
+  }).catch(() => false);
+}
+
+async function restoreAdminCache(snapshotData) {
+  const versionKey = getAdminVersionKey(snapshotData);
+  const meta = await readAdminCacheValue('meta', ADMIN_CACHE_META_KEY);
+  if (!meta || meta.versionKey !== versionKey || !meta.ready) return null;
+  const rows = await readAdminCacheValue('data', ADMIN_CACHE_DATA_KEY);
+  return Array.isArray(rows) ? rows : null;
+}
+
+async function saveAdminCache(snapshotData, rows) {
+  const versionKey = getAdminVersionKey(snapshotData);
+  await writeAdminCacheValue('data', ADMIN_CACHE_DATA_KEY, rows);
+  await writeAdminCacheValue('meta', ADMIN_CACHE_META_KEY, {
+    versionKey,
+    ready: true,
+    count: Array.isArray(rows) ? rows.length : 0,
+    cachedAt: Date.now()
+  });
 }
 
 async function cargarListaPublicada(baseUrl) {
@@ -3350,19 +3466,52 @@ document.querySelectorAll('#adminChipFilters .admin-filter-chip').forEach((chip)
 });
 
 // -- LISTENER FIRESTORE --
+let adminListLoadToken = 0;
+
 onSnapshot(doc(db, "config", "listaActual"), async snap => {
-  const loader = document.getElementById('loadingOverlay');
   try {
-    if (!snap.exists()) { document.getElementById('listaArticulos').innerHTML = '<div class="empty-lista">No hay lista publicada</div>'; if (loader) loader.style.display='none'; return; }
-    const url = snap.data().url;
+    if (!snap.exists()) { document.getElementById('listaArticulos').innerHTML = '<div class="empty-lista">No hay lista publicada</div>'; setAdminLoaderState({ visible: false }); return; }
+    const currentToken = ++adminListLoadToken;
+    const snapshotData = snap.data() || {};
+    const url = snapshotData.url;
     if (!url) throw new Error('URL no definida');
     jsonListaUrl = url;
     if (syncLoadedOnce && localStateDirty) {
-      if (loader) loader.style.display = 'none';
+      setAdminLoaderState({ visible: false });
       return;
     }
+    setAdminLoaderState({ visible: true, title: 'Verificando cache local...', percent: 4 });
+    const cachedRows = await restoreAdminCache(snapshotData);
+    if (currentToken !== adminListLoadToken) return;
+    if (Array.isArray(cachedRows)) {
+      setTodosArticulosEnriquecidos(cachedRows, { render: true });
+      syncLoadedOnce = true;
+      if (!localStateDirty) setSyncIndicator('ok', 'Sincronizado');
+      setAdminLoaderState({ visible: false });
+      return;
+    }
+    await clearAdminCache();
+    setAdminLoaderState({ visible: true, title: 'Descargando lista publicada...', percent: 6 });
     const data = await cargarListaPublicada(url);
-    setTodosArticulos(data);
+    let processed = [];
+    let offset = 0;
+    let firstPaintDone = false;
+    while (offset < data.length) {
+      if (currentToken !== adminListLoadToken) return;
+      const size = firstPaintDone ? ADMIN_BACKGROUND_BATCH : ADMIN_FIRST_PAINT_BATCH;
+      const batch = data.slice(offset, offset + size).map(enriquecerArticuloAdminBusqueda);
+      processed.push(...batch);
+      setTodosArticulosEnriquecidos(processed, { render: !firstPaintDone });
+      const progress = 8 + ((processed.length / Math.max(1, data.length)) * 92);
+      setAdminLoaderState({ visible: true, title: firstPaintDone ? 'Actualizando lista en segundo plano...' : 'Preparando primera vista...', percent: progress });
+      if (!firstPaintDone) {
+        setAdminLoaderState({ visible: true, title: 'Panel listo. Terminando de cargar articulos...', percent: progress });
+        firstPaintDone = true;
+      }
+      offset += size;
+      if (offset < data.length) await waitAdminBatchTurn();
+    }
+    setTodosArticulosEnriquecidos(processed, { render: true });
     if (articuloPendienteAbrir) {
       const existe = (todosArticulos || []).some((articulo) => String(articulo.codigo || '').trim() === articuloPendienteAbrir);
       if (existe) {
@@ -3377,12 +3526,13 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
     }
     syncLoadedOnce = true;
     if (!localStateDirty) setSyncIndicator('ok', 'Sincronizado');
+    await saveAdminCache(snapshotData, processed);
+    setAdminLoaderState({ visible: false });
   } catch(e) {
     console.error(e);
     document.getElementById('listaArticulos').innerHTML = '<div class="empty-lista" style="color:#e50000">Error: ' + e.message + '</div>';
     setSyncIndicator('error', 'Error al cargar la lista');
-  } finally {
-    if (loader) loader.style.display = 'none';
+    setAdminLoaderState({ visible: false });
   }
 });
 
@@ -3698,15 +3848,20 @@ window.doFullSync      = async () => { if (!confirm('Sincronizar completa: reemp
 
 </script>
 
-<div id="loadingOverlay" style="position:fixed;inset:0;background:#0f1117;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:9999;font-family:'Barlow Condensed',sans-serif;">
-  <div style="width:40px;height:40px;border:4px solid #2e3248;border-top-color:#e50000;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:16px;"></div>
-  <div style="color:#e50000;font-size:18px;letter-spacing:1px;text-transform:uppercase;">Cargando artículos...</div>
+<div id="loadingOverlay" style="position:fixed;right:16px;bottom:16px;width:min(360px,calc(100vw - 24px));background:rgba(15,17,23,.96);border:1px solid #2e3248;border-radius:18px;display:flex;align-items:stretch;justify-content:center;flex-direction:column;gap:10px;z-index:9999;font-family:'Barlow Condensed',sans-serif;box-shadow:0 20px 50px rgba(0,0,0,.35);padding:16px;pointer-events:none;">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div style="width:34px;height:34px;border:4px solid #2e3248;border-top-color:#e50000;border-radius:50%;animation:spin 0.8s linear infinite;flex:0 0 auto;"></div>
+    <div style="min-width:0;flex:1 1 auto;">
+      <div id="loadingOverlayLabel" style="color:#e50000;font-size:18px;letter-spacing:1px;text-transform:uppercase;line-height:1.1;">Cargando artículos...</div>
+      <div style="color:#a9adc0;font-size:12px;margin-top:4px;">El panel ya esta abierto mientras termina de procesar.</div>
+    </div>
+    <div id="loadingOverlayPct" style="color:#ffffff;font-size:20px;font-weight:900;line-height:1;">0%</div>
+  </div>
+  <div style="height:10px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;">
+    <div id="loadingOverlayBar" style="width:0%;height:100%;background:linear-gradient(90deg,#e50000,#ff6a5f);transition:width .18s ease;"></div>
+  </div>
 </div>
 
 <a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:10000;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>
 </body>
 </html>
-
-
-
-

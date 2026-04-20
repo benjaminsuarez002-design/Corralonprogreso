@@ -2314,6 +2314,12 @@ async function obtenerSiguienteNumeroPedido() {
 let todosArticulos = [];
 let paginaActual = 1;
 const ITEMS_POR_PAGINA = 20;
+const INDEX_FIRST_PAINT_BATCH = 80;
+const INDEX_BACKGROUND_BATCH = 320;
+const INDEX_CACHE_DB = 'corralon-index-cache';
+const INDEX_CACHE_VERSION = 1;
+const INDEX_CACHE_META_KEY = 'listaActualMeta';
+const INDEX_CACHE_DATA_KEY = 'listaActualData';
 let listaFiltradaActual = [];
 let rubroActivo = '';
 let sortActivo = '';
@@ -2322,6 +2328,7 @@ let vistaActiva = 'cards';
 let homeLandingConfig = { mode: 'auto', sections: { destacado: [], masVendido: [], oferta: [] } };
 const homeCarouselInstances = new Map();
 let homeCarouselInitTimer = null;
+let indexCacheDbPromise = null;
 try {
   vistaActiva = localStorage.getItem('vistaArticulos') === 'lista' ? 'lista' : 'cards';
 } catch (e) {}
@@ -2385,11 +2392,93 @@ function obtenerTextoTagsOcultos(articulo) {
 
 async function cargarJsonRemoto(url) {
   if (!url) return [];
-  const res = await fetch(url + "?t=" + Date.now());
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
   const data = await res.json();
   if (!Array.isArray(data)) throw new Error('JSON inválido');
   return data;
+}
+
+function getIndexVersionKey(data = {}) {
+  return JSON.stringify({
+    url: String(data?.url || ''),
+    updatedAt: Number(data?.updatedAt || 0)
+  });
+}
+
+function openIndexCacheDb() {
+  if (indexCacheDbPromise) return indexCacheDbPromise;
+  indexCacheDbPromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) {
+      resolve(null);
+      return;
+    }
+    const request = window.indexedDB.open(INDEX_CACHE_DB, INDEX_CACHE_VERSION);
+    request.onupgradeneeded = () => {
+      const dbRef = request.result;
+      if (!dbRef.objectStoreNames.contains('meta')) dbRef.createObjectStore('meta');
+      if (!dbRef.objectStoreNames.contains('data')) dbRef.createObjectStore('data');
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('No se pudo abrir la cache del catalogo.'));
+  }).catch((error) => {
+    console.warn('Cache local de catalogo deshabilitada:', error);
+    return null;
+  });
+  return indexCacheDbPromise;
+}
+
+async function readIndexCacheValue(storeName, key) {
+  const dbRef = await openIndexCacheDb();
+  if (!dbRef) return null;
+  return new Promise((resolve, reject) => {
+    const tx = dbRef.transaction(storeName, 'readonly');
+    const request = tx.objectStore(storeName).get(key);
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => reject(request.error || new Error('No se pudo leer la cache del catalogo.'));
+  }).catch(() => null);
+}
+
+async function writeIndexCacheValue(storeName, key, value) {
+  const dbRef = await openIndexCacheDb();
+  if (!dbRef) return false;
+  return new Promise((resolve, reject) => {
+    const tx = dbRef.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).put(value, key);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error('No se pudo guardar la cache del catalogo.'));
+  }).catch(() => false);
+}
+
+async function clearIndexCache() {
+  const dbRef = await openIndexCacheDb();
+  if (!dbRef) return false;
+  return new Promise((resolve, reject) => {
+    const tx = dbRef.transaction(['meta', 'data'], 'readwrite');
+    tx.objectStore('meta').clear();
+    tx.objectStore('data').clear();
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error('No se pudo limpiar la cache del catalogo.'));
+  }).catch(() => false);
+}
+
+async function restoreIndexCache(snapshotData) {
+  const versionKey = getIndexVersionKey(snapshotData);
+  const meta = await readIndexCacheValue('meta', INDEX_CACHE_META_KEY);
+  if (!meta || meta.versionKey !== versionKey || !meta.ready) return null;
+  const rows = await readIndexCacheValue('data', INDEX_CACHE_DATA_KEY);
+  return Array.isArray(rows) ? rows : null;
+}
+
+async function saveIndexCache(snapshotData, rows) {
+  const versionKey = getIndexVersionKey(snapshotData);
+  await writeIndexCacheValue('data', INDEX_CACHE_DATA_KEY, rows);
+  await writeIndexCacheValue('meta', INDEX_CACHE_META_KEY, {
+    versionKey,
+    ready: true,
+    count: Array.isArray(rows) ? rows.length : 0,
+    cachedAt: Date.now()
+  });
 }
 
 function extraerMetadatosArticulo(raw = {}) {
@@ -2493,6 +2582,39 @@ function normalizarArticulo(raw) {
     ofertaVigente,
     precioVigente
   };
+}
+
+function mapArticuloParaIndex(raw) {
+  const normalizado = normalizarArticulo(raw);
+  const indice = construirIndiceBusquedaArticulo(normalizado);
+  return {
+    ...normalizado,
+    _codigoArticulo: indice.codigoArticulo,
+    _descripcionPrincipal: indice.descripcionPrincipal,
+    _descripcionSecundaria: indice.descripcionSecundaria,
+    _searchFields: indice.fields,
+    _searchTokens: indice.tokens,
+    _busquedaPrincipal: indice.fields.principal,
+    _busqueda: indice.fields.full
+  };
+}
+
+function waitIndexBatchTurn() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function setIndexLoaderState({ visible = true, title = 'Cargando articulos...', percent = null } = {}) {
+  const loader = document.getElementById('loadingOverlay');
+  const label = document.getElementById('loadingOverlayLabel');
+  const pct = document.getElementById('loadingOverlayPct');
+  const bar = document.getElementById('loadingOverlayBar');
+  if (!loader || !label || !pct || !bar) return;
+  loader.style.display = visible ? 'flex' : 'none';
+  if (!visible) return;
+  label.textContent = title;
+  const safePercent = percent == null ? null : Math.max(0, Math.min(100, Math.round(percent)));
+  pct.textContent = safePercent == null ? '' : `${safePercent}%`;
+  bar.style.width = safePercent == null ? '18%' : `${safePercent}%`;
 }
 
 function fmtPrecio(n) {
@@ -4153,37 +4275,61 @@ document.getElementById('scrollBody').addEventListener('keydown', (e) => {
   }
 });
 
+let indexLoadToken = 0;
+
 onSnapshot(doc(db, "config", "listaActual"), async snap => {
-  const loader = document.getElementById('loadingOverlay');
   if (!snap.exists()) {
     document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
-    if (loader) loader.style.display = 'none';
+    setIndexLoaderState({ visible: false });
     return;
   }
   try {
-    const url = snap.data().url;
+    const currentToken = ++indexLoadToken;
+    const snapshotData = snap.data() || {};
+    const url = snapshotData.url;
+    setIndexLoaderState({ visible: true, title: 'Verificando cache local...', percent: 4 });
+    const cachedRows = await restoreIndexCache(snapshotData);
+    if (currentToken !== indexLoadToken) return;
+    if (Array.isArray(cachedRows)) {
+      todosArticulos = cachedRows;
+      actualizarVistaEtiqueta();
+      aplicarBusquedaActual();
+      setIndexLoaderState({ visible: false });
+      return;
+    }
+    await clearIndexCache();
+    setIndexLoaderState({ visible: true, title: 'Descargando lista publicada...', percent: 6 });
     const data = await cargarListaConMetadatos(url);
-    todosArticulos = data.map(a => {
-      const normalizado = normalizarArticulo(a);
-      const indice = construirIndiceBusquedaArticulo(normalizado);
-      return {
-        ...normalizado,
-        _codigoArticulo: indice.codigoArticulo,
-        _descripcionPrincipal: indice.descripcionPrincipal,
-        _descripcionSecundaria: indice.descripcionSecundaria,
-        _searchFields: indice.fields,
-        _searchTokens: indice.tokens,
-        _busquedaPrincipal: indice.fields.principal,
-        _busqueda: indice.fields.full
-      };
-    });
-    actualizarVistaEtiqueta();
-    aplicarBusquedaActual();
+    let processed = [];
+    let offset = 0;
+    let firstPaintDone = false;
+    while (offset < data.length) {
+      if (currentToken !== indexLoadToken) return;
+      const size = firstPaintDone ? INDEX_BACKGROUND_BATCH : INDEX_FIRST_PAINT_BATCH;
+      const batch = data.slice(offset, offset + size).map(mapArticuloParaIndex);
+      processed.push(...batch);
+      todosArticulos = processed;
+      const progress = 8 + ((processed.length / Math.max(1, data.length)) * 92);
+      setIndexLoaderState({ visible: true, title: firstPaintDone ? 'Actualizando catalogo en segundo plano...' : 'Preparando primera vista...', percent: progress });
+      if (!firstPaintDone) {
+        actualizarVistaEtiqueta();
+        aplicarBusquedaActual();
+        setIndexLoaderState({ visible: true, title: 'Pagina lista. Terminando de cargar articulos...', percent: progress });
+        firstPaintDone = true;
+      }
+      offset += size;
+      if (offset < data.length) await waitIndexBatchTurn();
+    }
+    if (currentToken === indexLoadToken && firstPaintDone) {
+      aplicarBusquedaActual();
+      await saveIndexCache(snapshotData, processed);
+    }
+    setIndexLoaderState({ visible: false });
   } catch (e) {
     console.error(e);
     document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error cargando lista</p></div>`;
+    setIndexLoaderState({ visible: false });
   }
-  if (loader) loader.style.display = 'none';
 });
 
 let carrito = {};
@@ -4436,9 +4582,18 @@ let logoCacheData = null;
 cargarCarrito();
 </script>
 
-<div id="loadingOverlay" style="position:fixed;inset:0;background:#f0ece8;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:9999;font-family:'Barlow Condensed',sans-serif;">
-  <div style="width:40px;height:40px;border:4px solid #d0c8f0;border-top-color:#6c4fc7;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:16px;"></div>
-  <div style="color:#6c4fc7;font-size:16px;letter-spacing:1px;text-transform:uppercase;">Cargando articulos...</div>
+<div id="loadingOverlay" style="position:fixed;right:16px;bottom:16px;width:min(360px,calc(100vw - 24px));background:rgba(255,255,255,.96);border:1px solid #d8cfee;border-radius:18px;display:flex;align-items:stretch;justify-content:center;flex-direction:column;gap:10px;z-index:9999;font-family:'Barlow Condensed',sans-serif;box-shadow:0 20px 50px rgba(58,35,120,.18);padding:16px;pointer-events:none;">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div style="width:34px;height:34px;border:4px solid #d0c8f0;border-top-color:#6c4fc7;border-radius:50%;animation:spin 0.8s linear infinite;flex:0 0 auto;"></div>
+    <div style="min-width:0;flex:1 1 auto;">
+      <div id="loadingOverlayLabel" style="color:#6c4fc7;font-size:16px;letter-spacing:1px;text-transform:uppercase;line-height:1.1;">Cargando articulos...</div>
+      <div style="color:#7b8090;font-size:12px;margin-top:4px;">La pagina ya esta usable mientras termina el resto.</div>
+    </div>
+    <div id="loadingOverlayPct" style="color:#4d35a0;font-size:20px;font-weight:900;line-height:1;">0%</div>
+  </div>
+  <div style="height:10px;background:rgba(108,79,199,.12);border-radius:999px;overflow:hidden;">
+    <div id="loadingOverlayBar" style="width:0%;height:100%;background:linear-gradient(90deg,#6c4fc7,#8d76e7);transition:width .18s ease;"></div>
+  </div>
 </div>
 
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"57a2e842481341dc931980f9468b270c","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
