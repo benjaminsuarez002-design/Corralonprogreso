@@ -1202,6 +1202,7 @@ function normalizarArticuloAdmin(articulo = {}) {
   return {
     ...articulo,
     codigo: String(articulo?.codigo ?? articulo?.idart ?? '').trim(),
+    codprov: String(articulo?.codprov ?? articulo?.codProv ?? articulo?.codigoProveedor ?? '').trim(),
     nombre: String(articulo?.nombre ?? articulo?.descripcion ?? '').trim(),
     detalle: String(articulo?.detalle ?? '').trim(),
     rubro: String(articulo?.rubro ?? '').trim(),
@@ -1222,6 +1223,7 @@ function serializarArticuloBase(articulo) {
   return {
     codigo: normalizado.codigo,
     idart: normalizado.codigo,
+    codprov: normalizado.codprov,
     nombre: normalizado.nombre,
     descripcion: normalizado.nombre,
     rubro: normalizado.rubro,
@@ -1810,7 +1812,7 @@ function obtenerIndiceTokensAdmin(texto) {
 function construirIndiceBusquedaAdmin(articulo) {
   const principal = obtenerIndiceTokensAdmin(articulo.nombre || '');
   const secundaria = obtenerIndiceTokensAdmin(articulo.detalle || '');
-  const codigo = obtenerIndiceTokensAdmin(articulo.codigo || '');
+  const codigo = obtenerIndiceTokensAdmin([articulo.codigo || '', articulo.codprov || ''].filter(Boolean).join(' '));
   const rubro = obtenerIndiceTokensAdmin(articulo.rubro || '');
   const tagsOcultos = obtenerIndiceTokensAdmin(tagsOcultosComoTexto(obtenerTagsOcultosArticulo(articulo)));
   const full = obtenerIndiceTokensAdmin([principal.texto, secundaria.texto, codigo.texto, rubro.texto, tagsOcultos.texto].filter(Boolean).join(' '));
@@ -3531,6 +3533,7 @@ function normalizeRow(r) {
 
     if (['idart','id_art','id','codigointerno','idartext'].includes(key)) out.idart = v;
     else if (['codigo','code','cod'].includes(key)) out.codigo = v;
+    else if (['codprov','cod_prov','codigo_proveedor','codigoproveedor','codigo_prov','codproveedor'].includes(key)) out.codprov = v;
     // Artículos_Descripción -> articulos_descripcion -> nombre
     else if (['aaarticulos_descripcion','aarticulos_descripcion','articulos_descripcion','articulo_descripcion','descripcion','description','nombre','name','desc'].includes(key)) out.nombre = v;
     else if (['preciovta3','preciovta_3','preciovta2','preciovta_2','preciovta1','preciovta_1','preciovta','precio','price','valor','amount','importe'].includes(key)) out.precio = v;
@@ -3581,6 +3584,7 @@ function buildImportArticle(r, viejo = {}) {
   const metaExistente = articulosMetaMap.get(code) || extraerMetadatosPersistentes(viejo);
   const base = {
     codigo: code,
+    codprov: String(r.codprov || viejo.codprov || '').trim(),
     nombre: r.nombre || viejo.nombre || '',
     precio: parsedPrecio !== null ? parsedPrecio : Number(viejo.precio || 0),
     rubro: r.rubro || viejo.rubro || '',
@@ -3702,7 +3706,6 @@ window.doFullSync      = async () => { if (!confirm('Sincronizar completa: reemp
 <a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:10000;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>
 </body>
 </html>
-
 
 
 
