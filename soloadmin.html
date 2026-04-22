@@ -1011,11 +1011,11 @@ let articulosMetaMap = new Map();
 let currentItems = [];
 let adminChipActivo = '';
 const pageSize = 20;
-const adminMaxVisibleItems = 40;
-let adminWindowStart = 0;
 let adminWindowCount = pageSize;
 let adminWindowAdvancing = false;
 let adminListObserver = null;
+let adminWindowAdvanceLatch = false;
+let adminWindowAdvanceResumeAt = 0;
 const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
 const HOME_LANDING_DOC_ID = 'homeLanding';
 const STOCK_NOTICE_DOC_ID = 'stockNotice';
@@ -3275,17 +3275,16 @@ function fmtPrecio(n) {
 }
 
 function resetAdminWindow() {
-  adminWindowStart = 0;
   adminWindowCount = pageSize;
   adminWindowAdvancing = false;
+  adminWindowAdvanceLatch = false;
+  adminWindowAdvanceResumeAt = 0;
 }
 
 function getAdminWindowSlice(total) {
-  const maxStart = total > adminMaxVisibleItems ? total - adminMaxVisibleItems : 0;
-  if (adminWindowStart > maxStart) adminWindowStart = maxStart;
-  adminWindowCount = Math.max(pageSize, Math.min(adminMaxVisibleItems, adminWindowCount));
-  const end = Math.min(total, adminWindowStart + adminWindowCount);
-  return { start: adminWindowStart, end };
+  adminWindowCount = Math.max(pageSize, Math.min(total || pageSize, adminWindowCount));
+  const end = Math.min(total, adminWindowCount);
+  return { start: 0, end };
 }
 
 function getAdminWindowAnimateCodes(lista, previousSlice, nextSlice) {
@@ -3305,31 +3304,58 @@ function disconnectAdminListObserver() {
   }
 }
 
-function finalizeAdminListRender({ anchorCode = '', anchorTop = null, anchorMode = 'preserve' } = {}) {
+function isAdminWindowNearBottom() {
+  const el = document.getElementById('listaArticulos');
+  if (!el) return false;
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - 120;
+}
+
+function canAdvanceAdminWindowNow() {
+  const now = window.performance?.now?.() ?? Date.now();
+  return now >= adminWindowAdvanceResumeAt;
+}
+
+function setAdminWindowAdvanceCooldown(ms = 180) {
+  const now = window.performance?.now?.() ?? Date.now();
+  adminWindowAdvanceResumeAt = now + ms;
+}
+
+function syncAdminWindowAdvanceLatch() {
+  adminWindowAdvanceLatch = isAdminWindowNearBottom();
+}
+
+function setupAdminListObserver() {
   disconnectAdminListObserver();
   const el = document.getElementById('listaArticulos');
   const sentinel = document.getElementById('adminListSentinel');
   if (el && sentinel) {
     adminListObserver = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) advanceAdminWindow();
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      if (adminWindowAdvancing || adminWindowAdvanceLatch || !canAdvanceAdminWindowNow()) return;
+      adminWindowAdvanceLatch = true;
+      advanceAdminWindow();
     }, { root: el, threshold: 0.2 });
     adminListObserver.observe(sentinel);
   }
+}
+
+function finalizeAdminListRender({ anchorCode = '', anchorTop = null } = {}) {
+  disconnectAdminListObserver();
+  const el = document.getElementById('listaArticulos');
   requestAnimationFrame(() => {
-    if (anchorCode) {
+    if (anchorCode && anchorTop !== null && el) {
       const anchor = [...document.querySelectorAll('#listaArticulos .art-item[data-code]')].find((item) => item.dataset.code === anchorCode);
       if (anchor) {
         const newTop = anchor.getBoundingClientRect().top;
-        if (anchorMode === 'top') {
-          const hostTop = el.getBoundingClientRect().top;
-          const desiredTop = hostTop + 8;
-          el.scrollTop += (newTop - desiredTop);
-        } else if (anchorTop !== null) {
-          el.scrollTop += (anchorTop - newTop);
-        }
+        el.scrollTop += (newTop - anchorTop);
       }
     }
+    setAdminWindowAdvanceCooldown(anchorCode ? 240 : 180);
+    syncAdminWindowAdvanceLatch();
     adminWindowAdvancing = false;
+    requestAnimationFrame(() => {
+      setupAdminListObserver();
+    });
   });
 }
 
@@ -3339,44 +3365,38 @@ function advanceAdminWindow() {
   const previousSlice = getAdminWindowSlice(total);
   if (previousSlice.end >= total) return;
 
-  const el = document.getElementById('listaArticulos');
-  let anchorCode = '';
-  let anchorTop = null;
-  let anchorMode = 'preserve';
-  if (adminWindowCount >= adminMaxVisibleItems) {
-    const items = [...document.querySelectorAll('#listaArticulos .art-item[data-code]')];
-    const anchor = items[pageSize];
-    if (anchor) {
-      anchorCode = anchor.dataset.code || '';
-      anchorTop = anchor.getBoundingClientRect().top;
-      anchorMode = 'top';
-    }
-    adminWindowStart = Math.min(adminWindowStart + pageSize, Math.max(0, total - adminMaxVisibleItems));
-    adminWindowCount = Math.min(adminMaxVisibleItems, total - adminWindowStart);
-  } else {
-    adminWindowCount = Math.min(adminMaxVisibleItems, adminWindowCount + pageSize);
-  }
+  const items = [...document.querySelectorAll('#listaArticulos .art-item[data-code]')];
+  const anchor = items[items.length - 1] || null;
+  const anchorCode = anchor?.dataset.code || '';
+  const anchorTop = anchor ? anchor.getBoundingClientRect().top : null;
+  adminWindowCount = Math.min(total, adminWindowCount + pageSize);
   const nextSlice = getAdminWindowSlice(total);
   const animateCodes = getAdminWindowAnimateCodes(currentItems, previousSlice, nextSlice);
   adminWindowAdvancing = true;
-  renderAdminWindow({ anchorCode, anchorTop, anchorMode, animateCodes });
+  renderAdminWindow({ anchorCode, anchorTop, animateCodes });
 }
 
 function maybeAdvanceAdminWindowFromScroll() {
-  const el = document.getElementById('listaArticulos');
-  if (!el || adminWindowAdvancing || !currentItems.length) return;
-  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
-    advanceAdminWindow();
+  if (adminWindowAdvancing || !currentItems.length) return;
+  const nearBottom = isAdminWindowNearBottom();
+  if (!nearBottom) {
+    adminWindowAdvanceLatch = false;
+    return;
   }
+  if (adminWindowAdvanceLatch || !canAdvanceAdminWindowNow()) return;
+  adminWindowAdvanceLatch = true;
+  advanceAdminWindow();
 }
 
 function renderLista(lista) {
   currentItems = lista;
   resetAdminWindow();
+  const el = document.getElementById('listaArticulos');
+  if (el) el.scrollTop = 0;
   renderAdminWindow();
 }
 
-function renderAdminWindow({ anchorCode = '', anchorTop = null, anchorMode = 'preserve', animateCodes = null } = {}) {
+function renderAdminWindow({ anchorCode = '', anchorTop = null, animateCodes = null } = {}) {
   const el = document.getElementById('listaArticulos');
   const total = currentItems.length;
   const pagination = document.getElementById('pagination');
@@ -3410,7 +3430,7 @@ function renderAdminWindow({ anchorCode = '', anchorTop = null, anchorMode = 'pr
       </div>
     </div>`).join('') + `<div id="adminListSentinel" style="height:${hayMas ? '1px' : '0'}"></div>`;
   syncTopPanelsHeight();
-  finalizeAdminListRender({ anchorCode, anchorTop, anchorMode });
+  finalizeAdminListRender({ anchorCode, anchorTop });
 }
 
 // -- BUSCADOR CON PRIORIDAD (igual que el público) --
