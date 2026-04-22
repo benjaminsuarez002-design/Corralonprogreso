@@ -407,7 +407,7 @@
     box-shadow: 0 14px 28px rgba(108,79,199,.24);
   }
   .productos-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
-  .producto-card { display: flex; align-items: stretch; margin-bottom: 11px; animation: fadeIn .2s ease; cursor: pointer; }
+  .producto-card { display: flex; align-items: stretch; margin-bottom: 11px; cursor: pointer; }
   .producto-card[data-result-item],
   .lista-row[data-result-item] {
     outline: none;
@@ -433,7 +433,15 @@
     border: 1px solid rgba(0,212,255,.42);
     pointer-events: none;
   }
+  .producto-card.window-item-enter,
+  .lista-row.window-item-enter {
+    animation: itemEnter .22s ease;
+  }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes itemEnter {
+    from { opacity: .42; transform: translateY(10px); filter: saturate(.92); }
+    to { opacity: 1; transform: translateY(0); filter: saturate(1); }
+  }
   .foto-wrap { flex-shrink: 0; width: 68px; display: flex; align-items: center; justify-content: center; padding-right: 8px; }
   .foto-placeholder { width: 58px; height: 58px; border-radius: 11px; background: rgba(0,212,255,0.07); border: 2px solid var(--azul-foto); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px rgba(0,212,255,0.2); }
   .foto-placeholder svg { width: 26px; height: 26px; color: var(--azul-foto); opacity: 0.75; }
@@ -890,7 +898,6 @@
     padding: 3px;
     background: linear-gradient(135deg, rgba(129,98,220,.62) 0%, rgba(189,168,235,.56) 55%, rgba(109,78,197,.65) 100%);
     box-shadow: 0 8px 22px rgba(108,79,199,.2);
-    animation: fadeIn .2s ease;
   }
   .producto-inner {
     width: 100%;
@@ -2312,14 +2319,7 @@ async function obtenerSiguienteNumeroPedido() {
 }
 
 let todosArticulos = [];
-let paginaActual = 1;
 const ITEMS_POR_PAGINA = 20;
-const INDEX_FIRST_PAINT_BATCH = 80;
-const INDEX_BACKGROUND_BATCH = 320;
-const INDEX_CACHE_DB = 'corralon-index-cache';
-const INDEX_CACHE_VERSION = 1;
-const INDEX_CACHE_META_KEY = 'listaActualMeta';
-const INDEX_CACHE_DATA_KEY = 'listaActualData';
 let listaFiltradaActual = [];
 let rubroActivo = '';
 let sortActivo = '';
@@ -2328,7 +2328,12 @@ let vistaActiva = 'cards';
 let homeLandingConfig = { mode: 'auto', sections: { destacado: [], masVendido: [], oferta: [] } };
 const homeCarouselInstances = new Map();
 let homeCarouselInitTimer = null;
-let indexCacheDbPromise = null;
+let publicWindowStart = 0;
+let publicWindowCount = ITEMS_POR_PAGINA;
+let publicWindowAdvancing = false;
+let publicListObserver = null;
+let publicWindowAdvanceLatch = false;
+let publicWindowAdvanceResumeAt = 0;
 try {
   vistaActiva = localStorage.getItem('vistaArticulos') === 'lista' ? 'lista' : 'cards';
 } catch (e) {}
@@ -2392,93 +2397,11 @@ function obtenerTextoTagsOcultos(articulo) {
 
 async function cargarJsonRemoto(url) {
   if (!url) return [];
-  const res = await fetch(url);
+  const res = await fetch(url + "?t=" + Date.now());
   if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
   const data = await res.json();
   if (!Array.isArray(data)) throw new Error('JSON inválido');
   return data;
-}
-
-function getIndexVersionKey(data = {}) {
-  return JSON.stringify({
-    url: String(data?.url || ''),
-    updatedAt: Number(data?.updatedAt || 0)
-  });
-}
-
-function openIndexCacheDb() {
-  if (indexCacheDbPromise) return indexCacheDbPromise;
-  indexCacheDbPromise = new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) {
-      resolve(null);
-      return;
-    }
-    const request = window.indexedDB.open(INDEX_CACHE_DB, INDEX_CACHE_VERSION);
-    request.onupgradeneeded = () => {
-      const dbRef = request.result;
-      if (!dbRef.objectStoreNames.contains('meta')) dbRef.createObjectStore('meta');
-      if (!dbRef.objectStoreNames.contains('data')) dbRef.createObjectStore('data');
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('No se pudo abrir la cache del catalogo.'));
-  }).catch((error) => {
-    console.warn('Cache local de catalogo deshabilitada:', error);
-    return null;
-  });
-  return indexCacheDbPromise;
-}
-
-async function readIndexCacheValue(storeName, key) {
-  const dbRef = await openIndexCacheDb();
-  if (!dbRef) return null;
-  return new Promise((resolve, reject) => {
-    const tx = dbRef.transaction(storeName, 'readonly');
-    const request = tx.objectStore(storeName).get(key);
-    request.onsuccess = () => resolve(request.result ?? null);
-    request.onerror = () => reject(request.error || new Error('No se pudo leer la cache del catalogo.'));
-  }).catch(() => null);
-}
-
-async function writeIndexCacheValue(storeName, key, value) {
-  const dbRef = await openIndexCacheDb();
-  if (!dbRef) return false;
-  return new Promise((resolve, reject) => {
-    const tx = dbRef.transaction(storeName, 'readwrite');
-    tx.objectStore(storeName).put(value, key);
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error('No se pudo guardar la cache del catalogo.'));
-  }).catch(() => false);
-}
-
-async function clearIndexCache() {
-  const dbRef = await openIndexCacheDb();
-  if (!dbRef) return false;
-  return new Promise((resolve, reject) => {
-    const tx = dbRef.transaction(['meta', 'data'], 'readwrite');
-    tx.objectStore('meta').clear();
-    tx.objectStore('data').clear();
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error || new Error('No se pudo limpiar la cache del catalogo.'));
-  }).catch(() => false);
-}
-
-async function restoreIndexCache(snapshotData) {
-  const versionKey = getIndexVersionKey(snapshotData);
-  const meta = await readIndexCacheValue('meta', INDEX_CACHE_META_KEY);
-  if (!meta || meta.versionKey !== versionKey || !meta.ready) return null;
-  const rows = await readIndexCacheValue('data', INDEX_CACHE_DATA_KEY);
-  return Array.isArray(rows) ? rows : null;
-}
-
-async function saveIndexCache(snapshotData, rows) {
-  const versionKey = getIndexVersionKey(snapshotData);
-  await writeIndexCacheValue('data', INDEX_CACHE_DATA_KEY, rows);
-  await writeIndexCacheValue('meta', INDEX_CACHE_META_KEY, {
-    versionKey,
-    ready: true,
-    count: Array.isArray(rows) ? rows.length : 0,
-    cachedAt: Date.now()
-  });
 }
 
 function extraerMetadatosArticulo(raw = {}) {
@@ -2582,39 +2505,6 @@ function normalizarArticulo(raw) {
     ofertaVigente,
     precioVigente
   };
-}
-
-function mapArticuloParaIndex(raw) {
-  const normalizado = normalizarArticulo(raw);
-  const indice = construirIndiceBusquedaArticulo(normalizado);
-  return {
-    ...normalizado,
-    _codigoArticulo: indice.codigoArticulo,
-    _descripcionPrincipal: indice.descripcionPrincipal,
-    _descripcionSecundaria: indice.descripcionSecundaria,
-    _searchFields: indice.fields,
-    _searchTokens: indice.tokens,
-    _busquedaPrincipal: indice.fields.principal,
-    _busqueda: indice.fields.full
-  };
-}
-
-function waitIndexBatchTurn() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function setIndexLoaderState({ visible = true, title = 'Cargando articulos...', percent = null } = {}) {
-  const loader = document.getElementById('loadingOverlay');
-  const label = document.getElementById('loadingOverlayLabel');
-  const pct = document.getElementById('loadingOverlayPct');
-  const bar = document.getElementById('loadingOverlayBar');
-  if (!loader || !label || !pct || !bar) return;
-  loader.style.display = visible ? 'flex' : 'none';
-  if (!visible) return;
-  label.textContent = title;
-  const safePercent = percent == null ? null : Math.max(0, Math.min(100, Math.round(percent)));
-  pct.textContent = safePercent == null ? '' : `${safePercent}%`;
-  bar.style.width = safePercent == null ? '18%' : `${safePercent}%`;
 }
 
 function fmtPrecio(n) {
@@ -2978,6 +2868,8 @@ function renderHomeSection({ kicker, title, subtitle, chip, items }) {
 
 function renderHomeLanding() {
   destroyHomeCarouselInstances();
+  disconnectPublicListObserver();
+  resetPublicWindow();
   const body = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
   limpiarResultadoActivo();
@@ -3162,7 +3054,7 @@ function construirIndiceBusquedaArticulo(articulo) {
   const descripcion = obtenerDescripcionArticulo(articulo);
   const principal = obtenerIndiceTokens(descripcion.principal);
   const secundaria = obtenerIndiceTokens([descripcion.secundaria, articulo.nombre || '', articulo.detalle || ''].filter(Boolean).join(' '));
-  const codigo = obtenerIndiceTokens([obtenerIdArticulo(articulo), articulo.codprov || '', articulo.codProv || ''].filter(Boolean).join(' '));
+  const codigo = obtenerIndiceTokens([obtenerIdArticulo(articulo), articulo.idartprov || '', articulo.idArtProv || '', articulo.codprov || '', articulo.codProv || ''].filter(Boolean).join(' '));
   const rubro = obtenerIndiceTokens(articulo.rubro || '');
   const tagsOcultos = obtenerIndiceTokens(obtenerTextoTagsOcultos(articulo));
   const full = obtenerIndiceTokens([principal.texto, secundaria.texto, codigo.texto, rubro.texto, tagsOcultos.texto].filter(Boolean).join(' '));
@@ -3520,11 +3412,132 @@ function resaltarTextoBusqueda(texto, terminos) {
   return resultado;
 }
 
-function renderPaginacion(totalPaginas) {
-  return `<div style="display:flex;justify-content:center;gap:12px;margin:18px 0;">
-    <div class="pag-wrap"><button class="pag-btn" onclick="cambiarPagina(-1)" ${paginaActual === 1 ? 'disabled' : ''}>&lsaquo; Anterior</button></div>
-    <div class="pag-wrap"><button class="pag-btn" onclick="cambiarPagina(1)" ${paginaActual === totalPaginas ? 'disabled' : ''}>Siguiente &rsaquo;</button></div>
-  </div>`;
+function resetPublicWindow() {
+  publicWindowStart = 0;
+  publicWindowCount = ITEMS_POR_PAGINA;
+  publicWindowAdvancing = false;
+  publicWindowAdvanceLatch = false;
+  publicWindowAdvanceResumeAt = 0;
+}
+
+function getPublicWindowSlice(total) {
+  publicWindowStart = 0;
+  publicWindowCount = Math.max(ITEMS_POR_PAGINA, Math.min(total || ITEMS_POR_PAGINA, publicWindowCount));
+  const end = Math.min(total, publicWindowCount);
+  return { start: 0, end };
+}
+
+function getPublicWindowAnimateCodes(lista, previousSlice, nextSlice) {
+  const anteriores = new Set(lista.slice(previousSlice.start, previousSlice.end).map((articulo) => obtenerIdArticulo(articulo)));
+  return new Set(
+    lista
+      .slice(nextSlice.start, nextSlice.end)
+      .map((articulo) => obtenerIdArticulo(articulo))
+      .filter((codigo) => codigo && !anteriores.has(codigo))
+  );
+}
+
+function getPublicVisibleAnchor(startIndex = 0) {
+  const items = obtenerElementosResultado().slice(startIndex);
+  if (!items.length || !mainScrollHost) return null;
+  const hostRect = mainScrollHost.getBoundingClientRect();
+  return items.find((item) => {
+    const rect = item.getBoundingClientRect();
+    return rect.bottom > hostRect.top + 12 && rect.top < hostRect.bottom - 12;
+  }) || items[0] || null;
+}
+
+function disconnectPublicListObserver() {
+  if (publicListObserver) {
+    publicListObserver.disconnect();
+    publicListObserver = null;
+  }
+}
+
+function isPublicWindowNearBottom() {
+  if (!mainScrollHost) return false;
+  return mainScrollHost.scrollTop + mainScrollHost.clientHeight >= mainScrollHost.scrollHeight - 220;
+}
+
+function canAdvancePublicWindowNow() {
+  const now = window.performance?.now?.() ?? Date.now();
+  return now >= publicWindowAdvanceResumeAt;
+}
+
+function setPublicWindowAdvanceCooldown(ms = 180) {
+  const now = window.performance?.now?.() ?? Date.now();
+  publicWindowAdvanceResumeAt = now + ms;
+}
+
+function syncPublicWindowAdvanceLatch() {
+  publicWindowAdvanceLatch = isPublicWindowNearBottom();
+}
+
+function setupPublicListObserver() {
+  disconnectPublicListObserver();
+  const sentinel = document.getElementById('publicListSentinel');
+  if (!sentinel || !mainScrollHost) return;
+  publicListObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    if (publicWindowAdvancing || publicWindowAdvanceLatch || !canAdvancePublicWindowNow()) return;
+    publicWindowAdvanceLatch = true;
+    advancePublicWindow();
+  }, { root: mainScrollHost, threshold: 0.2 });
+  publicListObserver.observe(sentinel);
+}
+
+function finalizePublicWindowRender({ anchorCode = '', anchorTop = null, anchorMode = 'preserve' } = {}) {
+  disconnectPublicListObserver();
+  requestAnimationFrame(() => {
+    if (anchorCode) {
+      const anchor = [...document.querySelectorAll('#scrollBody [data-detail-code]')].find((item) => item.dataset.detailCode === anchorCode);
+      if (anchor) {
+        const newTop = anchor.getBoundingClientRect().top;
+        if (anchorMode === 'top') {
+          const hostTop = mainScrollHost.getBoundingClientRect().top;
+          const desiredTop = hostTop + 10;
+          mainScrollHost.scrollTop += (newTop - desiredTop);
+        } else if (anchorTop !== null) {
+          mainScrollHost.scrollTop += (anchorTop - newTop);
+        }
+      }
+    }
+    setPublicWindowAdvanceCooldown(anchorCode ? 260 : 180);
+    syncPublicWindowAdvanceLatch();
+    publicWindowAdvancing = false;
+    requestAnimationFrame(() => {
+      setupPublicListObserver();
+    });
+  });
+}
+
+function advancePublicWindow() {
+  if (publicWindowAdvancing || estaModoInicio() || !listaFiltradaActual.length) return;
+  const total = listaFiltradaActual.length;
+  const previousSlice = getPublicWindowSlice(total);
+  if (previousSlice.end >= total) return;
+
+  const anchorCode = '';
+  const anchorTop = null;
+  const anchorMode = 'preserve';
+  publicWindowCount = Math.min(total, publicWindowCount + ITEMS_POR_PAGINA);
+
+  const nextSlice = getPublicWindowSlice(total);
+  const animateCodes = getPublicWindowAnimateCodes(listaFiltradaActual, previousSlice, nextSlice);
+  publicWindowAdvancing = true;
+  renderProductos(listaFiltradaActual, { preserveWindow: true, anchorCode, anchorTop, anchorMode, animateCodes });
+}
+
+function maybeAdvancePublicWindowFromScroll() {
+  if (!mainScrollHost || publicWindowAdvancing || !listaFiltradaActual.length || estaModoInicio()) return;
+  const nearBottom = isPublicWindowNearBottom();
+  if (!nearBottom) {
+    publicWindowAdvanceLatch = false;
+    return;
+  }
+  if (publicWindowAdvanceLatch || !canAdvancePublicWindowNow()) return;
+  publicWindowAdvanceLatch = true;
+  advancePublicWindow();
 }
 
 function abrirPopupImagen(src, alt) {
@@ -3687,7 +3700,7 @@ function abrirDetalleProducto(codigo) {
   });
 }
 
-function renderProductos(lista) {
+function renderProductos(lista, { preserveWindow = false, anchorCode = '', anchorTop = null, anchorMode = 'preserve', animateCodes = null } = {}) {
   const body   = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
   destroyHomeCarouselInstances();
@@ -3695,21 +3708,22 @@ function renderProductos(lista) {
   estado.classList.remove('home-state');
   listaFiltradaActual = lista;
   limpiarResultadoActivo();
+  if (!preserveWindow) resetPublicWindow();
   if (!lista.length) {
+    disconnectPublicListObserver();
     body.innerHTML = `<div class="empty-state"><div class="icon" aria-hidden="true"><svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></div><p style="font-size:14px">Sin resultados</p></div>`;
     estado.innerHTML = '';
     return;
   }
-  const totalPaginas = Math.ceil(lista.length / ITEMS_POR_PAGINA);
-  if (paginaActual > totalPaginas) paginaActual = 1;
-  const inicio = (paginaActual - 1) * ITEMS_POR_PAGINA;
-  const fin    = inicio + ITEMS_POR_PAGINA;
-  const paginaItems = lista.slice(inicio, fin);
-  estado.innerHTML = `<b>${lista.length}</b> productos - Pagina <b>${paginaActual}</b> de <b>${totalPaginas}</b>`;
+  const { start, end } = getPublicWindowSlice(lista.length);
+  const paginaItems = lista.slice(start, end);
+  const hayMas = end < lista.length;
+  estado.innerHTML = `<b>${lista.length}</b> productos - Mostrando <b>${start + 1}</b> a <b>${end}</b>`;
   if (vistaActiva === 'lista') {
     const filasHtml = paginaItems.map(a => {
       const descripcion = obtenerDescripcionArticulo(a);
       const codigoArticulo = obtenerIdArticulo(a);
+      const enterClass = animateCodes?.has(codigoArticulo) ? ' window-item-enter' : '';
       const highlightTerms = a._searchMeta?.highlightTerms || ultimaBusquedaInfo.highlightTerms || [];
       const nombreHtml = resaltarTextoBusqueda(descripcion.principal, highlightTerms);
       const detalleHtml = descripcion.secundaria ? resaltarTextoBusqueda(descripcion.secundaria, highlightTerms) : '';
@@ -3722,7 +3736,7 @@ function renderProductos(lista) {
       if (a.destacado) tags.push('<span class="chip-destacado">⭐ Destacado</span>');
       if (a.masVendido) tags.push('<span class="chip-mas-vendido">🏆 Más vendido</span>');
       const tagsHtml = tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
-      return `<div class="lista-row" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
+      return `<div class="lista-row${enterClass}" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
         <div class="lista-cell lista-img-cell">
           <button class="lista-img-btn${a.fotoUrl ? '' : ' is-empty'}" type="button" data-detail-trigger="1" data-detail-code="${codigoArticulo}" aria-label="Ver detalle">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -3756,12 +3770,14 @@ function renderProductos(lista) {
         </div>
         ${filasHtml}
       </div>
-    </div>${renderPaginacion(totalPaginas)}`;
+    </div><div id="publicListSentinel" style="height:${hayMas ? '1px' : '0'}"></div>`;
+    finalizePublicWindowRender({ anchorCode, anchorTop, anchorMode });
     return;
   }
   const cardsHtml = paginaItems.map(a => {
     const descripcion = obtenerDescripcionArticulo(a);
     const codigoArticulo = obtenerIdArticulo(a);
+    const enterClass = animateCodes?.has(codigoArticulo) ? ' window-item-enter' : '';
     const highlightTerms = a._searchMeta?.highlightTerms || ultimaBusquedaInfo.highlightTerms || [];
     const nombreHtml = resaltarTextoBusqueda(descripcion.principal, highlightTerms);
     const detalleHtml = descripcion.secundaria ? resaltarTextoBusqueda(descripcion.secundaria, highlightTerms) : escaparHtml('Detalle del artículo');
@@ -3777,7 +3793,7 @@ function renderProductos(lista) {
     if (a.destacado) tags.push('<span class="chip-destacado">⭐ Destacado</span>');
     if (a.masVendido) tags.push('<span class="chip-mas-vendido">🏆 Más vendido</span>');
     const tagsHtml = tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
-    return `<div class="producto-card" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
+    return `<div class="producto-card${enterClass}" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
       <div class="producto-inner">
         <div class="foto-wrap">${foto}</div>
         <div class="card-main">
@@ -3797,7 +3813,8 @@ function renderProductos(lista) {
       </div>
     </div>`;
   }).join('');
-  body.innerHTML = `<div class="productos-grid">${cardsHtml}</div>${renderPaginacion(totalPaginas)}`;
+  body.innerHTML = `<div class="productos-grid">${cardsHtml}</div><div id="publicListSentinel" style="height:${hayMas ? '1px' : '0'}"></div>`;
+  finalizePublicWindowRender({ anchorCode, anchorTop, anchorMode });
 }
 
 function renderContenidoActual() {
@@ -3946,7 +3963,7 @@ function aplicarValorBusqueda(valor, guardar = true) {
 function aplicarBusquedaActual() {
   const input = document.getElementById('searchInput');
   const procesada = procesarBusquedaArticulos(input.value);
-  paginaActual = 1;
+  resetPublicWindow();
   actualizarChipsEtiqueta();
 
   let resultado = [...procesada.resultados];
@@ -4021,12 +4038,6 @@ function cerrarMenuOrden() {
   if (!sortWrap || !sortButton) return;
   sortWrap.classList.remove('open');
   sortButton.setAttribute('aria-expanded', 'false');
-}
-
-window.cambiarPagina = function(direccion) {
-  paginaActual += direccion;
-  renderProductos(listaFiltradaActual);
-  scrollMainToTop();
 }
 
 let debounce;
@@ -4138,6 +4149,7 @@ mainScrollHost.addEventListener('scroll', () => {
   if (sortWrap.classList.contains('open')) cerrarMenuOrden();
   ocultarAsistenteBusqueda();
   updateScrollTopButton();
+  maybeAdvancePublicWindowFromScroll();
 }, { passive: true });
 window.addEventListener('touchmove', () => {
   ocultarAsistenteBusqueda();
@@ -4275,61 +4287,39 @@ document.getElementById('scrollBody').addEventListener('keydown', (e) => {
   }
 });
 
-let indexLoadToken = 0;
-
 onSnapshot(doc(db, "config", "listaActual"), async snap => {
+  const loader = document.getElementById('loadingOverlay');
   if (!snap.exists()) {
+    disconnectPublicListObserver();
     document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
-    setIndexLoaderState({ visible: false });
+    if (loader) loader.style.display = 'none';
     return;
   }
   try {
-    const currentToken = ++indexLoadToken;
-    const snapshotData = snap.data() || {};
-    const url = snapshotData.url;
-    setIndexLoaderState({ visible: true, title: 'Verificando cache local...', percent: 4 });
-    const cachedRows = await restoreIndexCache(snapshotData);
-    if (currentToken !== indexLoadToken) return;
-    if (Array.isArray(cachedRows)) {
-      todosArticulos = cachedRows;
-      actualizarVistaEtiqueta();
-      aplicarBusquedaActual();
-      setIndexLoaderState({ visible: false });
-      return;
-    }
-    await clearIndexCache();
-    setIndexLoaderState({ visible: true, title: 'Descargando lista publicada...', percent: 6 });
+    const url = snap.data().url;
     const data = await cargarListaConMetadatos(url);
-    let processed = [];
-    let offset = 0;
-    let firstPaintDone = false;
-    while (offset < data.length) {
-      if (currentToken !== indexLoadToken) return;
-      const size = firstPaintDone ? INDEX_BACKGROUND_BATCH : INDEX_FIRST_PAINT_BATCH;
-      const batch = data.slice(offset, offset + size).map(mapArticuloParaIndex);
-      processed.push(...batch);
-      todosArticulos = processed;
-      const progress = 8 + ((processed.length / Math.max(1, data.length)) * 92);
-      setIndexLoaderState({ visible: true, title: firstPaintDone ? 'Actualizando catalogo en segundo plano...' : 'Preparando primera vista...', percent: progress });
-      if (!firstPaintDone) {
-        actualizarVistaEtiqueta();
-        aplicarBusquedaActual();
-        setIndexLoaderState({ visible: true, title: 'Pagina lista. Terminando de cargar articulos...', percent: progress });
-        firstPaintDone = true;
-      }
-      offset += size;
-      if (offset < data.length) await waitIndexBatchTurn();
-    }
-    if (currentToken === indexLoadToken && firstPaintDone) {
-      aplicarBusquedaActual();
-      await saveIndexCache(snapshotData, processed);
-    }
-    setIndexLoaderState({ visible: false });
+    todosArticulos = data.map(a => {
+      const normalizado = normalizarArticulo(a);
+      const indice = construirIndiceBusquedaArticulo(normalizado);
+      return {
+        ...normalizado,
+        _codigoArticulo: indice.codigoArticulo,
+        _descripcionPrincipal: indice.descripcionPrincipal,
+        _descripcionSecundaria: indice.descripcionSecundaria,
+        _searchFields: indice.fields,
+        _searchTokens: indice.tokens,
+        _busquedaPrincipal: indice.fields.principal,
+        _busqueda: indice.fields.full
+      };
+    });
+    actualizarVistaEtiqueta();
+    aplicarBusquedaActual();
   } catch (e) {
     console.error(e);
+    disconnectPublicListObserver();
     document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error cargando lista</p></div>`;
-    setIndexLoaderState({ visible: false });
   }
+  if (loader) loader.style.display = 'none';
 });
 
 let carrito = {};
@@ -4582,18 +4572,9 @@ let logoCacheData = null;
 cargarCarrito();
 </script>
 
-<div id="loadingOverlay" style="position:fixed;right:16px;bottom:16px;width:min(360px,calc(100vw - 24px));background:rgba(255,255,255,.96);border:1px solid #d8cfee;border-radius:18px;display:flex;align-items:stretch;justify-content:center;flex-direction:column;gap:10px;z-index:9999;font-family:'Barlow Condensed',sans-serif;box-shadow:0 20px 50px rgba(58,35,120,.18);padding:16px;pointer-events:none;">
-  <div style="display:flex;align-items:center;gap:12px;">
-    <div style="width:34px;height:34px;border:4px solid #d0c8f0;border-top-color:#6c4fc7;border-radius:50%;animation:spin 0.8s linear infinite;flex:0 0 auto;"></div>
-    <div style="min-width:0;flex:1 1 auto;">
-      <div id="loadingOverlayLabel" style="color:#6c4fc7;font-size:16px;letter-spacing:1px;text-transform:uppercase;line-height:1.1;">Cargando articulos...</div>
-      <div style="color:#7b8090;font-size:12px;margin-top:4px;">La pagina ya esta usable mientras termina el resto.</div>
-    </div>
-    <div id="loadingOverlayPct" style="color:#4d35a0;font-size:20px;font-weight:900;line-height:1;">0%</div>
-  </div>
-  <div style="height:10px;background:rgba(108,79,199,.12);border-radius:999px;overflow:hidden;">
-    <div id="loadingOverlayBar" style="width:0%;height:100%;background:linear-gradient(90deg,#6c4fc7,#8d76e7);transition:width .18s ease;"></div>
-  </div>
+<div id="loadingOverlay" style="position:fixed;inset:0;background:#f0ece8;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:9999;font-family:'Barlow Condensed',sans-serif;">
+  <div style="width:40px;height:40px;border:4px solid #d0c8f0;border-top-color:#6c4fc7;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:16px;"></div>
+  <div style="color:#6c4fc7;font-size:16px;letter-spacing:1px;text-transform:uppercase;">Cargando articulos...</div>
 </div>
 
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"57a2e842481341dc931980f9468b270c","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
