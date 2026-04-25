@@ -185,6 +185,11 @@
     background: linear-gradient(90deg, #31d981 0%, var(--verde) 100%);
     box-shadow: 0 0 0 2px rgba(0,200,83,.2);
   }
+  .chip-toggle[data-chip="ceramico"].active {
+    border-color: #4cc9f0;
+    background: linear-gradient(90deg, #4cc9f0 0%, #3a86ff 100%);
+    box-shadow: 0 0 0 2px rgba(76,201,240,.2);
+  }
   .oferta-summary {
     margin-top: 8px;
     padding: 10px 12px;
@@ -218,6 +223,10 @@
   .apply-targets-list { max-height: min(54vh, 430px); overflow-y: auto; display: grid; gap: 10px; padding-right: 4px; }
   .apply-targets-list::-webkit-scrollbar { width: 6px; }
   .apply-targets-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  .apply-targets-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .apply-targets-toolbar .chip-row { margin: 0; }
+  .apply-targets-select-all { white-space: nowrap; }
+  .apply-targets-select-all:disabled { opacity: 0.4; cursor: not-allowed; }
   .apply-target-item { width: 100%; border: 1px solid var(--border); border-radius: 14px; background: var(--card2); padding: 10px; display: grid; grid-template-columns: 56px minmax(0, 1fr) 32px; gap: 12px; align-items: center; cursor: pointer; text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
   .apply-target-item:hover { border-color: #4a5070; transform: translateY(-1px); }
   .apply-target-item.is-selected { border-color: rgba(0,200,83,.62); box-shadow: 0 0 0 2px rgba(0,200,83,.16); }
@@ -645,6 +654,8 @@
     .modal { padding: 18px 14px; border-radius: 16px; max-height: 92vh; }
     .modal-acciones { flex-direction: column; }
     .btn-cancelar, .btn-guardar-edit, .btn-aplicar-relacionados { width: 100%; }
+    .apply-targets-toolbar { align-items: stretch; flex-direction: column; }
+    .apply-targets-select-all { width: 100%; }
     .apply-target-item { grid-template-columns: 48px minmax(0, 1fr) 30px; gap: 10px; }
     .apply-target-name { font-size: 13px; }
     .portada-toolbar { flex-direction: column; align-items: stretch; }
@@ -870,8 +881,10 @@
         <button class="chip-toggle" type="button" data-chip="oferta" id="editChipOferta">En oferta</button>
         <button class="chip-toggle" type="button" data-chip="destacado" id="editChipDestacado">Destacado</button>
         <button class="chip-toggle" type="button" data-chip="masVendido" id="editChipMasVendido">Más vendido</button>
+        <button class="chip-toggle" type="button" data-chip="ceramico" id="editChipCeramico">Ceramico</button>
       </div>
       <div class="oferta-summary" id="ofertaSummary" style="display:none;"></div>
+      <div class="oferta-summary" id="ceramicoSummary" style="display:none;"></div>
     </div>
     <div class="field"><label>Precio</label><input type="number" id="editPrecio" min="0" step="0.01"></div>
     <div class="field">
@@ -914,6 +927,21 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="modalCeramico">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-title">m2 <button class="btn-cerrar-modal" onclick="cancelarModalCeramico()">✕</button></div>
+    <div class="modal-subtitle">Ingresá los m2 del modelo de ceramico.</div>
+    <div class="field">
+      <label>m2</label>
+      <input type="number" id="ceramicoM2Input" min="0" step="0.01" placeholder="Ej: 2.68">
+    </div>
+    <div class="modal-acciones">
+      <button class="btn-cancelar" type="button" onclick="quitarModalCeramico()">Quitar</button>
+      <button class="btn-guardar-edit" type="button" onclick="guardarModalCeramico()">Guardar m2</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modalApplyTargets">
   <div class="modal" style="max-width:680px;">
     <div class="modal-title">Aplicar cambios también a <button class="btn-cerrar-modal" type="button" onclick="cerrarModalAplicarTargets()">✕</button></div>
@@ -925,10 +953,13 @@
       </div>
       <div id="applyTargetsAssist" class="admin-search-assist hidden"></div>
     </div>
-    <div class="chip-row admin-chip-filters apply-targets-filters" id="applyTargetsFilters">
-      <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="oferta">En oferta</button>
-      <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="destacado">Destacado</button>
-      <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="masVendido">Más vendido</button>
+    <div class="apply-targets-toolbar">
+      <div class="chip-row admin-chip-filters apply-targets-filters" id="applyTargetsFilters">
+        <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="oferta">En oferta</button>
+        <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="destacado">Destacado</button>
+        <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="masVendido">Más vendido</button>
+      </div>
+      <button class="chip-toggle apply-targets-select-all" id="btnSelectAllApplyTargets" type="button" onclick="toggleSelectAllApplyTargets()">Seleccionar todo</button>
     </div>
     <div class="art-contador" id="applyTargetsCounter">0 seleccionados</div>
     <div class="apply-targets-list" id="applyTargetsList"></div>
@@ -1032,10 +1063,13 @@ let editMeta = {
   oferta: false,
   destacado: false,
   masVendido: false,
+  ceramico: false,
+  ceramicoM2: 0,
   ofertaPct: 0,
   ofertaHasta: ''
 };
 let ofertaModalSnapshot = null;
+let ceramicoModalSnapshot = null;
 let applyTargetsSelection = new Set();
 let applyFieldsSelection = new Set();
 let applyTargetsFiltered = [];
@@ -1138,6 +1172,12 @@ function clampPct(value) {
   return Math.min(99, Math.max(0, parsed));
 }
 
+function sanitizeM2(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.round(parsed * 100) / 100);
+}
+
 function sanitizeIsoDate(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -1150,6 +1190,8 @@ function extraerMetaOferta(articulo) {
     oferta: toBool(articulo?.oferta ?? articulo?.enOferta ?? articulo?.tagOferta),
     destacado: toBool(articulo?.destacado ?? articulo?.tagDestacado),
     masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido),
+    ceramico: toBool(articulo?.ceramico ?? articulo?.tagCeramico),
+    ceramicoM2: sanitizeM2(articulo?.ceramicoM2 ?? articulo?.m2Ceramico ?? articulo?.m2 ?? articulo?.metros2Ceramico ?? 0),
     ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? '')
   };
@@ -1219,7 +1261,9 @@ function normalizarArticuloAdmin(articulo = {}) {
     ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? ''),
     destacado: toBool(articulo?.destacado ?? articulo?.tagDestacado),
-    masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido)
+    masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido),
+    ceramico: toBool(articulo?.ceramico ?? articulo?.tagCeramico),
+    ceramicoM2: sanitizeM2(articulo?.ceramicoM2 ?? articulo?.m2Ceramico ?? articulo?.m2 ?? articulo?.metros2Ceramico ?? 0)
   };
 }
 
@@ -1250,7 +1294,9 @@ function extraerMetadatosPersistentes(articulo = {}) {
     ofertaPct: normalizado.ofertaPct,
     ofertaHasta: normalizado.ofertaHasta,
     destacado: !!normalizado.destacado,
-    masVendido: !!normalizado.masVendido
+    masVendido: !!normalizado.masVendido,
+    ceramico: !!normalizado.ceramico,
+    ceramicoM2: normalizado.ceramicoM2
   };
   const tieneContenido = !!(
     meta.detalle ||
@@ -1260,7 +1306,9 @@ function extraerMetadatosPersistentes(articulo = {}) {
     meta.ofertaPct > 0 ||
     meta.ofertaHasta ||
     meta.destacado ||
-    meta.masVendido
+    meta.masVendido ||
+    meta.ceramico ||
+    meta.ceramicoM2 > 0
   );
   return tieneContenido ? meta : null;
 }
@@ -1294,7 +1342,9 @@ function aplicarMetadatosArticulo(articulo = {}, meta = null) {
     ofertaPct: meta.ofertaPct ?? articulo.ofertaPct ?? articulo.oferta_pct ?? articulo.ofertaPorcentaje ?? articulo.descuentoOferta ?? 0,
     ofertaHasta: meta.ofertaHasta ?? articulo.ofertaHasta ?? articulo.oferta_hasta ?? articulo.fechaOfertaHasta ?? '',
     destacado: meta.destacado ?? articulo.destacado ?? articulo.tagDestacado,
-    masVendido: meta.masVendido ?? articulo.masVendido ?? articulo.mas_vendido ?? articulo.tagMasVendido
+    masVendido: meta.masVendido ?? articulo.masVendido ?? articulo.mas_vendido ?? articulo.tagMasVendido,
+    ceramico: meta.ceramico ?? articulo.ceramico ?? articulo.tagCeramico,
+    ceramicoM2: meta.ceramicoM2 ?? articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico ?? 0
   });
 }
 
@@ -1311,8 +1361,28 @@ function serializarMetadatosArticulos(lista = []) {
     .filter(Boolean);
 }
 
+function tieneCampoPropio(obj, keys = []) {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(obj || {}, key));
+}
+
+function aplicarCeramicoPrevioSiFalta(articulo = {}, metaPrevio = null) {
+  if (!metaPrevio) return articulo;
+  const tieneCeramico = tieneCampoPropio(articulo, ['ceramico', 'tagCeramico']);
+  const tieneM2 = tieneCampoPropio(articulo, ['ceramicoM2', 'm2Ceramico', 'm2', 'metros2Ceramico']);
+  if (tieneCeramico && tieneM2) return articulo;
+  return {
+    ...articulo,
+    ceramico: tieneCeramico ? articulo.ceramico : metaPrevio.ceramico,
+    ceramicoM2: tieneM2 ? (articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico) : metaPrevio.ceramicoM2
+  };
+}
+
 function setTodosArticulos(lista, { render = true } = {}) {
-  todosArticulos = (lista || []).map(enriquecerArticuloAdminBusqueda);
+  const metaAnterior = articulosMetaMap;
+  todosArticulos = (lista || []).map((articulo) => {
+    const codigo = String(articulo?.codigo ?? articulo?.idart ?? '').trim();
+    return enriquecerArticuloAdminBusqueda(aplicarCeramicoPrevioSiFalta(articulo, metaAnterior.get(codigo)));
+  });
   articulosMetaMap = construirMapaMetadatos(todosArticulos);
   if (render) {
     filtrarLista();
@@ -2229,6 +2299,7 @@ function renderEditChips() {
   document.getElementById('editChipOferta').classList.toggle('active', !!editMeta.oferta);
   document.getElementById('editChipDestacado').classList.toggle('active', !!editMeta.destacado);
   document.getElementById('editChipMasVendido').classList.toggle('active', !!editMeta.masVendido);
+  document.getElementById('editChipCeramico').classList.toggle('active', !!editMeta.ceramico);
   const summary = document.getElementById('ofertaSummary');
   if (editMeta.oferta) {
     const precioLista = Number(document.getElementById('editPrecio').value || 0);
@@ -2239,6 +2310,14 @@ function renderEditChips() {
   } else {
     summary.style.display = 'none';
     summary.innerHTML = '';
+  }
+  const ceramicoSummary = document.getElementById('ceramicoSummary');
+  if (editMeta.ceramico) {
+    ceramicoSummary.style.display = 'block';
+    ceramicoSummary.innerHTML = `Ceramico: <b>${sanitizeM2(editMeta.ceramicoM2) || 0} m2</b> · <button type="button" style="border:none;background:transparent;color:var(--amarillo);font-weight:700;cursor:pointer;" onclick="abrirModalCeramico()">Editar m2</button>`;
+  } else {
+    ceramicoSummary.style.display = 'none';
+    ceramicoSummary.innerHTML = '';
   }
 }
 
@@ -2290,8 +2369,16 @@ function updateApplyTargetsSummary() {
   const seleccionados = applyTargetsSelection.size;
   const visibles = Math.min(applyTargetsVisibleCount, applyTargetsFiltered.length);
   const detalleCarga = applyTargetsFiltered.length ? ` · <b>${visibles}</b> de ${applyTargetsFiltered.length} cargados` : '';
+  const filteredCodes = applyTargetsFiltered.map((articulo) => String(articulo.codigo || '').trim()).filter(Boolean);
+  const todosFiltradosSeleccionados = !!filteredCodes.length && filteredCodes.every((codigo) => applyTargetsSelection.has(codigo));
   document.getElementById('applyTargetsCounter').innerHTML = `<b>${seleccionados}</b> seleccionado${seleccionados === 1 ? '' : 's'}${detalleCarga}`;
   document.getElementById('btnContinuarApplyTargets').disabled = seleccionados === 0;
+  const btnSelectAll = document.getElementById('btnSelectAllApplyTargets');
+  if (btnSelectAll) {
+    btnSelectAll.disabled = !filteredCodes.length;
+    btnSelectAll.classList.toggle('active', todosFiltradosSeleccionados);
+    btnSelectAll.textContent = todosFiltradosSeleccionados ? 'Quitar todo' : 'Seleccionar todo';
+  }
 }
 
 function renderApplyTargetsVisible({ resetScroll = false, appendOnly = false, startIndex = 0 } = {}) {
@@ -2328,6 +2415,17 @@ function loadMoreApplyTargets() {
   applyTargetsVisibleCount = Math.min(applyTargetsVisibleCount + APPLY_TARGETS_BATCH_SIZE, applyTargetsFiltered.length);
   renderApplyTargetsVisible({ appendOnly: true, startIndex: previousCount });
 }
+
+window.toggleSelectAllApplyTargets = function() {
+  const filteredCodes = applyTargetsFiltered.map((articulo) => String(articulo.codigo || '').trim()).filter(Boolean);
+  if (!filteredCodes.length) return;
+  const todosFiltradosSeleccionados = filteredCodes.every((codigo) => applyTargetsSelection.has(codigo));
+  filteredCodes.forEach((codigo) => {
+    if (todosFiltradosSeleccionados) applyTargetsSelection.delete(codigo);
+    else applyTargetsSelection.add(codigo);
+  });
+  renderApplyTargetsVisible();
+};
 
 window.abrirModalAplicarTargets = function() {
   if (!document.getElementById('editId').value.trim()) {
@@ -2427,6 +2525,44 @@ window.guardarModalOferta = function () {
   window.cerrarModalOferta();
 };
 
+window.abrirModalCeramico = function () {
+  ceramicoModalSnapshot = { ...editMeta };
+  document.getElementById('ceramicoM2Input').value = editMeta.ceramicoM2 || '';
+  document.getElementById('modalCeramico').classList.add('visible');
+  requestAnimationFrame(() => document.getElementById('ceramicoM2Input')?.focus({ preventScroll: true }));
+};
+
+window.cerrarModalCeramico = function () {
+  document.getElementById('modalCeramico').classList.remove('visible');
+};
+
+window.cancelarModalCeramico = function () {
+  if (ceramicoModalSnapshot) editMeta = { ...ceramicoModalSnapshot };
+  renderEditChips();
+  window.cerrarModalCeramico();
+};
+
+window.quitarModalCeramico = function () {
+  editMeta.ceramico = false;
+  editMeta.ceramicoM2 = 0;
+  ceramicoModalSnapshot = null;
+  renderEditChips();
+  window.cerrarModalCeramico();
+};
+
+window.guardarModalCeramico = function () {
+  const m2 = sanitizeM2(document.getElementById('ceramicoM2Input').value);
+  if (m2 <= 0) {
+    toast('Ingresá los m2 del ceramico', 'err');
+    return;
+  }
+  editMeta.ceramico = true;
+  editMeta.ceramicoM2 = m2;
+  ceramicoModalSnapshot = null;
+  renderEditChips();
+  window.cerrarModalCeramico();
+};
+
 document.getElementById('ofertaPctInput').addEventListener('input', renderOfferPreview);
 document.getElementById('ofertaHastaInput').addEventListener('change', renderOfferPreview);
 document.getElementById('editPrecio').addEventListener('input', () => {
@@ -2455,8 +2591,20 @@ document.getElementById('editChipMasVendido').addEventListener('click', () => {
   renderEditChips();
 });
 
+document.getElementById('editChipCeramico').addEventListener('click', () => {
+  const snapshot = { ...editMeta };
+  if (!editMeta.ceramico) editMeta.ceramico = true;
+  renderEditChips();
+  window.abrirModalCeramico();
+  ceramicoModalSnapshot = snapshot;
+});
+
 document.getElementById('modalOferta').addEventListener('click', (event) => {
   if (event.target === document.getElementById('modalOferta')) window.cancelarModalOferta();
+});
+
+document.getElementById('modalCeramico').addEventListener('click', (event) => {
+  if (event.target === document.getElementById('modalCeramico')) window.cancelarModalCeramico();
 });
 
 const searchAdminInput = document.getElementById('searchAdmin');
@@ -3073,6 +3221,8 @@ window.guardarArticulo = async () => {
       ofertaHasta: '',
       destacado: false,
       masVendido: false,
+      ceramico: false,
+      ceramicoM2: 0,
       timestamp: Date.now()
     });
     setTodosArticulos([...todosArticulos, nuevoArticulo]);
@@ -3132,9 +3282,11 @@ window.abrirEditar = codigo => {
 window.cerrarModal = () => {
   document.getElementById('modalOverlay').classList.remove('visible');
   window.cerrarModalOferta();
+  window.cerrarModalCeramico();
   window.cerrarModalAplicarTargets();
   window.cerrarModalAplicarCampos(false);
   ofertaModalSnapshot = null;
+  ceramicoModalSnapshot = null;
   applyTargetsSelection = new Set();
   applyFieldsSelection = new Set();
   applyTargetsFiltered = [];
@@ -3170,6 +3322,8 @@ function aplicarCamposMasivosEnDestino(destino, fuente, campos) {
     actualizado.ofertaHasta = fuente.ofertaHasta;
     actualizado.destacado = fuente.destacado;
     actualizado.masVendido = fuente.masVendido;
+    actualizado.ceramico = fuente.ceramico;
+    actualizado.ceramicoM2 = fuente.ceramicoM2;
   }
   if (campos.has('detalle')) {
     actualizado.detalle = fuente.detalle;
@@ -3198,6 +3352,9 @@ async function guardarEdicionInterna({ selectedCodes = [], fields = [] } = {}) {
     if (clampPct(editMeta.ofertaPct) <= 0) throw new Error('La oferta necesita porcentaje válido');
     if (!sanitizeIsoDate(editMeta.ofertaHasta)) throw new Error('La oferta necesita fecha hasta');
   }
+  if (editMeta.ceramico && sanitizeM2(editMeta.ceramicoM2) <= 0) {
+    throw new Error('El ceramico necesita m2 válidos');
+  }
   const indiceOriginal = obtenerIndiceArticuloPorCodigo(originalCode);
   if (indiceOriginal === -1) throw new Error('Artículo no encontrado en la lista');
   const original = todosArticulos[indiceOriginal];
@@ -3218,7 +3375,9 @@ async function guardarEdicionInterna({ selectedCodes = [], fields = [] } = {}) {
     ofertaPct: clampPct(editMeta.ofertaPct),
     ofertaHasta: sanitizeIsoDate(editMeta.ofertaHasta),
     destacado: !!editMeta.destacado,
-    masVendido: !!editMeta.masVendido
+    masVendido: !!editMeta.masVendido,
+    ceramico: !!editMeta.ceramico,
+    ceramicoM2: editMeta.ceramico ? sanitizeM2(editMeta.ceramicoM2) : 0
   });
 
   const camposSeleccionados = new Set(fields || []);
