@@ -1232,11 +1232,17 @@
   .lista-actions .agregar-btn { min-width: 102px; }
   .precio-lista {
     font-family:'Barlow Condensed',sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     color: #7d7f91;
     text-decoration: line-through;
     text-align: right;
     min-height: 14px;
+  }
+  .precio-lista.precio-caja {
+    text-decoration: none;
+    color: #6c6386;
+    font-size: 14px;
+    font-weight: 800;
   }
   .precio-vigente {
     font-family:'Barlow',sans-serif;
@@ -1247,6 +1253,12 @@
     color: #5b439a;
     text-align: right;
     white-space: nowrap;
+  }
+  .precio-vigente span {
+    font-family:'Barlow Condensed',sans-serif;
+    font-size: .62em;
+    font-weight: 800;
+    color: #6c6386;
   }
   .agregar-btn {
     background: linear-gradient(180deg, rgba(142,96,214,.82) 0%, rgba(111,70,189,.82) 100%);
@@ -2972,7 +2984,7 @@ function renderHomeSpotlight(articulo, label, accent, index) {
   if (!articulo) return '';
   const descripcion = obtenerDescripcionArticulo(articulo);
   const { stockText } = obtenerStockInfo(articulo);
-  const precioVigente = Number(articulo.precioVigente ?? articulo.precio ?? 0);
+  const precioVisual = obtenerPrecioVisualArticulo(articulo);
   const codigo = obtenerIdArticulo(articulo);
   return `<article class="home-spotlight" data-detail-code="${codigo}" style="--spotlight-tint:${accent};--spotlight-index:${index};">
     <div class="home-spotlight-media">${renderHomeArticuloFoto(articulo, descripcion.principal)}</div>
@@ -2980,7 +2992,7 @@ function renderHomeSpotlight(articulo, label, accent, index) {
       <div class="home-spotlight-eyebrow">${escaparHtml(label)}</div>
       <div class="home-spotlight-title">${escaparHtml(descripcion.principal)}</div>
       <div class="home-spotlight-meta">Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}</div>
-      <div class="home-spotlight-price">${fmtPrecio(precioVigente)}</div>
+      <div class="home-spotlight-price">${precioVisual.esCeramico ? `<span style="font-size:12px;color:#6c6386;margin-right:4px;">${precioVisual.precioBaseHtml}</span>` : ''}${precioVisual.precioFinalHtml}</div>
     </div>
   </article>`;
 }
@@ -2992,6 +3004,7 @@ function renderHomeSectionCard(articulo, index) {
   const { stockText, stockClass } = obtenerStockInfo(articulo);
   const precioLista = Number(articulo.precio || 0);
   const precioVigente = Number(articulo.precioVigente ?? precioLista);
+  const precioVisual = obtenerPrecioVisualArticulo(articulo);
   return `<article class="home-card" data-detail-code="${codigo}" style="--card-stagger:${index};">
     <div class="home-card-inner">
       <div class="home-card-media">${renderHomeArticuloFoto(articulo, descripcion.principal)}</div>
@@ -3007,10 +3020,10 @@ function renderHomeSectionCard(articulo, index) {
         </div>
         <div class="home-card-footer">
           <div class="home-card-price">
-            <div class="precio-lista">${articulo.ofertaVigente ? fmtPrecio(precioLista) : ''}</div>
-            <div class="precio-vigente">${fmtPrecio(precioVigente)}</div>
+            <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}">${precioVisual.precioBaseHtml}</div>
+            <div class="precio-vigente">${precioVisual.precioFinalHtml}</div>
           </div>
-          <button class="agregar-btn" data-codigo="${codigo}" data-nombre="${escaparHtml(descripcion.principal)}" data-precio="${precioVigente}" data-foto="${escaparHtml(articulo.fotoUrl || '')}">🛒 Agregar</button>
+          <button class="agregar-btn" data-detail-trigger="1" data-detail-code="${codigo}" type="button">🛒 Agregar</button>
         </div>
       </div>
     </div>
@@ -3023,13 +3036,14 @@ function renderHomeCompactItem(articulo, idxLocal) {
   const { stockText } = obtenerStockInfo(articulo);
   const precioLista = Number(articulo.precio || 0);
   const precioVigente = Number(articulo.precioVigente ?? precioLista);
+  const precioVisual = obtenerPrecioVisualArticulo(articulo);
   return `<article class="home-spotlight" data-detail-code="${codigo}" style="--spotlight-index:${idxLocal};">
     <div class="home-spotlight-media">${renderHomeArticuloFoto(articulo, descripcion.principal)}</div>
     <div class="home-spotlight-copy">
       ${construirTagsArticulo(articulo)}
       <div class="home-spotlight-title">${escaparHtml(descripcion.principal)}</div>
       <div class="home-spotlight-meta">Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}</div>
-      <div class="home-spotlight-price">${articulo.ofertaVigente ? `<span style="font-size:12px;text-decoration:line-through;color:#aaa;margin-right:4px;">${fmtPrecio(precioLista)}</span>` : ''}${fmtPrecio(precioVigente)}</div>
+      <div class="home-spotlight-price">${precioVisual.esCeramico ? `<span style="font-size:12px;color:#6c6386;margin-right:4px;">${precioVisual.precioBaseHtml}</span>` : (articulo.ofertaVigente ? `<span style="font-size:12px;text-decoration:line-through;color:#aaa;margin-right:4px;">${fmtPrecio(precioLista)}</span>` : '')}${precioVisual.precioFinalHtml}</div>
     </div>
   </article>`;
 }
@@ -3773,6 +3787,26 @@ function fmtM2(value) {
   return `${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} m2`;
 }
 
+function obtenerPrecioVisualArticulo(articulo = {}) {
+  const precioCaja = Number(articulo.precio || 0);
+  const precioVigente = Number(articulo.precioVigente ?? precioCaja);
+  const cajaM2 = sanitizeM2(articulo.ceramicoM2);
+  if (articulo.ceramico && cajaM2 > 0) {
+    return {
+      esCeramico: true,
+      precioBaseHtml: `Caja ${fmtPrecio(precioCaja)}`,
+      precioFinalHtml: `${fmtPrecio(precioCaja / cajaM2)} <span>/ m2</span>`,
+      precioCarrito: precioVigente
+    };
+  }
+  return {
+    esCeramico: false,
+    precioBaseHtml: articulo.ofertaVigente ? fmtPrecio(precioCaja) : '',
+    precioFinalHtml: fmtPrecio(precioVigente),
+    precioCarrito: precioVigente
+  };
+}
+
 function fmtBolsas(value) {
   const n = Number(value || 0);
   if (!Number.isFinite(n) || n <= 0) return '-';
@@ -3962,6 +3996,7 @@ function abrirDetalleProducto(codigo) {
   const { stockText } = obtenerStockInfo(articulo);
   const precioLista = Number(articulo.precio || 0);
   const precioVigente = Number(articulo.precioVigente ?? precioLista);
+  const precioVisual = obtenerPrecioVisualArticulo(articulo);
   const tags = [];
   if (articulo.ofertaVigente) tags.push('<span class="chip-oferta">🔥 Oferta</span>');
   if (articulo.destacado) tags.push('<span class="chip-destacado">⭐ Destacado</span>');
@@ -3971,8 +4006,10 @@ function abrirDetalleProducto(codigo) {
   document.getElementById('productDetailTitle').textContent = descripcion.principal;
   document.getElementById('productDetailCode').textContent = obtenerIdArticulo(articulo);
   document.getElementById('productDetailStock').textContent = stockText;
-  document.getElementById('productDetailPriceBase').textContent = articulo.ofertaVigente ? `Precio lista ${fmtPrecio(precioLista)}` : '';
-  document.getElementById('productDetailPriceFinal').textContent = fmtPrecio(precioVigente);
+  const detailPriceBase = document.getElementById('productDetailPriceBase');
+  detailPriceBase.textContent = precioVisual.esCeramico ? precioVisual.precioBaseHtml : (articulo.ofertaVigente ? `Precio lista ${fmtPrecio(precioLista)}` : '');
+  detailPriceBase.classList.toggle('precio-caja', precioVisual.esCeramico);
+  document.getElementById('productDetailPriceFinal').innerHTML = precioVisual.precioFinalHtml;
   document.getElementById('productDetailPriceNote').textContent = String(articulo.rubro || '').trim() || '';
   document.getElementById('productDetailDescription').textContent = descripcion.secundaria || 'Sin detalle disponible.';
   renderDetalleProductoFoto(articulo, descripcion.principal);
@@ -3985,7 +4022,7 @@ function abrirDetalleProducto(codigo) {
   budgetBtn.classList.toggle('hidden', !(articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0));
   addBtn.dataset.codigo = obtenerIdArticulo(articulo);
   addBtn.dataset.nombre = descripcion.principal;
-  addBtn.dataset.precio = String(precioVigente);
+  addBtn.dataset.precio = String(precioVisual.precioCarrito);
   addBtn.dataset.foto = articulo.fotoUrl || '';
   const modal = document.getElementById('productDetailModal');
   modal.classList.remove('hidden');
@@ -4027,6 +4064,7 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
       const { stockText, stockClass, stockLista } = obtenerStockInfo(a);
       const precioLista = Number(a.precio || 0);
       const precioVigente = Number(a.precioVigente ?? precioLista);
+      const precioVisual = obtenerPrecioVisualArticulo(a);
       const tags = [];
       if (a.ofertaVigente) tags.push('<span class="chip-oferta">🔥 Oferta</span>');
       if (a.destacado) tags.push('<span class="chip-destacado">⭐ Destacado</span>');
@@ -4047,11 +4085,11 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
         </div>
         <div class="lista-cell lista-stock"><div class="stock-pill ${stockClass}">${stockLista}</div></div>
         <div class="lista-cell lista-precio">
-          <div class="precio-lista">${a.ofertaVigente ? fmtPrecio(precioLista) : ''}</div>
-          <div class="precio-vigente">${fmtPrecio(precioVigente)}</div>
+          <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}">${precioVisual.precioBaseHtml}</div>
+          <div class="precio-vigente">${precioVisual.precioFinalHtml}</div>
         </div>
         <div class="lista-cell lista-actions">
-          <button class="agregar-btn" data-codigo="${codigoArticulo}" data-nombre="${descripcion.principal}" data-precio="${precioVigente}" data-foto="${a.fotoUrl || ''}">🛒 Agregar</button>
+          <button class="agregar-btn" data-detail-trigger="1" data-detail-code="${codigoArticulo}" type="button">🛒 Agregar</button>
         </div>
       </div>`;
     }).join('');
@@ -4085,6 +4123,7 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
     const { stockText, stockClass } = obtenerStockInfo(a);
     const precioLista = Number(a.precio || 0);
     const precioVigente = Number(a.precioVigente ?? precioLista);
+    const precioVisual = obtenerPrecioVisualArticulo(a);
     const tags = [];
     if (a.ofertaVigente) tags.push('<span class="chip-oferta">🔥 Oferta</span>');
     if (a.destacado) tags.push('<span class="chip-destacado">⭐ Destacado</span>');
@@ -4104,9 +4143,9 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
           </div>
         </div>
         <div class="card-cta">
-          <div class="precio-lista">${a.ofertaVigente ? fmtPrecio(precioLista) : ''}</div>
-          <div class="precio-vigente">${fmtPrecio(precioVigente)}</div>
-          <button class="agregar-btn" data-codigo="${codigoArticulo}" data-nombre="${descripcion.principal}" data-precio="${precioVigente}" data-foto="${a.fotoUrl || ''}">🛒 Agregar</button>
+          <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}">${precioVisual.precioBaseHtml}</div>
+          <div class="precio-vigente">${precioVisual.precioFinalHtml}</div>
+          <button class="agregar-btn" data-detail-trigger="1" data-detail-code="${codigoArticulo}" type="button">🛒 Agregar</button>
         </div>
       </div>
     </div>`;
@@ -4506,7 +4545,7 @@ document.getElementById('contactModalClose')?.addEventListener('click', closeCon
 contactModal?.addEventListener('click', (e) => { if (e.target === contactModal) closeContactModal(); });
 
 document.getElementById('scrollBody').addEventListener('click', e => {
-  if (e.target.closest('.agregar-btn')) {
+  if (e.target.closest('.agregar-btn:not([data-detail-trigger])')) {
     const btn = e.target.closest('.agregar-btn');
     openQuantityModal({ codigo: btn.dataset.codigo, nombre: btn.dataset.nombre, precio: parseFloat(btn.dataset.precio) || 0, foto: btn.dataset.foto });
     return;
