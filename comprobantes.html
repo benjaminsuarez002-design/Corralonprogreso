@@ -210,6 +210,13 @@
       padding: 7px 8px;
     }
 
+    .alias-print-btn {
+      width: 42px;
+      min-width: 42px;
+      font-size: 16px;
+      padding: 7px 8px;
+    }
+
     .field {
       display: flex;
       flex-direction: column;
@@ -1871,6 +1878,7 @@
             </div>
             <div class="alias-actions">
               <button class="ghost-btn alias-edit-btn" type="button" data-action="edit-alias" data-id="${esc(item.id)}" title="Editar alias" aria-label="Editar ${esc(item.nombre)}">✎</button>
+              <button class="ghost-btn alias-print-btn" type="button" data-action="print-alias" data-id="${esc(item.id)}" title="Imprimir alias" aria-label="Imprimir ${esc(item.nombre)}">⎙</button>
               <button class="danger-btn" type="button" data-action="delete-alias" data-id="${esc(item.id)}">Eliminar</button>
             </div>
           </div>
@@ -2554,6 +2562,110 @@
         closeEditAliasModal();
       }
 
+      function fitPdfFontSize(doc, text, maxWidth, startSize, minSize) {
+        let size = startSize;
+        doc.setFontSize(size);
+        while (size > minSize && doc.getTextWidth(text) > maxWidth) {
+          size -= 1;
+          doc.setFontSize(size);
+        }
+        return size;
+      }
+
+      function fitCanvasFontSize(ctx, text, maxWidth, startSize, minSize, family, weight = "normal") {
+        let size = startSize;
+        ctx.font = `${weight} ${size}px ${family}`;
+        while (size > minSize && ctx.measureText(text).width > maxWidth) {
+          size -= 2;
+          ctx.font = `${weight} ${size}px ${family}`;
+        }
+        return size;
+      }
+
+      function drawRotatedSegments(ctx, x, y, segments) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(-Math.PI / 2);
+        let cursor = 0;
+        segments.forEach((segment) => {
+          ctx.font = segment.font;
+          ctx.fillStyle = segment.color || "#000";
+          ctx.fillText(segment.text, cursor, 0);
+          cursor += ctx.measureText(segment.text).width + (segment.gap || 0);
+        });
+        ctx.restore();
+      }
+
+      function drawRotatedSegmentsCentered(ctx, x, centerY, segments) {
+        const totalWidth = segments.reduce((sum, segment) => {
+          ctx.font = segment.font;
+          return sum + ctx.measureText(segment.text).width + (segment.gap || 0);
+        }, 0);
+        ctx.save();
+        ctx.translate(x, centerY);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textBaseline = "middle";
+        let cursor = -totalWidth / 2;
+        segments.forEach((segment) => {
+          ctx.font = segment.font;
+          ctx.fillStyle = "#000";
+          ctx.fillText(segment.text, cursor, 0);
+          cursor += ctx.measureText(segment.text).width + (segment.gap || 0);
+        });
+        ctx.restore();
+      }
+
+      function openAliasPrintPdf(id) {
+        const item = findRecord(id, state.aliases);
+        if (!item) return;
+        const jsPdfCtor = window.jspdf && window.jspdf.jsPDF;
+        if (!jsPdfCtor) {
+          alert("No se pudo cargar la librería de PDF.");
+          return;
+        }
+        const titular = `Titular:  ${String(item.nombre || "").toUpperCase()}`;
+        const alias = String(item.alias || "").toUpperCase();
+        if (!alias) {
+          alert("Este registro no tiene alias cargado.");
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = 1240;
+        canvas.height = 1754;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = "#000";
+
+        const titularPrefix = "titular:";
+        const titularName = `  ${String(item.nombre || "").toUpperCase()}`;
+        const titularMax = 1330;
+        const titularSize = fitCanvasFontSize(ctx, `${titularPrefix}${titularName}`, titularMax, 70, 42, "Arial, Helvetica, sans-serif", "400");
+        const centerY = canvas.height / 2;
+        drawRotatedSegmentsCentered(ctx, 390, centerY, [
+          { text: titularPrefix, font: `900 ${titularSize}px Arial, Helvetica, sans-serif`, gap: 10 },
+          { text: titularName, font: `400 ${titularSize}px Arial, Helvetica, sans-serif` }
+        ]);
+
+        drawRotatedSegmentsCentered(ctx, 600, centerY, [
+          { text: "ALIAS:", font: "900 136px Arial, Helvetica, sans-serif" }
+        ]);
+
+        fitCanvasFontSize(ctx, alias, 1335, 155, 82, "Impact, 'Arial Black', sans-serif", "900");
+        const aliasSize = parseInt(ctx.font.match(/(\d+)px/)?.[1] || "130", 10);
+        drawRotatedSegmentsCentered(ctx, 760, centerY, [
+          { text: alias, font: `900 ${aliasSize}px Impact, 'Arial Black', sans-serif` }
+        ]);
+
+        const doc = new jsPdfCtor({ unit: "mm", format: "a4", orientation: "portrait" });
+        doc.setProperties({ title: `Alias ${alias}` });
+        doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 210, 297);
+        const url = doc.output("bloburl");
+        const win = window.open(url, "_blank", "noopener");
+        if (!win) alert("El navegador bloqueó la pestaña del PDF.");
+      }
+
       async function saveDraft() {
         if (state.isSavingDraft) return;
         syncDraftFromInputs();
@@ -2900,6 +3012,11 @@
           const editButton = event.target.closest("[data-action='edit-alias']");
           if (editButton) {
             openEditAliasModal(editButton.dataset.id);
+            return;
+          }
+          const printButton = event.target.closest("[data-action='print-alias']");
+          if (printButton) {
+            openAliasPrintPdf(printButton.dataset.id);
             return;
           }
           const button = event.target.closest("[data-action='delete-alias']");
