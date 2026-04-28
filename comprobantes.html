@@ -134,6 +134,21 @@
       gap: 12px;
     }
 
+    .section-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .section-head-actions .ghost-btn {
+      width: auto;
+      min-height: 32px;
+      padding: 6px 10px;
+      white-space: nowrap;
+    }
+
     .section-title {
       margin: 0;
       font-size: 13px;
@@ -1161,6 +1176,9 @@
         <div class="record-card" id="draft-card">
           <div class="section-head">
             <h2 class="section-title" id="draft-title">Cargar movimiento</h2>
+            <div class="section-head-actions">
+              <button class="ghost-btn" id="draft-paste-access" type="button">Pegar Access</button>
+            </div>
           </div>
           <div class="record-body">
             <div class="grid-top">
@@ -1418,6 +1436,7 @@
         draftOpenFile: $("#draft-open-file"),
         draftClear: $("#draft-clear"),
         draftAdd: $("#draft-add"),
+        draftPasteAccess: $("#draft-paste-access"),
         draftSavingIndicator: $("#draft-saving-indicator"),
         draftTitle: $("#draft-title"),
         aliasName: $("#alias-name"),
@@ -1636,6 +1655,58 @@
       function formatAmountInput(value) {
         const parsed = parseAmount(value);
         return parsed ? formatAmount(parsed, true) : "";
+      }
+
+      function normalizeAccessHeader(value) {
+        return String(value || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "");
+      }
+
+      function splitAccessRow(line) {
+        const raw = String(line || "").trim();
+        if (!raw) return [];
+        if (raw.includes("\t")) return raw.split("\t").map((item) => item.trim());
+        return raw.split(/\s{2,}/).map((item) => item.trim());
+      }
+
+      function parseAccessClipboard(text) {
+        const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        if (lines.length < 2) return null;
+        const headers = splitAccessRow(lines[0]).map(normalizeAccessHeader);
+        const values = splitAccessRow(lines[1]);
+        const findIndex = (candidates) => headers.findIndex((header) => candidates.includes(header));
+        const clientIndex = findIndex(["cliente"]);
+        const machineIndex = findIndex(["ncomprobante", "comprobante", "nrocomprobante", "numerocomprobante"]);
+        const amountIndex = findIndex(["importe", "monto"]);
+        return {
+          client: clientIndex >= 0 ? values[clientIndex] || "" : "",
+          machine: machineIndex >= 0 ? values[machineIndex] || "" : "",
+          amount: amountIndex >= 0 ? values[amountIndex] || "" : ""
+        };
+      }
+
+      async function pasteAccessClipboard() {
+        if (!navigator.clipboard?.readText) {
+          alert("El navegador no permite leer texto del portapapeles desde este botón.");
+          return;
+        }
+        const text = await navigator.clipboard.readText();
+        const parsed = parseAccessClipboard(text);
+        if (!parsed || !(parsed.client || parsed.machine || parsed.amount)) {
+          alert("No pude leer el formato de Access del portapapeles.");
+          return;
+        }
+        if (parsed.client) el.draftClient.value = parsed.client;
+        if (parsed.machine) el.draftMachine.value = formatMachine(parsed.machine);
+        if (parsed.amount) el.draftAmount.value = formatAmountInput(parsed.amount);
+        syncDraftFromInputs();
+        saveDraftToStorage();
+        if (!parsed.client) el.draftClient.focus();
+        else if (!parsed.machine) el.draftMachine.focus();
+        else if (!parsed.amount) el.draftAmount.focus();
       }
 
       function formatMachine(value) {
@@ -2845,6 +2916,9 @@
       }
 
       function bindDraftSection() {
+        el.draftPasteAccess.addEventListener("click", () => {
+          pasteAccessClipboard().catch((error) => throttleError("No se pudo pegar desde Access", error));
+        });
         el.draftClient.addEventListener("input", () => {
           syncDraftFromInputs();
         });
