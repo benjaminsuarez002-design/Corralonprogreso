@@ -1688,6 +1688,12 @@
         };
       }
 
+      function continueDraftAfterAmount() {
+        el.draftAmount.value = formatAmountInput(el.draftAmount.value);
+        syncDraftFromInputs();
+        openAliasModal({ type: "draft" });
+      }
+
       async function pasteAccessClipboard() {
         if (!navigator.clipboard?.readText) {
           alert("El navegador no permite leer texto del portapapeles desde este botón.");
@@ -1704,7 +1710,9 @@
         if (parsed.amount) el.draftAmount.value = formatAmountInput(parsed.amount);
         syncDraftFromInputs();
         saveDraftToStorage();
-        if (!parsed.client) el.draftClient.focus();
+        if (parsed.client && parsed.machine && parsed.amount) {
+          continueDraftAfterAmount();
+        } else if (!parsed.client) el.draftClient.focus();
         else if (!parsed.machine) el.draftMachine.focus();
         else if (!parsed.amount) el.draftAmount.focus();
       }
@@ -2953,9 +2961,7 @@
         el.draftAmount.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            el.draftAmount.value = formatAmountInput(el.draftAmount.value);
-            syncDraftFromInputs();
-            openAliasModal({ type: "draft" });
+            continueDraftAfterAmount();
           }
         });
         el.draftTransfer.addEventListener("click", () => openAliasModal({ type: "draft" }));
