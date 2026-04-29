@@ -1647,7 +1647,30 @@
       }
 
       function parseAmount(value) {
-        const cleaned = String(value || "").replace(/\./g, "").replace(",", ".").replace(/[^0-9.-]/g, "");
+        const raw = String(value || "").trim().replace(/[^0-9,.\-]/g, "");
+        const lastComma = raw.lastIndexOf(",");
+        const lastDot = raw.lastIndexOf(".");
+        let decimalIndex = -1;
+        if (lastComma >= 0 && lastDot >= 0) {
+          decimalIndex = Math.max(lastComma, lastDot);
+        } else if (lastComma >= 0) {
+          decimalIndex = lastComma;
+        } else if (lastDot >= 0) {
+          const dotCount = (raw.match(/\./g) || []).length;
+          const decimals = raw.slice(lastDot + 1).replace(/\D/g, "");
+          if (dotCount === 1 && decimals.length > 0 && decimals.length <= 2) {
+            decimalIndex = lastDot;
+            decimalChar = ".";
+          }
+        }
+        let cleaned = "";
+        if (decimalIndex >= 0) {
+          const integerPart = raw.slice(0, decimalIndex).replace(/[.,]/g, "").replace(/[^0-9\-]/g, "");
+          const decimalPart = raw.slice(decimalIndex + 1).replace(/\D/g, "");
+          cleaned = `${integerPart}.${decimalPart}`;
+        } else {
+          cleaned = raw.replace(/[.,]/g, "").replace(/[^0-9\-]/g, "");
+        }
         const parsed = Number(cleaned);
         return Number.isFinite(parsed) ? parsed : 0;
       }
@@ -1662,6 +1685,24 @@
       function formatAmountInput(value) {
         const parsed = parseAmount(value);
         return parsed ? formatAmount(parsed, true) : "";
+      }
+
+      function insertTextAtCursor(input, text) {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? input.value.length;
+        input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+        const next = start + text.length;
+        input.setSelectionRange(next, next);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      function normalizeDecimalKey(event) {
+        if (!(event.code === "NumpadDecimal" || event.key === ".")) return false;
+        const input = event.target;
+        if (!input || typeof input.value !== "string") return false;
+        event.preventDefault();
+        insertTextAtCursor(input, ",");
+        return true;
       }
 
       function normalizeAccessHeader(value) {
@@ -3076,6 +3117,7 @@
           syncDraftFromInputs();
         });
         el.draftAmount.addEventListener("keydown", (event) => {
+          if (normalizeDecimalKey(event)) return;
           if (event.key === "Enter") {
             event.preventDefault();
             continueDraftAfterAmount();
@@ -3092,6 +3134,8 @@
 
       function bindRecords() {
         el.savedRecords.addEventListener("keydown", (event) => {
+          const amountInput = event.target.closest(".js-record-input[data-field='amount']");
+          if (amountInput && normalizeDecimalKey(event)) return;
           if (event.key !== "Enter") return;
           const input = event.target.closest(".js-record-input");
           if (!input) return;
