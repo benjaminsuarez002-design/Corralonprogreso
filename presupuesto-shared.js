@@ -175,7 +175,8 @@
     ) || 0;
     const pageH = doc.internal.pageSize.getHeight();
     const footerY = pageH - 20;
-    const rowLimitY = footerY - 18;
+    const footerNote = data.footerNote ? String(data.footerNote) : '';
+    const rowLimitY = footerY - (footerNote ? 26 : 18);
     const columns = {
       cantidad: 17,
       descripcion: 35,
@@ -218,6 +219,10 @@
     doc.setFont(undefined, 'normal');
     doc.setFontSize(13);
     doc.text('TOTAL: ' + fmtMoneda(total), 195, footerY, { align: 'right' });
+    if (footerNote) {
+      doc.setFontSize(9);
+      doc.text(footerNote, 105, footerY + 8, { align: 'center' });
+    }
     return doc;
   }
 
@@ -227,6 +232,7 @@
       headerName: data.headerName || data.tipo || 'Presupuesto web',
       subtitle: data.subtitle || 'Presupuesto a clientes',
       numberLabel: data.numberLabel || data.etiquetaNumero || 'Pedido Nro: ',
+      footerNote: data.footerNote || 'Los precios y el total ya tienen todos los impuestos incluidos',
       importeLabel: 'Importe',
       codigoLabel: 'IDArt'
     });
@@ -238,6 +244,7 @@
       headerName: data.headerName || data.cliente || 'CORRALON PROGRESO',
       subtitle: data.subtitle || 'Remito a proveedores',
       numberLabel: data.numberLabel || 'Nro Remito: ',
+      footerNote: data.footerNote || 'Los precios y el total ya tienen todos los impuestos incluidos',
       importeLabel: 'Importe',
       codigoLabel: 'IDArt'
     });
