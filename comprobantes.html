@@ -166,6 +166,12 @@
       border-bottom: 1px solid var(--line);
     }
 
+    .alias-search {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
     .alias-list {
       display: grid;
     }
@@ -1257,6 +1263,12 @@
             </label>
             <button class="action-btn" id="alias-add" type="button">+ Agregar</button>
           </div>
+          <div class="alias-search">
+            <label class="field">
+              <span class="field-label">Buscar alias</span>
+              <input class="input" id="alias-search" autocomplete="off" placeholder="Buscar por nombre, alias o CUIT">
+            </label>
+          </div>
           <div class="alias-list" id="alias-list"></div>
         </div>
       </section>
@@ -1450,6 +1462,7 @@
         aliasAlias: $("#alias-alias"),
         aliasCuit: $("#alias-cuit"),
         aliasAdd: $("#alias-add"),
+        aliasSearch: $("#alias-search"),
         aliasList: $("#alias-list"),
         summaryPrev: $("#summary-prev"),
         summaryNext: $("#summary-next"),
@@ -1505,6 +1518,7 @@
         summaryDateIso: todayIso(),
         summaryView: "alias",
         aliasPickerTarget: null,
+        aliasSearchText: "",
         editingAliasId: "",
         fileTarget: null,
         confirm: null,
@@ -1911,7 +1925,15 @@
           el.aliasList.innerHTML = '<div class="empty">Todavía no hay alias cargados.</div>';
           return;
         }
-        el.aliasList.innerHTML = state.aliases.map((item) => `
+        const search = normalize(state.aliasSearchText);
+        const items = search
+          ? state.aliases.filter((item) => normalize(`${item.nombre || ""} ${item.alias || ""} ${item.cuit || ""}`).includes(search))
+          : state.aliases;
+        if (!items.length) {
+          el.aliasList.innerHTML = '<div class="empty">No hay alias que coincidan con la búsqueda.</div>';
+          return;
+        }
+        el.aliasList.innerHTML = items.map((item) => `
           <div class="alias-row">
             <div>
               <div class="alias-name">${esc(item.nombre)}</div>
@@ -3040,6 +3062,10 @@
       function bindAliasSection() {
         el.aliasAdd.addEventListener("click", () => {
           saveAlias().catch((error) => throttleError("No se pudo guardar alias", error));
+        });
+        el.aliasSearch.addEventListener("input", () => {
+          state.aliasSearchText = String(el.aliasSearch.value || "");
+          renderAliases();
         });
         [el.aliasName, el.aliasAlias, el.aliasCuit].forEach((input) => {
           input.addEventListener("keydown", (event) => {
