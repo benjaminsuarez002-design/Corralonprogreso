@@ -363,6 +363,8 @@ const els = {
 let todosArticulos = [];
 let articuloSeleccionado = null;
 let listaCargada = false;
+let autoPastePending = true;
+let autoPasteText = '';
 
 function todayIsoLocal() {
   const now = new Date();
@@ -879,6 +881,24 @@ async function pegarDesdePortapapeles() {
   }
 }
 
+async function intentarPegarAutomatico() {
+  if (!autoPastePending) return;
+  autoPastePending = false;
+  try {
+    autoPasteText = await navigator.clipboard.readText();
+    if (autoPasteText.trim()) aplicarDatosAccess(autoPasteText);
+  } catch (error) {
+    console.warn('Pegado automatico bloqueado por el navegador', error);
+    els.estado.className = 'status';
+    els.estado.textContent = 'Listo. Si el navegador bloqueó el pegado automático, usá Pegar o Ctrl+B.';
+  }
+}
+
+function aplicarPegadoAutomaticoSiCorresponde() {
+  if (autoPasteText.trim()) aplicarDatosAccess(autoPasteText);
+  else intentarPegarAutomatico();
+}
+
 const camposCarga = [els.codigo, els.boleta, els.cliente, els.fecha, els.confirmar];
 
 function enfocarCampoPorMovimiento(actual, direccion) {
@@ -967,7 +987,7 @@ async function generarGarantiaPdf() {
     const bytes = await pdf.save();
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener');
+window.open(url, '_blank', 'noopener');
   } catch (error) {
     console.error(error);
     els.estado.className = 'status error';
@@ -995,6 +1015,9 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+window.addEventListener('focus', intentarPegarAutomatico, { once: true });
+window.addEventListener('DOMContentLoaded', intentarPegarAutomatico);
+
 onSnapshot(doc(db, 'config', 'listaActual'), async (snap) => {
   listaCargada = false;
   articuloSeleccionado = null;
@@ -1013,6 +1036,7 @@ onSnapshot(doc(db, 'config', 'listaActual'), async (snap) => {
     todosArticulos = data.map(normalizarArticulo);
     listaCargada = true;
     aplicarBusqueda();
+    aplicarPegadoAutomaticoSiCorresponde();
   } catch (error) {
     console.error(error);
     todosArticulos = [];
