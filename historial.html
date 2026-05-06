@@ -78,7 +78,74 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .h-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .h-mini-btn { border: 1px solid var(--borde); background: #fff; color: var(--violeta); border-radius: 8px; padding: 6px 9px; font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 900; cursor: pointer; }
 .h-mini-btn.photo { color: #0077c8; border-color: #9bdcff; background: #f0fbff; }
-.photo-preview { max-width: 100%; max-height: 70vh; border-radius: 12px; display: block; margin: 0 auto; }
+.photo-preview { max-width: 100%; max-height: 70vh; border-radius: 12px; display: block; margin: 0 auto; cursor: zoom-in; }
+.foto-close {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 10000;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,.96);
+  color: var(--violeta);
+  font-size: 24px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 8px 26px rgba(0,0,0,.25);
+  display: none;
+}
+#verFotoGarantiaBg.open .foto-close { display: block; }
+#verFotoGarantiaBg.fullscreen-photo {
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.96);
+}
+#verFotoGarantiaBg.fullscreen-photo .confirm-box {
+  width: 100vw;
+  height: 100vh;
+  max-width: none !important;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+#verFotoGarantiaBg.fullscreen-photo .confirm-title,
+#verFotoGarantiaBg.fullscreen-photo .confirm-btns { display: none; }
+#verFotoGarantiaBg.fullscreen-photo .photo-preview {
+  max-width: 100vw;
+  max-height: 100vh;
+  border-radius: 0;
+  cursor: zoom-out;
+  touch-action: none;
+  user-select: none;
+  transform-origin: center center;
+}
+.dropzone {
+  border: 2px dashed var(--borde);
+  border-radius: 14px;
+  background: #faf8ff;
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 18px;
+  cursor: pointer;
+  transition: border-color .2s, background .2s, transform .2s;
+  margin: 12px 0 16px;
+}
+.dropzone:hover,
+.dropzone.dragover {
+  border-color: var(--violeta);
+  background: #f1ecff;
+  transform: translateY(-1px);
+}
+.dropzone-icon { font-size: 34px; margin-bottom: 8px; }
+.dropzone-title { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900; color: var(--violeta); text-transform: uppercase; }
+.dropzone-sub { font-size: 12px; color: #888; margin-top: 4px; }
+.dropzone-file { margin-top: 8px; font-size: 12px; color: var(--texto-dark); font-weight: 700; word-break: break-word; }
 
 /* ── DETALLE ── */
 .detalle-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100; display: none; align-items: flex-end; }
@@ -220,7 +287,15 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
   <div class="confirm-box" style="max-width:420px;text-align:left">
     <div class="confirm-title">Foto de garantía</div>
     <div class="confirm-sub" id="garantiaFotoSub"></div>
-    <input type="file" id="garantiaFotoInput" accept="image/*" style="width:100%;margin:10px 0 16px;">
+    <input type="file" id="garantiaFotoInput" accept="image/*" style="display:none;">
+    <div class="dropzone" id="garantiaDropzone" tabindex="0">
+      <div>
+        <div class="dropzone-icon">📷</div>
+        <div class="dropzone-title">Arrastrá la foto firmada</div>
+        <div class="dropzone-sub">También podés tocar acá para buscarla o usar Ctrl+V para pegar</div>
+        <div class="dropzone-file" id="garantiaDropzoneFile">Sin imagen seleccionada</div>
+      </div>
+    </div>
     <div class="confirm-btns">
       <button class="btn-confirm-cancel" onclick="cerrarFotoGarantia()">Cancelar</button>
       <button class="btn-confirm-ok" style="background:var(--violeta)" onclick="guardarFotoGarantia()">Guardar foto</button>
@@ -229,9 +304,10 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 </div>
 
 <div class="confirm-bg" id="verFotoGarantiaBg" onclick="if(event.target===this)cerrarVerFotoGarantia()">
+  <button class="foto-close" type="button" onclick="cerrarVerFotoGarantia()">×</button>
   <div class="confirm-box" style="max-width:760px">
     <div class="confirm-title">Garantía firmada</div>
-    <img id="garantiaFotoPreview" class="photo-preview" alt="Garantía firmada">
+    <img id="garantiaFotoPreview" class="photo-preview" alt="Garantía firmada" onclick="abrirFotoGarantiaPantallaCompleta()">
     <div class="confirm-btns" style="margin-top:14px">
       <button class="btn-confirm-cancel" onclick="cerrarVerFotoGarantia()">Cerrar</button>
     </div>
@@ -298,6 +374,13 @@ let _presupuestosCache = [];
 let _remitosCache = [];
 let _garantiasCache = [];
 let _garantiaFotoActual = null;
+let _garantiaFotoFile = null;
+let _fotoZoom = 1;
+let _fotoPanX = 0;
+let _fotoPanY = 0;
+let _fotoDragging = false;
+let _fotoDragStart = null;
+let _fotoPinchStart = null;
 let _detalleTipoActual = 'remito';
 let editItems = [];
 let _confirmCallback = null;
@@ -510,18 +593,22 @@ function abrirFotoGarantia(index) {
   const garantia = _garantiasCache[index];
   if (!garantia) return;
   _garantiaFotoActual = garantia;
+  _garantiaFotoFile = null;
   document.getElementById('garantiaFotoSub').textContent = `${garantia.boleta || '-'} - ${garantia.cliente || '-'} - ${garantia.codigo || '-'}`;
   document.getElementById('garantiaFotoInput').value = '';
+  actualizarDropzoneGarantia();
   document.getElementById('garantiaFotoBg').classList.add('open');
 }
 
 function cerrarFotoGarantia() {
   document.getElementById('garantiaFotoBg').classList.remove('open');
   _garantiaFotoActual = null;
+  _garantiaFotoFile = null;
+  actualizarDropzoneGarantia();
 }
 
 async function guardarFotoGarantia() {
-  const file = document.getElementById('garantiaFotoInput').files?.[0];
+  const file = _garantiaFotoFile || document.getElementById('garantiaFotoInput').files?.[0];
   if (!file || !_garantiaFotoActual) {
     toast('Seleccioná una foto');
     return;
@@ -545,6 +632,54 @@ async function guardarFotoGarantia() {
   }
 }
 
+function setGarantiaFotoFile(file) {
+  if (!file) return;
+  if (!String(file.type || '').startsWith('image/')) {
+    toast('El archivo tiene que ser una imagen');
+    return;
+  }
+  _garantiaFotoFile = file;
+  actualizarDropzoneGarantia();
+}
+
+function actualizarDropzoneGarantia() {
+  const label = document.getElementById('garantiaDropzoneFile');
+  if (!label) return;
+  label.textContent = _garantiaFotoFile ? _garantiaFotoFile.name : 'Sin imagen seleccionada';
+}
+
+async function pegarImagenGarantiaDesdeClipboard() {
+  if (!document.getElementById('garantiaFotoBg').classList.contains('open')) return;
+  try {
+    if (navigator.clipboard?.read) {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((type) => type.startsWith('image/'));
+        if (!imageType) continue;
+        const blob = await item.getType(imageType);
+        const ext = imageType.split('/')[1] || 'png';
+        setGarantiaFotoFile(new File([blob], `garantia-pegada.${ext}`, { type: imageType }));
+        return;
+      }
+    }
+    toast('No encontré una imagen en el portapapeles');
+  } catch (error) {
+    console.error(error);
+    toast('El navegador bloqueó el pegado');
+  }
+}
+
+function pegarImagenGarantiaDesdePasteEvent(event) {
+  if (!document.getElementById('garantiaFotoBg').classList.contains('open')) return false;
+  const items = [...(event.clipboardData?.items || [])];
+  const imageItem = items.find((item) => item.kind === 'file' && item.type.startsWith('image/'));
+  if (!imageItem) return false;
+  const file = imageItem.getAsFile();
+  if (!file) return false;
+  setGarantiaFotoFile(file);
+  return true;
+}
+
 function verFotoGarantia(index) {
   const garantia = _garantiasCache[index];
   if (!garantia?.fotoUrl) return;
@@ -552,9 +687,74 @@ function verFotoGarantia(index) {
   document.getElementById('verFotoGarantiaBg').classList.add('open');
 }
 
+async function abrirFotoGarantiaPantallaCompleta() {
+  const bg = document.getElementById('verFotoGarantiaBg');
+  bg.classList.add('fullscreen-photo');
+  try {
+    if (!document.fullscreenElement && bg.requestFullscreen) {
+      await bg.requestFullscreen();
+    }
+  } catch (error) {
+    console.warn('No se pudo activar pantalla completa', error);
+  }
+}
+
 function cerrarVerFotoGarantia() {
-  document.getElementById('verFotoGarantiaBg').classList.remove('open');
+  const bg = document.getElementById('verFotoGarantiaBg');
+  bg.classList.remove('open', 'fullscreen-photo');
   document.getElementById('garantiaFotoPreview').src = '';
+  resetFotoZoom();
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) {
+    document.getElementById('verFotoGarantiaBg').classList.remove('fullscreen-photo');
+  }
+});
+
+function aplicarFotoTransform() {
+  const img = document.getElementById('garantiaFotoPreview');
+  img.style.transform = `translate(${_fotoPanX}px, ${_fotoPanY}px) scale(${_fotoZoom})`;
+}
+
+function resetFotoZoom() {
+  _fotoZoom = 1;
+  _fotoPanX = 0;
+  _fotoPanY = 0;
+  _fotoDragging = false;
+  _fotoDragStart = null;
+  _fotoPinchStart = null;
+  aplicarFotoTransform();
+}
+
+function ajustarFotoZoom(delta, originX = 0, originY = 0) {
+  const nextZoom = Math.min(6, Math.max(1, _fotoZoom * delta));
+  if (nextZoom === _fotoZoom) return;
+  const ratio = nextZoom / _fotoZoom;
+  _fotoPanX = originX - (originX - _fotoPanX) * ratio;
+  _fotoPanY = originY - (originY - _fotoPanY) * ratio;
+  _fotoZoom = nextZoom;
+  if (_fotoZoom === 1) {
+    _fotoPanX = 0;
+    _fotoPanY = 0;
+  }
+  aplicarFotoTransform();
+}
+
+function distanciaTouches(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+function centroTouches(touches) {
+  return {
+    x: (touches[0].clientX + touches[1].clientX) / 2 - (window.innerWidth / 2),
+    y: (touches[0].clientY + touches[1].clientY) / 2 - (window.innerHeight / 2)
+  };
 }
 
 function setAccionesDetalleModo(modo) {
@@ -910,6 +1110,11 @@ async function guardarEdicion() {
 
 // ── NAVEGACIÓN TECLADO EDITAR ──
 document.addEventListener('keydown', function(e) {
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'v' && document.getElementById('garantiaFotoBg').classList.contains('open')) {
+    e.preventDefault();
+    pegarImagenGarantiaDesdeClipboard();
+    return;
+  }
   const active = document.activeElement;
   if(!active) return;
   const editBg = document.getElementById('editBg');
@@ -949,6 +1154,98 @@ document.addEventListener('keydown', function(e) {
     const hi = headerInputs.indexOf(active);
     if(hi !== -1) { e.preventDefault(); if(hi < headerInputs.length-1) headerInputs[hi+1].focus(); else if(agInputs[0]) agInputs[0].focus(); }
   }
+});
+
+document.getElementById('garantiaDropzone').addEventListener('click', () => {
+  document.getElementById('garantiaFotoInput').click();
+});
+document.getElementById('garantiaDropzone').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    document.getElementById('garantiaFotoInput').click();
+  }
+});
+document.getElementById('garantiaFotoInput').addEventListener('change', (event) => {
+  setGarantiaFotoFile(event.target.files?.[0]);
+});
+document.getElementById('garantiaDropzone').addEventListener('dragover', (event) => {
+  event.preventDefault();
+  document.getElementById('garantiaDropzone').classList.add('dragover');
+});
+document.getElementById('garantiaDropzone').addEventListener('dragleave', () => {
+  document.getElementById('garantiaDropzone').classList.remove('dragover');
+});
+document.getElementById('garantiaDropzone').addEventListener('drop', (event) => {
+  event.preventDefault();
+  document.getElementById('garantiaDropzone').classList.remove('dragover');
+  setGarantiaFotoFile(event.dataTransfer?.files?.[0]);
+});
+document.addEventListener('paste', (event) => {
+  if (pegarImagenGarantiaDesdePasteEvent(event)) event.preventDefault();
+});
+
+const fotoPreviewEl = document.getElementById('garantiaFotoPreview');
+fotoPreviewEl.addEventListener('wheel', (event) => {
+  if (!document.getElementById('verFotoGarantiaBg').classList.contains('fullscreen-photo')) return;
+  event.preventDefault();
+  const rect = fotoPreviewEl.getBoundingClientRect();
+  const originX = event.clientX - (rect.left + rect.width / 2);
+  const originY = event.clientY - (rect.top + rect.height / 2);
+  ajustarFotoZoom(event.deltaY < 0 ? 1.12 : 0.9, originX, originY);
+}, { passive: false });
+fotoPreviewEl.addEventListener('mousedown', (event) => {
+  if (!document.getElementById('verFotoGarantiaBg').classList.contains('fullscreen-photo') || _fotoZoom <= 1) return;
+  event.preventDefault();
+  _fotoDragging = true;
+  _fotoDragStart = { x: event.clientX, y: event.clientY, panX: _fotoPanX, panY: _fotoPanY };
+  fotoPreviewEl.style.cursor = 'grabbing';
+});
+document.addEventListener('mousemove', (event) => {
+  if (!_fotoDragging || !_fotoDragStart) return;
+  _fotoPanX = _fotoDragStart.panX + event.clientX - _fotoDragStart.x;
+  _fotoPanY = _fotoDragStart.panY + event.clientY - _fotoDragStart.y;
+  aplicarFotoTransform();
+});
+document.addEventListener('mouseup', () => {
+  _fotoDragging = false;
+  _fotoDragStart = null;
+  fotoPreviewEl.style.cursor = _fotoZoom > 1 ? 'grab' : 'zoom-out';
+});
+fotoPreviewEl.addEventListener('dblclick', (event) => {
+  if (!document.getElementById('verFotoGarantiaBg').classList.contains('fullscreen-photo')) return;
+  event.preventDefault();
+  resetFotoZoom();
+});
+fotoPreviewEl.addEventListener('touchstart', (event) => {
+  if (!document.getElementById('verFotoGarantiaBg').classList.contains('fullscreen-photo')) return;
+  if (event.touches.length === 2) {
+    const center = centroTouches(event.touches);
+    _fotoPinchStart = { dist: distanciaTouches(event.touches), zoom: _fotoZoom, x: center.x, y: center.y };
+    return;
+  }
+  if (event.touches.length === 1 && _fotoZoom > 1) {
+    _fotoDragStart = { x: event.touches[0].clientX, y: event.touches[0].clientY, panX: _fotoPanX, panY: _fotoPanY };
+  }
+}, { passive: false });
+fotoPreviewEl.addEventListener('touchmove', (event) => {
+  if (!document.getElementById('verFotoGarantiaBg').classList.contains('fullscreen-photo')) return;
+  if (event.touches.length === 2 && _fotoPinchStart) {
+    event.preventDefault();
+    const nextZoom = Math.min(6, Math.max(1, _fotoPinchStart.zoom * (distanciaTouches(event.touches) / _fotoPinchStart.dist)));
+    const delta = nextZoom / _fotoZoom;
+    ajustarFotoZoom(delta, _fotoPinchStart.x, _fotoPinchStart.y);
+    return;
+  }
+  if (event.touches.length === 1 && _fotoDragStart && _fotoZoom > 1) {
+    event.preventDefault();
+    _fotoPanX = _fotoDragStart.panX + event.touches[0].clientX - _fotoDragStart.x;
+    _fotoPanY = _fotoDragStart.panY + event.touches[0].clientY - _fotoDragStart.y;
+    aplicarFotoTransform();
+  }
+}, { passive: false });
+fotoPreviewEl.addEventListener('touchend', () => {
+  _fotoDragStart = null;
+  _fotoPinchStart = null;
 });
 
 // ── CONFIRM ──
