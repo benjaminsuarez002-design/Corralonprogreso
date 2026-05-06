@@ -333,7 +333,7 @@
 <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, onSnapshot, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, onSnapshot, collection, addDoc, serverTimestamp, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -986,7 +986,7 @@ async function generarGarantiaPdf() {
     drawSignatureLine(page, fonts, 'Firma del vendedor', 344, 58, 180);
 
     const bytes = await pdf.save();
-    await guardarGarantiaHistorial({
+    const historial = await guardarGarantiaHistorial({
       boleta,
       cliente,
       fecha,
@@ -996,6 +996,10 @@ async function generarGarantiaPdf() {
       rubro: articulo.rubro || '',
       detalle: articulo.detalle || ''
     });
+    if (historial?.existente) {
+      els.estado.className = 'status ok';
+      els.estado.textContent = 'Garantía ya existente: se generó el PDF sin duplicar historial.';
+    }
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
 window.open(url, '_blank', 'noopener');
@@ -1011,6 +1015,17 @@ window.open(url, '_blank', 'noopener');
 
 async function guardarGarantiaHistorial(payload) {
   try {
+    const codigo = String(payload.codigo || '').trim();
+    const boleta = String(payload.boleta || '').trim();
+    const existenteSnap = await getDocs(query(
+      collection(db, GARANTIAS_COLLECTION),
+      where('boleta', '==', boleta),
+      where('codigo', '==', codigo),
+      limit(1)
+    ));
+    if (!existenteSnap.empty) {
+      return { existente: true, id: existenteSnap.docs[0].id };
+    }
     await addDoc(collection(db, GARANTIAS_COLLECTION), {
       ...payload,
       fotoUrl: '',
@@ -1018,6 +1033,7 @@ async function guardarGarantiaHistorial(payload) {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
+    return { existente: false };
   } catch (error) {
     console.error('No se pudo guardar la garantia en historial', error);
     els.estado.className = 'status error';
