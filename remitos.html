@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -97,6 +97,21 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .btn-confirm-cancel { flex: 1; padding: 12px; border: 1.5px solid var(--borde); border-radius: 10px; background: transparent; color: #888; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; }
 .btn-confirm-ok { flex: 2; padding: 12px; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; color: #fff; }
 
+/* POPUP REMITO CONFIRMADO */
+.remito-actions-bg { position: fixed; inset: 0; background: rgba(20,14,42,.58); z-index: 360; display: none; align-items: center; justify-content: center; padding: 20px; }
+.remito-actions-bg.open { display: flex; }
+.remito-actions-box { width: 100%; max-width: 420px; background: #fff; border: 1px solid var(--borde); border-radius: 18px; padding: 22px; box-shadow: var(--sombra); }
+.remito-actions-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.remito-actions-title { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; line-height: 1; font-weight: 900; color: var(--violeta); text-transform: uppercase; }
+.remito-actions-sub { margin-top: 6px; font-size: 13px; color: #777; line-height: 1.35; }
+.remito-actions-close { width: 34px; height: 34px; border: none; border-radius: 50%; background: rgba(108,79,199,.12); color: var(--violeta); font-size: 20px; font-weight: 900; cursor: pointer; }
+.remito-actions-info { border: 1px solid var(--borde); background: rgba(108,79,199,.05); border-radius: 12px; padding: 12px; margin-bottom: 14px; font-size: 14px; color: var(--texto-dark); line-height: 1.45; }
+.remito-actions-grid { display: grid; gap: 10px; }
+.remito-action-btn { width: 100%; border: none; border-radius: 12px; padding: 13px 14px; font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900; text-transform: uppercase; cursor: pointer; color: #fff; background: var(--violeta); box-shadow: 0 8px 18px rgba(108,79,199,.22); }
+.remito-action-btn.print { background: #2f8edc; }
+.remito-action-btn.whatsapp { background: #25d366; }
+.remito-action-btn:hover { filter: brightness(.96); transform: translateY(-1px); }
+
 /* LOADING */
 .loading-overlay { position: fixed; inset: 0; background: #f0ece8; display: flex; align-items: center; justify-content: center; flex-direction: column; z-index: 600; display: none; }
 .loading-overlay.show { display: flex; }
@@ -192,8 +207,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 <div class="franja-roja">
   <button class="btn-f" onclick="limpiarTodo()">🗑 Nuevo</button>
   <button class="btn-f" onclick="location.href='historial.html'">📋 Historial</button>
-  <button class="btn-f" onclick="verPDF()">⬇ PDF</button>
-  <button class="btn-f" onclick="enviarWhatsapp()">💬 WhatsApp</button>
+  <button class="btn-f prim" onclick="confirmarRemitoFinal()">Confirmar</button>
 </div>
 
 <!-- CONFIRM POPUP -->
@@ -205,6 +219,25 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     <div class="confirm-btns">
       <button class="btn-confirm-cancel" onclick="cerrarConfirm()">Cancelar</button>
       <button class="btn-confirm-ok" id="confirmOkBtn" onclick="ejecutarConfirm()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- REMITO CONFIRMADO -->
+<div class="remito-actions-bg" id="remitoActionsBg">
+  <div class="remito-actions-box">
+    <div class="remito-actions-head">
+      <div>
+        <div class="remito-actions-title">Remito confirmado</div>
+        <div class="remito-actions-sub">Eleg&iacute; qu&eacute; quer&eacute;s hacer con el remito ya guardado.</div>
+      </div>
+      <button class="remito-actions-close" onclick="cerrarRemitoActions()" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="remito-actions-info" id="remitoActionsInfo"></div>
+    <div class="remito-actions-grid">
+      <button class="remito-action-btn" onclick="descargarRemitoConfirmado()">Descargar PDF</button>
+      <button class="remito-action-btn print" type="button" onclick="imprimirRemitoConfirmado()">Imprimir</button>
+      <button class="remito-action-btn whatsapp" onclick="whatsappRemitoConfirmado()">WhatsApp</button>
     </div>
   </div>
 </div>
@@ -238,6 +271,7 @@ const ADMIN_PASS       = 'Akashiya2301';
 // ── ESTADO ──────────────────────────────────────────────────────
 let items = [];
 let logoCacheData = null;
+let remitoConfirmadoActual = null;
 
 // ── UTILS ──────────────────────────────────────────────────────
 function fmt(n) {
@@ -555,23 +589,96 @@ function limpiarTodo() {
   pedirConfirm({ icon:'🗑', titulo:'Nuevo remito', sub:'Esta acción eliminará el remito actual. ¿Continuar?', color:'var(--rojo)', btnTxt:'Eliminar y crear nuevo', callback: _hacerLimpiar });
 }
 
-function imprimir() {
+function nombreArchivoRemito(remito) {
+  const cliente = (remito.cliente || 'Cliente').replace(/[\\/:*?"<>|]+/g, '').trim() || 'Cliente';
+  const nro = ('0001-' + remito.nro).replace(/[\\/:*?"<>|]+/g, '-');
+  return `${cliente} - ${nro}`;
+}
+
+function escapeHtml(txt) {
+  return String(txt ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
+}
+
+function generarDocRemitoConfirmado(remito) {
+  return generarPDFDoc(remito.cliente, remito.fecha, remito.nro, remito.total, remito.items);
+}
+
+function prepararRemitoDesdeFormulario() {
+  confirmarArticuloPendiente();
   const cliente = document.getElementById('cliente').value.trim();
-  if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return; }
-  if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return; }
-  pedirConfirm({ icon:'🖨', titulo:'Imprimir remito', sub:'Esta acción dará el remito como terminado. ¿Imprimimos?', color:'var(--violeta)', btnTxt:'Imprimir', callback: async () => {
-    const fecha  = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
-    const nro    = document.getElementById('nroRemito').textContent || '00001';
-    const total  = items.reduce((s,it) => s + it.precio*it.cant, 0);
-    const doc = generarPDFDoc(cliente, fecha, nro, total);
-    window.PresupuestoShared.openPdfPreview(
-      doc,
-      `${cliente || 'Cliente'} - 0001-${nro} - ${fecha}`,
-      `${cliente || 'Cliente'}-0001-${nro}-${fecha}`
-    );
-    try { await guardarRemito(nro, cliente, fecha, total, null, items); } catch(e) {}
-    setTimeout(_hacerLimpiar, 800);
-  }});
+  if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return null; }
+  if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return null; }
+  const fecha = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
+  const nro = document.getElementById('nroRemito').textContent || '00001';
+  const itemsSnapshot = items.map(it => ({
+    cant: Number(it.cant) || 0,
+    desc: it.desc || '',
+    precio: Number(it.precio) || 0
+  }));
+  const total = itemsSnapshot.reduce((s,it) => s + it.precio * it.cant, 0);
+  return { cliente, fecha, nro, total, items: itemsSnapshot };
+}
+
+function abrirRemitoActions(remito) {
+  const info = document.getElementById('remitoActionsInfo');
+  info.innerHTML = `
+    <strong>Remito:</strong> 0001-${remito.nro}<br>
+    <strong>Cliente:</strong> ${escapeHtml(remito.cliente)}<br>
+    <strong>Total:</strong> ${fmt(remito.total)}
+  `;
+  document.getElementById('remitoActionsBg').classList.add('open');
+}
+
+function cerrarRemitoActions() {
+  document.getElementById('remitoActionsBg').classList.remove('open');
+}
+
+async function confirmarRemitoFinal() {
+  const remito = prepararRemitoDesdeFormulario();
+  if(!remito) return;
+  loading(true);
+  try {
+    await guardarRemito(remito.nro, remito.cliente, remito.fecha, remito.total, null, remito.items);
+    remitoConfirmadoActual = remito;
+    _hacerLimpiar('Remito guardado');
+    abrirRemitoActions(remitoConfirmadoActual);
+  } catch(e) {
+    toast('Error guardando: ' + e.message);
+  } finally {
+    loading(false);
+  }
+}
+
+function descargarRemitoConfirmado() {
+  if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
+  const doc = generarDocRemitoConfirmado(remitoConfirmadoActual);
+  doc.save(nombreArchivoRemito(remitoConfirmadoActual) + '.pdf');
+}
+
+function imprimirRemitoConfirmado() {
+  if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
+  const doc = generarDocRemitoConfirmado(remitoConfirmadoActual);
+  const pdfBlob = doc.output('blob', { type: 'application/pdf' });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+  const popup = window.open(pdfUrl, '_blank');
+  if(!popup) {
+    toast('Permití las ventanas emergentes para abrir el PDF');
+    URL.revokeObjectURL(pdfUrl);
+    return;
+  }
+  setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+}
+
+function whatsappRemitoConfirmado() {
+  if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
+  const msg = 'Realice el siguiente remito: 0001-' + remitoConfirmadoActual.nro + '.';
+  window.open('https://wa.me/' + WA_NUM + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
 async function _hacerVerPDF() {
@@ -649,3 +756,4 @@ document.addEventListener('pointerdown', e => {
 <a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:9999;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>
 </body>
 </html>
+
