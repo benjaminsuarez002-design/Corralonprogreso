@@ -174,6 +174,20 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .btn-det.edit { background: #f5f3ff; color: var(--violeta); border: 1.5px solid var(--borde); }
 .btn-det.del  { background: #fff0f0; color: var(--rojo); border: 1.5px solid #fcc; }
 
+/* ── PDF ACCIONES ── */
+.pdf-actions-bg { position: fixed; inset: 0; background: rgba(20,14,42,.58); z-index: 260; display: none; align-items: center; justify-content: center; padding: 20px; }
+.pdf-actions-bg.open { display: flex; }
+.pdf-actions-box { width: 100%; max-width: 420px; background: #fff; border: 1px solid var(--borde); border-radius: 18px; padding: 22px; box-shadow: var(--sombra); }
+.pdf-actions-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.pdf-actions-title { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; line-height: 1; font-weight: 900; color: var(--violeta); text-transform: uppercase; }
+.pdf-actions-sub { margin-top: 6px; font-size: 13px; color: #777; line-height: 1.35; }
+.pdf-actions-close { width: 34px; height: 34px; border: none; border-radius: 50%; background: rgba(108,79,199,.12); color: var(--violeta); font-size: 20px; font-weight: 900; cursor: pointer; }
+.pdf-actions-info { border: 1px solid var(--borde); background: rgba(108,79,199,.05); border-radius: 12px; padding: 12px; margin-bottom: 14px; font-size: 14px; color: var(--texto-dark); line-height: 1.45; }
+.pdf-actions-grid { display: grid; gap: 10px; }
+.pdf-action-btn { width: 100%; border: none; border-radius: 12px; padding: 13px 14px; font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900; text-transform: uppercase; cursor: pointer; color: #fff; background: var(--violeta); box-shadow: 0 8px 18px rgba(108,79,199,.22); }
+.pdf-action-btn.print { background: #2f8edc; }
+.pdf-action-btn:hover { filter: brightness(.96); transform: translateY(-1px); }
+
 /* ── EDITAR ── */
 .edit-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200; display: none; align-items: flex-end; }
 .edit-bg.open { display: flex; }
@@ -282,6 +296,24 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
   </div>
 </div>
 
+<!-- ── PDF ACCIONES ── -->
+<div class="pdf-actions-bg" id="pdfActionsBg">
+  <div class="pdf-actions-box">
+    <div class="pdf-actions-head">
+      <div>
+        <div class="pdf-actions-title">PDF</div>
+        <div class="pdf-actions-sub">Elegí qué querés hacer con este movimiento.</div>
+      </div>
+      <button class="pdf-actions-close" onclick="cerrarPdfActions()" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="pdf-actions-info" id="pdfActionsInfo"></div>
+    <div class="pdf-actions-grid">
+      <button class="pdf-action-btn" onclick="descargarPdfDetalle()">Descargar PDF</button>
+      <button class="pdf-action-btn print" onclick="imprimirPdfDetalle()">Imprimir</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── FOTO GARANTÍA ── -->
 <div class="confirm-bg" id="garantiaFotoBg">
   <div class="confirm-box" style="max-width:420px;text-align:left">
@@ -385,6 +417,7 @@ let _detalleTipoActual = 'remito';
 let editItems = [];
 let _confirmCallback = null;
 let logoCacheData = null;
+let _pdfDetalleActual = null;
 
 // ── UTILS ──
 function toast(msg) {
@@ -398,6 +431,20 @@ function loading(show) {
 }
 function fmt(n) {
   return '$' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function parseMonto(valor) {
+  let texto = String(valor ?? '').trim();
+  if(!texto) return 0;
+  texto = texto.replace(/\$/g, '').replace(/\s+/g, '');
+  const tieneComa = texto.includes(',');
+  const tienePunto = texto.includes('.');
+  if(tieneComa) {
+    texto = texto.replace(/\./g, '').replace(',', '.');
+  } else if(tienePunto) {
+    const partes = texto.split('.');
+    if(partes.length > 2 || partes[partes.length - 1].length === 3) texto = texto.replace(/\./g, '');
+  }
+  return Number.parseFloat(texto.replace(/[^0-9.-]/g, '')) || 0;
 }
 
 (function precacheLogo() {
@@ -918,25 +965,33 @@ function cerrarDetalle() {
   _remitoDetalleActual = null;
   _presupuestoDetalleActual = null;
   _detalleTipoActual = 'remito';
+  cerrarPdfActions();
   setAccionesDetalleModo('remito');
 }
 
-function verPDFDetalle() {
+function nombreArchivoPdfDetalle(nombre) {
+  return String(nombre || 'documento')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim() || 'documento';
+}
+
+function generarPdfDetalleActual() {
   if (_detalleTipoActual === 'presupuesto') {
     const p = _presupuestoDetalleActual;
-    if(!p) return;
+    if(!p) return null;
     const doc = generarPDFPresupuestoDoc(p);
     const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '-');
-    window.PresupuestoShared.openPdfPreview(
+    return {
       doc,
-      `Presupuesto ${p.numero || '-'} - ${fechaTxt}`,
-      `Presupuesto-${p.numero || '-'}-${fechaTxt}`
-    );
-    return;
+      titulo: `Presupuesto ${p.numero || '-'} - ${fechaTxt}`,
+      archivo: nombreArchivoPdfDetalle(`Presupuesto-${p.numero || '-'}-${fechaTxt}`),
+      info: `<strong>Movimiento:</strong> Presupuesto ${esc(p.numero || '-')}<br><strong>Fecha:</strong> ${esc(fechaTxt)}`
+    };
   }
 
   const r = _remitoDetalleActual;
-  if(!r) return;
+  if(!r) return null;
   const its = (r.items||[]).map(it => ({
     cantidad: it.cant,
     nombre: it.descripcion,
@@ -945,11 +1000,42 @@ function verPDFDetalle() {
   }));
   const total = its.reduce((s,it) => s + (it.precio||0)*(it.cantidad||0), 0);
   const doc = generarPDFDoc(r.cliente, r.fecha, r.nro || '-', total, its);
-  window.PresupuestoShared.openPdfPreview(
+  return {
     doc,
-    `${r.cliente || 'Cliente'} - ${r.nro || '-'} - ${r.fecha || '-'}`,
-    `${r.cliente || 'Cliente'}-${r.nro || '-'}-${r.fecha || '-'}`
-  );
+    titulo: `${r.cliente || 'Cliente'} - ${r.nro || '-'} - ${r.fecha || '-'}`,
+    archivo: nombreArchivoPdfDetalle(`${r.cliente || 'Cliente'}-${r.nro || '-'}-${r.fecha || '-'}`),
+    info: `<strong>Remito:</strong> ${esc(r.nro || '-')}<br><strong>Cliente:</strong> ${esc(r.cliente || 'Cliente')}<br><strong>Total:</strong> ${fmt(total)}`
+  };
+}
+
+function verPDFDetalle() {
+  const preparado = generarPdfDetalleActual();
+  if(!preparado) return;
+  _pdfDetalleActual = preparado;
+  document.getElementById('pdfActionsInfo').innerHTML = preparado.info;
+  document.getElementById('pdfActionsBg').classList.add('open');
+}
+
+function cerrarPdfActions() {
+  document.getElementById('pdfActionsBg').classList.remove('open');
+}
+
+function descargarPdfDetalle() {
+  if(!_pdfDetalleActual) { toast('No hay PDF preparado'); return; }
+  _pdfDetalleActual.doc.save(_pdfDetalleActual.archivo + '.pdf');
+}
+
+function imprimirPdfDetalle() {
+  if(!_pdfDetalleActual) { toast('No hay PDF preparado'); return; }
+  const pdfBlob = _pdfDetalleActual.doc.output('blob', { type: 'application/pdf' });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+  const popup = window.open(pdfUrl, '_blank');
+  if(!popup) {
+    toast('Permití las ventanas emergentes para abrir el PDF');
+    URL.revokeObjectURL(pdfUrl);
+    return;
+  }
+  setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
 }
 
 // ── ELIMINAR ──
@@ -1043,7 +1129,7 @@ function renderEditItems() {
       <input type="text" class="edit-item-inp" value="${it.desc||''}" autocomplete="off"
         onchange="editItems[${i}].desc=this.value">
       <input type="text" class="edit-item-inp num" value="${it.precio||0}" inputmode="numeric" autocomplete="off"
-        onchange="editItems[${i}].precio=parseFloat(this.value)||0;actualizarSubEdit()">
+        onchange="editItems[${i}].precio=parseMonto(this.value);this.value=editItems[${i}].precio;actualizarSubEdit()">
       <div class="edit-item-inp num" id="editSub${i}" style="color:var(--violeta);font-weight:700;font-size:13px;text-align:right;padding:2px 3px">
         $${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR')}
       </div>
@@ -1061,7 +1147,7 @@ function actualizarSubEdit() {
 function editAgregarItem() {
   const cant  = parseFloat(document.getElementById('eNuevoCant').value) || 1;
   const desc  = document.getElementById('eNuevoDesc').value.trim();
-  const precio= parseFloat(document.getElementById('eNuevoPrecio').value) || 0;
+  const precio= parseMonto(document.getElementById('eNuevoPrecio').value);
   if(!desc && !precio) return;
   editItems.push({ cant, desc, precio });
   document.getElementById('eNuevoCant').value = '';

@@ -277,6 +277,20 @@ let remitoConfirmadoActual = null;
 function fmt(n) {
   return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
+function parseMonto(valor) {
+  let texto = String(valor ?? '').trim();
+  if(!texto) return 0;
+  texto = texto.replace(/\$/g, '').replace(/\s+/g, '');
+  const tieneComa = texto.includes(',');
+  const tienePunto = texto.includes('.');
+  if(tieneComa) {
+    texto = texto.replace(/\./g, '').replace(',', '.');
+  } else if(tienePunto) {
+    const partes = texto.split('.');
+    if(partes.length > 2 || partes[partes.length - 1].length === 3) texto = texto.replace(/\./g, '');
+  }
+  return Number.parseFloat(texto.replace(/[^0-9.-]/g, '')) || 0;
+}
 function toast(msg) {
   const el = document.getElementById('toastEl');
   el.textContent = msg;
@@ -302,7 +316,7 @@ function renderItems() {
       <input type="text" class="item-input" value="${it.desc}" autocomplete="off"
         onchange="items[${i}].desc=this.value">
       <input type="text" class="item-input num" value="${it.precio}" inputmode="numeric" autocomplete="off"
-        onchange="items[${i}].precio=parseFloat(this.value)||0;recalc()">
+        onchange="items[${i}].precio=parseMonto(this.value);this.value=items[${i}].precio;recalc()">
       <div class="item-subtotal">${fmt(it.precio*it.cant)}</div>
       <button class="btn-del-item" onclick="items.splice(${i},1);renderItems()">✕</button>`;
     lista.insertBefore(row, fila);
@@ -357,7 +371,7 @@ function recalc() {
 }
 
 function updatePreview() {
-  const p = parseFloat(document.getElementById('nPrecio').value) || 0;
+  const p = parseMonto(document.getElementById('nPrecio').value);
   const c = parseFloat(document.getElementById('nCant').value)  || 1;
   const sub = document.getElementById('nSub');
   if(p) { sub.textContent = fmt(p*c); sub.style.color = 'var(--violeta)'; }
@@ -380,7 +394,7 @@ function confirmarArticuloPendiente() {
 function agregarItem() {
   const cant  = parseFloat(document.getElementById('nCant').value)  || 1;
   const desc  = document.getElementById('nDesc').value.trim();
-  const precio= parseFloat(document.getElementById('nPrecio').value) || 0;
+  const precio= parseMonto(document.getElementById('nPrecio').value);
   if(!desc && !precio) return;
   items.push({cant, desc, precio});
   document.getElementById('nCant').value  = '';
