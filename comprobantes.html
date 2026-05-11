@@ -178,11 +178,33 @@
 
     .alias-row {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: auto 1fr auto;
       gap: 9px;
       align-items: center;
       padding: 10px 12px;
       border-top: 1px solid var(--line);
+    }
+
+    .alias-priority-btn {
+      width: 26px;
+      min-width: 26px;
+      height: 26px;
+      border: 1px solid #f1c5c5;
+      border-radius: 50%;
+      background: var(--red);
+      cursor: pointer;
+      box-shadow: inset 0 0 0 5px #fff;
+      transition: .16s ease;
+    }
+
+    .alias-priority-btn.active {
+      border-color: #8fdbac;
+      background: var(--ok);
+    }
+
+    .alias-priority-btn:focus {
+      outline: none;
+      box-shadow: inset 0 0 0 5px #fff, 0 0 0 3px rgba(108,79,199,.14);
     }
 
     .alias-row:nth-child(even),
@@ -764,6 +786,10 @@
       background: #fff;
       padding: 9px 10px;
       cursor: pointer;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 9px;
+      align-items: center;
     }
 
     .picker-item strong {
@@ -773,6 +799,34 @@
     }
 
     .picker-item span {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .picker-status-dot {
+      display: block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--red);
+      margin-top: 0;
+    }
+
+    .picker-status-dot.active {
+      background: var(--ok);
+    }
+
+    .picker-text {
+      display: block;
+      min-width: 0;
+      margin-top: 0;
+      font-size: inherit;
+      color: inherit;
+    }
+
+    .picker-text span {
       display: block;
       margin-top: 4px;
       font-size: 11px;
@@ -985,10 +1039,20 @@
 
     @media (max-width: 900px) {
       .alias-form,
+      .alias-row,
       .grid-top,
       .grid-middle,
       .grid-bottom {
         grid-template-columns: 1fr;
+      }
+
+      .alias-row {
+        grid-template-columns: auto 1fr;
+      }
+
+      .alias-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
       }
 
       .summary-row {
@@ -1399,6 +1463,8 @@
       const ALIASES_COLLECTION = "aliases";
       const COMPROBANTES_COLLECTION = "comprobantes";
       const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1";
+      const ALIASES_CACHE_KEY = "corralon_comprobantes_aliases_cache_v1";
+      const RECORDS_CACHE_KEY = "corralon_comprobantes_records_cache_v1";
 
       // Key used to persist collapsed state of summary sections in localStorage.
       // Stores an object where each property is an encoded alias name and the value is a boolean
@@ -1432,6 +1498,68 @@
         } catch (error) {
           // ignore errors (e.g. storage quota exceeded)
         }
+      }
+
+      function readJsonCache(key, fallback) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) return fallback;
+          const parsed = JSON.parse(raw);
+          return parsed ?? fallback;
+        } catch (error) {
+          localStorage.removeItem(key);
+          return fallback;
+        }
+      }
+
+      function writeJsonCache(key, value) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (error) {
+          // Browser storage can be full or disabled; live Firebase data still works.
+        }
+      }
+
+      function normalizeCachedAlias(item = {}) {
+        return {
+          id: String(item.id || ""),
+          nombre: String(item.nombre || ""),
+          alias: String(item.alias || ""),
+          cuit: String(item.cuit || ""),
+          prioritario: item.prioritario === true
+        };
+      }
+
+      function normalizeCachedRecord(item = {}) {
+        const dateIso = String(item.dateIso || todayIso());
+        return {
+          id: String(item.id || ""),
+          client: String(item.client || ""),
+          machine: String(item.machine || ""),
+          amountNumber: Number(item.amountNumber || 0),
+          transferName: String(item.transferName || ""),
+          transferAlias: String(item.transferAlias || ""),
+          transferCuit: String(item.transferCuit || ""),
+          dateIso,
+          dateText: String(item.dateText || formatDate(dateIso)),
+          timeText: String(item.timeText || ""),
+          attachmentUrl: String(item.attachmentUrl || ""),
+          attachmentName: String(item.attachmentName || ""),
+          attachmentType: String(item.attachmentType || ""),
+          createdClientMs: Number(item.createdClientMs || 0)
+        };
+      }
+
+      function restoreCachedData() {
+        const cachedAliases = readJsonCache(ALIASES_CACHE_KEY, []);
+        const cachedRecords = readJsonCache(RECORDS_CACHE_KEY, []);
+        if (Array.isArray(cachedAliases)) {
+          state.aliases = cachedAliases.map(normalizeCachedAlias).filter((item) => item.id);
+        }
+        if (Array.isArray(cachedRecords)) {
+          state.allRecords = cachedRecords.map(normalizeCachedRecord).filter((item) => item.id);
+        }
+        if (state.allRecords.length) refreshDerivedRecords();
       }
 
       const $ = (selector) => document.querySelector(selector);
@@ -1804,6 +1932,20 @@
         return String(value || "").trim().toLowerCase();
       }
 
+      function isPriorityAlias(item) {
+        return item?.prioritario === true;
+      }
+
+      function aliasSort(a, b) {
+        const priorityDiff = Number(isPriorityAlias(b)) - Number(isPriorityAlias(a));
+        if (priorityDiff) return priorityDiff;
+        return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es", { sensitivity: "base" });
+      }
+
+      function sortedAliases(items = state.aliases) {
+        return items.slice().sort(aliasSort);
+      }
+
       function resolveAliasName(value) {
         const raw = String(value || "").trim();
         if (!raw) return "";
@@ -1929,12 +2071,22 @@
         const items = search
           ? state.aliases.filter((item) => normalize(`${item.nombre || ""} ${item.alias || ""} ${item.cuit || ""}`).includes(search))
           : state.aliases;
-        if (!items.length) {
+        const orderedItems = sortedAliases(items);
+        if (!orderedItems.length) {
           el.aliasList.innerHTML = '<div class="empty">No hay alias que coincidan con la búsqueda.</div>';
           return;
         }
-        el.aliasList.innerHTML = items.map((item) => `
+        el.aliasList.innerHTML = orderedItems.map((item) => `
           <div class="alias-row">
+            <button
+              class="alias-priority-btn ${isPriorityAlias(item) ? "active" : ""}"
+              type="button"
+              data-action="toggle-alias-priority"
+              data-id="${esc(item.id)}"
+              title="${isPriorityAlias(item) ? "Desmarcar prioridad" : "Marcar prioridad"}"
+              aria-pressed="${isPriorityAlias(item) ? "true" : "false"}"
+              aria-label="${isPriorityAlias(item) ? "Desmarcar prioridad" : "Marcar prioridad"} de ${esc(item.nombre)}"
+            ></button>
             <div>
               <div class="alias-name">${esc(item.nombre)}</div>
               <div class="alias-meta">Alias: ${esc(item.alias || "-")} | CUIT: ${esc(item.cuit || "-")}</div>
@@ -2574,6 +2726,7 @@
           nombre,
           alias,
           cuit,
+          prioritario: false,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -2585,6 +2738,15 @@
 
       async function deleteAlias(id) {
         await aliasRef(id).delete();
+      }
+
+      async function toggleAliasPriority(id) {
+        const item = findRecord(id, state.aliases);
+        if (!item) return;
+        await aliasRef(id).update({
+          prioritario: !isPriorityAlias(item),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
       }
 
       function openEditAliasModal(id) {
@@ -2847,11 +3009,15 @@
 
       function openAliasModal(target) {
         state.aliasPickerTarget = target;
-        el.aliasModalList.innerHTML = state.aliases.length
-          ? state.aliases.map((item) => `
+        const items = sortedAliases();
+        el.aliasModalList.innerHTML = items.length
+          ? items.map((item) => `
               <button class="picker-item" type="button" data-action="pick-alias" data-id="${esc(item.id)}">
-                <strong>${esc(item.nombre)}</strong>
-                <span>Alias: ${esc(item.alias || "-")} | CUIT: ${esc(item.cuit || "-")}</span>
+                <span class="picker-status-dot ${isPriorityAlias(item) ? "active" : ""}" aria-hidden="true"></span>
+                <span class="picker-text">
+                  <strong>${esc(item.nombre)}</strong>
+                  <span>Alias: ${esc(item.alias || "-")} | CUIT: ${esc(item.cuit || "-")}</span>
+                </span>
               </button>
             `).join("")
           : '<div class="empty">No hay alias cargados.</div>';
@@ -3028,8 +3194,10 @@
             id: doc.id,
             nombre: String(doc.data().nombre || ""),
             alias: String(doc.data().alias || ""),
-            cuit: String(doc.data().cuit || "")
+            cuit: String(doc.data().cuit || ""),
+            prioritario: doc.data().prioritario === true
           }));
+          writeJsonCache(ALIASES_CACHE_KEY, state.aliases);
           renderAliases();
           syncDraftToInputs();
           renderTodayRecords();
@@ -3041,6 +3209,7 @@
         if (state.unsubRecords) state.unsubRecords();
         state.unsubRecords = state.db.collection(COMPROBANTES_COLLECTION).onSnapshot((snapshot) => {
           state.allRecords = snapshot.docs.map(mapDoc);
+          writeJsonCache(RECORDS_CACHE_KEY, state.allRecords);
           refreshDerivedRecords();
         }, (error) => throttleError("No se pudieron leer comprobantes", error));
       }
@@ -3076,6 +3245,11 @@
           });
         });
         el.aliasList.addEventListener("click", (event) => {
+          const priorityButton = event.target.closest("[data-action='toggle-alias-priority']");
+          if (priorityButton) {
+            toggleAliasPriority(priorityButton.dataset.id).catch((error) => throttleError("No se pudo marcar alias", error));
+            return;
+          }
           const editButton = event.target.closest("[data-action='edit-alias']");
           if (editButton) {
             openEditAliasModal(editButton.dataset.id);
@@ -3400,6 +3574,7 @@
 
       function initStaticUi() {
         restoreDraftFromStorage();
+        restoreCachedData();
         activateTab("comp");
         syncDraftToInputs();
         renderAliases();
@@ -3417,23 +3592,22 @@
         bindPasteAndDrop();
       }
 
-      function initFirebase() {
+      async function initFirebase() {
         if (!window.firebase || !window.firebase.firestore) throw new Error("Firebase no cargó correctamente");
         if (!window.firebase.apps.length) {
           window.firebase.initializeApp(firebaseConfig);
         }
         state.db = window.firebase.firestore();
+        if (typeof state.db.enablePersistence === "function") {
+          await state.db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+        }
         subscribeAliases();
         subscribeTodayRecords();
         subscribeSummaryDates();
       }
 
       initStaticUi();
-      try {
-        initFirebase();
-      } catch (error) {
-        throttleError("Error inicializando Firebase", error);
-      }
+      initFirebase().catch((error) => throttleError("Error inicializando Firebase", error));
     })();
 </script>
 <a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:30;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>
