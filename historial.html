@@ -78,6 +78,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .h-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .h-mini-btn { border: 1px solid var(--borde); background: #fff; color: var(--violeta); border-radius: 8px; padding: 6px 9px; font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 900; cursor: pointer; }
 .h-mini-btn.photo { color: #0077c8; border-color: #9bdcff; background: #f0fbff; }
+.h-mini-btn.danger { color: var(--rojo); border-color: #ffcaca; background: #fff6f6; }
 .photo-preview { max-width: 100%; max-height: 70vh; border-radius: 12px; display: block; margin: 0 auto; cursor: zoom-in; }
 .foto-close {
   position: fixed;
@@ -605,6 +606,7 @@ async function cargarGarantias() {
           <div class="h-actions">
             ${tieneFoto ? `<button class="h-mini-btn photo" onclick="event.stopPropagation();verFotoGarantia(${idx})">Ver foto</button>` : ''}
             <button class="h-mini-btn" title="Cargar foto firmada" onclick="event.stopPropagation();abrirFotoGarantia(${idx})">✏️</button>
+            <button class="h-mini-btn danger" title="Eliminar movimiento" onclick="event.stopPropagation();confirmarEliminarGarantia(${idx})">Eliminar</button>
           </div>
         </div>`;
     }).join('');
@@ -754,6 +756,31 @@ function cerrarVerFotoGarantia() {
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   }
+}
+
+function confirmarEliminarGarantia(index) {
+  const garantia = _garantiasCache[index];
+  if (!garantia?.id) return;
+  pedirConfirm({
+    icon: '🗑',
+    titulo: 'Eliminar garantía',
+    sub: `¿Eliminar la garantía ${garantia.boleta || '-'} de ${garantia.cliente || '-'}? Esta acción no se puede deshacer.`,
+    color: 'var(--rojo)',
+    btnTxt: 'Eliminar',
+    callback: async () => {
+      loading(true);
+      try {
+        await histDb.collection(GARANTIAS_COLLECTION).doc(garantia.id).delete();
+        loading(false);
+        toast('🗑 Garantía eliminada');
+        cargarGarantias();
+      } catch (e) {
+        loading(false);
+        console.error('Error eliminando garantia', e);
+        toast('❌ Error eliminando garantía');
+      }
+    }
+  });
 }
 
 document.addEventListener('fullscreenchange', () => {

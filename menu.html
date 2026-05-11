@@ -420,6 +420,7 @@
     const ADMIN_PASS = 'Akashiya2301';
     const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
     const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
+    const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
     const MENU_USERS_COLLECTION = 'menuUsuarios';
     const ALL_MENU_IDS = ['lista', 'remitos', 'historial', 'comprobantes', 'admin', 'garantias', 'usuarios'];
     const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
@@ -433,6 +434,7 @@
     const rememberLogin = document.getElementById('rememberLogin');
     const activeUserLabel = document.getElementById('activeUserLabel');
     let usuariosMenu = [];
+    let accesoManualEnPagina = false;
 
     function usuariosDefault() {
       return [
@@ -471,9 +473,51 @@
       `).join('');
     }
 
+    function usuarioSnapshot(usuario) {
+      if (!usuario) return null;
+      return {
+        id: usuario.id,
+        nombre: usuario.nombre || usuario.usuario || 'Usuario',
+        usuario: usuario.usuario || usuario.nombre || '',
+        nivel: usuario.nivel || 'personalizado',
+        permisos: Array.isArray(usuario.permisos) ? usuario.permisos : []
+      };
+    }
+
+    function obtenerUsuarioSnapshot(activeId) {
+      try {
+        const usuario = JSON.parse(localStorage.getItem(MENU_ACTIVE_USER_SNAPSHOT_KEY) || 'null');
+        return usuario?.id === activeId ? usuario : null;
+      } catch (error) {
+        localStorage.removeItem(MENU_ACTIVE_USER_SNAPSHOT_KEY);
+        return null;
+      }
+    }
+
+    function guardarUsuarioActivo(usuario) {
+      if (!usuario?.id) return;
+      localStorage.setItem(MENU_ACTIVE_USER_KEY, usuario.id);
+      localStorage.setItem(MENU_ACTIVE_USER_SNAPSHOT_KEY, JSON.stringify(usuarioSnapshot(usuario)));
+    }
+
+    function tieneSesionMenuRecordada() {
+      return tieneSesionRecordada() && Boolean(localStorage.getItem(MENU_ACTIVE_USER_KEY));
+    }
+
     function obtenerUsuarioActivo() {
       const activeId = localStorage.getItem(MENU_ACTIVE_USER_KEY);
-      return usuariosMenu.find((u) => u.id === activeId) || usuariosMenu[0] || usuariosDefault()[0];
+      const defaults = usuariosDefault();
+      return usuariosMenu.find((u) => u.id === activeId)
+        || obtenerUsuarioSnapshot(activeId)
+        || defaults.find((u) => u.id === activeId)
+        || usuariosMenu[0]
+        || defaults[0];
+    }
+
+    function obtenerUsuarioActivoValidado() {
+      const activeId = localStorage.getItem(MENU_ACTIVE_USER_KEY);
+      if (!activeId) return null;
+      return usuariosMenu.find((u) => u.id === activeId) || null;
     }
 
     function permisosUsuario(usuario) {
@@ -500,7 +544,7 @@
     function mostrarLogin() {
       appContent.style.display = 'none';
       loginBg.style.display = 'flex';
-      loginUserInput.focus();
+      requestAnimationFrame(() => loginUserInput.focus());
     }
 
     function ocultarCargaMenu() {
@@ -510,9 +554,11 @@
     function recordarSesion(usuario, activar) {
       if (activar) {
         localStorage.setItem(HISTORIAL_LOGIN_STORAGE_KEY, '1');
-        localStorage.setItem(MENU_ACTIVE_USER_KEY, usuario.id);
+        guardarUsuarioActivo(usuario);
       } else {
         localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
+        localStorage.removeItem(MENU_ACTIVE_USER_KEY);
+        localStorage.removeItem(MENU_ACTIVE_USER_SNAPSHOT_KEY);
       }
     }
 
@@ -527,8 +573,9 @@
       const usuario = usuariosMenu.find((u) => String(u.usuario || u.nombre || '').trim().toLowerCase() === usuarioIngresado);
       const password = String(usuario?.password || (usuario?.id === 'admin' ? ADMIN_PASS : ''));
       if (usuario && passIngresada === password) {
+        guardarUsuarioActivo(usuario);
         recordarSesion(usuario, rememberLogin.checked);
-        localStorage.setItem(MENU_ACTIVE_USER_KEY, usuario.id);
+        accesoManualEnPagina = true;
         loginError.textContent = '';
         mostrarMenu(usuario);
       } else {
@@ -541,13 +588,14 @@
     function cerrarSesion() {
       localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
       localStorage.removeItem(MENU_ACTIVE_USER_KEY);
+      localStorage.removeItem(MENU_ACTIVE_USER_SNAPSHOT_KEY);
       appContent.style.display = 'none';
       loginBg.style.display = 'flex';
       loginUserInput.value = '';
       loginInput.value = '';
       loginError.textContent = '';
       rememberLogin.checked = false;
-      loginUserInput.focus();
+      requestAnimationFrame(() => loginUserInput.focus());
     }
 
     document.getElementById('loginBtn').addEventListener('click', verificarPass);
@@ -568,16 +616,36 @@
       if (event.key === 'Enter') verificarPass();
     });
 
-    async function inicializarMenu() {
-      rememberLogin.checked = tieneSesionRecordada();
+    function validarSesionRecordada() {
+      if (!tieneSesionMenuRecordada()) return null;
+      return obtenerUsuarioActivoValidado();
+    }
+
+    async function validarSesionEnSegundoPlano() {
       await cargarUsuariosMenu();
       renderLoginUsers();
-      if (tieneSesionRecordada()) {
+      const usuarioValidado = validarSesionRecordada();
+      if (!usuarioValidado) {
+        if (accesoManualEnPagina) return;
+        cerrarSesion();
+        return;
+      }
+      guardarUsuarioActivo(usuarioValidado);
+      mostrarMenu(usuarioValidado);
+    }
+
+    function inicializarMenu() {
+      rememberLogin.checked = tieneSesionMenuRecordada();
+      if (tieneSesionMenuRecordada()) {
         mostrarMenu(obtenerUsuarioActivo());
       } else {
         mostrarLogin();
       }
-      setTimeout(ocultarCargaMenu, 220);
+      setTimeout(ocultarCargaMenu, 80);
+      validarSesionEnSegundoPlano().catch((error) => {
+        console.error('No se pudo validar la sesión del menú', error);
+        if (!tieneSesionRecordada()) cerrarSesion();
+      });
     }
 
     inicializarMenu();
