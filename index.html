@@ -437,6 +437,13 @@
   .lista-row.window-item-enter {
     animation: itemEnter .22s ease;
   }
+  body.sync-no-animations *,
+  body.sync-no-animations *::before,
+  body.sync-no-animations *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes itemEnter {
     from { opacity: .42; transform: translateY(10px); filter: saturate(.92); }
@@ -1567,10 +1574,23 @@
   }
   .home-carousel {
     min-width: 0;
+    overflow: hidden;
+    border-radius: 22px;
+    visibility: visible;
   }
   .home-carousel .splide__track {
-    overflow: hidden;
-    padding: 4px 2px 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 0 2px;
+  }
+  .home-carousel .splide__track::-webkit-scrollbar { display: none; }
+  .home-carousel .splide__list {
+    align-items: stretch;
   }
   .home-strip {
     display: flex;
@@ -1580,6 +1600,8 @@
   .home-slide {
     width: clamp(224px, 76vw, 290px);
     flex: 0 0 auto;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
   .home-slide-compact {
     width: 100%;
@@ -2456,6 +2478,7 @@ const db  = getFirestore(app);
 const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
 const HOME_LANDING_DOC_ID = 'homeLanding';
 const STOCK_NOTICE_DOC_ID = 'stockNotice';
+const HOME_LANDING_CACHE_KEY = 'corralon_index_home_landing_cache_v1';
 const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo.';
 
 // POPUP AL ABRIR
@@ -2476,8 +2499,17 @@ onSnapshot(doc(db, 'config', STOCK_NOTICE_DOC_ID), snap => {
 }, () => {});
 
 onSnapshot(doc(db, 'config', HOME_LANDING_DOC_ID), snap => {
-  homeLandingConfig = sanitizarConfigPortada(snap.exists() ? snap.data() : null);
-  if (todosArticulos.length) renderContenidoActual();
+  const nextConfig = sanitizarConfigPortada(snap.exists() ? snap.data() : null);
+  const nextFingerprint = fingerprintConfigPortada(nextConfig);
+  guardarJsonCache(HOME_LANDING_CACHE_KEY, {
+    fingerprint: nextFingerprint,
+    config: nextConfig
+  });
+  if (homeLandingFingerprintActiva === nextFingerprint) return;
+  homeLandingConfig = nextConfig;
+  homeLandingFingerprintActiva = nextFingerprint;
+  if (!todosArticulos.length || !estaModoInicio()) return;
+  ejecutarSinAnimacionesSync(renderHomeLanding);
 }, () => {});
 
 const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
@@ -2485,6 +2517,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const SUPABASE_BUCKET = 'Archivos';
 const NUMERACION_SUCURSAL = '0001';
 const PRESUPUESTOS_TABLE = 'presupuestos_web';
+const LISTA_ARTICULOS_CACHE_KEY = 'corralon_index_lista_articulos_cache_v1';
 let ultimoPedidoGenerado = null;
 
 async function obtenerSiguienteNumeroPedido() {
@@ -2514,6 +2547,7 @@ let sortActivo = '';
 let chipActivo = '';
 let vistaActiva = 'cards';
 let homeLandingConfig = { mode: 'auto', sections: { destacado: [], masVendido: [], oferta: [] } };
+let homeLandingFingerprintActiva = '';
 const homeCarouselInstances = new Map();
 let homeCarouselInitTimer = null;
 let publicWindowStart = 0;
@@ -2522,9 +2556,56 @@ let publicWindowAdvancing = false;
 let publicListObserver = null;
 let publicWindowAdvanceLatch = false;
 let publicWindowAdvanceResumeAt = 0;
+let listaCacheFingerprintActiva = '';
+let listaCacheUrlActiva = '';
 try {
   vistaActiva = localStorage.getItem('vistaArticulos') === 'lista' ? 'lista' : 'cards';
 } catch (e) {}
+
+function leerJsonCache(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    try { localStorage.removeItem(key); } catch (_) {}
+    return fallback;
+  }
+}
+
+function guardarJsonCache(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    // Si la lista supera la cuota del navegador, la página sigue cargando desde Firebase.
+  }
+}
+
+function hashTextoCache(texto) {
+  let hash = 2166136261;
+  for (let i = 0; i < texto.length; i++) {
+    hash ^= texto.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function fingerprintListaArticulos(data = []) {
+  try {
+    const json = JSON.stringify(data);
+    return `${data.length}:${json.length}:${hashTextoCache(json)}`;
+  } catch (e) {
+    return `${Array.isArray(data) ? data.length : 0}:${Date.now()}`;
+  }
+}
+
+function fingerprintConfigPortada(config = {}) {
+  try {
+    const json = JSON.stringify(config || {});
+    return `${json.length}:${hashTextoCache(json)}`;
+  } catch (e) {
+    return String(Date.now());
+  }
+}
 
 function toBool(value) {
   if (typeof value === 'boolean') return value;
@@ -2915,6 +2996,19 @@ function sanitizarConfigPortada(raw) {
   };
 }
 
+function restaurarConfigPortadaCache() {
+  const cached = leerJsonCache(HOME_LANDING_CACHE_KEY, null);
+  if (!cached?.config) return false;
+  try {
+    homeLandingConfig = sanitizarConfigPortada(cached.config);
+    homeLandingFingerprintActiva = cached.fingerprint || fingerprintConfigPortada(homeLandingConfig);
+    return true;
+  } catch (e) {
+    try { localStorage.removeItem(HOME_LANDING_CACHE_KEY); } catch (_) {}
+    return false;
+  }
+}
+
 function resolverArticulosPortadaManual(key) {
   const codigos = homeLandingConfig?.sections?.[key] || [];
   if (!codigos.length) return [];
@@ -3183,8 +3277,89 @@ function destroyHomeCarouselInstances() {
 function stopHomeCarouselAuto() {
   clearHomeCarouselInitTimer();
   homeCarouselInstances.forEach((instance) => {
-    try { instance.Components?.Autoplay?.pause?.(); } catch (e) {}
+    try { instance.pause?.(); } catch (e) {}
   });
+}
+
+function obtenerSlidesHomeCarousel(instance) {
+  return [...(instance.root?.querySelectorAll('.home-slide') || [])];
+}
+
+function obtenerScrollTargetHomeCarousel(instance, slide) {
+  if (!instance.track || !instance.list || !slide) return 0;
+  return Math.max(0, slide.offsetLeft - instance.list.offsetLeft);
+}
+
+function actualizarIndiceHomeCarousel(instance) {
+  const slides = obtenerSlidesHomeCarousel(instance);
+  if (!slides.length || !instance.track) {
+    instance.index = 0;
+    return;
+  }
+  const current = instance.track.scrollLeft;
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  slides.forEach((slide, index) => {
+    const distance = Math.abs(obtenerScrollTargetHomeCarousel(instance, slide) - current);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  instance.index = bestIndex;
+}
+
+function alinearHomeCarousel(instance, index, smooth = true) {
+  const slides = obtenerSlidesHomeCarousel(instance);
+  if (!slides.length || !instance.track) return;
+  let nextIndex = Number(index) || 0;
+  if (nextIndex >= slides.length) nextIndex = 0;
+  if (nextIndex < 0) nextIndex = slides.length - 1;
+  instance.index = nextIndex;
+  instance.track.scrollTo({
+    left: obtenerScrollTargetHomeCarousel(instance, slides[nextIndex]),
+    behavior: smooth ? 'smooth' : 'auto'
+  });
+}
+
+function moverHomeCarouselInstance(instance, direction = 1) {
+  actualizarIndiceHomeCarousel(instance);
+  alinearHomeCarousel(instance, instance.index + (direction > 0 ? 1 : -1), true);
+}
+
+function crearHomeCarouselInstance(root) {
+  const track = root.querySelector('.splide__track');
+  const list = root.querySelector('.splide__list');
+  const instance = {
+    root,
+    track,
+    list,
+    index: 0,
+    timer: null,
+    scrollTimer: null,
+    onScroll: null,
+    pause() {
+      if (this.timer) clearInterval(this.timer);
+      this.timer = null;
+    },
+    play() {
+      this.pause();
+      if (obtenerSlidesHomeCarousel(this).length <= 1) return;
+      this.timer = setInterval(() => moverHomeCarouselInstance(this, 1), 4000);
+    },
+    destroy() {
+      this.pause();
+      if (this.scrollTimer) clearTimeout(this.scrollTimer);
+      if (this.track && this.onScroll) this.track.removeEventListener('scroll', this.onScroll);
+    }
+  };
+  instance.onScroll = () => {
+    if (instance.scrollTimer) clearTimeout(instance.scrollTimer);
+    instance.scrollTimer = setTimeout(() => actualizarIndiceHomeCarousel(instance), 120);
+  };
+  if (track) track.addEventListener('scroll', instance.onScroll, { passive: true });
+  requestAnimationFrame(() => alinearHomeCarousel(instance, 0, false));
+  return instance;
 }
 
 function initHomeCarousels(force = false) {
@@ -3198,10 +3373,6 @@ function initHomeCarousels(force = false) {
     destroyHomeCarouselInstances();
     return;
   }
-  if (!window.Splide) {
-    homeCarouselInitTimer = setTimeout(() => initHomeCarousels(force), 140);
-    return;
-  }
   const needsRebuild = force
     || roots.length !== homeCarouselInstances.size
     || roots.some((root) => homeCarouselInstances.get(root.dataset.homeCarousel || '')?.root !== root);
@@ -3210,28 +3381,7 @@ function initHomeCarousels(force = false) {
   roots.forEach((root) => {
     const key = String(root.dataset.homeCarousel || '').trim();
     if (!key) return;
-    const isMobileCarousel = window.matchMedia('(max-width: 640px)').matches;
-    const splide = new window.Splide(root, {
-      type: 'loop',
-      autoWidth: !isMobileCarousel,
-      arrows: false,
-      pagination: false,
-      drag: true,
-      snap: true,
-      gap: isMobileCarousel ? '10px' : '12px',
-      speed: 520,
-      interval: 4000,
-      autoplay: true,
-      pauseOnHover: true,
-      pauseOnFocus: true,
-      easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-      flickPower: 300,
-      flickMaxPages: 1,
-      updateOnMove: true,
-      waitForTransition: false
-    });
-    splide.mount();
-    homeCarouselInstances.set(key, splide);
+    homeCarouselInstances.set(key, crearHomeCarouselInstance(root));
   });
 }
 
@@ -3239,13 +3389,13 @@ function moverHomeStrip(targetKey, direction = 1) {
   initHomeCarousels();
   const instance = homeCarouselInstances.get(String(targetKey || '').trim());
   if (!instance) return;
-  instance.go(direction > 0 ? '>' : '<');
+  moverHomeCarouselInstance(instance, direction);
 }
 
 function startHomeCarouselAuto() {
   initHomeCarousels();
   homeCarouselInstances.forEach((instance) => {
-    try { instance.Components?.Autoplay?.play?.(); } catch (e) {}
+    try { instance.play?.(); } catch (e) {}
   });
 }
 
@@ -3295,6 +3445,62 @@ function construirIndiceBusquedaArticulo(articulo) {
       full: full.tokens
     }
   };
+}
+
+function prepararArticulosParaVista(data = []) {
+  return (Array.isArray(data) ? data : []).map(a => {
+    const normalizado = normalizarArticulo(a);
+    const indice = construirIndiceBusquedaArticulo(normalizado);
+    return {
+      ...normalizado,
+      _codigoArticulo: indice.codigoArticulo,
+      _descripcionPrincipal: indice.descripcionPrincipal,
+      _descripcionSecundaria: indice.descripcionSecundaria,
+      _searchFields: indice.fields,
+      _searchTokens: indice.tokens,
+      _busquedaPrincipal: indice.fields.principal,
+      _busqueda: indice.fields.full
+    };
+  });
+}
+
+function guardarListaArticulosCache(url, data) {
+  if (!Array.isArray(data) || !data.length) return;
+  guardarJsonCache(LISTA_ARTICULOS_CACHE_KEY, {
+    url: String(url || ''),
+    savedAt: Date.now(),
+    fingerprint: fingerprintListaArticulos(data),
+    data
+  });
+}
+
+function restaurarListaArticulosCache() {
+  const cached = leerJsonCache(LISTA_ARTICULOS_CACHE_KEY, null);
+  if (!cached || !Array.isArray(cached.data) || !cached.data.length) return false;
+  try {
+    listaCacheUrlActiva = String(cached.url || '');
+    listaCacheFingerprintActiva = cached.fingerprint || fingerprintListaArticulos(cached.data);
+    todosArticulos = prepararArticulosParaVista(cached.data);
+    actualizarVistaEtiqueta();
+    aplicarBusquedaActual();
+    const loader = document.getElementById('loadingOverlay');
+    if (loader) loader.style.display = 'none';
+    return true;
+  } catch (e) {
+    try { localStorage.removeItem(LISTA_ARTICULOS_CACHE_KEY); } catch (_) {}
+    return false;
+  }
+}
+
+function ejecutarSinAnimacionesSync(callback) {
+  document.body.classList.add('sync-no-animations');
+  try {
+    callback();
+  } finally {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => document.body.classList.remove('sync-no-animations'));
+    });
+  }
 }
 
 function obtenerRelacionTermino(termino) {
@@ -4419,6 +4625,7 @@ searchAssist.addEventListener('click', (e) => {
   aplicarValorBusqueda(btn.dataset.searchValue);
 });
 let searchSelectAllOnFocus = false;
+let searchWasFocusedOnPointerDown = false;
 function seleccionarTextoBusqueda() {
   if (!searchInput.value) return;
   searchSelectAllOnFocus = true;
@@ -4432,13 +4639,17 @@ searchInput.addEventListener('focus', () => {
   seleccionarTextoBusqueda();
   mostrarAsistenteBusqueda();
 });
+searchInput.addEventListener('pointerdown', () => {
+  searchWasFocusedOnPointerDown = document.activeElement === searchInput;
+  if (searchWasFocusedOnPointerDown) searchSelectAllOnFocus = false;
+});
 searchInput.addEventListener('mouseup', (event) => {
-  if (!searchSelectAllOnFocus) return;
+  if (!searchSelectAllOnFocus || searchWasFocusedOnPointerDown) return;
   event.preventDefault();
   seleccionarTextoBusqueda();
 });
 searchInput.addEventListener('pointerup', (event) => {
-  if (!searchSelectAllOnFocus) return;
+  if (!searchSelectAllOnFocus || searchWasFocusedOnPointerDown) return;
   event.preventDefault();
   seleccionarTextoBusqueda();
 });
@@ -4646,37 +4857,51 @@ document.getElementById('scrollBody').addEventListener('keydown', (e) => {
   }
 });
 
+restaurarConfigPortadaCache();
+restaurarListaArticulosCache();
+
 onSnapshot(doc(db, "config", "listaActual"), async snap => {
   const loader = document.getElementById('loadingOverlay');
   if (!snap.exists()) {
     disconnectPublicListObserver();
-    document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
+    if (!todosArticulos.length) {
+      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
+    }
     if (loader) loader.style.display = 'none';
     return;
   }
   try {
     const url = snap.data().url;
     const data = await cargarListaConMetadatos(url);
-    todosArticulos = data.map(a => {
-      const normalizado = normalizarArticulo(a);
-      const indice = construirIndiceBusquedaArticulo(normalizado);
-      return {
-        ...normalizado,
-        _codigoArticulo: indice.codigoArticulo,
-        _descripcionPrincipal: indice.descripcionPrincipal,
-        _descripcionSecundaria: indice.descripcionSecundaria,
-        _searchFields: indice.fields,
-        _searchTokens: indice.tokens,
-        _busquedaPrincipal: indice.fields.principal,
-        _busqueda: indice.fields.full
-      };
-    });
-    actualizarVistaEtiqueta();
-    aplicarBusquedaActual();
+    const fingerprint = fingerprintListaArticulos(data);
+    guardarListaArticulosCache(url, data);
+    if (
+      todosArticulos.length &&
+      listaCacheUrlActiva === String(url || '') &&
+      listaCacheFingerprintActiva === fingerprint
+    ) {
+      if (loader) loader.style.display = 'none';
+      return;
+    }
+    listaCacheUrlActiva = String(url || '');
+    listaCacheFingerprintActiva = fingerprint;
+    const teniaListaRenderizada = todosArticulos.length > 0;
+    todosArticulos = prepararArticulosParaVista(data);
+    if (teniaListaRenderizada) {
+      ejecutarSinAnimacionesSync(() => {
+        actualizarVistaEtiqueta();
+        aplicarBusquedaActual();
+      });
+    } else {
+      actualizarVistaEtiqueta();
+      aplicarBusquedaActual();
+    }
   } catch (e) {
     console.error(e);
     disconnectPublicListObserver();
-    document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error cargando lista</p></div>`;
+    if (!todosArticulos.length) {
+      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error cargando lista</p></div>`;
+    }
   }
   if (loader) loader.style.display = 'none';
 });
