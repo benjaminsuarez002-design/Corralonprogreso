@@ -421,6 +421,7 @@
     const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
     const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
     const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
+    const MENU_USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
     const MENU_USERS_COLLECTION = 'menuUsuarios';
     const ALL_MENU_IDS = ['lista', 'remitos', 'historial', 'comprobantes', 'admin', 'garantias', 'usuarios'];
     const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
@@ -443,14 +444,51 @@
       ];
     }
 
+    function normalizarUsuarioMenu(raw = {}) {
+      return {
+        id: String(raw.id || ''),
+        nombre: String(raw.nombre || ''),
+        usuario: String(raw.usuario || ''),
+        password: String(raw.password || ''),
+        nivel: String(raw.nivel || ''),
+        permisos: Array.isArray(raw.permisos) ? raw.permisos : []
+      };
+    }
+
+    function leerUsuariosMenuCache() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(MENU_USERS_CACHE_KEY) || '[]');
+        return Array.isArray(raw) ? raw.map(normalizarUsuarioMenu).filter((u) => u.id) : [];
+      } catch (error) {
+        localStorage.removeItem(MENU_USERS_CACHE_KEY);
+        return [];
+      }
+    }
+
+    function guardarUsuariosMenuCache(usuarios) {
+      try {
+        localStorage.setItem(MENU_USERS_CACHE_KEY, JSON.stringify((usuarios || []).map(normalizarUsuarioMenu)));
+      } catch (error) {
+        // Si el navegador no deja guardar, el menú sigue funcionando con Firebase.
+      }
+    }
+
+    function cargarUsuariosMenuDesdeCache() {
+      const cached = leerUsuariosMenuCache();
+      if (!cached.length) return false;
+      usuariosMenu = cached;
+      return true;
+    }
+
     async function cargarUsuariosMenu() {
       try {
         const snap = await getDocs(collection(db, MENU_USERS_COLLECTION));
-        usuariosMenu = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        usuariosMenu = snap.docs.map((docSnap) => normalizarUsuarioMenu({ id: docSnap.id, ...docSnap.data() }));
         if (!usuariosMenu.length) usuariosMenu = usuariosDefault();
+        guardarUsuariosMenuCache(usuariosMenu);
       } catch (error) {
         console.error('No se pudieron cargar usuarios desde Firebase', error);
-        usuariosMenu = usuariosDefault();
+        if (!cargarUsuariosMenuDesdeCache()) usuariosMenu = usuariosDefault();
       }
       return usuariosMenu;
     }
@@ -635,6 +673,10 @@
     }
 
     function inicializarMenu() {
+      if (!usuariosMenu.length && !cargarUsuariosMenuDesdeCache()) {
+        usuariosMenu = usuariosDefault();
+      }
+      renderLoginUsers();
       rememberLogin.checked = tieneSesionMenuRecordada();
       if (tieneSesionMenuRecordada()) {
         mostrarMenu(obtenerUsuarioActivo());
