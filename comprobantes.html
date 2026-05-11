@@ -1538,6 +1538,7 @@
           machine: String(item.machine || ""),
           amountNumber: Number(item.amountNumber || 0),
           transferName: String(item.transferName || ""),
+          transferId: String(item.transferId || ""),
           transferAlias: String(item.transferAlias || ""),
           transferCuit: String(item.transferCuit || ""),
           dateIso,
@@ -1946,6 +1947,34 @@
         return items.slice().sort(aliasSort);
       }
 
+      function findAliasForRecord(item) {
+        const transferId = String(item?.transferId || "");
+        if (transferId) {
+          const byId = findRecord(transferId, state.aliases);
+          if (byId) return byId;
+        }
+        const name = normalize(item?.transferName);
+        const alias = normalize(item?.transferAlias);
+        const cuit = normalize(item?.transferCuit);
+        return state.aliases.find((entry) => (
+          (name && normalize(entry.nombre) === name) ||
+          (alias && normalize(entry.alias) === alias) ||
+          (cuit && normalize(entry.cuit) === cuit)
+        )) || null;
+      }
+
+      function aliasGroupKey(item) {
+        const aliasDoc = findAliasForRecord(item);
+        if (aliasDoc?.id) return `alias:${aliasDoc.id}`;
+        if (item?.transferId) return `alias:${item.transferId}`;
+        return `legacy:${normalize(item?.transferName) || normalize(item?.transferAlias) || normalize(item?.transferCuit) || "sin-proveedor"}`;
+      }
+
+      function aliasDisplayName(item) {
+        const aliasDoc = findAliasForRecord(item);
+        return aliasDoc?.nombre || item?.transferName || "Sin proveedor";
+      }
+
       function resolveAliasName(value) {
         const raw = String(value || "").trim();
         if (!raw) return "";
@@ -2167,20 +2196,22 @@
 
         const groups = new Map();
         items.forEach((item) => {
-          const key = item.transferName || "Sin proveedor";
-          if (!groups.has(key)) groups.set(key, []);
-          groups.get(key).push(item);
+          const key = aliasGroupKey(item);
+          if (!groups.has(key)) groups.set(key, { name: aliasDisplayName(item), rows: [] });
+          groups.get(key).rows.push(item);
         });
 
         // Load collapsed mapping once and reuse for each group. Each key corresponds to an encoded alias name.
         const collapsedMapping = loadSummaryCollapsed();
 
         let dayTotal = 0;
-        const groupedHtml = Array.from(groups.entries()).map(([name, group]) => {
+        const groupedHtml = Array.from(groups.entries()).map(([key, section]) => {
+          const name = section.name || "Sin proveedor";
+          const group = section.rows;
           const total = group.reduce((sum, item) => sum + Number(item.amountNumber || 0), 0);
           dayTotal += total;
           // Create a safe key for use as a dataset attribute and in localStorage.
-          const aliasKey = encodeURIComponent(String(name));
+          const aliasKey = encodeURIComponent(String(key));
           // Determine if this group should start collapsed based on persisted state.
           const isCollapsed = collapsedMapping && collapsedMapping[aliasKey];
           return `
@@ -2261,14 +2292,14 @@
       function buildPdfRowsByAlias(items) {
         const groups = new Map();
         items.forEach((item) => {
-          const key = String(item.transferName || "Sin proveedor");
-          if (!groups.has(key)) groups.set(key, []);
-          groups.get(key).push(item);
+          const key = aliasGroupKey(item);
+          if (!groups.has(key)) groups.set(key, { aliasName: aliasDisplayName(item), rows: [] });
+          groups.get(key).rows.push(item);
         });
-        return Array.from(groups.entries()).map(([aliasName, group]) => ({
-          aliasName,
-          total: group.reduce((sum, entry) => sum + Number(entry.amountNumber || 0), 0),
-          rows: group
+        return Array.from(groups.values()).map((section) => ({
+          aliasName: section.aliasName || "Sin proveedor",
+          total: section.rows.reduce((sum, entry) => sum + Number(entry.amountNumber || 0), 0),
+          rows: section.rows
         }));
       }
 
@@ -2357,7 +2388,7 @@
         items.forEach((item) => {
           y = ensurePdfSpace(doc, y, 8);
           const time = String(item.timeText || "--:--");
-          const alias = String(item.transferName || "Sin proveedor");
+          const alias = String(aliasDisplayName(item));
           const client = String(item.client || "Sin cliente");
           const fact = String(item.machine || item.attachmentName || "Sin comprobante");
           doc.setFont("helvetica", "normal");
@@ -2422,7 +2453,7 @@
         items.forEach((item) => {
           rows.push([
             String(item.timeText || "--:--"),
-            String(item.transferName || "Sin proveedor"),
+            String(aliasDisplayName(item)),
             String(item.client || "Sin cliente"),
             String(item.machine || item.attachmentName || "Sin comprobante"),
             String(item.attachmentUrl || ""),
@@ -2648,6 +2679,7 @@
           client: firstText(data.client, data.cliente, data.nombreCliente),
           machine: firstText(data.machine, data.maquina, data.numeroMaquina, data.maquina_texto),
           amountNumber,
+          transferId: firstText(data.transferId, data.transfer_id, data.aliasId, data.alias_id),
           transferName: firstText(data.transferName, data.transferencia, data.transfer, data.aliasNombre, data.alias, data.alias_mp),
           transferAlias: firstText(data.transferAlias, data.alias, data.alias_mp),
           transferCuit: firstText(data.transferCuit, data.cuit),
@@ -2695,6 +2727,7 @@
           client: state.draft.client,
           machine: state.draft.machine,
           amountNumber: state.draft.amountNumber,
+          transferId: state.draft.transfer ? state.draft.transfer.id : "",
           transferName: state.draft.transfer ? state.draft.transfer.nombre : "",
           transferAlias: state.draft.transfer ? state.draft.transfer.alias : "",
           transferCuit: state.draft.transfer ? state.draft.transfer.cuit : "",
@@ -2958,6 +2991,7 @@
 
       async function updateRecordAlias(id, aliasDoc) {
         await recordRef(id).update({
+          transferId: aliasDoc ? aliasDoc.id : "",
           transferName: aliasDoc ? aliasDoc.nombre : "",
           transferAlias: aliasDoc ? aliasDoc.alias : "",
           transferCuit: aliasDoc ? aliasDoc.cuit : "",
@@ -2988,7 +3022,7 @@
         state.draft.amountNumber = Number(record.amountNumber || 0);
         state.draft.amountInput = record.amountNumber ? formatAmount(record.amountNumber, true) : "";
         state.draft.transfer = record.transferName ? {
-          id: "",
+          id: record.transferId || "",
           nombre: record.transferName || "",
           alias: record.transferAlias || "",
           cuit: record.transferCuit || ""
