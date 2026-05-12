@@ -433,10 +433,7 @@
     border: 1px solid rgba(0,212,255,.42);
     pointer-events: none;
   }
-  .producto-card.window-item-enter,
-  .lista-row.window-item-enter {
-    animation: itemEnter .22s ease;
-  }
+  .public-list-sentinel { height: 1px; width: 100%; }
   body.sync-no-animations *,
   body.sync-no-animations *::before,
   body.sync-no-animations *::after {
@@ -2508,8 +2505,6 @@ onSnapshot(doc(db, 'config', HOME_LANDING_DOC_ID), snap => {
   if (homeLandingFingerprintActiva === nextFingerprint) return;
   homeLandingConfig = nextConfig;
   homeLandingFingerprintActiva = nextFingerprint;
-  if (!todosArticulos.length || !estaModoInicio()) return;
-  ejecutarSinAnimacionesSync(renderHomeLanding);
 }, () => {});
 
 const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
@@ -2550,12 +2545,9 @@ let homeLandingConfig = { mode: 'auto', sections: { destacado: [], masVendido: [
 let homeLandingFingerprintActiva = '';
 const homeCarouselInstances = new Map();
 let homeCarouselInitTimer = null;
-let publicWindowStart = 0;
 let publicWindowCount = ITEMS_POR_PAGINA;
 let publicWindowAdvancing = false;
 let publicListObserver = null;
-let publicWindowAdvanceLatch = false;
-let publicWindowAdvanceResumeAt = 0;
 let listaCacheFingerprintActiva = '';
 let listaCacheUrlActiva = '';
 try {
@@ -3838,38 +3830,13 @@ function resaltarTextoBusqueda(texto, terminos) {
 }
 
 function resetPublicWindow() {
-  publicWindowStart = 0;
   publicWindowCount = ITEMS_POR_PAGINA;
   publicWindowAdvancing = false;
-  publicWindowAdvanceLatch = false;
-  publicWindowAdvanceResumeAt = 0;
 }
 
-function getPublicWindowSlice(total) {
-  publicWindowStart = 0;
-  publicWindowCount = Math.max(ITEMS_POR_PAGINA, Math.min(total || ITEMS_POR_PAGINA, publicWindowCount));
-  const end = Math.min(total, publicWindowCount);
-  return { start: 0, end };
-}
-
-function getPublicWindowAnimateCodes(lista, previousSlice, nextSlice) {
-  const anteriores = new Set(lista.slice(previousSlice.start, previousSlice.end).map((articulo) => obtenerIdArticulo(articulo)));
-  return new Set(
-    lista
-      .slice(nextSlice.start, nextSlice.end)
-      .map((articulo) => obtenerIdArticulo(articulo))
-      .filter((codigo) => codigo && !anteriores.has(codigo))
-  );
-}
-
-function getPublicVisibleAnchor(startIndex = 0) {
-  const items = obtenerElementosResultado().slice(startIndex);
-  if (!items.length || !mainScrollHost) return null;
-  const hostRect = mainScrollHost.getBoundingClientRect();
-  return items.find((item) => {
-    const rect = item.getBoundingClientRect();
-    return rect.bottom > hostRect.top + 12 && rect.top < hostRect.bottom - 12;
-  }) || items[0] || null;
+function getPublicWindowEnd(total) {
+  publicWindowCount = Math.max(ITEMS_POR_PAGINA, publicWindowCount);
+  return Math.min(total, publicWindowCount);
 }
 
 function disconnectPublicListObserver() {
@@ -3884,84 +3851,38 @@ function isPublicWindowNearBottom() {
   return mainScrollHost.scrollTop + mainScrollHost.clientHeight >= mainScrollHost.scrollHeight - 220;
 }
 
-function canAdvancePublicWindowNow() {
-  const now = window.performance?.now?.() ?? Date.now();
-  return now >= publicWindowAdvanceResumeAt;
-}
-
-function setPublicWindowAdvanceCooldown(ms = 180) {
-  const now = window.performance?.now?.() ?? Date.now();
-  publicWindowAdvanceResumeAt = now + ms;
-}
-
-function syncPublicWindowAdvanceLatch() {
-  publicWindowAdvanceLatch = isPublicWindowNearBottom();
-}
-
 function setupPublicListObserver() {
   disconnectPublicListObserver();
   const sentinel = document.getElementById('publicListSentinel');
   if (!sentinel || !mainScrollHost) return;
   publicListObserver = new IntersectionObserver((entries) => {
     if (!entries.some((entry) => entry.isIntersecting)) return;
-    if (publicWindowAdvancing || publicWindowAdvanceLatch || !canAdvancePublicWindowNow()) return;
-    publicWindowAdvanceLatch = true;
+    if (publicWindowAdvancing) return;
     advancePublicWindow();
-  }, { root: mainScrollHost, threshold: 0.2 });
+  }, { root: mainScrollHost, rootMargin: '220px 0px', threshold: 0 });
   publicListObserver.observe(sentinel);
 }
 
-function finalizePublicWindowRender({ anchorCode = '', anchorTop = null, anchorMode = 'preserve' } = {}) {
+function finalizePublicWindowRender() {
   disconnectPublicListObserver();
   requestAnimationFrame(() => {
-    if (anchorCode) {
-      const anchor = [...document.querySelectorAll('#scrollBody [data-detail-code]')].find((item) => item.dataset.detailCode === anchorCode);
-      if (anchor) {
-        const newTop = anchor.getBoundingClientRect().top;
-        if (anchorMode === 'top') {
-          const hostTop = mainScrollHost.getBoundingClientRect().top;
-          const desiredTop = hostTop + 10;
-          mainScrollHost.scrollTop += (newTop - desiredTop);
-        } else if (anchorTop !== null) {
-          mainScrollHost.scrollTop += (anchorTop - newTop);
-        }
-      }
-    }
-    setPublicWindowAdvanceCooldown(anchorCode ? 260 : 180);
-    syncPublicWindowAdvanceLatch();
     publicWindowAdvancing = false;
-    requestAnimationFrame(() => {
-      setupPublicListObserver();
-    });
+    setupPublicListObserver();
   });
 }
 
 function advancePublicWindow() {
-  if (publicWindowAdvancing || estaModoInicio() || !listaFiltradaActual.length) return;
+  if (publicWindowAdvancing || !listaFiltradaActual.length) return;
   const total = listaFiltradaActual.length;
-  const previousSlice = getPublicWindowSlice(total);
-  if (previousSlice.end >= total) return;
-
-  const anchorCode = '';
-  const anchorTop = null;
-  const anchorMode = 'preserve';
+  if (publicWindowCount >= total) return;
   publicWindowCount = Math.min(total, publicWindowCount + ITEMS_POR_PAGINA);
-
-  const nextSlice = getPublicWindowSlice(total);
-  const animateCodes = getPublicWindowAnimateCodes(listaFiltradaActual, previousSlice, nextSlice);
   publicWindowAdvancing = true;
-  renderProductos(listaFiltradaActual, { preserveWindow: true, anchorCode, anchorTop, anchorMode, animateCodes });
+  renderProductos(listaFiltradaActual, { preserveWindow: true });
 }
 
 function maybeAdvancePublicWindowFromScroll() {
-  if (!mainScrollHost || publicWindowAdvancing || !listaFiltradaActual.length || estaModoInicio()) return;
-  const nearBottom = isPublicWindowNearBottom();
-  if (!nearBottom) {
-    publicWindowAdvanceLatch = false;
-    return;
-  }
-  if (publicWindowAdvanceLatch || !canAdvancePublicWindowNow()) return;
-  publicWindowAdvanceLatch = true;
+  if (!mainScrollHost || publicWindowAdvancing || !listaFiltradaActual.length) return;
+  if (!isPublicWindowNearBottom()) return;
   advancePublicWindow();
 }
 
@@ -4239,7 +4160,7 @@ function abrirDetalleProducto(codigo) {
   });
 }
 
-function renderProductos(lista, { preserveWindow = false, anchorCode = '', anchorTop = null, anchorMode = 'preserve', animateCodes = null } = {}) {
+function renderProductos(lista, { preserveWindow = false } = {}) {
   const body   = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
   destroyHomeCarouselInstances();
@@ -4254,15 +4175,16 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
     estado.innerHTML = '';
     return;
   }
-  const { start, end } = getPublicWindowSlice(lista.length);
+  const start = 0;
+  const end = getPublicWindowEnd(lista.length);
   const paginaItems = lista.slice(start, end);
   const hayMas = end < lista.length;
   estado.innerHTML = `<b>${lista.length}</b> productos - Mostrando <b>${start + 1}</b> a <b>${end}</b>`;
+  const sentinelHtml = hayMas ? '<div id="publicListSentinel" class="public-list-sentinel"></div>' : '';
   if (vistaActiva === 'lista') {
     const filasHtml = paginaItems.map(a => {
       const descripcion = obtenerDescripcionArticulo(a);
       const codigoArticulo = obtenerIdArticulo(a);
-      const enterClass = animateCodes?.has(codigoArticulo) ? ' window-item-enter' : '';
       const highlightTerms = a._searchMeta?.highlightTerms || ultimaBusquedaInfo.highlightTerms || [];
       const nombreHtml = resaltarTextoBusqueda(descripcion.principal, highlightTerms);
       const detalleHtml = descripcion.secundaria ? resaltarTextoBusqueda(descripcion.secundaria, highlightTerms) : '';
@@ -4277,7 +4199,7 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
       if (a.masVendido) tags.push('<span class="chip-mas-vendido">🏆 Más vendido</span>');
       if (a.ceramico) tags.push(`<span class="chip-ceramico">Ceramico ${fmtM2(a.ceramicoM2)}</span>`);
       const tagsHtml = tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
-      return `<div class="lista-row${enterClass}" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
+      return `<div class="lista-row" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
         <div class="lista-cell lista-img-cell">
           <button class="lista-img-btn${a.fotoUrl ? '' : ' is-empty'}" type="button" data-detail-trigger="1" data-detail-code="${codigoArticulo}" aria-label="Ver detalle">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -4311,14 +4233,13 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
         </div>
         ${filasHtml}
       </div>
-    </div><div id="publicListSentinel" style="height:${hayMas ? '1px' : '0'}"></div>`;
-    finalizePublicWindowRender({ anchorCode, anchorTop, anchorMode });
+    </div>${sentinelHtml}`;
+    finalizePublicWindowRender();
     return;
   }
   const cardsHtml = paginaItems.map(a => {
     const descripcion = obtenerDescripcionArticulo(a);
     const codigoArticulo = obtenerIdArticulo(a);
-    const enterClass = animateCodes?.has(codigoArticulo) ? ' window-item-enter' : '';
     const highlightTerms = a._searchMeta?.highlightTerms || ultimaBusquedaInfo.highlightTerms || [];
     const nombreHtml = resaltarTextoBusqueda(descripcion.principal, highlightTerms);
     const detalleHtml = descripcion.secundaria ? resaltarTextoBusqueda(descripcion.secundaria, highlightTerms) : escaparHtml('Detalle del artículo');
@@ -4336,7 +4257,7 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
     if (a.masVendido) tags.push('<span class="chip-mas-vendido">🏆 Más vendido</span>');
     if (a.ceramico) tags.push(`<span class="chip-ceramico">Ceramico ${fmtM2(a.ceramicoM2)}</span>`);
     const tagsHtml = tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
-    return `<div class="producto-card${enterClass}" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
+    return `<div class="producto-card" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
       <div class="producto-inner">
         <div class="foto-wrap">${foto}</div>
         <div class="card-main">
@@ -4356,15 +4277,11 @@ function renderProductos(lista, { preserveWindow = false, anchorCode = '', ancho
       </div>
     </div>`;
   }).join('');
-  body.innerHTML = `<div class="productos-grid">${cardsHtml}</div><div id="publicListSentinel" style="height:${hayMas ? '1px' : '0'}"></div>`;
-  finalizePublicWindowRender({ anchorCode, anchorTop, anchorMode });
+  body.innerHTML = `<div class="productos-grid">${cardsHtml}</div>${sentinelHtml}`;
+  finalizePublicWindowRender();
 }
 
 function renderContenidoActual() {
-  if (estaModoInicio()) {
-    renderHomeLanding();
-    return;
-  }
   destroyHomeCarouselInstances();
   renderProductos(ultimaBusquedaInfo.resultados || listaFiltradaActual || []);
 }
@@ -4528,8 +4445,7 @@ function aplicarBusquedaActual() {
     highlightTerms: procesada.highlightTerms
   };
 
-  if (estaModoInicio(procesada.parsed)) renderHomeLanding();
-  else renderProductos(resultado);
+  renderProductos(resultado);
   actualizarAsistenteBusqueda();
 }
 
