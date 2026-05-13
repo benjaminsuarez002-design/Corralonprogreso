@@ -1195,7 +1195,12 @@
       if (!db) return;
       try {
         const snap = await db.collection(FIREBASE_SUMMARY_COLLECTION).doc(dateKey).get();
-        if (dateKey !== selectedDateKey || !snap.exists) return;
+        if (dateKey !== selectedDateKey) return;
+        if (!snap.exists) {
+          const hasLocalValues = Object.values(summaryManualPayload()).some((value) => Number(value || 0) !== 0);
+          if (hasLocalValues) queueSummaryManualSave(dateKey);
+          return;
+        }
         applyingFirebaseSummary = true;
         applySummaryManualPayload(snap.data()?.values || snap.data());
         applyingFirebaseSummary = false;
