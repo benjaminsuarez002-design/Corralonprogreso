@@ -25,11 +25,23 @@
       --muted: #6f698b;
       --ok: #1f8f53;
       --shadow: 0 8px 22px rgba(58, 35, 120, .10);
+      --ui-scale: .75;
     }
 
-    html, body { margin: 0; min-height: 100%; }
+    html {
+      margin: 0;
+      min-height: 100%;
+      zoom: var(--ui-scale);
+    }
+    @supports not (zoom: 1) {
+      body {
+        transform: scale(var(--ui-scale));
+        transform-origin: top left;
+        width: calc(100% / var(--ui-scale));
+      }
+    }
+    body { margin: 0; min-height: calc(100dvh / var(--ui-scale)); }
     body {
-      min-height: 100vh;
       color: var(--texto);
       font-family: 'Barlow', Arial, sans-serif;
       background:
@@ -51,7 +63,7 @@
     .app {
       position: relative;
       z-index: 1;
-      height: 100vh;
+      height: calc(100dvh / var(--ui-scale));
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -120,14 +132,14 @@
       padding: 10px 16px 24px;
     }
     .cash-board {
-      width: 100%;
-      min-width: 1420px;
-      min-height: 690px;
+      width: max-content;
+      min-width: 0;
+      min-height: 0;
       padding: 14px 0 18px;
-      border: 1px solid var(--borde);
-      border-radius: 14px;
-      background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(247,244,255,.86));
-      box-shadow: var(--shadow);
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
     }
     .top-grid {
       display: grid;
@@ -333,6 +345,10 @@
       color: #51496e;
       cursor: default;
     }
+    tr.system-warning td {
+      color: #d80000;
+      font-weight: 700;
+    }
 
     .navigator {
       height: 22px;
@@ -514,6 +530,13 @@
       box-shadow: 0 24px 70px rgba(35, 22, 80, .28);
       overflow: hidden;
     }
+    .diff-modal {
+      width: min(1820px, 98vw);
+      height: min(980px, 94vh);
+      min-width: 960px;
+      min-height: 560px;
+      resize: both;
+    }
     .modal-head {
       display: flex;
       align-items: center;
@@ -532,6 +555,63 @@
       letter-spacing: .03em;
     }
     .modal-body { padding: 12px 14px 14px; }
+    .diff-modal .modal-body {
+      height: calc(100% - 61px);
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .diff-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: var(--violeta-oscuro);
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .diff-boards {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .diff-board {
+      min-width: 0;
+      border: 1px solid var(--borde);
+      border-radius: 8px;
+      background: #fff;
+      overflow: auto;
+    }
+    .diff-board-title {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      height: 30px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--borde);
+      background: #e8defd;
+      color: var(--violeta-oscuro);
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .diff-table th { top: 30px; }
+    .diff-table .diff-row td {
+      background: #fff1f1 !important;
+      color: #d80000;
+      font-weight: 800;
+    }
+    .diff-table tr.selected-diff-row td {
+      background: #dcd3fb !important;
+      color: var(--violeta-oscuro);
+      box-shadow: inset 0 1px 0 rgba(108,79,199,.28), inset 0 -1px 0 rgba(108,79,199,.28);
+    }
+    .diff-table tr.blank-diff-row td {
+      background: #fff !important;
+      color: #b2aac8;
+      font-style: italic;
+    }
+    .diff-table .muted-cell { color: #aaa0c7; }
     .paste-textarea {
       width: 100%;
       min-height: 240px;
@@ -565,7 +645,7 @@
 
     @media (max-width: 900px) {
       body { overflow: auto; }
-      .app { min-height: 100vh; height: auto; overflow: visible; }
+      .app { min-height: calc(100dvh / var(--ui-scale)); height: auto; overflow: visible; }
       .topbar {
         height: auto;
         min-height: 60px;
@@ -596,7 +676,7 @@
         <div class="top-grid">
           <section class="subform">
             <div class="subform-head">
-              <div class="subform-title">Total Caja Efectiv</div>
+              <div class="subform-title">Total caja en efectivo</div>
               <div class="head-actions">
                 <button class="access-btn" id="clearCashBtn" type="button">Eliminar registro</button>
               </div>
@@ -628,7 +708,7 @@
 
           <section class="subform">
             <div class="subform-head">
-              <div class="subform-title"></div>
+              <div class="subform-title">Transferencias Mercado Pago</div>
               <div class="head-actions">
                 <button class="access-btn" id="clearTransfersBtn" type="button">Eliminar registro</button>
                 <button class="access-btn primary" id="pasteTransfersBtn" type="button">Pegar</button>
@@ -662,16 +742,19 @@
 
           <section class="subform">
             <div class="subform-head">
-              <div class="subform-title"></div>
+              <div class="subform-title">Transferencias Sistema</div>
               <div class="head-actions">
                 <button class="access-btn" id="clearSystemBtn" type="button">Eliminar registro</button>
+                <button class="access-btn primary" id="pasteSystemBtn" type="button">Pegar</button>
               </div>
             </div>
             <div class="grid-box">
               <table>
                 <thead>
                   <tr>
-                    <th>Transferencias</th>
+                    <th style="width:62px">Tipo</th>
+                    <th style="width:112px">N Factura</th>
+                    <th>Cliente</th>
                     <th style="width:116px">Monto</th>
                   </tr>
                 </thead>
@@ -691,6 +774,7 @@
             <div class="total-line">
               <span class="total-label">Diferencia</span>
               <span class="total-value" id="systemDiff">$ 0,00</span>
+              <button class="access-btn small" id="findDiffBtn" type="button">Buscar diferencias</button>
             </div>
           </section>
         </div>
@@ -754,6 +838,49 @@
     </div>
   </div>
 
+  <div class="modal-bg" id="diffModal">
+    <div class="modal diff-modal">
+      <div class="modal-head">
+        <h2 class="modal-title">Buscar diferencias</h2>
+        <button class="access-btn small" id="closeDiffModalBtn" type="button">Cerrar</button>
+      </div>
+      <div class="modal-body">
+        <div class="diff-summary" id="diffSummary"></div>
+        <div class="diff-boards">
+          <section class="diff-board">
+            <div class="diff-board-title">Transferencias Mercado Pago</div>
+            <table class="diff-table">
+              <thead>
+                <tr>
+                  <th style="width:82px">Hora</th>
+                  <th>Cliente</th>
+                  <th style="width:132px">Total</th>
+                  <th style="width:132px">Diferencia</th>
+                </tr>
+              </thead>
+              <tbody id="diffMercadoRows"></tbody>
+            </table>
+          </section>
+          <section class="diff-board">
+            <div class="diff-board-title">Transferencias Sistema</div>
+            <table class="diff-table">
+              <thead>
+                <tr>
+                  <th style="width:66px">Tipo</th>
+                  <th style="width:120px">N Factura</th>
+                  <th>Cliente</th>
+                  <th style="width:132px">Total</th>
+                  <th style="width:132px">Diferencia</th>
+                </tr>
+              </thead>
+              <tbody id="diffSystemRows"></tbody>
+            </table>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -787,6 +914,10 @@
       systemRows: document.getElementById('systemRows'),
       movementRows: document.getElementById('movementRows'),
       summaryRows: document.getElementById('summaryRows'),
+      diffModal: document.getElementById('diffModal'),
+      diffSummary: document.getElementById('diffSummary'),
+      diffMercadoRows: document.getElementById('diffMercadoRows'),
+      diffSystemRows: document.getElementById('diffSystemRows'),
       cashTotal: document.getElementById('cashTotal'),
       transferTotal: document.getElementById('transferTotal'),
       systemTotal: document.getElementById('systemTotal'),
@@ -803,6 +934,7 @@
     let pasteMode = 'transfers';
     let transferSort = { field: '', direction: '' };
     let selectedTransferId = '';
+    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0 };
 
     function normalizarTexto(value) {
       return String(value || '')
@@ -923,7 +1055,15 @@
           });
         }
         if (Array.isArray(saved.transfers)) state.transfers = saved.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
-        if (Array.isArray(saved.system)) state.system = saved.system.map((item) => ({ name: String(item.name || ''), amount: Number(item.amount || 0) }));
+        if (Array.isArray(saved.system)) {
+          state.system = saved.system.map((item) => ({
+            typeComp: String(item.typeComp || ''),
+            invoice: String(item.invoice || ''),
+            name: String(item.name || ''),
+            amount: Number(item.amount || 0),
+            paymentType: String(item.paymentType || item.type || '')
+          }));
+        }
         if (saved.summaryManual && typeof saved.summaryManual === 'object') {
           state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
           Object.keys(DEFAULT_SUMMARY_MANUAL).forEach((key) => {
@@ -1068,11 +1208,13 @@
     }
 
     function renderSystemRows() {
-      const system = state.system.length ? state.system : [{ name: '', amount: 0 }];
-      el.systemRows.innerHTML = system.map((row, idx) => `<tr>
+      const system = state.system.length ? state.system : [{ typeComp: '', invoice: '', name: '', amount: 0 }];
+      el.systemRows.innerHTML = system.map((row, idx) => `<tr class="${movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago') ? 'system-warning' : ''}">
+        <td class="center"><input class="cell-input" style="text-align:center" data-system-field="typeComp" data-index="${idx}" value="${escapeHtml(row.typeComp || '')}"></td>
+        <td class="center"><input class="cell-input" style="text-align:center" data-system-field="invoice" data-index="${idx}" value="${escapeHtml(row.invoice || '')}"></td>
         <td class="client"><input class="cell-input" style="text-align:left" data-system-field="name" data-index="${idx}" value="${escapeHtml(row.name || '')}"></td>
         <td class="money"><input class="cell-input" data-system-field="amount" data-index="${idx}" inputmode="decimal" value="${row.amount ? formatMoney(row.amount) : ''}" placeholder="$ 0,00"></td>
-      </tr>`).join('') + blankRows(8, 2);
+      </tr>`).join('') + blankRows(8, 4);
       el.systemCount.textContent = rowCountText(state.system.length || 1);
     }
 
@@ -1129,7 +1271,10 @@
     function calculateTotals() {
       const cash = state.cash.reduce((sum, row) => sum + cashRowTotal(row), 0);
       const transfers = state.transfers.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-      const system = state.system.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      const system = state.system.reduce((sum, row) => {
+        if (movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago')) return sum;
+        return sum + Number(row.amount || 0);
+      }, 0);
       const movementFinal = (type) => {
         const row = state.movements.find((item) => movementTypeKey(item.type) === movementTypeKey(type));
         return row ? Number(row.initial || 0) + Number(row.day || 0) + Number(row.ie || 0) : 0;
@@ -1152,6 +1297,142 @@
       el.systemDiff.textContent = formatMoney(totals.system - totals.transfers);
       el.dailyTotal.textContent = formatMoney(totals.daily);
       if (renderSummaryBlock) renderSummary();
+    }
+
+    function sortedMercadoPagoRows() {
+      return [...state.transfers]
+        .map((row) => ({ ...row, amount: Number(row.amount || 0) }))
+        .sort((a, b) => a.amount - b.amount || String(a.client || '').localeCompare(String(b.client || ''), 'es', { sensitivity: 'base' }));
+    }
+
+    function sortedSystemRows() {
+      return [...state.system]
+        .filter((row) => movementTypeKey(row.paymentType) !== movementTypeKey('Mercado Pago'))
+        .map((row) => ({ ...row, amount: Number(row.amount || 0) }))
+        .sort((a, b) => a.amount - b.amount || String(a.invoice || '').localeCompare(String(b.invoice || ''), 'es', { sensitivity: 'base' }));
+    }
+
+    function diffAmount(left, right) {
+      return Number(right?.amount || 0) - Number(left?.amount || 0);
+    }
+
+    function diffClass(diff) {
+      return Math.abs(diff) > 0.009 ? 'diff-row' : '';
+    }
+
+    function diffRowClass(side, index, row, diff) {
+      return [
+        diffClass(diff),
+        row?.blank ? 'blank-diff-row' : '',
+        diffState.selectedSide === side && diffState.selectedIndex === index ? 'selected-diff-row' : ''
+      ].filter(Boolean).join(' ');
+    }
+
+    function renderDiffModal() {
+      const mercado = diffState.mercado;
+      const system = diffState.system;
+      const count = Math.max(mercado.length, system.length);
+      let diffCount = 0;
+      let diffTotal = 0;
+      const mercadoHtml = [];
+      const systemHtml = [];
+      for (let i = 0; i < count; i++) {
+        const mp = mercado[i];
+        const sys = system[i];
+        const diff = diffAmount(mp, sys);
+        const hasDiff = Math.abs(diff) > 0.009;
+        if (hasDiff) {
+          diffCount += 1;
+          diffTotal += diff;
+        }
+        const mpClass = diffRowClass('mercado', i, mp, diff);
+        const sysClass = diffRowClass('system', i, sys, diff);
+        mercadoHtml.push(`<tr class="${mpClass}" data-diff-side="mercado" data-diff-index="${i}" tabindex="0">
+          <td class="center">${escapeHtml(mp?.hour || '-')}</td>
+          <td class="${mp && !mp.blank ? '' : 'muted-cell'}">${escapeHtml(mp?.client || 'Espacio en blanco')}</td>
+          <td class="money">${mp && !mp.blank ? formatMoney(mp.amount) : '-'}</td>
+          <td class="money">${formatMoney(diff)}</td>
+        </tr>`);
+        systemHtml.push(`<tr class="${sysClass}" data-diff-side="system" data-diff-index="${i}" tabindex="0">
+          <td class="center ${sys && !sys.blank ? '' : 'muted-cell'}">${escapeHtml(sys?.typeComp || '-')}</td>
+          <td class="center ${sys && !sys.blank ? '' : 'muted-cell'}">${escapeHtml(sys?.invoice || '-')}</td>
+          <td class="${sys && !sys.blank ? '' : 'muted-cell'}">${escapeHtml(sys?.name || 'Espacio en blanco')}</td>
+          <td class="money">${sys && !sys.blank ? formatMoney(sys.amount) : '-'}</td>
+          <td class="money">${formatMoney(diff)}</td>
+        </tr>`);
+      }
+      el.diffMercadoRows.innerHTML = mercadoHtml.join('') || `<tr><td colspan="4" class="center muted-cell">Sin transferencias</td></tr>`;
+      el.diffSystemRows.innerHTML = systemHtml.join('') || `<tr><td colspan="5" class="center muted-cell">Sin transferencias</td></tr>`;
+      el.diffSummary.innerHTML = `<span>Mercado Pago: ${mercado.length} filas</span>
+        <span>Sistema: ${system.length} filas</span>
+        <span>Diferencias: ${diffCount}</span>
+        <span>Total diferencia: ${formatMoney(diffTotal)}</span>`;
+    }
+
+    function openDiffModal() {
+      diffState = {
+        mercado: sortedMercadoPagoRows(),
+        system: sortedSystemRows(),
+        selectedSide: 'mercado',
+        selectedIndex: 0
+      };
+      renderDiffModal();
+      el.diffModal.classList.add('open');
+    }
+
+    function closeDiffModal() {
+      el.diffModal.classList.remove('open');
+    }
+
+    function selectDiffRow(side, index) {
+      diffState.selectedSide = side;
+      diffState.selectedIndex = Number(index) || 0;
+      renderDiffModal();
+      const row = document.querySelector(`[data-diff-side="${side}"][data-diff-index="${diffState.selectedIndex}"]`);
+      row?.focus();
+    }
+
+    function insertDiffBlankRow() {
+      if (!el.diffModal.classList.contains('open')) return false;
+      const rows = diffState[diffState.selectedSide];
+      const index = Math.max(0, Math.min(diffState.selectedIndex, rows.length));
+      rows.splice(index, 0, { blank: true, amount: 0 });
+      diffState.selectedIndex = index;
+      renderDiffModal();
+      document.querySelector(`[data-diff-side="${diffState.selectedSide}"][data-diff-index="${index}"]`)?.focus();
+      return true;
+    }
+
+    function removeDiffBlankRow() {
+      if (!el.diffModal.classList.contains('open')) return false;
+      const rows = diffState[diffState.selectedSide];
+      const index = Math.max(0, Math.min(diffState.selectedIndex, rows.length - 1));
+      if (rows[index]?.blank) {
+        rows.splice(index, 1);
+        diffState.selectedIndex = Math.min(index, Math.max(0, rows.length - 1));
+      } else if (index > 0 && rows[index - 1]?.blank) {
+        rows.splice(index - 1, 1);
+        diffState.selectedIndex = index - 1;
+      } else {
+        showToast('Selecciona un espacio en blanco o una fila debajo de un espacio.');
+        return true;
+      }
+      renderDiffModal();
+      document.querySelector(`[data-diff-side="${diffState.selectedSide}"][data-diff-index="${diffState.selectedIndex}"]`)?.focus();
+      return true;
+    }
+
+    function handleDiffModalKey(event) {
+      if (!el.diffModal.classList.contains('open')) return false;
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        return insertDiffBlankRow();
+      }
+      if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        return removeDiffBlankRow();
+      }
+      return false;
     }
 
     function renderAll() {
@@ -1321,6 +1602,29 @@
       return records;
     }
 
+    function parseSystemTransferClipboard(text) {
+      const records = [];
+      const lines = String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      lines.forEach((line) => {
+        const normalized = normalizarTexto(line);
+        if (!line || normalized.startsWith('fecha') || normalized.includes('tipocomp')) return;
+        const parts = line.includes('\t') ? line.split('\t').map(cleanLine) : splitPastedTableRow(line);
+        if (parts.length < 8) return;
+        const paymentType = cleanLine(parts[parts.length - 1]);
+        const paymentKey = movementTypeKey(paymentType);
+        const isBankTransfer = paymentKey === movementTypeKey('Transf Bria.');
+        const isMercadoPago = paymentKey === movementTypeKey('Mercado Pago');
+        if (!isBankTransfer && !isMercadoPago) return;
+        const typeComp = cleanLine(parts[1]);
+        const invoice = cleanLine(parts[2]);
+        const client = cleanLine(parts[4]);
+        const amount = parseNumber(parts[parts.length - 3]);
+        if (!client || !amount) return;
+        records.push({ typeComp, invoice, name: client, amount, paymentType: isMercadoPago ? 'Mercado Pago' : 'Transf Bria.' });
+      });
+      return records;
+    }
+
     function parseMercadoPagoText(text) {
       const lines = String(text || '').split(/\r?\n/).map(cleanLine).filter(Boolean);
       const records = [];
@@ -1393,6 +1697,21 @@
       return true;
     }
 
+    function applyPastedSystem(text) {
+      const parsed = parseSystemTransferClipboard(text);
+      if (!parsed.length) {
+        showToast('No encontre filas Transf Bria. o Mercado Pago.');
+        return false;
+      }
+      state.system = parsed;
+      saveState();
+      renderSystemRows();
+      updateTotals();
+      const mercadoPagoRows = parsed.filter((row) => movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago')).length;
+      showToast(`Se pegaron ${parsed.length} filas del sistema${mercadoPagoRows ? `, ${mercadoPagoRows} Mercado Pago en rojo` : ''}.`);
+      return true;
+    }
+
     async function pasteMovementsFromClipboard() {
       try {
         if (!navigator.clipboard?.readText) throw new Error('Clipboard no disponible');
@@ -1417,13 +1736,32 @@
       }
     }
 
+    async function pasteSystemFromClipboard() {
+      try {
+        if (!navigator.clipboard?.readText) throw new Error('Clipboard no disponible');
+        const text = await navigator.clipboard.readText();
+        if (!text.trim()) throw new Error('Clipboard vacio');
+        if (!applyPastedSystem(text)) openPasteModal(text, 'system');
+      } catch (error) {
+        openPasteModal('', 'system');
+        showToast('Pega la tabla del sistema en el cuadro y procesala.');
+      }
+    }
+
     function openPasteModal(text = '', mode = 'transfers') {
       pasteMode = mode;
       const isMovements = mode === 'movements';
-      el.pasteModalTitle.textContent = isMovements ? 'Pegar movimientos del dia' : 'Pegar actividad de Mercado Pago';
+      const isSystem = mode === 'system';
+      el.pasteModalTitle.textContent = isMovements
+        ? 'Pegar movimientos del dia'
+        : isSystem
+          ? 'Pegar transferencias del sistema'
+          : 'Pegar actividad de Mercado Pago';
       el.pasteModalHint.textContent = isMovements
         ? 'Pega aca la tabla con Tipo Valor, Caja Inicial, Movs. Dia, Imp. I/E e Imp. Final. Solo se importan Tipo Valor e Imp. Final.'
-        : 'Pega aca el texto copiado con Ctrl+A desde Mercado Pago. Solo se importan movimientos positivos de Transferencia recibida o Ingreso de dinero por transferencia bancaria.';
+        : isSystem
+          ? 'Pega aca la tabla con Fecha, Cliente, Total y Tipo pago. Se importan Transf Bria.; Transf prov se ignora; Mercado Pago queda marcado en rojo.'
+          : 'Pega aca el texto copiado con Ctrl+A desde Mercado Pago. Solo se importan movimientos positivos de Transferencia recibida o Ingreso de dinero por transferencia bancaria.';
       el.pasteText.value = text;
       el.pasteModal.classList.add('open');
       requestAnimationFrame(() => {
@@ -1561,8 +1899,8 @@
         row.amount = value;
         formatTransferAmountInput(input);
       } else if (input.dataset.systemField === 'amount') {
-        if (!state.system.length) state.system = [{ name: '', amount: 0 }];
-        if (!state.system[index]) state.system[index] = { name: '', amount: 0 };
+        if (!state.system.length) state.system = [{ typeComp: '', invoice: '', name: '', amount: 0 }];
+        if (!state.system[index]) state.system[index] = { typeComp: '', invoice: '', name: '', amount: 0 };
         state.system[index].amount = value;
         input.value = value ? formatMoney(value) : '';
       } else if (input.dataset.movementField) {
@@ -1696,12 +2034,15 @@
     document.getElementById('clearTransfersBtn').addEventListener('click', clearTransfers);
     document.getElementById('clearCashBtn').addEventListener('click', clearCash);
     document.getElementById('clearSystemBtn').addEventListener('click', clearSystem);
+    document.getElementById('pasteSystemBtn').addEventListener('click', pasteSystemFromClipboard);
+    document.getElementById('findDiffBtn').addEventListener('click', openDiffModal);
     document.getElementById('updateTotalsBtn').addEventListener('click', () => {
       updateTotals();
       saveState();
       showToast('Importes actualizados.');
     });
     document.getElementById('closePasteModalBtn').addEventListener('click', closePasteModal);
+    document.getElementById('closeDiffModalBtn').addEventListener('click', closeDiffModal);
     document.getElementById('clearPasteTextBtn').addEventListener('click', () => {
       el.pasteText.value = '';
       el.pasteText.focus();
@@ -1709,6 +2050,8 @@
     document.getElementById('processPasteTextBtn').addEventListener('click', () => {
       const applied = pasteMode === 'movements'
         ? applyPastedMovements(el.pasteText.value)
+        : pasteMode === 'system'
+          ? applyPastedSystem(el.pasteText.value)
         : applyPastedTransfers(el.pasteText.value);
       if (applied) closePasteModal();
     });
@@ -1732,9 +2075,36 @@
     el.pasteModal.addEventListener('click', (event) => {
       if (event.target === el.pasteModal) closePasteModal();
     });
+    el.diffModal.addEventListener('click', (event) => {
+      if (event.target === el.diffModal) closeDiffModal();
+    });
+    el.diffMercadoRows.addEventListener('click', (event) => {
+      const row = event.target.closest('[data-diff-side]');
+      if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex);
+    });
+    el.diffSystemRows.addEventListener('click', (event) => {
+      const row = event.target.closest('[data-diff-side]');
+      if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex);
+    });
+    el.diffMercadoRows.addEventListener('focusin', (event) => {
+      const row = event.target.closest('[data-diff-side]');
+      if (row) {
+        diffState.selectedSide = row.dataset.diffSide;
+        diffState.selectedIndex = Number(row.dataset.diffIndex) || 0;
+      }
+    });
+    el.diffSystemRows.addEventListener('focusin', (event) => {
+      const row = event.target.closest('[data-diff-side]');
+      if (row) {
+        diffState.selectedSide = row.dataset.diffSide;
+        diffState.selectedIndex = Number(row.dataset.diffIndex) || 0;
+      }
+    });
 
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && el.pasteModal.classList.contains('open')) closePasteModal();
+      if (event.key === 'Escape' && el.diffModal.classList.contains('open')) closeDiffModal();
+      if (handleDiffModalKey(event)) return;
       if ((event.key === 'Delete' || event.key === 'Del' || event.key === 'Supr') && event.target.closest('[data-row-select="transfer"]')) {
         if (deleteSelectedTransferRow()) event.preventDefault();
         return;
@@ -1759,8 +2129,8 @@
         updateCashRowDisplay(index);
       }
       if (target.dataset.systemField) {
-        if (!state.system.length) state.system = [{ name: '', amount: 0 }];
-        if (!state.system[index]) state.system[index] = { name: '', amount: 0 };
+        if (!state.system.length) state.system = [{ typeComp: '', invoice: '', name: '', amount: 0 }];
+        if (!state.system[index]) state.system[index] = { typeComp: '', invoice: '', name: '', amount: 0 };
         const field = target.dataset.systemField;
         state.system[index][field] = field === 'amount' ? parseNumber(target.value) : target.value;
       }
