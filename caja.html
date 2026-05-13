@@ -1542,12 +1542,32 @@
       return rows.flatMap((row) => Array.isArray(row.children) && row.children.length ? row.children : [row]);
     }
 
+    function earliestTransferHour(rows) {
+      const hours = sourceTransferRows(rows)
+        .map((row) => String(row.hour || '').trim())
+        .filter((hour) => hour && hour !== '-')
+        .sort((a, b) => parseHourMinutes(a) - parseHourMinutes(b));
+      return hours[0] || rows[0]?.hour || '-';
+    }
+
+    function transferDuplicateKey(row) {
+      return [
+        normalizarTexto(row?.hour || ''),
+        normalizarTexto(row?.client || ''),
+        Math.round(Number(row?.amount || 0) * 100)
+      ].join('|');
+    }
+
+    function existingTransferKeys() {
+      return new Set(sourceTransferRows(state.transfers).map(transferDuplicateKey));
+    }
+
     function mergedTransferRow(rows) {
       const children = sourceTransferRows(rows);
       const order = Math.min(...rows.map((row) => Number(row.order || 0)));
       return normalizeTransfer({
         id: `merge-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        hour: 'Unificado',
+        hour: earliestTransferHour(rows),
         client: `${uniqueTextList(rows.map((row) => row.client)).join(' / ') || 'Unificado'} (${children.length})`,
         amount: rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
         source: 'manual',
@@ -2204,8 +2224,24 @@
         showToast('No encontre transferencias recibidas positivas.');
         return false;
       }
+      const keys = existingTransferKeys();
+      const newRecords = [];
+      let skipped = 0;
+      parsed.forEach((record) => {
+        const key = transferDuplicateKey(record);
+        if (keys.has(key)) {
+          skipped += 1;
+          return;
+        }
+        keys.add(key);
+        newRecords.push(record);
+      });
+      if (!newRecords.length) {
+        showToast(`No se agregaron transferencias nuevas${skipped ? `; ${skipped} ya existian` : ''}.`);
+        return true;
+      }
       const startOrder = nextTransferOrder();
-      const nextRows = parsed
+      const nextRows = newRecords
         .map((record, idx) => normalizeTransfer({ ...record, source: 'paste', order: startOrder + idx }, startOrder + idx))
         .filter(Boolean);
       state.transfers.push(...nextRows);
@@ -2213,7 +2249,7 @@
       saveState();
       renderTransferRows();
       updateTotals();
-      showToast(`Se agregaron ${nextRows.length} transferencias.`);
+      showToast(`Se agregaron ${nextRows.length} transferencias nuevas${skipped ? `, ${skipped} repetidas ignoradas` : ''}.`);
       return true;
     }
 
