@@ -894,6 +894,7 @@
       <div class="modal-head">
         <h2 class="modal-title">Buscar diferencias</h2>
         <div class="head-actions">
+          <button class="access-btn" id="filterDiffRowsBtn" type="button">Solo rojas</button>
           <button class="access-btn primary" id="mergeDiffRowsBtn" type="button">Unificar seleccionadas</button>
           <button class="access-btn" id="splitDiffRowsBtn" type="button">Separar</button>
           <button class="access-btn small" id="closeDiffModalBtn" type="button">Cerrar</button>
@@ -902,7 +903,7 @@
       <div class="modal-body">
         <div class="diff-summary" id="diffSummary"></div>
         <div class="diff-boards">
-          <section class="diff-board">
+          <section class="diff-board" id="diffMercadoBoard">
             <div class="diff-board-title">Transferencias Mercado Pago</div>
             <table class="diff-table">
               <thead>
@@ -916,7 +917,7 @@
               <tbody id="diffMercadoRows"></tbody>
             </table>
           </section>
-          <section class="diff-board">
+          <section class="diff-board" id="diffSystemBoard">
             <div class="diff-board-title">Transferencias Sistema</div>
             <table class="diff-table">
               <thead>
@@ -947,6 +948,7 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
     const SUPABASE_TABLE_CAJA = 'control_caja_estados';
     const REMOTE_ROW_ID = `caja_${CAJA_DATE_KEY}`;
+    const DIFF_TOLERANCE = 10;
     const CASH_DENOMS = [100, 200, 500, 1000, 2000, 10000, 20000];
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
     const DEFAULT_SUMMARY_MANUAL = { mercadoPago: 0, lapos: 0, getnet: 0, providerTransfers: 0 };
@@ -978,6 +980,9 @@
       summaryRows: document.getElementById('summaryRows'),
       diffModal: document.getElementById('diffModal'),
       diffSummary: document.getElementById('diffSummary'),
+      filterDiffRowsBtn: document.getElementById('filterDiffRowsBtn'),
+      diffMercadoBoard: document.getElementById('diffMercadoBoard'),
+      diffSystemBoard: document.getElementById('diffSystemBoard'),
       diffMercadoRows: document.getElementById('diffMercadoRows'),
       diffSystemRows: document.getElementById('diffSystemRows'),
       cashTotal: document.getElementById('cashTotal'),
@@ -999,11 +1004,12 @@
     let selectedTransferId = '';
     let selectedTransferRows = new Set();
     let selectedSystemRows = new Set();
-    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0, selectedRows: { mercado: [], system: [] }, sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } } };
+    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0, selectedRows: { mercado: [], system: [] }, sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } }, onlyDiffs: false };
     let copySelection = { table: null, mode: '', colIndex: -1, text: '' };
     let remoteSaveTimer = null;
     let remoteSaveBlocked = false;
     let applyingRemoteState = false;
+    let syncingDiffScroll = false;
 
     function normalizarTexto(value) {
       return String(value || '')
@@ -1688,8 +1694,8 @@
         diffState[side] = side === 'mercado' ? sortedMercadoPagoRows() : sortedSystemRows();
       }
       diffState.selectedRows[side] = [];
-      diffState.selectedIndex = 0;
       diffState.selectedSide = side;
+      diffState.selectedIndex = firstVisibleDiffIndex();
       renderDiffModal();
     }
 
@@ -1705,8 +1711,12 @@
       return Number(right?.amount || 0) - Number(left?.amount || 0);
     }
 
+    function isDiffOverTolerance(diff) {
+      return Math.abs(diff) > DIFF_TOLERANCE;
+    }
+
     function diffClass(diff) {
-      return Math.abs(diff) > 0.009 ? 'diff-row' : '';
+      return isDiffOverTolerance(diff) ? 'diff-row' : '';
     }
 
     function diffRowClass(side, index, row, diff) {
@@ -1724,17 +1734,20 @@
       const count = Math.max(mercado.length, system.length);
       let diffCount = 0;
       let diffTotal = 0;
+      let visibleCount = 0;
       const mercadoHtml = [];
       const systemHtml = [];
       for (let i = 0; i < count; i++) {
         const mp = mercado[i];
         const sys = system[i];
         const diff = diffAmount(mp, sys);
-        const hasDiff = Math.abs(diff) > 0.009;
+        const hasDiff = isDiffOverTolerance(diff);
         if (hasDiff) {
           diffCount += 1;
           diffTotal += diff;
         }
+        if (diffState.onlyDiffs && !hasDiff) continue;
+        visibleCount += 1;
         const mpClass = diffRowClass('mercado', i, mp, diff);
         const sysClass = diffRowClass('system', i, sys, diff);
         mercadoHtml.push(`<tr class="${mpClass}" data-diff-side="mercado" data-diff-index="${i}" tabindex="0">
@@ -1755,9 +1768,42 @@
       el.diffSystemRows.innerHTML = systemHtml.join('') || `<tr><td colspan="5" class="center muted-cell">Sin transferencias</td></tr>`;
       el.diffSummary.innerHTML = `<span>Mercado Pago: ${mercado.length} filas</span>
         <span>Sistema: ${system.length} filas</span>
+        <span>Tolerancia: ${formatMoney(DIFF_TOLERANCE)}</span>
         <span>Diferencias: ${diffCount}</span>
+        <span>Mostradas: ${visibleCount}</span>
         <span>Total diferencia: ${formatMoney(diffTotal)}</span>`;
+      el.filterDiffRowsBtn.classList.toggle('primary', Boolean(diffState.onlyDiffs));
+      el.filterDiffRowsBtn.textContent = diffState.onlyDiffs ? 'Mostrar todas' : 'Solo rojas';
       updateDiffSortHeaders();
+    }
+
+    function syncDiffBoardScroll(source, target) {
+      if (!source || !target || syncingDiffScroll) return;
+      syncingDiffScroll = true;
+      target.scrollTop = source.scrollTop;
+      target.scrollLeft = source.scrollLeft;
+      requestAnimationFrame(() => {
+        syncingDiffScroll = false;
+      });
+    }
+
+    function firstVisibleDiffIndex() {
+      const count = Math.max(diffState.mercado.length, diffState.system.length);
+      for (let i = 0; i < count; i++) {
+        if (!diffState.onlyDiffs || isDiffOverTolerance(diffAmount(diffState.mercado[i], diffState.system[i]))) return i;
+      }
+      return 0;
+    }
+
+    function toggleDiffFilter() {
+      diffState.onlyDiffs = !diffState.onlyDiffs;
+      diffState.selectedRows = { mercado: [], system: [] };
+      diffState.selectedIndex = firstVisibleDiffIndex();
+      renderDiffModal();
+      requestAnimationFrame(() => {
+        if (el.diffMercadoBoard) el.diffMercadoBoard.scrollTop = 0;
+        if (el.diffSystemBoard) el.diffSystemBoard.scrollTop = 0;
+      });
     }
 
     function openDiffModal() {
@@ -1767,10 +1813,15 @@
         selectedSide: 'mercado',
         selectedIndex: 0,
         selectedRows: { mercado: [], system: [] },
-        sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } }
+        sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } },
+        onlyDiffs: false
       };
       renderDiffModal();
       el.diffModal.classList.add('open');
+      requestAnimationFrame(() => {
+        if (el.diffMercadoBoard) el.diffMercadoBoard.scrollTop = 0;
+        if (el.diffSystemBoard) el.diffSystemBoard.scrollTop = 0;
+      });
     }
 
     function closeDiffModal() {
@@ -1889,6 +1940,15 @@
         return removeDiffBlankRow();
       }
       return false;
+    }
+
+    function handleSystemQuickAdd(event) {
+      if (event.key !== '+') return false;
+      const systemSubform = el.systemRows.closest('.subform');
+      if (!systemSubform?.contains(event.target)) return false;
+      event.preventDefault();
+      addManualSystemRow();
+      return true;
     }
 
     function renderAll() {
@@ -2406,6 +2466,29 @@
       return row;
     }
 
+    function addManualSystemRow() {
+      const row = normalizeSystemRow({
+        typeComp: '',
+        invoice: '',
+        name: '',
+        amount: 0,
+        paymentType: 'Transf Bria.'
+      });
+      state.system.push(row);
+      const index = state.system.length - 1;
+      selectedSystemRows.clear();
+      selectedSystemRows.add(index);
+      systemSort = { field: '', direction: '' };
+      saveState();
+      renderSystemRows();
+      updateTotals();
+      requestAnimationFrame(() => {
+        focusGridCell(document.querySelector(`[data-system-field="typeComp"][data-index="${index}"]`));
+      });
+      showToast('Fila en blanco agregada en sistema.');
+      return row;
+    }
+
     function deleteSelectedTransferRow() {
       if (!selectedTransferId && !selectedTransferRows.size) return false;
       const before = state.transfers.length;
@@ -2710,6 +2793,7 @@
     document.getElementById('closeDiffModalBtn').addEventListener('click', closeDiffModal);
     document.getElementById('mergeDiffRowsBtn').addEventListener('click', mergeSelectedDiffRows);
     document.getElementById('splitDiffRowsBtn').addEventListener('click', () => splitDiffRow());
+    el.filterDiffRowsBtn.addEventListener('click', toggleDiffFilter);
     document.getElementById('clearPasteTextBtn').addEventListener('click', () => {
       el.pasteText.value = '';
       el.pasteText.focus();
@@ -2769,6 +2853,12 @@
     el.diffModal.addEventListener('click', (event) => {
       if (event.target === el.diffModal) closeDiffModal();
     });
+    el.diffMercadoBoard.addEventListener('scroll', () => {
+      syncDiffBoardScroll(el.diffMercadoBoard, el.diffSystemBoard);
+    });
+    el.diffSystemBoard.addEventListener('scroll', () => {
+      syncDiffBoardScroll(el.diffSystemBoard, el.diffMercadoBoard);
+    });
     el.diffMercadoRows.addEventListener('click', (event) => {
       const row = event.target.closest('[data-diff-side]');
       if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex, event.ctrlKey || event.metaKey);
@@ -2807,6 +2897,7 @@
       if (event.key === 'Escape' && el.pasteModal.classList.contains('open')) closePasteModal();
       if (event.key === 'Escape' && el.diffModal.classList.contains('open')) closeDiffModal();
       if (handleDiffModalKey(event)) return;
+      if (handleSystemQuickAdd(event)) return;
       if ((event.key === 'Delete' || event.key === 'Del' || event.key === 'Supr') && event.target.closest('[data-row-select="transfer"]')) {
         if (deleteSelectedTransferRow()) event.preventDefault();
         return;
