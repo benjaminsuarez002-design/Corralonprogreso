@@ -166,9 +166,8 @@
     }
     .subform-head {
       min-height: 36px;
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: 1fr;
       gap: 8px;
       padding: 0 2px 8px;
       overflow: visible;
@@ -188,7 +187,7 @@
       gap: 8px;
       flex: 0 0 auto;
       flex-wrap: wrap;
-      justify-content: flex-end;
+      justify-content: flex-start;
     }
     .access-btn {
       height: 34px;
@@ -273,6 +272,20 @@
       border-bottom: 0;
       opacity: 1;
     }
+    th[data-copy-col],
+    th.row-selector-head {
+      cursor: pointer;
+      user-select: none;
+    }
+    th.row-selector-head::before {
+      content: '';
+      display: block;
+      width: 0;
+      height: 0;
+      margin: 4px auto 0;
+      border-top: 9px solid var(--borde-fuerte);
+      border-right: 9px solid transparent;
+    }
     td {
       height: 25px;
       padding: 2px 5px;
@@ -288,6 +301,11 @@
     tbody tr.selected-row td {
       background: #ded6fb !important;
       box-shadow: inset 0 1px 0 rgba(108,79,199,.12), inset 0 -1px 0 rgba(108,79,199,.12);
+    }
+    .copy-selected {
+      background: #dcd3fb !important;
+      color: var(--violeta-oscuro) !important;
+      box-shadow: inset 0 0 0 2px rgba(108,79,199,.34);
     }
     .row-selector-head,
     .row-selector-cell {
@@ -401,6 +419,18 @@
       align-items: center;
       gap: 4px;
       margin-top: 4px;
+    }
+    .total-line.compact {
+      gap: 6px;
+      flex-wrap: nowrap;
+    }
+    .total-line.compact .total-label {
+      min-width: 82px;
+      font-size: 16px;
+    }
+    .total-line.compact .total-value {
+      min-width: 128px;
+      font-size: 18px;
     }
     .total-label {
       min-width: 78px;
@@ -693,10 +723,11 @@
               <table>
                 <thead>
                   <tr>
-                    <th style="width:120px">Denominacion</th>
-                    <th style="width:76px">Billetes</th>
-                    <th style="width:76px">Paquet</th>
-                    <th style="width:138px">Totalporfila</th>
+                    <th class="row-selector-head"></th>
+                    <th data-copy-col style="width:120px">Denominacion</th>
+                    <th data-copy-col style="width:76px">Billetes</th>
+                    <th data-copy-col style="width:76px">Paquet</th>
+                    <th data-copy-col style="width:138px">Totalporfila</th>
                   </tr>
                 </thead>
                 <tbody id="cashRows"></tbody>
@@ -721,6 +752,8 @@
                 <button class="access-btn" id="clearTransfersBtn" type="button">Eliminar registro</button>
                 <button class="access-btn primary" id="pasteTransfersBtn" type="button">Pegar</button>
                 <button class="access-btn primary" id="addTransferBtn" type="button">Agregar fila</button>
+                <button class="access-btn primary" id="mergeTransfersBtn" type="button">Unificar</button>
+                <button class="access-btn" id="splitTransfersBtn" type="button">Separar</button>
               </div>
             </div>
             <div class="grid-box">
@@ -728,9 +761,9 @@
                 <thead>
                   <tr>
                     <th class="row-selector-head"></th>
-                    <th class="sortable-header" data-transfer-sort="hour" style="width:84px">Hora</th>
-                    <th class="sortable-header" data-transfer-sort="client">Cliente</th>
-                    <th class="sortable-header" data-transfer-sort="amount" style="width:132px">Monto</th>
+                    <th class="sortable-header" data-copy-col data-transfer-sort="hour" style="width:84px">Hora</th>
+                    <th class="sortable-header" data-copy-col data-transfer-sort="client">Cliente</th>
+                    <th class="sortable-header" data-copy-col data-transfer-sort="amount" style="width:132px">Monto</th>
                   </tr>
                 </thead>
                 <tbody id="transferRows"></tbody>
@@ -756,6 +789,7 @@
                 <button class="access-btn primary" id="pasteSystemBtn" type="button">Pegar</button>
                 <button class="access-btn primary" id="mergeSystemBtn" type="button">Unificar</button>
                 <button class="access-btn" id="splitSystemBtn" type="button">Separar</button>
+                <button class="access-btn small" id="findDiffBtn" type="button">Buscar diferencias</button>
               </div>
             </div>
             <div class="grid-box">
@@ -763,10 +797,10 @@
                 <thead>
                   <tr>
                     <th class="row-selector-head"></th>
-                    <th style="width:62px">Tipo</th>
-                    <th style="width:112px">N Factura</th>
-                    <th>Cliente</th>
-                    <th style="width:116px">Monto</th>
+                    <th class="sortable-header" data-copy-col data-system-sort="typeComp" style="width:62px">Tipo</th>
+                    <th class="sortable-header" data-copy-col data-system-sort="invoice" style="width:112px">N Factura</th>
+                    <th class="sortable-header" data-copy-col data-system-sort="name">Cliente</th>
+                    <th class="sortable-header" data-copy-col data-system-sort="amount" style="width:116px">Monto</th>
                   </tr>
                 </thead>
                 <tbody id="systemRows"></tbody>
@@ -778,14 +812,11 @@
               <span class="nav-filter">Sin filtro</span>
               <input class="nav-search" value="Buscar" aria-label="Buscar sistema">
             </div>
-            <div class="total-line">
+            <div class="total-line compact">
               <span class="total-label">Total Transferencias Sistema</span>
               <span class="total-value" id="systemTotal">$ 0,00</span>
-            </div>
-            <div class="total-line">
               <span class="total-label">Diferencia</span>
               <span class="total-value" id="systemDiff">$ 0,00</span>
-              <button class="access-btn small" id="findDiffBtn" type="button">Buscar diferencias</button>
             </div>
           </section>
         </div>
@@ -802,8 +833,12 @@
               <table>
                 <thead>
                   <tr>
-                    <th>Tipo Valor</th>
-                    <th style="width:180px">Importe Final</th>
+                    <th class="row-selector-head"></th>
+                    <th data-copy-col>Tipo Valor</th>
+                    <th data-copy-col style="width:130px">Caja Inicial</th>
+                    <th data-copy-col style="width:130px">Movs. Dia</th>
+                    <th data-copy-col style="width:130px">Imp. I/E</th>
+                    <th data-copy-col style="width:130px">Imp. Final</th>
                   </tr>
                 </thead>
                 <tbody id="movementRows"></tbody>
@@ -867,9 +902,9 @@
             <table class="diff-table">
               <thead>
                 <tr>
-                  <th style="width:82px">Hora</th>
-                  <th>Cliente</th>
-                  <th style="width:132px">Total</th>
+                  <th class="sortable-header" data-diff-sort-side="mercado" data-diff-sort="hour" style="width:82px">Hora</th>
+                  <th class="sortable-header" data-diff-sort-side="mercado" data-diff-sort="client">Cliente</th>
+                  <th class="sortable-header" data-diff-sort-side="mercado" data-diff-sort="amount" style="width:132px">Total</th>
                   <th style="width:132px">Diferencia</th>
                 </tr>
               </thead>
@@ -881,10 +916,10 @@
             <table class="diff-table">
               <thead>
                 <tr>
-                  <th style="width:66px">Tipo</th>
-                  <th style="width:120px">N Factura</th>
-                  <th>Cliente</th>
-                  <th style="width:132px">Total</th>
+                  <th class="sortable-header" data-diff-sort-side="system" data-diff-sort="typeComp" style="width:66px">Tipo</th>
+                  <th class="sortable-header" data-diff-sort-side="system" data-diff-sort="invoice" style="width:120px">N Factura</th>
+                  <th class="sortable-header" data-diff-sort-side="system" data-diff-sort="name">Cliente</th>
+                  <th class="sortable-header" data-diff-sort-side="system" data-diff-sort="amount" style="width:132px">Total</th>
                   <th style="width:132px">Diferencia</th>
                 </tr>
               </thead>
@@ -955,9 +990,12 @@
     };
     let pasteMode = 'transfers';
     let transferSort = { field: '', direction: '' };
+    let systemSort = { field: '', direction: '' };
     let selectedTransferId = '';
+    let selectedTransferRows = new Set();
     let selectedSystemRows = new Set();
-    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0, selectedRows: { mercado: [], system: [] } };
+    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0, selectedRows: { mercado: [], system: [] }, sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } } };
+    let copySelection = { table: null, mode: '', colIndex: -1, text: '' };
     let remoteSaveTimer = null;
     let remoteSaveBlocked = false;
     let applyingRemoteState = false;
@@ -1207,7 +1245,8 @@
         client: cleanClientName(item.client || (source === 'manual' ? '' : 'Ingreso de dinero')),
         amount,
         source,
-        order: Number.isFinite(Number(item.order)) ? Number(item.order) : fallbackOrder
+        order: Number.isFinite(Number(item.order)) ? Number(item.order) : fallbackOrder,
+        children: Array.isArray(item.children) ? item.children.map((child, idx) => normalizeTransfer(child, idx)).filter(Boolean) : undefined
       };
     }
 
@@ -1230,7 +1269,7 @@
 
     function updateTransferSelection() {
       document.querySelectorAll('[data-transfer-id]').forEach((row) => {
-        row.classList.toggle('selected-row', row.dataset.transferId === selectedTransferId);
+        row.classList.toggle('selected-row', row.dataset.transferId === selectedTransferId || selectedTransferRows.has(row.dataset.transferId));
       });
     }
 
@@ -1238,16 +1277,46 @@
       transferSort = { field: '', direction: '' };
     }
 
+    function compareValues(a, b, field) {
+      if (field === 'amount') return Number(a?.amount || 0) - Number(b?.amount || 0);
+      if (field === 'hour') return parseHourMinutes(a?.hour) - parseHourMinutes(b?.hour);
+      return String(a?.[field] || '').localeCompare(String(b?.[field] || ''), 'es', { sensitivity: 'base' });
+    }
+
+    function getSortedSystemEntries() {
+      const entries = state.system.map((row, index) => ({ row, index }));
+      if (!systemSort.field || !systemSort.direction) return entries;
+      const direction = systemSort.direction === 'desc' ? -1 : 1;
+      return entries.sort((a, b) => {
+        const result = compareValues(a.row, b.row, systemSort.field);
+        return result ? result * direction : a.index - b.index;
+      });
+    }
+
+    function updateSystemSortHeaders() {
+      document.querySelectorAll('[data-system-sort]').forEach((header) => {
+        header.dataset.sortState = header.dataset.systemSort === systemSort.field ? systemSort.direction : '';
+      });
+    }
+
+    function cycleSystemSort(field) {
+      if (systemSort.field !== field) systemSort = { field, direction: 'asc' };
+      else if (systemSort.direction === 'asc') systemSort = { field, direction: 'desc' };
+      else systemSort = { field: '', direction: '' };
+      renderSystemRows();
+    }
+
     function renderCashRows() {
       el.cashRows.innerHTML = state.cash.map((row, idx) => {
         const total = cashRowTotal(row);
         return `<tr>
+          <td class="row-selector-cell"></td>
           <td class="num">${formatDenom(row.denom)}</td>
           <td class="num"><input class="cell-input" data-cash-field="bills" data-index="${idx}" inputmode="numeric" value="${row.bills || ''}"></td>
           <td class="num"><input class="cell-input" data-cash-field="packs" data-index="${idx}" inputmode="numeric" value="${row.packs || ''}"></td>
           <td class="money" data-cash-total="${idx}">${formatMoney(total)}</td>
         </tr>`;
-      }).join('') + blankRows(Math.max(0, 10 - state.cash.length), 4);
+      }).join('') + blankRows(Math.max(0, 10 - state.cash.length), 5);
     }
 
     function updateCashRowDisplay(index) {
@@ -1307,7 +1376,7 @@
       const sortedRows = getSortedTransfers();
       const rows = sortedRows.map((row) => {
         const locked = row.source !== 'manual';
-        const selectedClass = row.id === selectedTransferId ? ' class="selected-row"' : '';
+        const selectedClass = row.id === selectedTransferId || selectedTransferRows.has(row.id) ? ' class="selected-row"' : '';
         return `<tr data-transfer-id="${escapeHtml(row.id)}"${selectedClass}>
         <td class="row-selector-cell"><button class="row-selector-btn" type="button" data-row-select="transfer" data-id="${escapeHtml(row.id)}" aria-label="Seleccionar transferencia"></button></td>
         <td class="center"><input class="cell-input" style="text-align:center" data-transfer-field="hour" data-id="${escapeHtml(row.id)}" value="${escapeHtml(row.hour || '-')}" readonly></td>
@@ -1323,8 +1392,8 @@
     }
 
     function renderSystemRows() {
-      const system = state.system.length ? state.system : [{ typeComp: '', invoice: '', name: '', amount: 0 }];
-      el.systemRows.innerHTML = system.map((row, idx) => `<tr class="${[
+      const entries = state.system.length ? getSortedSystemEntries() : [{ row: { typeComp: '', invoice: '', name: '', amount: 0 }, index: 0 }];
+      el.systemRows.innerHTML = entries.map(({ row, index: idx }) => `<tr class="${[
           movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago') ? 'system-warning' : '',
           selectedSystemRows.has(idx) ? 'selected-row' : ''
         ].filter(Boolean).join(' ')}" data-system-row="${idx}">
@@ -1335,16 +1404,21 @@
         <td class="money"><input class="cell-input" data-system-field="amount" data-index="${idx}" inputmode="decimal" value="${row.amount ? formatMoney(row.amount) : ''}" placeholder="$ 0,00"></td>
       </tr>`).join('') + blankRows(8, 5);
       el.systemCount.textContent = rowCountText(state.system.length || 1);
+      updateSystemSortHeaders();
     }
 
     function renderMovementRows() {
       el.movementRows.innerHTML = state.movements.map((row, idx) => {
         const finalAmount = Number(row.initial || 0) + Number(row.day || 0) + Number(row.ie || 0);
         return `<tr>
+          <td class="row-selector-cell"></td>
           <td>${escapeHtml(row.type)}</td>
+          <td class="money">${formatMoney(row.initial)}</td>
+          <td class="money">${formatMoney(row.day)}</td>
+          <td class="money">${formatMoney(row.ie)}</td>
           <td class="money">${formatMoney(finalAmount)}</td>
         </tr>`;
-      }).join('') + blankRows(2, 2);
+      }).join('') + blankRows(2, 6);
     }
 
     function summaryRowsData(totals = calculateTotals()) {
@@ -1399,13 +1473,17 @@
         return row ? Number(row.initial || 0) + Number(row.day || 0) + Number(row.ie || 0) : 0;
       };
       const movements = state.movements.reduce((sum, row) => sum + Number(row.initial || 0) + Number(row.day || 0) + Number(row.ie || 0), 0);
+      const daily = state.movements.reduce((sum, row) => {
+        if (movementTypeKey(row.type) === movementTypeKey('Cta. Cte.')) return sum;
+        return sum + Number(row.day || 0);
+      }, 0);
       const cashMovement = movementFinal('Efectivo');
       const mercadoPagoMovement = movementFinal('Mercado Pago');
       const transferMovement = movementFinal('Transf. Bria.');
       const lapos = movementFinal('Lapos');
       const getnet = movementFinal('Get Net');
       const providerTransfers = movementFinal('Transf prov');
-      return { cash, cashMovement, mercadoPagoMovement, transferMovement, transfers, system, movements, lapos, getnet, providerTransfers, daily: cash + transfers + system + movements };
+      return { cash, cashMovement, mercadoPagoMovement, transferMovement, transfers, system, movements, lapos, getnet, providerTransfers, daily };
     }
 
     function updateTotals(renderSummaryBlock = true) {
@@ -1431,6 +1509,18 @@
       return rows.flatMap((row) => Array.isArray(row.children) && row.children.length ? row.children : [row]).map(normalizeSystemRow);
     }
 
+    function systemDuplicateKey(row) {
+      return [
+        normalizarTexto(row?.name || ''),
+        normalizarTexto(row?.invoice || ''),
+        Math.round(Number(row?.amount || 0) * 100)
+      ].join('|');
+    }
+
+    function existingSystemKeys() {
+      return new Set(sourceRows(state.system).map(systemDuplicateKey));
+    }
+
     function mergedSystemRow(rows) {
       const children = sourceRows(rows);
       return {
@@ -1441,6 +1531,63 @@
         paymentType: rows[0]?.paymentType || 'Transf Bria.',
         children
       };
+    }
+
+    function sourceTransferRows(rows) {
+      return rows.flatMap((row) => Array.isArray(row.children) && row.children.length ? row.children : [row]);
+    }
+
+    function mergedTransferRow(rows) {
+      const children = sourceTransferRows(rows);
+      const order = Math.min(...rows.map((row) => Number(row.order || 0)));
+      return normalizeTransfer({
+        id: `merge-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        hour: 'Unificado',
+        client: `${uniqueTextList(rows.map((row) => row.client)).join(' / ') || 'Unificado'} (${children.length})`,
+        amount: rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        source: 'manual',
+        order,
+        children
+      }, order);
+    }
+
+    function mergeSelectedTransferRows() {
+      const selectedRows = state.transfers.filter((row) => selectedTransferRows.has(row.id));
+      if (selectedRows.length < 2) {
+        showToast('Selecciona dos o mas transferencias de Mercado Pago.');
+        return;
+      }
+      const merged = mergedTransferRow(selectedRows);
+      const firstIndex = state.transfers.findIndex((row) => selectedTransferRows.has(row.id));
+      state.transfers = state.transfers.filter((row) => !selectedTransferRows.has(row.id));
+      state.transfers.splice(Math.max(0, firstIndex), 0, merged);
+      selectedTransferRows = new Set([merged.id]);
+      selectedTransferId = merged.id;
+      saveState();
+      renderTransferRows();
+      updateTotals();
+      showToast(`Se unificaron ${selectedRows.length} transferencias.`);
+    }
+
+    function splitSelectedTransferRows() {
+      const selectedRows = state.transfers.filter((row) => selectedTransferRows.has(row.id) && Array.isArray(row.children) && row.children.length);
+      if (!selectedRows.length) {
+        showToast('Selecciona una transferencia unificada para separar.');
+        return;
+      }
+      const selectedIds = new Set(selectedRows.map((row) => row.id));
+      const nextRows = [];
+      state.transfers.forEach((row) => {
+        if (selectedIds.has(row.id)) nextRows.push(...row.children.map((child, idx) => normalizeTransfer({ ...child, order: Number(row.order || 0) + (idx / 1000) }, idx)).filter(Boolean));
+        else nextRows.push(row);
+      });
+      state.transfers = nextRows;
+      selectedTransferRows.clear();
+      selectedTransferId = '';
+      saveState();
+      renderTransferRows();
+      updateTotals();
+      showToast('Transferencia unificada separada.');
     }
 
     function mergeSelectedSystemRows() {
@@ -1493,6 +1640,40 @@
         .filter((row) => movementTypeKey(row.paymentType) !== movementTypeKey('Mercado Pago'))
         .map((row) => ({ ...row, amount: Number(row.amount || 0) }))
         .sort((a, b) => a.amount - b.amount || String(a.invoice || '').localeCompare(String(b.invoice || ''), 'es', { sensitivity: 'base' }));
+    }
+
+    function cycleSortState(sort, field) {
+      if (sort.field !== field) return { field, direction: 'asc' };
+      if (sort.direction === 'asc') return { field, direction: 'desc' };
+      return { field: '', direction: '' };
+    }
+
+    function sortDiffRows(side, field) {
+      diffState.sort[side] = cycleSortState(diffState.sort[side], field);
+      const sort = diffState.sort[side];
+      if (sort.field && sort.direction) {
+        const direction = sort.direction === 'desc' ? -1 : 1;
+        diffState[side].sort((a, b) => {
+          if (a.blank && !b.blank) return 1;
+          if (!a.blank && b.blank) return -1;
+          const result = compareValues(a, b, sort.field);
+          return result * direction;
+        });
+      } else {
+        diffState[side] = side === 'mercado' ? sortedMercadoPagoRows() : sortedSystemRows();
+      }
+      diffState.selectedRows[side] = [];
+      diffState.selectedIndex = 0;
+      diffState.selectedSide = side;
+      renderDiffModal();
+    }
+
+    function updateDiffSortHeaders() {
+      document.querySelectorAll('[data-diff-sort]').forEach((header) => {
+        const side = header.dataset.diffSortSide;
+        const sort = diffState.sort?.[side] || { field: '', direction: '' };
+        header.dataset.sortState = header.dataset.diffSort === sort.field ? sort.direction : '';
+      });
     }
 
     function diffAmount(left, right) {
@@ -1551,6 +1732,7 @@
         <span>Sistema: ${system.length} filas</span>
         <span>Diferencias: ${diffCount}</span>
         <span>Total diferencia: ${formatMoney(diffTotal)}</span>`;
+      updateDiffSortHeaders();
     }
 
     function openDiffModal() {
@@ -1559,7 +1741,8 @@
         system: sortedSystemRows(),
         selectedSide: 'mercado',
         selectedIndex: 0,
-        selectedRows: { mercado: [], system: [] }
+        selectedRows: { mercado: [], system: [] },
+        sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } }
       };
       renderDiffModal();
       el.diffModal.classList.add('open');
@@ -1689,6 +1872,95 @@
       renderSystemRows();
       renderMovementRows();
       updateTotals();
+    }
+
+    function cellCopyText(cell) {
+      const field = cell.querySelector('input, textarea');
+      return cleanLine(field ? field.value : cell.textContent);
+    }
+
+    function tableRowsForCopy(table) {
+      return [...table.querySelectorAll('tbody tr')].filter((row) => !row.classList.contains('blank'));
+    }
+
+    function tableCopyMatrix(table, colIndex = -1) {
+      const headers = [...table.querySelectorAll('thead th')];
+      const copyIndexes = headers
+        .map((header, index) => ({ header, index }))
+        .filter((item) => !item.header.classList.contains('row-selector-head') && (colIndex < 0 || item.index === colIndex));
+      const headerRow = copyIndexes.map((item) => cellCopyText(item.header));
+      const bodyRows = tableRowsForCopy(table).map((row) => {
+        const cells = [...row.children];
+        return copyIndexes.map((item) => cellCopyText(cells[item.index]));
+      });
+      return [headerRow, ...bodyRows].filter((row) => row.some(Boolean));
+    }
+
+    function clearCopySelection() {
+      document.querySelectorAll('.copy-selected').forEach((cell) => cell.classList.remove('copy-selected'));
+    }
+
+    function markCopySelection(table, colIndex = -1) {
+      clearCopySelection();
+      if (!table) return;
+      const headerCells = [...table.querySelectorAll('thead th')];
+      const rows = tableRowsForCopy(table);
+      const indexes = colIndex >= 0
+        ? [colIndex]
+        : headerCells.map((_, index) => index).filter((index) => !headerCells[index].classList.contains('row-selector-head'));
+      indexes.forEach((index) => {
+        headerCells[index]?.classList.add('copy-selected');
+        rows.forEach((row) => row.children[index]?.classList.add('copy-selected'));
+      });
+      if (colIndex < 0) headerCells.find((cell) => cell.classList.contains('row-selector-head'))?.classList.add('copy-selected');
+    }
+
+    function selectCopyArea(table, colIndex = -1) {
+      if (copySelection.table === table && copySelection.colIndex === colIndex) {
+        clearCopySelection();
+        copySelection = { table: null, mode: '', colIndex: -1, text: '' };
+        showToast('Seleccion desmarcada.');
+        return;
+      }
+      const matrix = tableCopyMatrix(table, colIndex);
+      const text = matrix.map((row) => row.join('\t')).join('\n');
+      copySelection = { table, mode: colIndex >= 0 ? 'col' : 'all', colIndex, text };
+      markCopySelection(table, colIndex);
+      showToast(colIndex >= 0 ? 'Columna seleccionada para copiar.' : 'Tabla seleccionada para copiar.');
+    }
+
+    function handleCopySelectionClick(event) {
+      const header = event.target.closest('th');
+      if (!header) return false;
+      const table = header.closest('table');
+      if (!table || !header.closest('.grid-box')) return false;
+      if (header.classList.contains('row-selector-head')) {
+        event.preventDefault();
+        event.stopPropagation();
+        selectCopyArea(table, -1);
+        return true;
+      }
+      if (header.dataset.copyCol !== undefined) {
+        event.stopPropagation();
+        selectCopyArea(table, [...header.parentElement.children].indexOf(header));
+      }
+      return false;
+    }
+
+    function copySelectedArea(event) {
+      const isCopyEvent = event.type === 'copy';
+      const isCopyKey = (event.ctrlKey || event.metaKey) && String(event.key || '').toLowerCase() === 'c';
+      if (!copySelection.text || (!isCopyEvent && !isCopyKey)) return false;
+      const active = document.activeElement;
+      if (isEditableField(active) && active.matches(':focus')) return false;
+      event.preventDefault();
+      if (event.clipboardData) {
+        event.clipboardData.setData('text/plain', copySelection.text);
+        showToast('Seleccion copiada.');
+        return true;
+      }
+      navigator.clipboard?.writeText(copySelection.text).then(() => showToast('Seleccion copiada.'), () => showToast('No pude copiar la seleccion.'));
+      return true;
     }
 
     function showToast(message) {
@@ -1826,26 +2098,36 @@
 
     function parseMovementClipboard(text) {
       const records = [];
-      const lines = String(text || '').split(/\r?\n/).map(cleanLine).filter(Boolean);
+      const lines = String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       lines.forEach((line) => {
         const normalized = normalizarTexto(line);
-        if (!line || normalized.includes('tipo valor') || normalized.includes('imp final')) return;
+        if (!line || normalized.includes('tipo valor')) return;
         let type = '';
-        let amountText = '';
+        let initial = 0;
+        let day = 0;
+        let ie = 0;
+        let amount = 0;
         const parts = splitPastedTableRow(line);
-        if (parts.length >= 2 && extractMoneyValues(parts[parts.length - 1]).length) {
+        if (parts.length >= 5 && extractMoneyValues(parts[parts.length - 1]).length) {
           type = parts[0];
-          amountText = parts[parts.length - 1];
+          initial = parseNumber(parts[1]);
+          day = parseNumber(parts[2]);
+          ie = parseNumber(parts[3]);
+          amount = parseNumber(parts[4]);
+        } else if (parts.length >= 2 && extractMoneyValues(parts[parts.length - 1]).length) {
+          type = parts[0];
+          amount = parseNumber(parts[parts.length - 1]);
+          day = amount;
         } else {
           const matches = extractMoneyValues(line);
           if (!matches.length) return;
           const firstIndex = line.indexOf(matches[0]);
           type = cleanLine(line.slice(0, firstIndex));
-          amountText = matches[matches.length - 1];
+          amount = parseNumber(matches[matches.length - 1]);
+          day = amount;
         }
-        const amount = parseNumber(amountText);
         if (!type) return;
-        records.push({ type: canonicalMovementType(type), amount });
+        records.push({ type: canonicalMovementType(type), initial, day, ie, amount });
       });
       return records;
     }
@@ -1925,23 +2207,24 @@
     function applyPastedMovements(text) {
       const parsed = parseMovementClipboard(text);
       if (!parsed.length) {
-        showToast('No encontre filas de Tipo Valor / Imp. Final.');
+        showToast('No encontre filas de movimientos del dia.');
         return false;
       }
-      const amountsByType = new Map(parsed.map((record) => [movementTypeKey(record.type), record.amount]));
+      const amountsByType = new Map(parsed.map((record) => [movementTypeKey(record.type), record]));
       state.movements = MOVEMENT_TYPES.map((type) => {
         const key = movementTypeKey(type);
+        const record = amountsByType.get(key);
         return {
           type,
-          initial: 0,
-          day: amountsByType.has(key) ? amountsByType.get(key) : 0,
-          ie: 0
+          initial: record ? Number(record.initial || 0) : 0,
+          day: record ? Number(record.day || 0) : 0,
+          ie: record ? Number(record.ie || 0) : 0
         };
       });
       saveState();
       renderMovementRows();
       updateTotals();
-      showToast(`Se pegaron ${parsed.length} importes finales.`);
+      showToast(`Se pegaron ${parsed.length} movimientos del dia.`);
       return true;
     }
 
@@ -1951,12 +2234,28 @@
         showToast('No encontre filas Transf Bria. o Mercado Pago.');
         return false;
       }
-      state.system = parsed;
+      const keys = existingSystemKeys();
+      const nextRows = [];
+      let skipped = 0;
+      parsed.forEach((row) => {
+        const key = systemDuplicateKey(row);
+        if (keys.has(key)) {
+          skipped += 1;
+          return;
+        }
+        keys.add(key);
+        nextRows.push(row);
+      });
+      if (!nextRows.length) {
+        showToast(`No se agregaron filas nuevas${skipped ? `; ${skipped} ya existian` : ''}.`);
+        return true;
+      }
+      state.system.push(...nextRows);
       saveState();
       renderSystemRows();
       updateTotals();
-      const mercadoPagoRows = parsed.filter((row) => movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago')).length;
-      showToast(`Se pegaron ${parsed.length} filas del sistema${mercadoPagoRows ? `, ${mercadoPagoRows} Mercado Pago en rojo` : ''}.`);
+      const mercadoPagoRows = nextRows.filter((row) => movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago')).length;
+      showToast(`Se agregaron ${nextRows.length} filas nuevas${skipped ? `, ${skipped} repetidas ignoradas` : ''}${mercadoPagoRows ? `, ${mercadoPagoRows} Mercado Pago en rojo` : ''}.`);
       return true;
     }
 
@@ -2006,7 +2305,7 @@
           ? 'Pegar transferencias del sistema'
           : 'Pegar actividad de Mercado Pago';
       el.pasteModalHint.textContent = isMovements
-        ? 'Pega aca la tabla con Tipo Valor, Caja Inicial, Movs. Dia, Imp. I/E e Imp. Final. Solo se importan Tipo Valor e Imp. Final.'
+        ? 'Pega aca la tabla completa con Tipo Valor, Caja Inicial, Movs. Dia, Imp. I/E e Imp. Final.'
         : isSystem
           ? 'Pega aca la tabla con Fecha, Cliente, Total y Tipo pago. Se importan Transf Bria.; Transf prov se ignora; Mercado Pago queda marcado en rojo.'
           : 'Pega aca el texto copiado con Ctrl+A desde Mercado Pago. Solo se importan movimientos positivos de Transferencia recibida o Ingreso de dinero por transferencia bancaria.';
@@ -2025,6 +2324,7 @@
     function clearTransfers() {
       state.transfers = [];
       selectedTransferId = '';
+      selectedTransferRows.clear();
       resetTransferSort();
       saveState();
       renderTransferRows();
@@ -2044,6 +2344,7 @@
       }, order);
       state.transfers.push(row);
       selectedTransferId = row.id;
+      selectedTransferRows = new Set([row.id]);
       resetTransferSort();
       saveState();
       renderTransferRows();
@@ -2057,11 +2358,13 @@
     }
 
     function deleteSelectedTransferRow() {
-      if (!selectedTransferId) return false;
+      if (!selectedTransferId && !selectedTransferRows.size) return false;
       const before = state.transfers.length;
-      state.transfers = state.transfers.filter((row) => row.id !== selectedTransferId);
+      const ids = selectedTransferRows.size ? selectedTransferRows : new Set([selectedTransferId]);
+      state.transfers = state.transfers.filter((row) => !ids.has(row.id));
       if (state.transfers.length === before) return false;
       selectedTransferId = '';
+      selectedTransferRows.clear();
       saveState();
       renderTransferRows();
       updateTotals();
@@ -2130,6 +2433,52 @@
       const end = target.value.length;
       target.setSelectionRange(end, end);
       event.preventDefault();
+      return true;
+    }
+
+    function isEditableField(target) {
+      if (!target?.matches) return false;
+      if (target.matches('textarea')) return true;
+      if (!target.matches('input')) return false;
+      return !['button', 'submit', 'reset', 'file', 'hidden'].includes(String(target.type || '').toLowerCase());
+    }
+
+    function rememberEditValue(target) {
+      if (!isEditableField(target)) return;
+      target.dataset.editOriginalValue = target.value;
+      if (target.type === 'checkbox' || target.type === 'radio') {
+        target.dataset.editOriginalChecked = target.checked ? '1' : '0';
+      }
+    }
+
+    function cancelEdit(event) {
+      const target = event.target;
+      if (event.key !== 'Escape' || !isEditableField(target)) return false;
+      if (!Object.prototype.hasOwnProperty.call(target.dataset, 'editOriginalValue')) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      if (target.type === 'checkbox' || target.type === 'radio') {
+        target.checked = target.dataset.editOriginalChecked === '1';
+      } else {
+        target.value = target.dataset.editOriginalValue;
+        if (typeof target.setSelectionRange === 'function') {
+          const end = target.value.length;
+          target.setSelectionRange(end, end);
+        }
+      }
+      if (target.matches('.cell-input')) {
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      target.blur();
+      showToast('Edicion cancelada.');
+      return true;
+    }
+
+    function selectFieldWithF2(event) {
+      const target = event.target;
+      if (event.key !== 'F2' || !isEditableField(target) || typeof target.select !== 'function') return false;
+      event.preventDefault();
+      target.select();
       return true;
     }
 
@@ -2293,6 +2642,8 @@
 
     document.getElementById('pasteTransfersBtn').addEventListener('click', pasteTransfersFromClipboard);
     document.getElementById('addTransferBtn').addEventListener('click', addManualTransferRow);
+    document.getElementById('mergeTransfersBtn').addEventListener('click', mergeSelectedTransferRows);
+    document.getElementById('splitTransfersBtn').addEventListener('click', splitSelectedTransferRows);
     document.getElementById('pasteMovementsBtn').addEventListener('click', pasteMovementsFromClipboard);
     document.getElementById('clearTransfersBtn').addEventListener('click', clearTransfers);
     document.getElementById('clearCashBtn').addEventListener('click', clearCash);
@@ -2325,11 +2676,23 @@
     document.querySelectorAll('[data-transfer-sort]').forEach((header) => {
       header.addEventListener('click', () => cycleTransferSort(header.dataset.transferSort || ''));
     });
+    document.querySelectorAll('[data-system-sort]').forEach((header) => {
+      header.addEventListener('click', () => cycleSystemSort(header.dataset.systemSort || ''));
+    });
+    document.querySelectorAll('[data-diff-sort]').forEach((header) => {
+      header.addEventListener('click', () => sortDiffRows(header.dataset.diffSortSide || 'mercado', header.dataset.diffSort || ''));
+    });
+    document.addEventListener('click', handleCopySelectionClick, true);
+    document.addEventListener('copy', copySelectedArea);
     el.transferRows.addEventListener('click', (event) => {
       const selector = event.target.closest('[data-row-select="transfer"]');
       const row = event.target.closest('[data-transfer-id]');
       if (selector) {
-        selectTransferRow(selector.dataset.id || '');
+        const id = selector.dataset.id || '';
+        if (selectedTransferRows.has(id)) selectedTransferRows.delete(id);
+        else selectedTransferRows.add(id);
+        selectedTransferId = selectedTransferRows.has(id) ? id : '';
+        updateTransferSelection();
         selector.focus();
         return;
       }
@@ -2338,6 +2701,9 @@
     el.transferRows.addEventListener('focusin', (event) => {
       const row = event.target.closest('[data-transfer-id]');
       if (row) selectTransferRow(row.dataset.transferId || '');
+    });
+    document.addEventListener('focusin', (event) => {
+      rememberEditValue(event.target);
     });
     el.systemRows.addEventListener('click', (event) => {
       const selector = event.target.closest('[data-system-select]');
@@ -2386,6 +2752,9 @@
     });
 
     document.addEventListener('keydown', (event) => {
+      if (cancelEdit(event)) return;
+      if (selectFieldWithF2(event)) return;
+      if (copySelectedArea(event)) return;
       if (event.key === 'Escape' && el.pasteModal.classList.contains('open')) closePasteModal();
       if (event.key === 'Escape' && el.diffModal.classList.contains('open')) closeDiffModal();
       if (handleDiffModalKey(event)) return;
