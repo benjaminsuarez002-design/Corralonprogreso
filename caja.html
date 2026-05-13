@@ -124,6 +124,38 @@
       background: #fff;
       box-shadow: 0 2px 10px rgba(108,79,199,.08);
     }
+    .date-nav {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px;
+      border: 1px solid var(--borde);
+      border-radius: 999px;
+      background: #fff;
+      box-shadow: 0 2px 10px rgba(108,79,199,.08);
+    }
+    .date-nav-btn {
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 999px;
+      color: #fff;
+      background: var(--violeta);
+      font-size: 18px;
+      font-weight: 900;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .date-nav-label {
+      min-width: 118px;
+      color: var(--violeta-oscuro);
+      font-size: 13px;
+      font-weight: 900;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .top-link { margin-left: 0; }
 
     .canvas {
       flex: 1 1 auto;
@@ -143,20 +175,21 @@
     }
     .top-grid {
       display: grid;
-      grid-template-columns: 444px 620px 660px;
+      grid-template-columns: 520px 620px 660px;
       gap: 16px;
       padding: 0 14px;
       align-items: start;
     }
     .bottom-grid {
       display: grid;
-      grid-template-columns: 770px 568px;
-      gap: 52px;
+      grid-template-columns: 770px 720px;
+      gap: 36px;
       align-items: start;
       padding: 8px 14px 0;
     }
 
     .subform {
+      position: relative;
       min-width: 0;
       border: 1px solid var(--borde);
       border-radius: 8px;
@@ -188,6 +221,22 @@
       flex: 0 0 auto;
       flex-wrap: wrap;
       justify-content: flex-start;
+    }
+    .movements .subform-head {
+      grid-template-columns: 1fr auto;
+      align-items: start;
+    }
+    .movements .head-actions {
+      justify-content: flex-end;
+    }
+    .subform.paste-corner .subform-head {
+      padding-right: 84px;
+    }
+    .subform.paste-corner .paste-action {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 2;
     }
     .access-btn {
       height: 34px;
@@ -476,7 +525,7 @@
     .summary-block {
       width: 100%;
       display: grid;
-      grid-template-columns: 154px repeat(3, minmax(0, 1fr));
+      grid-template-columns: 210px repeat(3, 154px);
       gap: 2px;
       align-items: center;
     }
@@ -489,7 +538,6 @@
       line-height: 23px;
       overflow: hidden;
       white-space: nowrap;
-      text-overflow: ellipsis;
       font-variant-numeric: tabular-nums;
     }
     .summary-cell.label {
@@ -517,15 +565,15 @@
       text-align: right;
       line-height: 23px;
     }
-    .update-wrap { margin-left: 154px; }
+    .update-wrap { margin-left: 212px; }
     .daily-total {
       display: flex;
       align-items: center;
       gap: 10px;
       margin-top: 4px;
     }
-    .daily-total .summary-cell { width: 132px; }
-    .daily-total .summary-cell.value { width: 144px; background: #fff; }
+    .daily-total .summary-cell { width: 210px; }
+    .daily-total .summary-cell.value { width: 154px; background: #fff; }
 
     .toast {
       position: fixed;
@@ -547,6 +595,37 @@
     .toast.visible {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
+    }
+    .context-menu {
+      position: fixed;
+      z-index: 60;
+      min-width: 138px;
+      display: none;
+      padding: 4px;
+      border: 1px solid var(--borde);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 10px 24px rgba(57,35,120,.18);
+    }
+    .context-menu.open { display: block; }
+    .context-menu button {
+      width: 100%;
+      height: 30px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--violeta-oscuro);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 800;
+      text-align: left;
+      padding: 0 10px;
+      cursor: pointer;
+    }
+    .context-menu button:hover,
+    .context-menu button:focus {
+      outline: none;
+      background: #eee8ff;
     }
 
     .modal-bg {
@@ -711,6 +790,11 @@
         <div class="kicker">Caja y transferencias</div>
         <h1 class="title">Control General De Caja</h1>
       </div>
+      <div class="date-nav" aria-label="Navegar dias de caja">
+        <button class="date-nav-btn" id="prevCajaDayBtn" type="button" aria-label="Dia anterior">‹</button>
+        <span class="date-nav-label" id="cajaDateLabel"></span>
+        <button class="date-nav-btn" id="nextCajaDayBtn" type="button" aria-label="Dia siguiente">›</button>
+      </div>
       <a class="top-link" href="menu.html">Volver al menu</a>
     </header>
 
@@ -729,10 +813,10 @@
                 <thead>
                   <tr>
                     <th class="row-selector-head"></th>
-                    <th data-copy-col style="width:120px">Denominacion</th>
+                    <th data-copy-col style="width:126px">Denominacion</th>
                     <th data-copy-col style="width:76px">Billetes</th>
                     <th data-copy-col style="width:76px">Paquet</th>
-                    <th data-copy-col style="width:138px">Totalporfila</th>
+                    <th data-copy-col style="width:158px">Totalporfila</th>
                   </tr>
                 </thead>
                 <tbody id="cashRows"></tbody>
@@ -750,15 +834,15 @@
             </div>
           </section>
 
-          <section class="subform">
+          <section class="subform paste-corner">
             <div class="subform-head">
               <div class="subform-title">Transferencias Mercado Pago</div>
               <div class="head-actions">
                 <button class="access-btn" id="clearTransfersBtn" type="button">Eliminar registro</button>
-                <button class="access-btn primary" id="pasteTransfersBtn" type="button">Pegar</button>
                 <button class="access-btn primary" id="addTransferBtn" type="button">Agregar fila</button>
                 <button class="access-btn primary" id="mergeTransfersBtn" type="button">Unificar</button>
                 <button class="access-btn" id="splitTransfersBtn" type="button">Separar</button>
+                <button class="access-btn primary paste-action" id="pasteTransfersBtn" type="button">Pegar</button>
               </div>
             </div>
             <div class="grid-box">
@@ -786,15 +870,15 @@
             </div>
           </section>
 
-          <section class="subform">
+          <section class="subform paste-corner">
             <div class="subform-head">
               <div class="subform-title">Transferencias Sistema</div>
               <div class="head-actions">
                 <button class="access-btn" id="clearSystemBtn" type="button">Eliminar registro</button>
-                <button class="access-btn primary" id="pasteSystemBtn" type="button">Pegar</button>
                 <button class="access-btn primary" id="mergeSystemBtn" type="button">Unificar</button>
                 <button class="access-btn" id="splitSystemBtn" type="button">Separar</button>
                 <button class="access-btn small" id="findDiffBtn" type="button">Buscar diferencias</button>
+                <button class="access-btn primary paste-action" id="pasteSystemBtn" type="button">Pegar</button>
               </div>
             </div>
             <div class="grid-box">
@@ -827,11 +911,11 @@
         </div>
 
         <div class="bottom-grid">
-          <section class="subform movements">
+          <section class="subform movements paste-corner">
             <div class="subform-head">
               <div class="subform-title">Movimientos del dia</div>
               <div class="head-actions">
-                <button class="access-btn primary" id="pasteMovementsBtn" type="button">Pegar</button>
+                <button class="access-btn primary paste-action" id="pasteMovementsBtn" type="button">Pegar</button>
               </div>
             </div>
             <div class="grid-box tall">
@@ -938,16 +1022,18 @@
   </div>
 
   <div class="toast" id="toast"></div>
+  <div class="context-menu" id="systemRowMenu">
+    <button type="button" id="deleteSystemRowMenuBtn">Eliminar fila</button>
+  </div>
 
   <script>
     const STORAGE_KEY_BASE = 'corralon_control_caja_v1';
-    const CAJA_DATE_KEY = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-    const STORAGE_KEY = `${STORAGE_KEY_BASE}_${CAJA_DATE_KEY}`;
     const LEGACY_STORAGE_KEY = STORAGE_KEY_BASE;
     const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
     const SUPABASE_TABLE_CAJA = 'control_caja_estados';
-    const REMOTE_ROW_ID = `caja_${CAJA_DATE_KEY}`;
+    const TODAY_DATE_KEY = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    let selectedDateKey = TODAY_DATE_KEY;
     const DIFF_TOLERANCE = 10;
     const CASH_DENOMS = [100, 200, 500, 1000, 2000, 10000, 20000];
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
@@ -990,12 +1076,17 @@
       systemTotal: document.getElementById('systemTotal'),
       systemDiff: document.getElementById('systemDiff'),
       dailyTotal: document.getElementById('dailyTotal'),
+      cajaDateLabel: document.getElementById('cajaDateLabel'),
+      prevCajaDayBtn: document.getElementById('prevCajaDayBtn'),
+      nextCajaDayBtn: document.getElementById('nextCajaDayBtn'),
       transferCount: document.getElementById('transferCount'),
       systemCount: document.getElementById('systemCount'),
       pasteModal: document.getElementById('pasteModal'),
       pasteModalTitle: document.getElementById('pasteModalTitle'),
       pasteModalHint: document.getElementById('pasteModalHint'),
       pasteText: document.getElementById('pasteText'),
+      systemRowMenu: document.getElementById('systemRowMenu'),
+      deleteSystemRowMenuBtn: document.getElementById('deleteSystemRowMenuBtn'),
       toast: document.getElementById('toast')
     };
     let pasteMode = 'transfers';
@@ -1010,6 +1101,56 @@
     let remoteSaveBlocked = false;
     let applyingRemoteState = false;
     let syncingDiffScroll = false;
+    let systemContextIndex = -1;
+
+    function storageKeyForDate(dateKey = selectedDateKey) {
+      return `${STORAGE_KEY_BASE}_${dateKey}`;
+    }
+
+    function remoteRowIdForDate(dateKey = selectedDateKey) {
+      return `caja_${dateKey}`;
+    }
+
+    function dateFromKey(dateKey) {
+      const [year, month, day] = String(dateKey || TODAY_DATE_KEY).split('-').map(Number);
+      return new Date(year, (month || 1) - 1, day || 1);
+    }
+
+    function dateKeyFromDate(date) {
+      const copy = new Date(date);
+      copy.setMinutes(copy.getMinutes() - copy.getTimezoneOffset());
+      return copy.toISOString().slice(0, 10);
+    }
+
+    function addDaysToKey(dateKey, days) {
+      const date = dateFromKey(dateKey);
+      date.setDate(date.getDate() + days);
+      return dateKeyFromDate(date);
+    }
+
+    function formatDateLabel(dateKey = selectedDateKey) {
+      const date = dateFromKey(dateKey);
+      const label = date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      if (dateKey === TODAY_DATE_KEY) return `${label} · Hoy`;
+      return label;
+    }
+
+    function updateDateLabel() {
+      el.cajaDateLabel.textContent = formatDateLabel();
+    }
+
+    function resetState() {
+      state.cash = CASH_DENOMS.map((denom) => ({ denom, bills: 0, packs: 0 }));
+      state.transfers = [];
+      state.system = [];
+      state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
+      state.movements = MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 }));
+      selectedTransferId = '';
+      selectedTransferRows.clear();
+      selectedSystemRows.clear();
+      transferSort = { field: '', direction: '' };
+      systemSort = { field: '', direction: '' };
+    }
 
     function normalizarTexto(value) {
       return String(value || '')
@@ -1097,6 +1238,59 @@
       return evaluateExpression(value);
     }
 
+    function hasMathExpression(value) {
+      const text = String(value || '').replace(/\$/g, '').replace(/\s+/g, '');
+      return /[+*/xX]/.test(text) || /.-/.test(text);
+    }
+
+    function isCurrencyAmountInput(input) {
+      return input?.dataset?.transferField === 'amount'
+        || input?.dataset?.systemField === 'amount'
+        || input?.dataset?.summaryManual
+        || input?.dataset?.movementField;
+    }
+
+    function formatMoneyWhileTyping(input) {
+      if (!isCurrencyAmountInput(input) || hasMathExpression(input.value)) return false;
+      const raw = String(input.value || '');
+      const oldCursor = input.selectionStart ?? raw.length;
+      const cursorWasAtEnd = oldCursor >= raw.length;
+      const digitsBeforeCursor = (raw.slice(0, oldCursor).match(/\d/g) || []).length;
+      let clean = raw.replace(/\$/g, '').replace(/\s+/g, '');
+      const negative = clean.trim().startsWith('-');
+      clean = clean.replace(/-/g, '');
+      const commaIndex = clean.indexOf(',');
+      const hasComma = commaIndex >= 0;
+      const integerRaw = hasComma ? clean.slice(0, commaIndex) : clean;
+      const decimalRaw = hasComma ? clean.slice(commaIndex + 1) : '';
+      const integerDigits = integerRaw.replace(/\D/g, '');
+      const decimalDigits = decimalRaw.replace(/\D/g, '').slice(0, 2);
+      if (!integerDigits && !hasComma) {
+        input.value = '';
+        return true;
+      }
+      const integerValue = integerDigits ? Number(integerDigits).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '0';
+      input.value = `$ ${negative ? '-' : ''}${integerValue}${hasComma ? `,${decimalDigits}` : ''}`;
+      if (typeof input.setSelectionRange === 'function') {
+        if (cursorWasAtEnd) {
+          const end = input.value.length;
+          input.setSelectionRange(end, end);
+        } else {
+          let seen = 0;
+          let nextCursor = input.value.length;
+          for (let i = 0; i < input.value.length; i++) {
+            if (/\d/.test(input.value[i])) seen += 1;
+            if (seen >= digitsBeforeCursor) {
+              nextCursor = i + 1;
+              break;
+            }
+          }
+          input.setSelectionRange(nextCursor, nextCursor);
+        }
+      }
+      return true;
+    }
+
     function formatDenom(value) {
       return `$ ${Number(value || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}`;
     }
@@ -1166,18 +1360,21 @@
 
     function saveState() {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(statePayload()));
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.setItem(storageKeyForDate(), JSON.stringify(statePayload()));
+        if (selectedDateKey === TODAY_DATE_KEY) localStorage.removeItem(LEGACY_STORAGE_KEY);
       } catch (error) {}
       queueRemoteSave();
     }
 
-    function loadState() {
+    function loadState(dateKey = selectedDateKey) {
       try {
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || 'null');
-        applySavedState(saved);
+        resetState();
+        const fallback = dateKey === TODAY_DATE_KEY ? localStorage.getItem(LEGACY_STORAGE_KEY) : null;
+        const saved = JSON.parse(localStorage.getItem(storageKeyForDate(dateKey)) || fallback || 'null');
+        if (saved) applySavedState(saved);
       } catch (error) {
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(storageKeyForDate(dateKey));
+        resetState();
       }
     }
 
@@ -1190,10 +1387,10 @@
       };
     }
 
-    async function loadRemoteState() {
+    async function loadRemoteState(dateKey = selectedDateKey) {
       if (remoteSaveBlocked) return;
       try {
-        const url = `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE_CAJA}?id=eq.${encodeURIComponent(REMOTE_ROW_ID)}&select=payload&limit=1`;
+        const url = `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE_CAJA}?id=eq.${encodeURIComponent(remoteRowIdForDate(dateKey))}&select=payload&limit=1`;
         const response = await fetch(url, { headers: supabaseHeaders() });
         if (!response.ok) throw new Error(await response.text());
         const rows = await response.json();
@@ -1202,15 +1399,16 @@
           queueRemoteSave();
           return;
         }
+        if (dateKey !== selectedDateKey) return;
         applyingRemoteState = true;
         applySavedState(payload);
         applyingRemoteState = false;
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(statePayload()));
+          localStorage.setItem(storageKeyForDate(dateKey), JSON.stringify(statePayload()));
         } catch (error) {}
         selectedSystemRows.clear();
         renderAll();
-        showToast('Caja sincronizada.');
+        showToast(`Caja ${formatDateLabel(dateKey)} sincronizada.`);
       } catch (error) {
         remoteSaveBlocked = true;
         showToast('Caja local. Falta crear o habilitar la tabla de Supabase.');
@@ -1219,12 +1417,12 @@
       }
     }
 
-    async function saveRemoteState() {
+    async function saveRemoteState(dateKey = selectedDateKey, payloadData = statePayload()) {
       if (remoteSaveBlocked || applyingRemoteState) return;
       const payload = {
-        id: REMOTE_ROW_ID,
-        fecha: CAJA_DATE_KEY,
-        payload: statePayload(),
+        id: remoteRowIdForDate(dateKey),
+        fecha: dateKey,
+        payload: payloadData,
         updated_at: new Date().toISOString()
       };
       try {
@@ -1242,7 +1440,25 @@
     function queueRemoteSave() {
       if (remoteSaveBlocked || applyingRemoteState) return;
       clearTimeout(remoteSaveTimer);
-      remoteSaveTimer = setTimeout(saveRemoteState, 550);
+      const dateKey = selectedDateKey;
+      const payloadData = statePayload();
+      remoteSaveTimer = setTimeout(() => saveRemoteState(dateKey, payloadData), 550);
+    }
+
+    async function switchCajaDate(delta) {
+      hideSystemRowMenu();
+      closePasteModal();
+      closeDiffModal();
+      clearTimeout(remoteSaveTimer);
+      saveState();
+      const previousDate = selectedDateKey;
+      selectedDateKey = addDaysToKey(selectedDateKey, delta);
+      updateDateLabel();
+      loadState(selectedDateKey);
+      renderAll();
+      showToast(`Caja ${formatDateLabel(selectedDateKey)} cargada.`);
+      await loadRemoteState(selectedDateKey);
+      if (previousDate !== selectedDateKey) window.scrollTo?.(0, 0);
     }
 
     function normalizeTransfer(item, fallbackOrder = 0) {
@@ -1439,7 +1655,7 @@
         { key: 'transfers', label: 'Transferencia', system: totals.transferMovement, total: totals.transfers },
         { key: 'lapos', label: 'Lapos', system: totals.lapos, total: state.summaryManual.lapos, manual: true },
         { key: 'getnet', label: 'Getnet', system: totals.getnet, total: state.summaryManual.getnet, manual: true },
-        { key: 'providerTransfers', label: 'Transferencias a proveedores', system: totals.providerTransfers, total: state.summaryManual.providerTransfers, manual: true }
+        { key: 'providerTransfers', label: 'Trans a prov', system: totals.providerTransfers, total: state.summaryManual.providerTransfers, manual: true }
       ];
     }
 
@@ -1949,6 +2165,31 @@
       event.preventDefault();
       addManualSystemRow();
       return true;
+    }
+
+    function hideSystemRowMenu() {
+      el.systemRowMenu.classList.remove('open');
+      el.systemRowMenu.style.left = '';
+      el.systemRowMenu.style.top = '';
+    }
+
+    function showSystemRowMenu(event, index) {
+      systemContextIndex = Number(index);
+      if (!selectedSystemRows.has(systemContextIndex)) {
+        selectedSystemRows.clear();
+        selectedSystemRows.add(systemContextIndex);
+        renderSystemRows();
+      }
+      const menu = el.systemRowMenu;
+      menu.classList.add('open');
+      const scale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+      const viewportWidth = window.innerWidth / scale;
+      const viewportHeight = window.innerHeight / scale;
+      const left = Math.min(event.clientX / scale, viewportWidth - menu.offsetWidth - 8);
+      const top = Math.min(event.clientY / scale, viewportHeight - menu.offsetHeight - 8);
+      menu.style.left = `${Math.max(8, left)}px`;
+      menu.style.top = `${Math.max(8, top)}px`;
+      el.deleteSystemRowMenuBtn.focus();
     }
 
     function renderAll() {
@@ -2489,6 +2730,29 @@
       return row;
     }
 
+    function deleteSelectedSystemRows(fallbackIndex = systemContextIndex) {
+      const indexes = selectedSystemRows.size
+        ? [...selectedSystemRows]
+        : [Number(fallbackIndex)];
+      const valid = [...new Set(indexes)]
+        .map((idx) => Number(idx))
+        .filter((idx) => Number.isInteger(idx) && state.system[idx]);
+      if (!valid.length) {
+        hideSystemRowMenu();
+        return false;
+      }
+      const remove = new Set(valid);
+      state.system = state.system.filter((_, idx) => !remove.has(idx));
+      selectedSystemRows.clear();
+      systemContextIndex = -1;
+      hideSystemRowMenu();
+      saveState();
+      renderSystemRows();
+      updateTotals();
+      showToast(valid.length === 1 ? 'Fila eliminada.' : `${valid.length} filas eliminadas.`);
+      return true;
+    }
+
     function deleteSelectedTransferRow() {
       if (!selectedTransferId && !selectedTransferRows.size) return false;
       const before = state.transfers.length;
@@ -2784,6 +3048,8 @@
     document.getElementById('mergeSystemBtn').addEventListener('click', mergeSelectedSystemRows);
     document.getElementById('splitSystemBtn').addEventListener('click', splitSelectedSystemRows);
     document.getElementById('findDiffBtn').addEventListener('click', openDiffModal);
+    el.prevCajaDayBtn.addEventListener('click', () => switchCajaDate(-1));
+    el.nextCajaDayBtn.addEventListener('click', () => switchCajaDate(1));
     document.getElementById('updateTotalsBtn').addEventListener('click', () => {
       updateTotals();
       saveState();
@@ -2839,6 +3105,7 @@
       rememberEditValue(event.target);
     });
     el.systemRows.addEventListener('click', (event) => {
+      hideSystemRowMenu();
       const selector = event.target.closest('[data-system-select]');
       if (!selector) return;
       const index = Number(selector.dataset.systemSelect);
@@ -2846,6 +3113,23 @@
       else selectedSystemRows.add(index);
       renderSystemRows();
       document.querySelector(`[data-system-select="${index}"]`)?.focus();
+    });
+    el.systemRows.addEventListener('contextmenu', (event) => {
+      const row = event.target.closest('[data-system-row]');
+      if (!row) return;
+      const index = Number(row.dataset.systemRow);
+      if (!state.system[index]) return;
+      event.preventDefault();
+      showSystemRowMenu(event, index);
+    });
+    el.systemRowMenu.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    el.deleteSystemRowMenuBtn.addEventListener('click', () => {
+      deleteSelectedSystemRows();
+    });
+    document.addEventListener('click', (event) => {
+      if (!el.systemRowMenu.contains(event.target)) hideSystemRowMenu();
     });
     el.pasteModal.addEventListener('click', (event) => {
       if (event.target === el.pasteModal) closePasteModal();
@@ -2915,7 +3199,10 @@
         if (!row) return;
         const field = target.dataset.transferField;
         if (field === 'client' && row.source === 'manual') row.client = cleanClientName(target.value);
-        if (field === 'amount') row.amount = parseNumber(target.value);
+        if (field === 'amount') {
+          row.amount = parseNumber(target.value);
+          formatMoneyWhileTyping(target);
+        }
       }
       if (target.dataset.cashField) {
         state.cash[index][target.dataset.cashField] = parseNumber(target.value);
@@ -2926,12 +3213,15 @@
         if (!state.system[index]) state.system[index] = { typeComp: '', invoice: '', name: '', amount: 0 };
         const field = target.dataset.systemField;
         state.system[index][field] = field === 'amount' ? parseNumber(target.value) : target.value;
+        if (field === 'amount') formatMoneyWhileTyping(target);
       }
       if (target.dataset.movementField) {
         state.movements[index][target.dataset.movementField] = parseNumber(target.value);
+        formatMoneyWhileTyping(target);
       }
       if (target.dataset.summaryManual) {
         state.summaryManual[target.dataset.summaryManual] = parseNumber(target.value);
+        formatMoneyWhileTyping(target);
         saveState();
         updateTotals(false);
         updateSummaryDifference(target.dataset.summaryManual);
@@ -2959,9 +3249,10 @@
       saveState();
     });
 
-    loadState();
+    updateDateLabel();
+    loadState(selectedDateKey);
     renderAll();
-    loadRemoteState();
+    loadRemoteState(selectedDateKey);
   </script>
 </body>
 </html>
