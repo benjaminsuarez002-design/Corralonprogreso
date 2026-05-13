@@ -143,7 +143,7 @@
     }
     .top-grid {
       display: grid;
-      grid-template-columns: 444px 444px 444px;
+      grid-template-columns: 444px 620px 660px;
       gap: 16px;
       padding: 0 14px;
       align-items: start;
@@ -171,6 +171,7 @@
       justify-content: space-between;
       gap: 8px;
       padding: 0 2px 8px;
+      overflow: visible;
     }
     .subform-title {
       color: var(--violeta-oscuro);
@@ -185,6 +186,9 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
     .access-btn {
       height: 34px;
@@ -611,6 +615,10 @@
       color: #b2aac8;
       font-style: italic;
     }
+    .diff-table tr.group-selected-row td {
+      outline: 2px solid rgba(108,79,199,.42);
+      outline-offset: -2px;
+    }
     .diff-table .muted-cell { color: #aaa0c7; }
     .paste-textarea {
       width: 100%;
@@ -746,12 +754,15 @@
               <div class="head-actions">
                 <button class="access-btn" id="clearSystemBtn" type="button">Eliminar registro</button>
                 <button class="access-btn primary" id="pasteSystemBtn" type="button">Pegar</button>
+                <button class="access-btn primary" id="mergeSystemBtn" type="button">Unificar</button>
+                <button class="access-btn" id="splitSystemBtn" type="button">Separar</button>
               </div>
             </div>
             <div class="grid-box">
               <table>
                 <thead>
                   <tr>
+                    <th class="row-selector-head"></th>
                     <th style="width:62px">Tipo</th>
                     <th style="width:112px">N Factura</th>
                     <th>Cliente</th>
@@ -842,7 +853,11 @@
     <div class="modal diff-modal">
       <div class="modal-head">
         <h2 class="modal-title">Buscar diferencias</h2>
-        <button class="access-btn small" id="closeDiffModalBtn" type="button">Cerrar</button>
+        <div class="head-actions">
+          <button class="access-btn primary" id="mergeDiffRowsBtn" type="button">Unificar seleccionadas</button>
+          <button class="access-btn" id="splitDiffRowsBtn" type="button">Separar</button>
+          <button class="access-btn small" id="closeDiffModalBtn" type="button">Cerrar</button>
+        </div>
       </div>
       <div class="modal-body">
         <div class="diff-summary" id="diffSummary"></div>
@@ -884,7 +899,14 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const STORAGE_KEY = 'corralon_control_caja_v1';
+    const STORAGE_KEY_BASE = 'corralon_control_caja_v1';
+    const CAJA_DATE_KEY = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const STORAGE_KEY = `${STORAGE_KEY_BASE}_${CAJA_DATE_KEY}`;
+    const LEGACY_STORAGE_KEY = STORAGE_KEY_BASE;
+    const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+    const SUPABASE_TABLE_CAJA = 'control_caja_estados';
+    const REMOTE_ROW_ID = `caja_${CAJA_DATE_KEY}`;
     const CASH_DENOMS = [100, 200, 500, 1000, 2000, 10000, 20000];
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
     const DEFAULT_SUMMARY_MANUAL = { mercadoPago: 0, lapos: 0, getnet: 0, providerTransfers: 0 };
@@ -934,7 +956,11 @@
     let pasteMode = 'transfers';
     let transferSort = { field: '', direction: '' };
     let selectedTransferId = '';
-    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0 };
+    let selectedSystemRows = new Set();
+    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0, selectedRows: { mercado: [], system: [] } };
+    let remoteSaveTimer = null;
+    let remoteSaveBlocked = false;
+    let applyingRemoteState = false;
 
     function normalizarTexto(value) {
       return String(value || '')
@@ -1038,16 +1064,32 @@
       return Number(row.denom || 0) * ((Number(row.bills) || 0) + ((Number(row.packs) || 0) * 100));
     }
 
-    function saveState() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch (error) {}
+    function statePayload() {
+      return {
+        cash: state.cash,
+        transfers: state.transfers,
+        system: state.system,
+        summaryManual: state.summaryManual,
+        movements: state.movements
+      };
     }
 
-    function loadState() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-        if (!saved || typeof saved !== 'object') return;
+    function normalizeSystemRow(item) {
+      const row = {
+        typeComp: String(item?.typeComp || ''),
+        invoice: String(item?.invoice || ''),
+        name: String(item?.name || ''),
+        amount: Number(item?.amount || 0),
+        paymentType: String(item?.paymentType || item?.type || '')
+      };
+      if (Array.isArray(item?.children) && item.children.length) {
+        row.children = item.children.map(normalizeSystemRow);
+      }
+      return row;
+    }
+
+    function applySavedState(saved) {
+      if (!saved || typeof saved !== 'object') return false;
         if (Array.isArray(saved.cash)) {
           state.cash = CASH_DENOMS.map((denom, idx) => {
             const item = saved.cash.find((row) => Number(row.denom) === denom) || saved.cash[idx] || {};
@@ -1056,13 +1098,7 @@
         }
         if (Array.isArray(saved.transfers)) state.transfers = saved.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
         if (Array.isArray(saved.system)) {
-          state.system = saved.system.map((item) => ({
-            typeComp: String(item.typeComp || ''),
-            invoice: String(item.invoice || ''),
-            name: String(item.name || ''),
-            amount: Number(item.amount || 0),
-            paymentType: String(item.paymentType || item.type || '')
-          }));
+          state.system = saved.system.map(normalizeSystemRow);
         }
         if (saved.summaryManual && typeof saved.summaryManual === 'object') {
           state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
@@ -1076,9 +1112,88 @@
             return { type, initial: Number(item.initial || 0), day: Number(item.day || 0), ie: Number(item.ie || 0) };
           });
         }
+      return true;
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(statePayload()));
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch (error) {}
+      queueRemoteSave();
+    }
+
+    function loadState() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || 'null');
+        applySavedState(saved);
       } catch (error) {
         localStorage.removeItem(STORAGE_KEY);
       }
+    }
+
+    function supabaseHeaders(extra = {}) {
+      return {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        ...extra
+      };
+    }
+
+    async function loadRemoteState() {
+      if (remoteSaveBlocked) return;
+      try {
+        const url = `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE_CAJA}?id=eq.${encodeURIComponent(REMOTE_ROW_ID)}&select=payload&limit=1`;
+        const response = await fetch(url, { headers: supabaseHeaders() });
+        if (!response.ok) throw new Error(await response.text());
+        const rows = await response.json();
+        const payload = rows?.[0]?.payload;
+        if (!payload || typeof payload !== 'object') {
+          queueRemoteSave();
+          return;
+        }
+        applyingRemoteState = true;
+        applySavedState(payload);
+        applyingRemoteState = false;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(statePayload()));
+        } catch (error) {}
+        selectedSystemRows.clear();
+        renderAll();
+        showToast('Caja sincronizada.');
+      } catch (error) {
+        remoteSaveBlocked = true;
+        showToast('Caja local. Falta crear o habilitar la tabla de Supabase.');
+      } finally {
+        applyingRemoteState = false;
+      }
+    }
+
+    async function saveRemoteState() {
+      if (remoteSaveBlocked || applyingRemoteState) return;
+      const payload = {
+        id: REMOTE_ROW_ID,
+        fecha: CAJA_DATE_KEY,
+        payload: statePayload(),
+        updated_at: new Date().toISOString()
+      };
+      try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE_CAJA}?on_conflict=id`, {
+          method: 'POST',
+          headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error(await response.text());
+      } catch (error) {
+        remoteSaveBlocked = true;
+      }
+    }
+
+    function queueRemoteSave() {
+      if (remoteSaveBlocked || applyingRemoteState) return;
+      clearTimeout(remoteSaveTimer);
+      remoteSaveTimer = setTimeout(saveRemoteState, 550);
     }
 
     function normalizeTransfer(item, fallbackOrder = 0) {
@@ -1209,12 +1324,16 @@
 
     function renderSystemRows() {
       const system = state.system.length ? state.system : [{ typeComp: '', invoice: '', name: '', amount: 0 }];
-      el.systemRows.innerHTML = system.map((row, idx) => `<tr class="${movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago') ? 'system-warning' : ''}">
+      el.systemRows.innerHTML = system.map((row, idx) => `<tr class="${[
+          movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago') ? 'system-warning' : '',
+          selectedSystemRows.has(idx) ? 'selected-row' : ''
+        ].filter(Boolean).join(' ')}" data-system-row="${idx}">
+        <td class="row-selector-cell"><button class="row-selector-btn" type="button" data-system-select="${idx}" aria-label="Seleccionar transferencia sistema"></button></td>
         <td class="center"><input class="cell-input" style="text-align:center" data-system-field="typeComp" data-index="${idx}" value="${escapeHtml(row.typeComp || '')}"></td>
         <td class="center"><input class="cell-input" style="text-align:center" data-system-field="invoice" data-index="${idx}" value="${escapeHtml(row.invoice || '')}"></td>
         <td class="client"><input class="cell-input" style="text-align:left" data-system-field="name" data-index="${idx}" value="${escapeHtml(row.name || '')}"></td>
         <td class="money"><input class="cell-input" data-system-field="amount" data-index="${idx}" inputmode="decimal" value="${row.amount ? formatMoney(row.amount) : ''}" placeholder="$ 0,00"></td>
-      </tr>`).join('') + blankRows(8, 4);
+      </tr>`).join('') + blankRows(8, 5);
       el.systemCount.textContent = rowCountText(state.system.length || 1);
     }
 
@@ -1241,7 +1360,7 @@
 
     function summaryTotalCell(row) {
       if (!row.manual) return `<span class="summary-cell value">${formatMoney(row.total)}</span>`;
-      return `<input class="summary-cell summary-input cell-input" data-summary-manual="${row.key}" inputmode="decimal" value="${row.total ? formatMoney(row.total) : ''}" placeholder="$ 0,00">`;
+      return `<input class="summary-cell summary-input cell-input" data-summary-manual="${row.key}" data-summary-nav="total" inputmode="decimal" value="${row.total ? formatMoney(row.total) : ''}" placeholder="$ 0,00">`;
     }
 
     function renderSummary() {
@@ -1299,6 +1418,70 @@
       if (renderSummaryBlock) renderSummary();
     }
 
+    function uniqueTextList(values) {
+      const seen = new Set();
+      return values.map((value) => cleanLine(value)).filter((value) => {
+        if (!value || seen.has(normalizarTexto(value))) return false;
+        seen.add(normalizarTexto(value));
+        return true;
+      });
+    }
+
+    function sourceRows(rows) {
+      return rows.flatMap((row) => Array.isArray(row.children) && row.children.length ? row.children : [row]).map(normalizeSystemRow);
+    }
+
+    function mergedSystemRow(rows) {
+      const children = sourceRows(rows);
+      return {
+        typeComp: uniqueTextList(rows.map((row) => row.typeComp)).join('+') || 'UNIF',
+        invoice: uniqueTextList(rows.map((row) => row.invoice)).join(' / '),
+        name: uniqueTextList(rows.map((row) => row.name)).join(' / ') || 'Unificado',
+        amount: rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        paymentType: rows[0]?.paymentType || 'Transf Bria.',
+        children
+      };
+    }
+
+    function mergeSelectedSystemRows() {
+      const indexes = [...selectedSystemRows].sort((a, b) => a - b).filter((idx) => state.system[idx]);
+      if (indexes.length < 2) {
+        showToast('Selecciona dos o mas boletas del sistema.');
+        return;
+      }
+      const selectedRows = indexes.map((idx) => state.system[idx]);
+      const firstIndex = indexes[0];
+      const merged = mergedSystemRow(selectedRows);
+      const selectedSet = new Set(indexes);
+      state.system = state.system.filter((_, idx) => !selectedSet.has(idx));
+      state.system.splice(firstIndex, 0, merged);
+      selectedSystemRows = new Set([firstIndex]);
+      saveState();
+      renderSystemRows();
+      updateTotals();
+      showToast(`Se unificaron ${indexes.length} boletas.`);
+    }
+
+    function splitSelectedSystemRows() {
+      const indexes = [...selectedSystemRows].sort((a, b) => a - b).filter((idx) => Array.isArray(state.system[idx]?.children) && state.system[idx].children.length);
+      if (!indexes.length) {
+        showToast('Selecciona una fila unificada para separar.');
+        return;
+      }
+      const selectedSet = new Set(indexes);
+      const nextRows = [];
+      state.system.forEach((row, idx) => {
+        if (selectedSet.has(idx)) nextRows.push(...row.children.map(normalizeSystemRow));
+        else nextRows.push(row);
+      });
+      state.system = nextRows;
+      selectedSystemRows.clear();
+      saveState();
+      renderSystemRows();
+      updateTotals();
+      showToast('Boleta unificada separada.');
+    }
+
     function sortedMercadoPagoRows() {
       return [...state.transfers]
         .map((row) => ({ ...row, amount: Number(row.amount || 0) }))
@@ -1324,6 +1507,7 @@
       return [
         diffClass(diff),
         row?.blank ? 'blank-diff-row' : '',
+        diffState.selectedRows?.[side]?.includes(index) ? 'group-selected-row' : '',
         diffState.selectedSide === side && diffState.selectedIndex === index ? 'selected-diff-row' : ''
       ].filter(Boolean).join(' ');
     }
@@ -1374,7 +1558,8 @@
         mercado: sortedMercadoPagoRows(),
         system: sortedSystemRows(),
         selectedSide: 'mercado',
-        selectedIndex: 0
+        selectedIndex: 0,
+        selectedRows: { mercado: [], system: [] }
       };
       renderDiffModal();
       el.diffModal.classList.add('open');
@@ -1384,12 +1569,75 @@
       el.diffModal.classList.remove('open');
     }
 
-    function selectDiffRow(side, index) {
+    function selectDiffRow(side, index, multi = false) {
       diffState.selectedSide = side;
       diffState.selectedIndex = Number(index) || 0;
+      if (multi) {
+        const selected = diffState.selectedRows[side] || [];
+        if (selected.includes(diffState.selectedIndex)) {
+          diffState.selectedRows[side] = selected.filter((item) => item !== diffState.selectedIndex);
+        } else {
+          diffState.selectedRows[side] = [...selected, diffState.selectedIndex].sort((a, b) => a - b);
+        }
+      } else {
+        diffState.selectedRows = { mercado: [], system: [] };
+      }
       renderDiffModal();
       const row = document.querySelector(`[data-diff-side="${side}"][data-diff-index="${diffState.selectedIndex}"]`);
       row?.focus();
+    }
+
+    function mergedDiffRow(side, rows) {
+      const amount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      if (side === 'mercado') {
+        return {
+          hour: 'Unificado',
+          client: `${uniqueTextList(rows.map((row) => row.client)).join(' / ') || 'Unificado'} (${rows.length})`,
+          amount,
+          group: true,
+          children: rows.flatMap((row) => Array.isArray(row.children) && row.children.length ? row.children : [row])
+        };
+      }
+      return { ...mergedSystemRow(rows), group: true };
+    }
+
+    function mergeSelectedDiffRows() {
+      if (!el.diffModal.classList.contains('open')) return;
+      const side = diffState.selectedSide;
+      const rows = diffState[side];
+      const indexes = [...(diffState.selectedRows[side] || [])].sort((a, b) => a - b).filter((idx) => rows[idx] && !rows[idx].blank);
+      if (indexes.length < 2) {
+        showToast('Selecciona dos o mas filas del mismo lado.');
+        return;
+      }
+      const firstIndex = indexes[0];
+      const selectedRows = indexes.map((idx) => rows[idx]);
+      const selectedSet = new Set(indexes);
+      diffState[side] = rows.filter((_, idx) => !selectedSet.has(idx));
+      diffState[side].splice(firstIndex, 0, mergedDiffRow(side, selectedRows));
+      diffState.selectedIndex = firstIndex;
+      diffState.selectedRows[side] = [firstIndex];
+      renderDiffModal();
+      document.querySelector(`[data-diff-side="${side}"][data-diff-index="${firstIndex}"]`)?.focus();
+      showToast(`Se unificaron ${indexes.length} filas.`);
+    }
+
+    function splitDiffRow(side = diffState.selectedSide, index = diffState.selectedIndex) {
+      if (!el.diffModal.classList.contains('open')) return;
+      const rows = diffState[side];
+      const safeIndex = Math.max(0, Math.min(Number(index) || 0, rows.length - 1));
+      const row = rows[safeIndex];
+      if (!Array.isArray(row?.children) || !row.children.length) {
+        showToast('Selecciona una fila unificada para separar.');
+        return;
+      }
+      rows.splice(safeIndex, 1, ...row.children);
+      diffState.selectedSide = side;
+      diffState.selectedIndex = safeIndex;
+      diffState.selectedRows[side] = [];
+      renderDiffModal();
+      document.querySelector(`[data-diff-side="${side}"][data-diff-index="${safeIndex}"]`)?.focus();
+      showToast('Fila unificada separada.');
     }
 
     function insertDiffBlankRow() {
@@ -1941,6 +2189,13 @@
       return focusGridCell(targetCells[Math.min(colIndex, targetCells.length - 1)]);
     }
 
+    function moveSummaryCell(current, delta) {
+      const cells = [...el.summaryRows.querySelectorAll('[data-summary-nav]')].filter((input) => input.offsetParent !== null);
+      const index = cells.indexOf(current);
+      if (index < 0) return false;
+      return focusGridCell(cells[Math.max(0, Math.min(cells.length - 1, index + delta))]);
+    }
+
     function isBlankManualTransfer(row) {
       return row?.source === 'manual' && !String(row.client || '').trim() && !(Number(row.amount || 0) > 0);
     }
@@ -2014,6 +2269,14 @@
     function handleCellNavigation(event) {
       const target = event.target;
       if (!target.matches('.cell-input')) return;
+      if (target.dataset.summaryNav) {
+        if (['Enter', 'Tab', 'ArrowDown', 'ArrowUp'].includes(event.key)) commitCalculatedCell(target);
+        let moved = false;
+        if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowDown') moved = moveSummaryCell(target, event.shiftKey || event.key === 'ArrowUp' ? -1 : 1);
+        else if (event.key === 'ArrowUp') moved = moveSummaryCell(target, -1);
+        if (moved) event.preventDefault();
+        return;
+      }
       if (handleTransferEnter(event, target)) return;
       if (['Enter', 'Tab', 'ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) {
         commitCalculatedCell(target);
@@ -2035,6 +2298,8 @@
     document.getElementById('clearCashBtn').addEventListener('click', clearCash);
     document.getElementById('clearSystemBtn').addEventListener('click', clearSystem);
     document.getElementById('pasteSystemBtn').addEventListener('click', pasteSystemFromClipboard);
+    document.getElementById('mergeSystemBtn').addEventListener('click', mergeSelectedSystemRows);
+    document.getElementById('splitSystemBtn').addEventListener('click', splitSelectedSystemRows);
     document.getElementById('findDiffBtn').addEventListener('click', openDiffModal);
     document.getElementById('updateTotalsBtn').addEventListener('click', () => {
       updateTotals();
@@ -2043,6 +2308,8 @@
     });
     document.getElementById('closePasteModalBtn').addEventListener('click', closePasteModal);
     document.getElementById('closeDiffModalBtn').addEventListener('click', closeDiffModal);
+    document.getElementById('mergeDiffRowsBtn').addEventListener('click', mergeSelectedDiffRows);
+    document.getElementById('splitDiffRowsBtn').addEventListener('click', () => splitDiffRow());
     document.getElementById('clearPasteTextBtn').addEventListener('click', () => {
       el.pasteText.value = '';
       el.pasteText.focus();
@@ -2072,6 +2339,15 @@
       const row = event.target.closest('[data-transfer-id]');
       if (row) selectTransferRow(row.dataset.transferId || '');
     });
+    el.systemRows.addEventListener('click', (event) => {
+      const selector = event.target.closest('[data-system-select]');
+      if (!selector) return;
+      const index = Number(selector.dataset.systemSelect);
+      if (selectedSystemRows.has(index)) selectedSystemRows.delete(index);
+      else selectedSystemRows.add(index);
+      renderSystemRows();
+      document.querySelector(`[data-system-select="${index}"]`)?.focus();
+    });
     el.pasteModal.addEventListener('click', (event) => {
       if (event.target === el.pasteModal) closePasteModal();
     });
@@ -2080,11 +2356,19 @@
     });
     el.diffMercadoRows.addEventListener('click', (event) => {
       const row = event.target.closest('[data-diff-side]');
-      if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex);
+      if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex, event.ctrlKey || event.metaKey);
     });
     el.diffSystemRows.addEventListener('click', (event) => {
       const row = event.target.closest('[data-diff-side]');
-      if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex);
+      if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex, event.ctrlKey || event.metaKey);
+    });
+    el.diffMercadoRows.addEventListener('dblclick', (event) => {
+      const row = event.target.closest('[data-diff-side]');
+      if (row) splitDiffRow(row.dataset.diffSide, row.dataset.diffIndex);
+    });
+    el.diffSystemRows.addEventListener('dblclick', (event) => {
+      const row = event.target.closest('[data-diff-side]');
+      if (row) splitDiffRow(row.dataset.diffSide, row.dataset.diffIndex);
     });
     el.diffMercadoRows.addEventListener('focusin', (event) => {
       const row = event.target.closest('[data-diff-side]');
@@ -2168,6 +2452,7 @@
 
     loadState();
     renderAll();
+    loadRemoteState();
   </script>
 </body>
 </html>
