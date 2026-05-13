@@ -6,6 +6,8 @@
   <title>Control General De Caja</title>
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -1034,6 +1036,15 @@
     const SUPABASE_TABLE_CAJA = 'control_caja_estados';
     const TODAY_DATE_KEY = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     let selectedDateKey = TODAY_DATE_KEY;
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
+      authDomain: "corralon-progreso.firebaseapp.com",
+      projectId: "corralon-progreso",
+      storageBucket: "corralon-progreso.firebasestorage.app",
+      messagingSenderId: "466583614632",
+      appId: "1:466583614632:web:42cb839f83e97475fabe9d"
+    };
+    const FIREBASE_SUMMARY_COLLECTION = 'control_caja_totales_manual';
     const DIFF_TOLERANCE = 10;
     const CASH_DENOMS = [100, 200, 500, 1000, 2000, 10000, 20000];
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
@@ -1102,6 +1113,9 @@
     let applyingRemoteState = false;
     let syncingDiffScroll = false;
     let systemContextIndex = -1;
+    let firebaseDb = null;
+    let firebaseSaveTimer = null;
+    let applyingFirebaseSummary = false;
 
     function storageKeyForDate(dateKey = selectedDateKey) {
       return `${STORAGE_KEY_BASE}_${dateKey}`;
@@ -1150,6 +1164,67 @@
       selectedSystemRows.clear();
       transferSort = { field: '', direction: '' };
       systemSort = { field: '', direction: '' };
+    }
+
+    function firebaseDatabase() {
+      if (firebaseDb) return firebaseDb;
+      if (!window.firebase?.firestore) return null;
+      if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      firebaseDb = firebase.firestore();
+      return firebaseDb;
+    }
+
+    function summaryManualPayload() {
+      return {
+        mercadoPago: Number(state.summaryManual.mercadoPago || 0),
+        lapos: Number(state.summaryManual.lapos || 0),
+        getnet: Number(state.summaryManual.getnet || 0),
+        providerTransfers: Number(state.summaryManual.providerTransfers || 0)
+      };
+    }
+
+    function applySummaryManualPayload(payload) {
+      state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
+      Object.keys(DEFAULT_SUMMARY_MANUAL).forEach((key) => {
+        state.summaryManual[key] = Number(payload?.[key] || 0);
+      });
+    }
+
+    async function loadSummaryManualState(dateKey = selectedDateKey) {
+      const db = firebaseDatabase();
+      if (!db) return;
+      try {
+        const snap = await db.collection(FIREBASE_SUMMARY_COLLECTION).doc(dateKey).get();
+        if (dateKey !== selectedDateKey || !snap.exists) return;
+        applyingFirebaseSummary = true;
+        applySummaryManualPayload(snap.data()?.values || snap.data());
+        applyingFirebaseSummary = false;
+        persistLocalState();
+        renderSummary();
+      } catch (error) {
+        showToast('No pude cargar los totales manuales de Firebase.');
+      } finally {
+        applyingFirebaseSummary = false;
+      }
+    }
+
+    function queueSummaryManualSave(dateKey = selectedDateKey) {
+      if (applyingFirebaseSummary) return;
+      const db = firebaseDatabase();
+      if (!db) return;
+      clearTimeout(firebaseSaveTimer);
+      const values = summaryManualPayload();
+      firebaseSaveTimer = setTimeout(async () => {
+        try {
+          await db.collection(FIREBASE_SUMMARY_COLLECTION).doc(dateKey).set({
+            fecha: dateKey,
+            values,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (error) {
+          showToast('No pude guardar los totales manuales en Firebase.');
+        }
+      }, 450);
     }
 
     function normalizarTexto(value) {
@@ -1317,6 +1392,15 @@
       };
     }
 
+    function remoteStatePayload() {
+      return {
+        cash: state.cash,
+        transfers: state.transfers,
+        system: state.system,
+        movements: state.movements
+      };
+    }
+
     function normalizeSystemRow(item) {
       const row = {
         typeComp: String(item?.typeComp || ''),
@@ -1343,7 +1427,7 @@
         if (Array.isArray(saved.system)) {
           state.system = saved.system.map(normalizeSystemRow);
         }
-        if (saved.summaryManual && typeof saved.summaryManual === 'object') {
+        if (saved.summaryManual && typeof saved.summaryManual === 'object' && !applyingRemoteState) {
           state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
           Object.keys(DEFAULT_SUMMARY_MANUAL).forEach((key) => {
             state.summaryManual[key] = Number(saved.summaryManual[key] || 0);
@@ -1358,11 +1442,15 @@
       return true;
     }
 
-    function saveState() {
+    function persistLocalState() {
       try {
         localStorage.setItem(storageKeyForDate(), JSON.stringify(statePayload()));
         if (selectedDateKey === TODAY_DATE_KEY) localStorage.removeItem(LEGACY_STORAGE_KEY);
       } catch (error) {}
+    }
+
+    function saveState() {
+      persistLocalState();
       queueRemoteSave();
     }
 
@@ -1417,7 +1505,7 @@
       }
     }
 
-    async function saveRemoteState(dateKey = selectedDateKey, payloadData = statePayload()) {
+    async function saveRemoteState(dateKey = selectedDateKey, payloadData = remoteStatePayload()) {
       if (remoteSaveBlocked || applyingRemoteState) return;
       const payload = {
         id: remoteRowIdForDate(dateKey),
@@ -1441,7 +1529,7 @@
       if (remoteSaveBlocked || applyingRemoteState) return;
       clearTimeout(remoteSaveTimer);
       const dateKey = selectedDateKey;
-      const payloadData = statePayload();
+      const payloadData = remoteStatePayload();
       remoteSaveTimer = setTimeout(() => saveRemoteState(dateKey, payloadData), 550);
     }
 
@@ -1458,6 +1546,7 @@
       renderAll();
       showToast(`Caja ${formatDateLabel(selectedDateKey)} cargada.`);
       await loadRemoteState(selectedDateKey);
+      await loadSummaryManualState(selectedDateKey);
       if (previousDate !== selectedDateKey) window.scrollTo?.(0, 0);
     }
 
@@ -2902,7 +2991,8 @@
       } else if (input.dataset.summaryManual) {
         state.summaryManual[input.dataset.summaryManual] = value;
         input.value = value ? formatMoney(value) : '';
-        saveState();
+        persistLocalState();
+        queueSummaryManualSave();
         updateTotals(false);
         updateSummaryDifference(input.dataset.summaryManual);
         return true;
@@ -3222,7 +3312,8 @@
       if (target.dataset.summaryManual) {
         state.summaryManual[target.dataset.summaryManual] = parseNumber(target.value);
         formatMoneyWhileTyping(target);
-        saveState();
+        persistLocalState();
+        queueSummaryManualSave();
         updateTotals(false);
         updateSummaryDifference(target.dataset.summaryManual);
         return;
@@ -3252,7 +3343,7 @@
     updateDateLabel();
     loadState(selectedDateKey);
     renderAll();
-    loadRemoteState(selectedDateKey);
+    loadRemoteState(selectedDateKey).finally(() => loadSummaryManualState(selectedDateKey));
   </script>
 </body>
 </html>
