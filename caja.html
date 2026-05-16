@@ -1406,6 +1406,21 @@
       };
     }
 
+    function hasPayloadData(payload) {
+      if (!payload || typeof payload !== 'object') return false;
+      const hasCash = Array.isArray(payload.cash) && payload.cash.some((row) => Number(row?.bills || 0) || Number(row?.packs || 0));
+      const hasTransfers = Array.isArray(payload.transfers) && payload.transfers.length > 0;
+      const hasSystem = Array.isArray(payload.system) && payload.system.length > 0;
+      const hasMovements = Array.isArray(payload.movements) && payload.movements.some((row) => (
+        Number(row?.initial || 0) || Number(row?.day || 0) || Number(row?.ie || 0)
+      ));
+      return hasCash || hasTransfers || hasSystem || hasMovements;
+    }
+
+    function hasStateData() {
+      return hasPayloadData(remoteStatePayload());
+    }
+
     function normalizeSystemRow(item) {
       const row = {
         typeComp: String(item?.typeComp || ''),
@@ -1489,10 +1504,14 @@
         const rows = await response.json();
         const payload = rows?.[0]?.payload;
         if (!payload || typeof payload !== 'object') {
-          queueRemoteSave();
+          if (dateKey === selectedDateKey && hasStateData()) queueRemoteSave();
           return;
         }
         if (dateKey !== selectedDateKey) return;
+        if (!hasPayloadData(payload) && hasStateData()) {
+          queueRemoteSave();
+          return;
+        }
         applyingRemoteState = true;
         applySavedState(payload);
         applyingRemoteState = false;
