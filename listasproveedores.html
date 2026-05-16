@@ -1,0 +1,1490 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Comparar Listas de Proveedores</title>
+  <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --ui-scale: .75;
+      --rojo: #d21f31;
+      --rojo-oscuro: #a91626;
+      --acento: #4f6f92;
+      --acento-oscuro: #263f59;
+      --borde: #b9c3cf;
+      --borde-fuerte: #8795a6;
+      --fondo: #eed5ad;
+      --panel: #fffdfa;
+      --header: #e7e5e0;
+      --fila: #ffffff;
+      --fila-alt: #f1f1f1;
+      --seleccion: #b9daf4;
+      --texto: #142033;
+      --muted: #627084;
+      --ok: #147847;
+      --warn: #d80000;
+      --shadow: 0 8px 22px rgba(30, 48, 76, .12);
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      color: var(--texto);
+      font-family: 'Barlow', Arial, sans-serif;
+      background: var(--fondo);
+    }
+    .app {
+      width: 100vw;
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: 48px 1fr;
+      min-width: 1280px;
+      zoom: var(--ui-scale);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 28px;
+      background: var(--rojo);
+      color: #fff;
+      box-shadow: 0 3px 10px rgba(0,0,0,.16);
+    }
+    .topbar img { width: 34px; height: 26px; object-fit: contain; background: #fff; border-radius: 2px; }
+    .title {
+      margin: 0;
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .top-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status {
+      min-width: 250px;
+      color: rgba(255,255,255,.88);
+      font-size: 13px;
+      font-weight: 700;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .btn {
+      height: 36px;
+      border: 1px solid #8490a0;
+      border-radius: 5px;
+      color: var(--texto);
+      background: linear-gradient(180deg, #fff, #d9dde2);
+      box-shadow: 1px 2px 2px rgba(0,0,0,.22);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+      padding: 6px 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn.primary {
+      color: #fff;
+      border-color: var(--acento-oscuro);
+      background: linear-gradient(180deg, #6687a8, var(--acento));
+    }
+    .btn.danger {
+      color: #fff;
+      border-color: var(--rojo-oscuro);
+      background: linear-gradient(180deg, #e5535f, var(--rojo));
+    }
+    .main {
+      display: grid;
+      grid-template-columns: minmax(760px, 1fr) 430px;
+      gap: 22px;
+      padding: 18px 28px 10px;
+      min-height: 0;
+    }
+    .left {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto auto 1fr 138px;
+      gap: 14px;
+      min-height: 0;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: 130px minmax(360px, 1fr) 250px;
+      gap: 0;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+    }
+    .filter-cell {
+      min-width: 0;
+      border-right: 1px solid var(--borde);
+    }
+    .filter-cell:last-child { border-right: 0; }
+    .filter-label {
+      height: 26px;
+      padding: 4px 6px;
+      background: var(--header);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+      line-height: 18px;
+      white-space: nowrap;
+    }
+    .filter-input, .base-input, .slot-input {
+      width: 100%;
+      height: 28px;
+      border: 0;
+      outline: 0;
+      background: #fff;
+      color: var(--texto);
+      font: 16px 'Barlow Condensed', Arial, sans-serif;
+      padding: 3px 6px;
+    }
+    .base-row {
+      display: grid;
+      grid-template-columns: 130px 1fr 180px 250px;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+    }
+    .base-cell {
+      min-width: 0;
+      border-right: 1px solid var(--borde);
+    }
+    .base-cell:last-child { border-right: 0; }
+    .base-label {
+      height: 26px;
+      padding: 4px 6px;
+      background: var(--header);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+      line-height: 18px;
+    }
+    .table-card {
+      min-height: 0;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+      display: grid;
+      grid-template-rows: 28px 1fr;
+      overflow: hidden;
+    }
+    .grid-head {
+      display: grid;
+      grid-template-columns: 116px minmax(360px, 1fr) 130px 220px;
+      background: #d8dde4;
+      border-bottom: 1px solid var(--borde-fuerte);
+      padding-right: 14px;
+    }
+    .grid-head div {
+      padding: 5px 6px;
+      border-right: 1px solid var(--borde);
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .viewport {
+      position: relative;
+      overflow: auto;
+      min-height: 0;
+      background: #fff;
+    }
+    .spacer { width: 1px; opacity: 0; }
+    .rows {
+      position: absolute;
+      inset: 0 0 auto 0;
+    }
+    .row {
+      height: 24px;
+      display: grid;
+      grid-template-columns: 116px minmax(360px, 1fr) 130px 220px;
+      border-bottom: 1px solid #ddd;
+      cursor: default;
+      font-size: 16px;
+      line-height: 24px;
+    }
+    .row:nth-child(even) { background: var(--fila-alt); }
+    .row.selected { background: var(--seleccion) !important; }
+    .row.adjusted { background: #dff3e8 !important; }
+    .row.adjusted.selected { background: #bfe8d3 !important; }
+    .row div {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0 6px;
+      border-right: 1px solid #e2e2e2;
+    }
+    .row div:focus {
+      outline: 2px solid var(--acento);
+      outline-offset: -2px;
+      background: #d7ecff;
+    }
+    .exclude-card {
+      min-height: 0;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+      display: grid;
+      grid-template-rows: 28px 1fr;
+      overflow: hidden;
+    }
+    .exclude-head {
+      padding: 5px 8px;
+      background: #d8dde4;
+      border-bottom: 1px solid var(--borde-fuerte);
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .exclude-body {
+      overflow: auto;
+      min-height: 0;
+      background: #fff;
+    }
+    .exclude-row {
+      height: 24px;
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      border-bottom: 1px solid #ddd;
+      font-size: 16px;
+    }
+    .exclude-row:nth-child(even) { background: var(--fila-alt); }
+    .exclude-index {
+      padding: 2px 6px;
+      border-right: 1px solid #e2e2e2;
+      color: var(--muted);
+      text-align: right;
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+    }
+    .exclude-input {
+      width: 100%;
+      height: 24px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--texto);
+      font: 16px 'Barlow Condensed', Arial, sans-serif;
+      padding: 2px 7px;
+    }
+    .money { text-align: right; font-variant-numeric: tabular-nums; }
+    .navigator {
+      display: none;
+      height: 24px;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--borde-fuerte);
+      border-top: 0;
+      background: #f3f3f3;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 2px 6px;
+    }
+    .nav-count {
+      min-width: 78px;
+      height: 18px;
+      border: 1px solid var(--borde);
+      background: #fff;
+      text-align: center;
+      line-height: 17px;
+    }
+    .side {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 1fr;
+      gap: 0;
+      align-content: start;
+    }
+    .side-actions {
+      display: none;
+      justify-items: center;
+      gap: 10px;
+      padding-top: 4px;
+    }
+    .slots {
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-right: 8px;
+    }
+    .slot {
+      position: relative;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+      display: grid;
+      grid-template-columns: 112px 1fr;
+      flex: 0 0 auto;
+      margin-right: 36px;
+    }
+    .slot-clear {
+      position: absolute;
+      right: -36px;
+      top: 0;
+      width: 30px;
+      height: 30px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 4px;
+      background: linear-gradient(180deg, #fff, #d9dde2);
+      color: #667;
+      font-size: 22px;
+      line-height: 24px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 1px 2px 2px rgba(0,0,0,.14);
+    }
+    .slot-clear:hover { color: var(--rojo); border-color: var(--rojo); }
+    .slot.empty {
+      min-height: 120px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+      padding: 16px;
+    }
+    .slot.winner { box-shadow: inset 4px 0 0 var(--ok); }
+    .slot-label {
+      height: 28px;
+      padding: 4px 6px;
+      background: var(--header);
+      border-right: 1px solid var(--borde);
+      border-bottom: 1px solid var(--borde);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .slot-value {
+      min-width: 0;
+      border-bottom: 1px solid var(--borde);
+      height: 28px;
+      padding: 3px 6px;
+      font-size: 16px;
+      line-height: 22px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .slot-label.last, .slot-value.last { border-bottom: 0; }
+    .diff.positive { color: var(--ok); font-weight: 800; }
+    .diff.negative { color: var(--warn); font-weight: 800; }
+    .footer {
+      display: none;
+      align-items: center;
+      padding: 0 28px;
+      border-top: 1px solid var(--borde-fuerte);
+      background: #dedbd5;
+      color: var(--muted);
+      font-size: 12px;
+      gap: 12px;
+    }
+    .hidden-file { display: none; }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 34px;
+      transform: translateX(-50%) translateY(8px);
+      z-index: 20;
+      opacity: 0;
+      pointer-events: none;
+      background: #172032;
+      color: #fff;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 800;
+      transition: .18s ease;
+    }
+    .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .context-menu {
+      position: fixed;
+      z-index: 40;
+      display: none;
+      min-width: 132px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 5px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(20, 32, 51, .22);
+      padding: 4px;
+    }
+    .context-menu.visible { display: block; }
+    .context-menu button {
+      width: 100%;
+      height: 30px;
+      border: 0;
+      background: transparent;
+      color: var(--texto);
+      font: 700 16px 'Barlow Condensed', Arial, sans-serif;
+      text-align: left;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    .context-menu button:hover { background: #e8edf2; }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 45;
+      display: none;
+      place-items: center;
+      background: rgba(20, 32, 51, .28);
+    }
+    .modal-backdrop.visible { display: grid; }
+    .calc-modal {
+      width: 430px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(20, 32, 51, .28);
+      padding: 16px;
+    }
+    .calc-title {
+      margin: 0 0 12px;
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 25px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .calc-grid {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+    }
+    .calc-label {
+      height: 30px;
+      padding: 5px 7px;
+      background: var(--header);
+      border-right: 1px solid var(--borde);
+      border-bottom: 1px solid var(--borde);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+    }
+    .calc-field {
+      height: 30px;
+      border-bottom: 1px solid var(--borde);
+    }
+    .calc-label.last, .calc-field.last { border-bottom: 0; }
+    .calc-field input {
+      width: 100%;
+      height: 29px;
+      border: 0;
+      outline: 0;
+      background: #fff;
+      color: var(--texto);
+      font: 17px 'Barlow Condensed', Arial, sans-serif;
+      padding: 3px 8px;
+      text-align: right;
+    }
+    .calc-result {
+      height: 29px;
+      padding: 3px 8px;
+      text-align: right;
+      font-size: 17px;
+      font-variant-numeric: tabular-nums;
+      line-height: 23px;
+    }
+    .calc-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Corralon Progreso">
+      <h1 class="title">Comparar Listas De Precios</h1>
+      <div class="top-actions">
+        <span class="status" id="statusText">Inicializando...</span>
+        <button class="btn primary" id="uploadBtn" type="button">Subir / Exportar</button>
+        <button class="btn" id="importBtn" type="button">Importar</button>
+        <button class="btn" type="button" onclick="location.href='menu.html'">Menú</button>
+      </div>
+      <input class="hidden-file" id="fileInput" type="file" accept=".xlsx,.xls,.csv">
+    </header>
+
+    <main class="main">
+      <section class="left">
+        <div class="filters">
+          <div class="filter-cell">
+            <div class="filter-label">Filtrar por código</div>
+            <input class="filter-input" id="filterCode" autocomplete="off">
+          </div>
+          <div class="filter-cell">
+            <div class="filter-label">Filtrar Por Artículo</div>
+            <input class="filter-input" id="filterArticle" autocomplete="off">
+          </div>
+          <div class="filter-cell">
+            <div class="filter-label">Filtrar por proveedor</div>
+            <input class="filter-input" id="filterProvider" autocomplete="off">
+          </div>
+        </div>
+        <input type="hidden" id="filterPrice" value="">
+
+        <div class="base-row">
+          <div class="base-cell">
+            <div class="base-label">Cod. Proveedor</div>
+            <input class="base-input" id="baseCode" readonly>
+          </div>
+          <div class="base-cell">
+            <div class="base-label">Artículo</div>
+            <input class="base-input" id="baseArticle" readonly>
+          </div>
+          <div class="base-cell">
+            <div class="base-label">Precio inicial</div>
+            <input class="base-input money" id="basePrice">
+          </div>
+          <div class="base-cell">
+            <div class="base-label">Proveedor</div>
+            <input class="base-input" id="baseProvider" readonly>
+          </div>
+        </div>
+
+        <section class="table-card">
+          <div class="grid-head">
+            <div>CodProveed</div>
+            <div>Artículo</div>
+            <div>PrecioCosto</div>
+            <div>Proveedor</div>
+          </div>
+          <div class="viewport" id="viewport">
+            <div class="spacer" id="spacer"></div>
+            <div class="rows" id="rows"></div>
+          </div>
+        </section>
+
+        <section class="exclude-card">
+          <div class="exclude-head">No filtrar si contiene</div>
+          <div class="exclude-body" id="excludeRows"></div>
+        </section>
+
+        <div class="navigator">
+          <span>Registro:</span>
+          <span>|&lt; &lt; &gt; &gt;|</span>
+          <span class="nav-count" id="recordCount">0</span>
+          <span id="activeInfo"></span>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="slots" id="slots"></div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>Subir / Exportar carga el Excel a Supabase. Importar descarga la lista compartida a este navegador.</span>
+      <span id="metaInfo"></span>
+    </footer>
+  </div>
+  <div class="toast" id="toast"></div>
+  <div class="context-menu" id="rowContextMenu">
+    <button type="button" id="compareContextBtn">Comparar</button>
+    <button type="button" id="calcContextBtn">Dividir / multiplicar</button>
+  </div>
+  <div class="modal-backdrop" id="calcBackdrop">
+    <div class="calc-modal" role="dialog" aria-modal="true" aria-labelledby="calcTitle">
+      <h2 class="calc-title" id="calcTitle">Dividir / multiplicar</h2>
+      <div class="calc-grid">
+        <div class="calc-label">Precio inicial</div>
+        <div class="calc-field"><input id="calcOriginalPrice" readonly></div>
+        <div class="calc-label">Dividir por</div>
+        <div class="calc-field"><input id="calcDivide" inputmode="decimal" autocomplete="off"></div>
+        <div class="calc-label">Multiplicar por</div>
+        <div class="calc-field"><input id="calcMultiply" inputmode="decimal" autocomplete="off"></div>
+        <div class="calc-label last">Precio calculado</div>
+        <div class="calc-field last"><div class="calc-result" id="calcResult">$ 0,00</div></div>
+      </div>
+      <div class="calc-actions">
+        <button class="btn" type="button" id="calcCancelBtn">Cancelar</button>
+        <button class="btn" type="button" id="calcUndoBtn">Volver a original</button>
+        <button class="btn primary" type="button" id="calcApplyBtn">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+    const TABLE = 'lista_precios';
+    const META_TABLE = 'lista_precios_meta';
+    const DB_NAME = 'corralon_lista_proveedores_v1';
+    const ROW_HEIGHT = 24;
+    const BUFFER = 12;
+    const PAGE_SIZE = 1000;
+    const state = {
+      db: null,
+      worker: null,
+      loaded: false,
+      total: 0,
+      matchCount: 0,
+      selectedId: null,
+      selectedRow: null,
+      contextRow: null,
+      contextRowId: null,
+      calcRow: null,
+      filterTimer: null,
+      base: null,
+      slots: [],
+      excludeTerms: ['', '', '', '', ''],
+      tableNav: { matchIndex: 0, col: 0, pending: null },
+      currentRows: []
+    };
+    const el = {
+      status: document.getElementById('statusText'),
+      meta: document.getElementById('metaInfo'),
+      filterCode: document.getElementById('filterCode'),
+      filterArticle: document.getElementById('filterArticle'),
+      filterPrice: document.getElementById('filterPrice'),
+      filterProvider: document.getElementById('filterProvider'),
+      baseCode: document.getElementById('baseCode'),
+      baseArticle: document.getElementById('baseArticle'),
+      basePrice: document.getElementById('basePrice'),
+      baseProvider: document.getElementById('baseProvider'),
+      viewport: document.getElementById('viewport'),
+      spacer: document.getElementById('spacer'),
+      rows: document.getElementById('rows'),
+      tableCard: document.querySelector('.table-card'),
+      excludeRows: document.getElementById('excludeRows'),
+      recordCount: document.getElementById('recordCount'),
+      activeInfo: document.getElementById('activeInfo'),
+      slots: document.getElementById('slots'),
+      rowContextMenu: document.getElementById('rowContextMenu'),
+      compareContextBtn: document.getElementById('compareContextBtn'),
+      calcContextBtn: document.getElementById('calcContextBtn'),
+      calcBackdrop: document.getElementById('calcBackdrop'),
+      calcOriginalPrice: document.getElementById('calcOriginalPrice'),
+      calcDivide: document.getElementById('calcDivide'),
+      calcMultiply: document.getElementById('calcMultiply'),
+      calcResult: document.getElementById('calcResult'),
+      calcCancelBtn: document.getElementById('calcCancelBtn'),
+      calcUndoBtn: document.getElementById('calcUndoBtn'),
+      calcApplyBtn: document.getElementById('calcApplyBtn'),
+      toast: document.getElementById('toast'),
+      fileInput: document.getElementById('fileInput')
+    };
+
+    function syncComparisonHeight() {
+      if (!el.slots) return;
+      const rect = el.slots.getBoundingClientRect();
+      const bottomGap = 14;
+      const height = window.innerHeight - rect.top - bottomGap;
+      el.slots.style.maxHeight = `${Math.max(160, height)}px`;
+    }
+
+    function supabaseHeaders(extra = {}) {
+      return {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        ...extra
+      };
+    }
+    function normalize(value) {
+      return String(value ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    function formatMoney(value) {
+      return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    function parseMoney(value) {
+      let text = String(value ?? '').replace(/\$/g, '').replace(/\s+/g, '').trim();
+      if (!text) return 0;
+      if (text.includes(',')) text = text.replace(/\./g, '').replace(',', '.');
+      else text = text.replace(/\.(?=\d{3}(\D|$))/g, '');
+      return Number(text.replace(/[^0-9.-]/g, '')) || 0;
+    }
+    function parseFactor(value, fallback = 1) {
+      const text = String(value ?? '').replace(',', '.').trim();
+      if (!text) return fallback;
+      const number = Number(text.replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(number) && number !== 0 ? number : fallback;
+    }
+    function showToast(message) {
+      el.toast.textContent = message;
+      el.toast.classList.add('visible');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => el.toast.classList.remove('visible'), 2300);
+    }
+    function setStatus(message) {
+      el.status.textContent = message;
+    }
+    function hideRowContextMenu() {
+      state.contextRow = null;
+      state.contextRowId = null;
+      el.compareContextBtn.dataset.rowId = '';
+      el.calcContextBtn.dataset.rowId = '';
+      el.rowContextMenu.classList.remove('visible');
+    }
+    function showRowContextMenu(event, row) {
+      state.contextRow = row;
+      state.contextRowId = row?.idorden ?? null;
+      el.compareContextBtn.dataset.rowId = state.contextRowId ?? '';
+      el.calcContextBtn.dataset.rowId = state.contextRowId ?? '';
+      el.rowContextMenu.style.left = `${event.clientX}px`;
+      el.rowContextMenu.style.top = `${event.clientY}px`;
+      el.rowContextMenu.classList.add('visible');
+    }
+    function openDb() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('articulos')) db.createObjectStore('articulos', { keyPath: 'idorden' });
+          if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbGet(store, key) {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction(store, 'readonly').objectStore(store).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbSet(store, value) {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction(store, 'readwrite').objectStore(store).put(value);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbClear(store) {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction(store, 'readwrite').objectStore(store).clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbBulkPut(rows) {
+      return new Promise((resolve, reject) => {
+        const tx = state.db.transaction('articulos', 'readwrite');
+        const store = tx.objectStore('articulos');
+        rows.forEach((row) => store.put(row));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    function idbAllArticles() {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction('articulos', 'readonly').objectStore('articulos').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function createWorker() {
+      const code = `
+        let data = [];
+        let matches = [];
+        function norm(v){ return String(v ?? '').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/\\s+/g,' ').trim(); }
+        function test(row, f) {
+          if (f.code && !row.cod_proveedor_norm.includes(f.code)) return false;
+          if (f.provider && !row.proveedor_norm.includes(f.provider)) return false;
+          if (f.articleWords.length && !f.articleWords.every(w => row.articulo_norm.includes(w))) return false;
+          if (f.excludeWords.length && f.excludeWords.some(w => row.articulo_norm.includes(w))) return false;
+          if (f.price && !String(row.precio_costo || '').includes(f.price)) return false;
+          return true;
+        }
+        self.onmessage = (event) => {
+          const msg = event.data || {};
+          if (msg.type === 'load') {
+            data = msg.rows || [];
+            matches = data.map((_, i) => i);
+            self.postMessage({ type:'loaded', total:data.length, count:matches.length });
+          }
+          if (msg.type === 'filter') {
+            const article = norm(msg.filter.article || '');
+            const f = {
+              code: norm(msg.filter.code || ''),
+              provider: norm(msg.filter.provider || ''),
+              price: String(msg.filter.price || '').replace(/[^0-9.,-]/g,'').trim(),
+              articleWords: article.split(' ').filter(Boolean),
+              excludeWords: (msg.filter.exclude || []).map(norm).filter(Boolean)
+            };
+            matches = [];
+            for (let i = 0; i < data.length; i++) if (test(data[i], f)) matches.push(i);
+            self.postMessage({ type:'filtered', count:matches.length });
+          }
+          if (msg.type === 'slice') {
+            const start = Math.max(0, msg.start || 0);
+            const end = Math.min(matches.length, start + (msg.limit || 100));
+            const rows = [];
+            for (let i = start; i < end; i++) rows.push({ index:i, row:data[matches[i]] });
+            self.postMessage({ type:'slice', start, rows, count:matches.length });
+          }
+          if (msg.type === 'update') {
+            const idx = data.findIndex(row => String(row.idorden) === String(msg.row?.idorden));
+            if (idx >= 0) data[idx] = { ...data[idx], ...msg.row };
+          }
+        };
+      `;
+      const blob = new Blob([code], { type: 'text/javascript' });
+      const worker = new Worker(URL.createObjectURL(blob));
+      worker.onmessage = handleWorkerMessage;
+      return worker;
+    }
+    function workerPost(message) {
+      if (state.worker) state.worker.postMessage(message);
+    }
+    function handleWorkerMessage(event) {
+      const msg = event.data || {};
+      if (msg.type === 'loaded') {
+        state.loaded = true;
+        state.total = msg.total;
+        state.matchCount = msg.count;
+        updateCounts();
+        requestFilter();
+        syncComparisonHeight();
+        setStatus(`${msg.total.toLocaleString('es-AR')} artículos cargados`);
+      }
+      if (msg.type === 'filtered') {
+        state.matchCount = msg.count;
+        el.viewport.scrollTop = 0;
+        updateCounts();
+        requestSlice();
+      }
+      if (msg.type === 'slice') {
+        state.currentRows = msg.rows || [];
+        renderSlice(msg.start || 0, state.currentRows);
+      }
+    }
+    function updateCounts() {
+      el.spacer.style.height = `${Math.max(1, state.matchCount) * ROW_HEIGHT}px`;
+      el.recordCount.textContent = state.matchCount.toLocaleString('es-AR');
+      el.meta.textContent = `${state.matchCount.toLocaleString('es-AR')} filtrados / ${state.total.toLocaleString('es-AR')} artículos`;
+    }
+    function currentFilter() {
+      return {
+        code: el.filterCode.value,
+        article: el.filterArticle.value,
+        price: el.filterPrice.value,
+        provider: el.filterProvider.value,
+        exclude: state.excludeTerms
+      };
+    }
+    function renderExcludeRows() {
+      el.excludeRows.innerHTML = state.excludeTerms.map((term, i) => `
+        <label class="exclude-row">
+          <span class="exclude-index">${i + 1}</span>
+          <input class="exclude-input" data-exclude-index="${i}" value="${escapeHtml(term)}" autocomplete="off">
+        </label>
+      `).join('');
+    }
+    function updateExcludeTerm(index, value) {
+      state.excludeTerms[index] = value;
+      const lastHasText = state.excludeTerms[state.excludeTerms.length - 1]?.trim();
+      if (lastHasText) {
+        state.excludeTerms.push('');
+        renderExcludeRows();
+        const next = el.excludeRows.querySelector(`[data-exclude-index="${index}"]`);
+        next?.focus();
+        next?.setSelectionRange(value.length, value.length);
+      }
+      requestFilter();
+    }
+    function requestFilter() {
+      clearTimeout(state.filterTimer);
+      state.filterTimer = setTimeout(() => {
+        workerPost({ type: 'filter', filter: currentFilter() });
+      }, 35);
+    }
+    function requestSlice() {
+      if (!state.loaded) return;
+      const start = Math.max(0, Math.floor(el.viewport.scrollTop / ROW_HEIGHT) - BUFFER);
+      const visible = Math.ceil(el.viewport.clientHeight / ROW_HEIGHT) + BUFFER * 2;
+      workerPost({ type: 'slice', start, limit: visible });
+    }
+    function renderSlice(start, rows) {
+      el.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
+      el.rows.innerHTML = rows.map(({ index, row }) => `
+        <div class="row ${state.selectedId === row.idorden ? 'selected' : ''} ${isAdjustedPrice(row) ? 'adjusted' : ''}" data-id="${escapeHtml(row.idorden)}" data-match-index="${index}" title="${escapeHtml(row.articulo)}">
+          <div tabindex="-1" data-col="0">${escapeHtml(row.cod_proveedor)}</div>
+          <div tabindex="-1" data-col="1">${escapeHtml(row.articulo)}</div>
+          <div tabindex="-1" data-col="2" class="money">${formatMoney(row.precio_costo)}</div>
+          <div tabindex="-1" data-col="3">${escapeHtml(row.proveedor)}</div>
+        </div>
+      `).join('');
+      focusPendingTableCell();
+    }
+    function rowById(id) {
+      return state.currentRows.find((item) => String(item.row.idorden) === String(id))?.row || null;
+    }
+    function paintSelectedRow() {
+      el.rows.querySelectorAll('.row.selected').forEach((node) => node.classList.remove('selected'));
+      const safeId = CSS.escape(String(state.selectedId ?? ''));
+      if (safeId) el.rows.querySelector(`.row[data-id="${safeId}"]`)?.classList.add('selected');
+    }
+    function selectRow(row) {
+      if (!row) return;
+      state.selectedId = row.idorden;
+      state.selectedRow = row;
+      el.activeInfo.textContent = `${row.cod_proveedor || ''} · ${row.articulo || ''}`;
+      paintSelectedRow();
+    }
+    function selectRowText(rowEl) {
+      if (!rowEl) return;
+      const range = document.createRange();
+      range.selectNodeContents(rowEl);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    function selectCellText(cell) {
+      if (!cell) return;
+      cell.focus({ preventScroll: true });
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    function selectActiveField() {
+      const active = document.activeElement;
+      if (!active) return false;
+      if (active.matches?.('input, textarea')) {
+        active.select();
+        return true;
+      }
+      const cell = active.closest?.('.row [data-col], .slot-value, .slot-label');
+      if (cell) {
+        selectCellText(cell);
+        return true;
+      }
+      return false;
+    }
+    function focusPendingTableCell() {
+      const pending = state.tableNav.pending;
+      if (!pending) return;
+      const cell = el.rows.querySelector(`.row[data-match-index="${pending.matchIndex}"] [data-col="${pending.col}"]`);
+      if (!cell) return;
+      state.tableNav.pending = null;
+      const rowEl = cell.closest('.row');
+      selectRow(rowById(rowEl?.dataset.id));
+      selectCellText(cell);
+    }
+    function focusTableCell(matchIndex = 0, col = 0) {
+      if (!state.matchCount) return;
+      const nextIndex = Math.max(0, Math.min(state.matchCount - 1, matchIndex));
+      const nextCol = Math.max(0, Math.min(3, col));
+      state.tableNav.matchIndex = nextIndex;
+      state.tableNav.col = nextCol;
+      const cell = el.rows.querySelector(`.row[data-match-index="${nextIndex}"] [data-col="${nextCol}"]`);
+      if (cell) {
+        const rowEl = cell.closest('.row');
+        selectRow(rowById(rowEl?.dataset.id));
+        selectCellText(cell);
+        return;
+      }
+      state.tableNav.pending = { matchIndex: nextIndex, col: nextCol };
+      el.viewport.scrollTop = nextIndex * ROW_HEIGHT;
+      requestSlice();
+    }
+    function focusFirstTableCell() {
+      const first = state.currentRows[0];
+      if (!first) return;
+      focusTableCell(first.index, 0);
+    }
+    function setBase(row) {
+      if (!row) return;
+      state.base = row;
+      el.baseCode.value = row.cod_proveedor || '';
+      el.baseArticle.value = row.articulo || '';
+      el.basePrice.value = formatMoney(row.precio_costo);
+      el.baseProvider.value = row.proveedor || '';
+      renderSlots();
+    }
+    function copyToSlot(row) {
+      if (!row) return;
+      state.slots.push({ ...row, pickedAt: Date.now() });
+      renderSlots();
+    }
+    function calcOriginalPrice(row) {
+      return Number(row?.precio_costo_original || row?.precio_costo || 0);
+    }
+    function isAdjustedPrice(row) {
+      if (!row?.precio_costo_original) return false;
+      return Math.abs(Number(row.precio_costo || 0) - Number(row.precio_costo_original || 0)) > 0.009;
+    }
+    function calcCurrentPrice() {
+      const original = calcOriginalPrice(state.calcRow);
+      const divisor = parseFactor(el.calcDivide.value, 1);
+      const multiplier = parseFactor(el.calcMultiply.value, 1);
+      return original / divisor * multiplier;
+    }
+    function updateCalcResult() {
+      el.calcResult.textContent = formatMoney(calcCurrentPrice());
+    }
+    function openCalcModal(row) {
+      if (!row) return;
+      state.calcRow = row;
+      el.calcOriginalPrice.value = formatMoney(calcOriginalPrice(row));
+      el.calcDivide.value = row.precio_costo_divisor || '';
+      el.calcMultiply.value = row.precio_costo_multiplicador || '';
+      updateCalcResult();
+      el.calcBackdrop.classList.add('visible');
+      setTimeout(() => {
+        el.calcDivide.focus();
+        el.calcDivide.select();
+      }, 0);
+    }
+    function closeCalcModal() {
+      state.calcRow = null;
+      el.calcBackdrop.classList.remove('visible');
+    }
+    async function applyCalculatedPrice() {
+      const row = state.calcRow;
+      if (!row) return;
+      const original = calcOriginalPrice(row);
+      const calculated = Number(calcCurrentPrice().toFixed(2));
+      const updated = {
+        ...row,
+        precio_costo_original: original,
+        precio_costo_divisor: el.calcDivide.value.trim(),
+        precio_costo_multiplicador: el.calcMultiply.value.trim(),
+        precio_costo: calculated
+      };
+      if (Math.abs(calculated - original) <= 0.009) {
+        delete updated.precio_costo_original;
+        delete updated.precio_costo_divisor;
+        delete updated.precio_costo_multiplicador;
+      }
+      await saveUpdatedPriceRow(updated);
+      closeCalcModal();
+      showToast('Precio guardado.');
+    }
+    async function undoCalculatedPrice() {
+      const row = state.calcRow;
+      if (!row) return;
+      const original = calcOriginalPrice(row);
+      const updated = { ...row, precio_costo: original };
+      delete updated.precio_costo_original;
+      delete updated.precio_costo_divisor;
+      delete updated.precio_costo_multiplicador;
+      await saveUpdatedPriceRow(updated);
+      closeCalcModal();
+      showToast('Precio original restaurado.');
+    }
+    async function saveUpdatedPriceRow(updated) {
+      state.currentRows.forEach((item) => {
+        if (String(item.row.idorden) === String(updated.idorden)) item.row = updated;
+      });
+      state.slots = state.slots.map((item) => String(item.idorden) === String(updated.idorden) ? { ...item, ...updated } : item);
+      if (String(state.selectedRow?.idorden) === String(updated.idorden)) state.selectedRow = updated;
+      if (String(state.contextRow?.idorden) === String(updated.idorden)) state.contextRow = updated;
+      workerPost({ type: 'update', row: updated });
+      await idbSet('articulos', updated);
+      renderSlice(Math.max(0, Math.floor(el.viewport.scrollTop / ROW_HEIGHT) - BUFFER), state.currentRows);
+      renderSlots();
+    }
+    function clearSlot(index) {
+      state.slots.splice(index, 1);
+      renderSlots();
+    }
+    function slotDiff(row) {
+      const base = parseMoney(el.basePrice.value) || Number(state.base?.precio_costo || 0);
+      const price = Number(row?.precio_costo || 0);
+      if (!row || !base) return '';
+      return `${(((price - base) / base) * 100).toFixed(2).replace('.', ',')}%`;
+    }
+    function renderSlots() {
+      const prices = state.slots.filter(Boolean).map((row) => Number(row.precio_costo || 0));
+      const min = prices.length ? Math.min(...prices) : null;
+      if (!state.slots.length) {
+        el.slots.innerHTML = '<div class="slot empty">Toca un precio de la lista para agregarlo aca.</div>';
+        return;
+      }
+      el.slots.innerHTML = state.slots.map((row, i) => {
+        const diff = slotDiff(row);
+        const diffNum = Number(diff.replace(',', '.').replace('%', '')) || 0;
+        return `<div class="slot ${row && Number(row.precio_costo || 0) === min ? 'winner' : ''}">
+          <button class="slot-clear" type="button" data-clear-slot="${i}" title="Eliminar comparación">×</button>
+          <div class="slot-label">Cod. proveedor</div>
+          <div class="slot-value">${escapeHtml(row?.cod_proveedor || '')}</div>
+          <div class="slot-label">Articulo</div>
+          <div class="slot-value" title="${escapeHtml(row?.articulo || '')}">${escapeHtml(row?.articulo || '')}</div>
+          <div class="slot-label">Proveedor</div>
+          <div class="slot-value" title="${escapeHtml(row?.proveedor || '')}">${escapeHtml(row?.proveedor || '')}</div>
+          <div class="slot-label">Precio</div>
+          <div class="slot-value money">${row ? formatMoney(row.precio_costo) : ''}</div>
+          <div class="slot-label last">% diferencia</div>
+          <div class="slot-value last diff ${diffNum >= 0 ? 'positive' : 'negative'}">${escapeHtml(diff || 'Sin precio inicial')}</div>
+        </div>`;
+      }).join('');
+    }
+    function articleFromSheetRow(raw, headers) {
+      const get = (...names) => {
+        for (const name of names) {
+          const idx = headers.findIndex((h) => normalize(h) === normalize(name));
+          if (idx >= 0) return raw[idx];
+        }
+        return '';
+      };
+      const row = {
+        idorden: Number(get('idorden')) || Date.now() + Math.floor(Math.random() * 100000000),
+        cod_proveedor: String(get('CodProveedor') ?? '').trim(),
+        articulo: String(get('Articulo') ?? '').trim(),
+        precio_costo: Number(get('PrecioCosto')) || 0,
+        id_proveedor: String(get('IDProveedor') ?? '').trim(),
+        proveedor: String(get('Proveedor') ?? '').trim()
+      };
+      row.cod_proveedor_norm = normalize(row.cod_proveedor);
+      row.articulo_norm = normalize(row.articulo);
+      row.proveedor_norm = normalize(row.proveedor);
+      row.activo = true;
+      return row.articulo ? row : null;
+    }
+    async function readExcel(file) {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const headers = rows[0] || [];
+      const out = [];
+      for (let i = 1; i < rows.length; i++) {
+        const row = articleFromSheetRow(rows[i], headers);
+        if (row) out.push(row);
+      }
+      return out;
+    }
+    async function supabaseDeleteAll() {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?idorden=gte.0`, {
+        method: 'DELETE',
+        headers: supabaseHeaders()
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }
+    async function supabaseInsertRows(rows, version) {
+      for (let i = 0; i < rows.length; i += PAGE_SIZE) {
+        const chunk = rows.slice(i, i + PAGE_SIZE).map((row) => ({ ...row, lista_version: version }));
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?on_conflict=idorden`, {
+          method: 'POST',
+          headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+          body: JSON.stringify(chunk)
+        });
+        if (!response.ok) throw new Error(await response.text());
+        setStatus(`Subiendo a Supabase ${Math.min(i + PAGE_SIZE, rows.length).toLocaleString('es-AR')} / ${rows.length.toLocaleString('es-AR')}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    async function saveMeta(version, total, fileName = '') {
+      const payload = { id: 'principal', lista_version: version, total_articulos: total, archivo_nombre: fileName };
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
+        method: 'POST',
+        headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error(await response.text());
+      await idbSet('meta', payload);
+    }
+    async function remoteMeta() {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,updated_at&limit=1`, {
+        headers: supabaseHeaders()
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return (await response.json())?.[0] || null;
+    }
+    async function downloadRemoteArticles(meta) {
+      await idbClear('articulos');
+      let from = 0;
+      let total = 0;
+      while (true) {
+        const to = from + PAGE_SIZE - 1;
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&order=idorden.asc`, {
+          headers: supabaseHeaders({ Range: `${from}-${to}` })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const rows = await response.json();
+        if (!rows.length) break;
+        await idbBulkPut(rows);
+        total += rows.length;
+        setStatus(`Descargando lista ${total.toLocaleString('es-AR')} artículos`);
+        from += PAGE_SIZE;
+        if (rows.length < PAGE_SIZE) break;
+      }
+      await idbSet('meta', { id: 'principal', ...meta });
+    }
+    async function loadCacheIntoWorker() {
+      const rows = await idbAllArticles();
+      if (!rows.length) return false;
+      state.worker = state.worker || createWorker();
+      workerPost({ type: 'load', rows });
+      return true;
+    }
+    async function checkCloudUpdates() {
+      setStatus('Consultando versión...');
+      const meta = await remoteMeta();
+      if (!meta) {
+        setStatus('Sin lista en Supabase. Importá el Excel.');
+        return false;
+      }
+      const local = await idbGet('meta', 'principal');
+      if (!local || Number(local.lista_version) !== Number(meta.lista_version)) {
+        setStatus('Hay una lista nueva. Descargando...');
+        await downloadRemoteArticles(meta);
+        await loadCacheIntoWorker();
+        showToast('Lista actualizada desde Supabase.');
+        return true;
+      }
+      setStatus(`Lista local al día: ${Number(meta.total_articulos || state.total).toLocaleString('es-AR')} artículos`);
+      return false;
+    }
+    async function importFromCloud() {
+      setStatus('Importando lista desde Supabase...');
+      const meta = await remoteMeta();
+      if (!meta) {
+        setStatus('Sin lista en Supabase. Subí el Excel primero.');
+        return;
+      }
+      await downloadRemoteArticles(meta);
+      await loadCacheIntoWorker();
+      setStatus(`Lista importada: ${Number(meta.total_articulos || state.total).toLocaleString('es-AR')} artículos`);
+      showToast('Lista importada a esta computadora.');
+    }
+    async function importExcel(file) {
+      setStatus('Leyendo Excel...');
+      const rows = await readExcel(file);
+      if (!rows.length) throw new Error('No encontré artículos en el Excel.');
+      const version = Date.now();
+      rows.forEach((row) => row.lista_version = version);
+      setStatus('Guardando cache local...');
+      await idbClear('articulos');
+      for (let i = 0; i < rows.length; i += 5000) {
+        await idbBulkPut(rows.slice(i, i + 5000));
+        setStatus(`Cache local ${Math.min(i + 5000, rows.length).toLocaleString('es-AR')} / ${rows.length.toLocaleString('es-AR')}`);
+      }
+      await loadCacheIntoWorker();
+      setStatus('Limpiando lista anterior...');
+      await supabaseDeleteAll();
+      await supabaseInsertRows(rows, version);
+      await saveMeta(version, rows.length, file.name);
+      setStatus(`Lista subida: ${rows.length.toLocaleString('es-AR')} artículos`);
+      showToast('Lista subida a Supabase.');
+    }
+    function exportTxt() {
+      const lines = state.slots.filter(Boolean).map((row, i) => [
+        `Proveedor ${i + 1}`,
+        row.proveedor || '',
+        row.cod_proveedor || '',
+        row.articulo || '',
+        formatMoney(row.precio_costo),
+        slotDiff(row)
+      ].join('\t'));
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'comparacion-proveedores.txt';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+    document.getElementById('uploadBtn').addEventListener('click', () => el.fileInput.click());
+    document.getElementById('importBtn').addEventListener('click', () => importFromCloud().catch((error) => showToast(error.message)));
+    el.fileInput.addEventListener('change', () => {
+      const file = el.fileInput.files?.[0];
+      if (!file) return;
+      importExcel(file).catch((error) => {
+        console.error(error);
+        setStatus('Error al subir');
+        showToast(error.message || 'No pude subir el Excel.');
+      }).finally(() => el.fileInput.value = '');
+    });
+    [el.filterCode, el.filterArticle, el.filterPrice, el.filterProvider].forEach((input) => {
+      input.addEventListener('input', requestFilter);
+      input.addEventListener('focus', () => input.select());
+    });
+    el.basePrice.addEventListener('input', renderSlots);
+    el.basePrice.addEventListener('focus', () => el.basePrice.select());
+    el.excludeRows.addEventListener('input', (event) => {
+      const input = event.target.closest('[data-exclude-index]');
+      if (!input) return;
+      updateExcludeTerm(Number(input.dataset.excludeIndex), input.value);
+    });
+    el.excludeRows.addEventListener('focusin', (event) => {
+      if (event.target.matches('.exclude-input')) event.target.select();
+    });
+    el.viewport.addEventListener('scroll', requestSlice);
+    el.rows.addEventListener('click', (event) => {
+      hideRowContextMenu();
+      const rowEl = event.target.closest('.row');
+      if (!rowEl) return;
+      const row = rowById(rowEl.dataset.id);
+      selectRow(row);
+      state.tableNav.matchIndex = Number(rowEl.dataset.matchIndex) || 0;
+      state.tableNav.col = Number(event.target.closest('[data-col]')?.dataset.col) || 0;
+      if (event.detail >= 4) {
+        event.preventDefault();
+        selectRowText(rowEl);
+      }
+    });
+    el.rows.addEventListener('contextmenu', (event) => {
+      const rowEl = event.target.closest('.row');
+      if (!rowEl) return;
+      event.preventDefault();
+      const row = rowById(rowEl.dataset.id);
+      selectRow(row);
+      showRowContextMenu(event, row);
+    });
+    el.rowContextMenu.addEventListener('pointerdown', (event) => event.stopPropagation());
+    el.rowContextMenu.addEventListener('click', (event) => event.stopPropagation());
+    function compareContextRow(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rowId = event.currentTarget.dataset.rowId;
+      const row = rowById(rowId) || state.contextRow || state.selectedRow;
+      copyToSlot(row);
+      hideRowContextMenu();
+    }
+    el.compareContextBtn.addEventListener('mousedown', compareContextRow);
+    el.calcContextBtn.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rowId = event.currentTarget.dataset.rowId || el.compareContextBtn.dataset.rowId;
+      const row = rowById(rowId) || state.contextRow || state.selectedRow;
+      hideRowContextMenu();
+      openCalcModal(row);
+    });
+    [el.calcDivide, el.calcMultiply].forEach((input) => {
+      input.addEventListener('input', updateCalcResult);
+      input.addEventListener('focus', () => input.select());
+    });
+    el.calcCancelBtn.addEventListener('click', closeCalcModal);
+    el.calcUndoBtn.addEventListener('click', () => undoCalculatedPrice().catch((error) => {
+      console.error(error);
+      showToast('No pude restaurar el precio.');
+    }));
+    el.calcApplyBtn.addEventListener('click', () => applyCalculatedPrice().catch((error) => {
+      console.error(error);
+      showToast('No pude guardar el precio.');
+    }));
+    el.calcBackdrop.addEventListener('mousedown', (event) => {
+      if (event.target === el.calcBackdrop) closeCalcModal();
+    });
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('#rowContextMenu')) hideRowContextMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') hideRowContextMenu();
+    });
+    el.slots.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-clear-slot]');
+      if (btn) clearSlot(Number(btn.dataset.clearSlot));
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'F1') {
+        event.preventDefault();
+        el.filterCode.focus();
+        el.filterCode.select();
+        return;
+      }
+      if (event.key === 'F2') {
+        if (selectActiveField()) event.preventDefault();
+        return;
+      }
+      const filterOrder = [el.filterCode, el.filterArticle, el.filterProvider];
+      const filterIndex = filterOrder.indexOf(document.activeElement);
+      if (event.key === 'Enter' && filterIndex >= 0) {
+        event.preventDefault();
+        const next = filterOrder[filterIndex + 1];
+        if (next) {
+          next.focus();
+          next.select();
+        } else {
+          focusFirstTableCell();
+        }
+        return;
+      }
+      if (filterIndex >= 0 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        const input = document.activeElement;
+        const allSelected = input.selectionStart === 0 && input.selectionEnd === input.value.length;
+        const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
+        const atEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+        const shouldMoveLeft = event.key === 'ArrowLeft' && (allSelected || atStart);
+        const shouldMoveRight = event.key === 'ArrowRight' && (allSelected || atEnd);
+        if (shouldMoveLeft || shouldMoveRight) {
+          event.preventDefault();
+          const next = filterOrder[filterIndex + (shouldMoveRight ? 1 : -1)];
+          if (next) {
+            next.focus();
+            next.select();
+          }
+        }
+        return;
+      }
+      const activeCell = document.activeElement?.closest?.('.row [data-col]');
+      if (activeCell && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+        event.preventDefault();
+        const rowEl = activeCell.closest('.row');
+        const currentIndex = Number(rowEl?.dataset.matchIndex ?? state.tableNav.matchIndex);
+        const currentCol = Number(activeCell.dataset.col ?? state.tableNav.col);
+        const delta = {
+          ArrowLeft: [0, -1],
+          ArrowRight: [0, 1],
+          ArrowUp: [-1, 0],
+          ArrowDown: [1, 0]
+        }[event.key];
+        focusTableCell(currentIndex + delta[0], currentCol + delta[1]);
+        return;
+      }
+      if (event.key === 'F3' && state.selectedRow) {
+        event.preventDefault();
+        setBase(state.selectedRow);
+      }
+    });
+    async function init() {
+      state.db = await openDb();
+      renderSlots();
+      renderExcludeRows();
+      syncComparisonHeight();
+      window.addEventListener('resize', syncComparisonHeight);
+      try {
+        const hadCache = await loadCacheIntoWorker();
+        if (hadCache) {
+          setStatus('Lista local cargada. Revisando cambios en segundo plano...');
+          checkCloudUpdates().catch((error) => {
+            console.error(error);
+            setStatus('Lista local cargada. No pude revisar Supabase.');
+          });
+          return;
+        }
+        setStatus('Sin cache local. Importando desde Supabase...');
+        await importFromCloud();
+      } catch (error) {
+        const rows = await idbAllArticles();
+        if (rows.length) {
+          state.worker = createWorker();
+          workerPost({ type: 'load', rows });
+          setStatus('Lista local cargada. No pude sincronizar Supabase.');
+        } else {
+          setStatus('Subí el Excel o importá la lista desde Supabase.');
+        }
+      }
+    }
+    init();
+  </script>
+</body>
+</html>
