@@ -199,6 +199,29 @@
 
   function buildArticlesXlsBlob(articles) {
     const headers = ['IDArt', 'CodProveedor', 'Articulo', 'CodBarra', 'PrecioCosto', 'preciolista', 'PrecioVta', 'IDProveedor', 'IDRubro', 'IDMoneda', 'Nota', 'PorcIVA'];
+    const rows = [headers, ...articles.map((article) => [
+      '',
+      article.cod_proveedor || '',
+      article.articulo || '',
+      '',
+      Number(article.precio_costo || 0),
+      '',
+      '',
+      article.id_proveedor || '',
+      '',
+      '',
+      '',
+      ''
+    ])];
+
+    if (window.XLSX) {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Hoja1');
+      const output = XLSX.write(workbook, { bookType: 'biff8', type: 'array' });
+      return new Blob([output], { type: 'application/vnd.ms-excel' });
+    }
+
     const out = [
       '<?xml version="1.0"?>',
       '<?mso-application progid="Excel.Sheet"?>',
@@ -246,6 +269,351 @@
     setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
   }
 
+  const FALTANTES = (() => {
+    const INDEX_CACHE_KEY = 'corralon_index_lista_articulos_cache_v1';
+    const LIST_DB = 'corralon_lista_proveedores_v1';
+    const LOCAL_KEY = 'corralon_faltantes_rows_v2';
+    const COLLECTION = 'faltantes';
+    const FIREBASE_CONFIG = {
+      apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
+      authDomain: 'corralon-progreso.firebaseapp.com',
+      projectId: 'corralon-progreso',
+      storageBucket: 'corralon-progreso.firebasestorage.app',
+      messagingSenderId: '466583614632',
+      appId: '1:466583614632:web:42cb839f83e97475fabe9d'
+    };
+    let firebaseDb = null;
+
+    function searchNorm(value) {
+      return norm(value)
+        .replace(/([0-9]+)([a-z]+)/g, '$1 $2')
+        .replace(/([a-z]+)([0-9]+)/g, '$1 $2')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function makeLocalUid() {
+      return crypto.randomUUID ? crypto.randomUUID() : `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    function blankRow(columnFiltro = '', source = 'index') {
+      return {
+        id: '',
+        localUid: makeLocalUid(),
+        idart: '',
+        codProv: '',
+        filtro: columnFiltro,
+        proveedor: '',
+        descripcion: '',
+        cantidad: '',
+        precioCosto: 0,
+        precioFinal: 0,
+        pedido: false,
+        source
+      };
+    }
+
+    function isBlank(row) {
+      return !String(row?.idart || row?.codProv || row?.descripcion || row?.cantidad || '').trim() && !row?.pedido;
+    }
+
+    function withSearch(row) {
+      row.idartNorm = searchNorm(row.idart);
+      row.codProvNorm = searchNorm(row.codProv);
+      row.proveedorNorm = searchNorm(row.proveedor);
+      row.descripcionNorm = searchNorm(row.descripcion);
+      return row;
+    }
+
+    function normalizeIndexItem(item, index = 0) {
+      const idart = String(item.idArt || item.IDArt || item.id || item.codigo || item._codigoArticulo || index + 1).trim();
+      const descripcion = String(item.descripcion || item.Descripcion || item.nombre || item.articulo || item._descripcionPrincipal || '').trim();
+      const precio = Number(item.precioCosto || item.precio_costo || item.precioVigente || item.precio || 0);
+      const codProv = String(
+        item.idartprov || item.idArtProv || item.idart_prov || item.id_art_prov || item.artprov || item.idProveedorArticulo ||
+        item.codprov || item.codProv || item.cod_prov || item.codigo_proveedor || item.codigoProveedor || item.codigo_prov ||
+        item.codProveedor || item.CodProveedor || item.CodProveed || ''
+      ).trim();
+      return withSearch({
+        source: 'index',
+        idart,
+        codProv,
+        filtro: String(item.filtro || ''),
+        proveedor: String(item.proveedor || item.Proveedor || '').trim(),
+        descripcion,
+        precioCosto: precio,
+        precioFinal: Number(item.precioFinal || item.precioVigente || item.precio || precio)
+      });
+    }
+
+    function normalizeProviderArticle(item) {
+      return withSearch({
+        source: 'proveedores',
+        idart: String(item.idart || item.idorden || '').padStart(6, '0'),
+        codProv: String(item.cod_proveedor || '').trim(),
+        filtro: String(item.filtro || ''),
+        proveedor: String(item.proveedor || '').trim(),
+        descripcion: String(item.articulo || '').trim(),
+        precioCosto: Number(item.precio_costo || 0),
+        precioFinal: Number(item.precio_final || item.precio_costo || 0)
+      });
+    }
+
+    function rowFromRemote(item) {
+      return {
+        id: item.id || '',
+        localUid: item.local_uid || makeLocalUid(),
+        idart: item.idart || '',
+        codProv: item.cod_proveedor || '',
+        filtro: item.filtro || '',
+        proveedor: item.proveedor || '',
+        descripcion: item.descripcion || '',
+        cantidad: item.cantidad ?? '',
+        precioCosto: Number(item.precio_costo || 0),
+        precioFinal: Number(item.precio_final || 0),
+        pedido: Boolean(item.pedido),
+        source: item.origen || 'index'
+      };
+    }
+
+    function rowToRemote(row, orden = 0) {
+      if (!row.localUid) row.localUid = makeLocalUid();
+      return {
+        local_uid: row.localUid,
+        idart: row.idart || '',
+        cod_proveedor: row.codProv || '',
+        filtro: row.filtro || '',
+        proveedor: row.proveedor || '',
+        descripcion: row.descripcion || '',
+        cantidad: Number(row.cantidad || 0),
+        precio_costo: Number(row.precioCosto || 0),
+        precio_final: Number(row.precioFinal || 0),
+        pedido: Boolean(row.pedido),
+        origen: row.source || '',
+        orden,
+        updatedAt: window.firebase?.firestore?.FieldValue?.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : Date.now()
+      };
+    }
+
+    function localFiltroKey() {
+      return `${LOCAL_KEY}_filtro`;
+    }
+
+    function loadLocalRows() {
+      try {
+        return JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]') || [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveLocalRows(rows, columnFiltro = '') {
+      localStorage.setItem(localFiltroKey(), String(columnFiltro || ''));
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(rows || []));
+    }
+
+    function loadColumnFiltro() {
+      return localStorage.getItem(localFiltroKey()) || '';
+    }
+
+    function firebaseDatabase() {
+      if (firebaseDb) return firebaseDb;
+      if (!window.firebase?.firestore) return null;
+      if (!window.firebase.apps.length) window.firebase.initializeApp(FIREBASE_CONFIG);
+      firebaseDb = window.firebase.firestore();
+      return firebaseDb;
+    }
+
+    function firebaseRowFromDoc(doc) {
+      return rowFromRemote({ id: doc.id, ...doc.data() });
+    }
+
+    async function loadRemoteRows() {
+      const db = firebaseDatabase();
+      if (!db) return [];
+      const snap = await db.collection(COLLECTION).orderBy('orden', 'asc').get();
+      return snap.docs.map(firebaseRowFromDoc);
+    }
+
+    function subscribeRows(onRows, onError = console.warn) {
+      const db = firebaseDatabase();
+      if (!db) return null;
+      return db.collection(COLLECTION).orderBy('orden', 'asc').onSnapshot(
+        (snapshot) => onRows(snapshot.docs.map(firebaseRowFromDoc)),
+        onError
+      );
+    }
+
+    async function saveRows(rows) {
+      const db = firebaseDatabase();
+      if (!db) return;
+      const filled = (rows || []).filter((row) => !isBlank(row));
+      if (!filled.length) return;
+      const batch = db.batch();
+      filled.forEach((row, index) => {
+        if (!row.localUid) row.localUid = makeLocalUid();
+        batch.set(db.collection(COLLECTION).doc(row.localUid), rowToRemote(row, index), { merge: true });
+      });
+      await batch.commit();
+    }
+
+    async function deleteRowsByUid(uids) {
+      const db = firebaseDatabase();
+      const valid = [...(uids || [])].filter(Boolean);
+      if (!db || !valid.length) return;
+      const batch = db.batch();
+      valid.forEach((uid) => batch.delete(db.collection(COLLECTION).doc(uid)));
+      await batch.commit();
+    }
+
+    function readIndexCache() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(INDEX_CACHE_KEY) || 'null');
+        return (Array.isArray(raw?.data) ? raw.data : []).map(normalizeIndexItem).filter((item) => item.descripcion || item.idart);
+      } catch (error) {
+        console.warn(error);
+        return [];
+      }
+    }
+
+    function openListDb() {
+      return openDb(LIST_DB, (database) => {
+        if (!database.objectStoreNames.contains('articulos')) database.createObjectStore('articulos', { keyPath: 'idorden' });
+      });
+    }
+
+    async function readProviderArticlesCache() {
+      try {
+        const database = await openListDb();
+        return await new Promise((resolve, reject) => {
+          const request = database.transaction('articulos').objectStore('articulos').getAll();
+          request.onsuccess = () => resolve((request.result || []).map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart));
+          request.onerror = () => reject(request.error);
+        });
+      } catch (error) {
+        console.warn(error);
+        return [];
+      }
+    }
+
+    async function loadProviderNames() {
+      let providers = await getProvidersCache();
+      if (!providers.length) providers = await importProvidersCloud();
+      return providers
+        .map((provider) => ({ ...provider, idNorm: norm(provider.id_proveedor), nameNorm: norm(provider.proveedor) }))
+        .sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es', { numeric: true, sensitivity: 'base' }));
+    }
+
+    async function loadCatalog(useProviderList = false, cache = {}) {
+      const key = useProviderList ? 'proveedores' : 'index';
+      if (!cache[key]) cache[key] = useProviderList ? await readProviderArticlesCache() : readIndexCache();
+      const catalog = cache[key];
+      const byIdart = new Map();
+      for (const row of catalog) {
+        const digits = String(row.idart || '').replace(/\D/g, '').padStart(6, '0');
+        if (digits && !byIdart.has(digits)) byIdart.set(digits, row);
+      }
+      return { catalog, byIdart, cache };
+    }
+
+    function catalogFilter({ code = '', article = '', extra = '', columnFiltro = '', provider = '' } = {}) {
+      return {
+        code: searchNorm(code),
+        articleWords: searchNorm(`${article} ${columnFiltro} ${extra}`).split(' ').filter(Boolean),
+        provider: searchNorm(provider)
+      };
+    }
+
+    function catalogMatches(row, filter) {
+      return (!filter.code || row.codProvNorm.includes(filter.code) || row.idartNorm.includes(filter.code)) &&
+        (!filter.provider || row.proveedorNorm.includes(filter.provider)) &&
+        (!filter.articleWords.length || filter.articleWords.every((word) => row.descripcionNorm.includes(word)));
+    }
+
+    function catalogOptions(catalog, filter, limit = 100) {
+      const out = [];
+      for (let i = 0; i < catalog.length && out.length < limit; i++) {
+        if (catalogMatches(catalog[i], filter)) out.push(catalog[i]);
+      }
+      return out;
+    }
+
+    function providerOptions(providers, text = '', limit = 100) {
+      const query = norm(text);
+      const out = [];
+      for (let i = 0; i < providers.length && out.length < limit; i++) {
+        const row = providers[i];
+        if (!query || row.nameNorm.includes(query) || row.idNorm.includes(query)) out.push(row);
+      }
+      return out;
+    }
+
+    function applyArticle(row, item, columnFiltro = '') {
+      if (!row || !item) return false;
+      Object.assign(row, {
+        idart: item.idart,
+        codProv: item.codProv,
+        filtro: columnFiltro,
+        proveedor: item.proveedor,
+        descripcion: item.descripcion,
+        precioCosto: item.precioCosto,
+        precioFinal: item.precioFinal,
+        source: item.source
+      });
+      return true;
+    }
+
+    function applyIdart(row, byIdart, columnFiltro = '') {
+      if (!row?.idart) return false;
+      const padded = String(row.idart).replace(/\D/g, '').padStart(6, '0');
+      row.idart = padded;
+      return applyArticle(row, byIdart.get(padded), columnFiltro);
+    }
+
+    function sortRows(rows, sortState) {
+      const sortValue = (row, col) => {
+        if (col === 'id') return Number(row.id || Number.MAX_SAFE_INTEGER);
+        if (col === 'cantidad' || col === 'precioCosto' || col === 'precioFinal') return Number(row[col] || 0);
+        if (col === 'pedido') return row.pedido ? 1 : 0;
+        return norm(row[col] || '');
+      };
+      const blank = rows.filter(isBlank);
+      const filled = rows.filter((row) => !isBlank(row));
+      filled.sort((a, b) => {
+        const av = sortValue(a, sortState.col);
+        const bv = sortValue(b, sortState.col);
+        if (typeof av === 'number' || typeof bv === 'number') return ((Number(av) || 0) - (Number(bv) || 0)) * sortState.dir;
+        return String(av).localeCompare(String(bv), 'es', { numeric: true, sensitivity: 'base' }) * sortState.dir;
+      });
+      return [...filled, ...blank.slice(-1)];
+    }
+
+    return {
+      LOCAL_KEY,
+      COLLECTION,
+      searchNorm,
+      makeLocalUid,
+      blankRow,
+      isBlank,
+      loadLocalRows,
+      saveLocalRows,
+      loadColumnFiltro,
+      loadRemoteRows,
+      subscribeRows,
+      saveRows,
+      deleteRowsByUid,
+      loadProviderNames,
+      loadCatalog,
+      catalogFilter,
+      catalogOptions,
+      providerOptions,
+      applyArticle,
+      applyIdart,
+      sortRows
+    };
+  })();
+
   window.CorralonSystem = {
     SUPABASE_URL,
     SUPABASE_KEY,
@@ -266,6 +634,7 @@
     updateProviderDateOnly,
     replaceProviderArticles,
     buildArticlesXlsBlob,
-    saveBlobAs
+    saveBlobAs,
+    faltantes: FALTANTES
   };
 })();

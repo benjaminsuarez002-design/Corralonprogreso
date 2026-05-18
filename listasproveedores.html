@@ -12,23 +12,23 @@
     *, *::before, *::after { box-sizing: border-box; }
     :root {
       --ui-scale: 1;
-      --rojo: #d21f31;
-      --rojo-oscuro: #a91626;
-      --acento: #d21f31;
-      --acento-oscuro: #7f1020;
-      --borde: #f0b9c0;
-      --borde-fuerte: #df6a76;
-      --fondo: #f6eee8;
+      --rojo: #8b7cff;
+      --rojo-oscuro: #5d55c8;
+      --acento: #8b7cff;
+      --acento-oscuro: #5d55c8;
+      --borde: #cce8ff;
+      --borde-fuerte: #8bc7ff;
+      --fondo: #f6fcff;
       --panel: #fffdfa;
-      --header: #f8dfe2;
+      --header: #eef8ff;
       --fila: #ffffff;
-      --fila-alt: #fff6f7;
-      --seleccion: #ffd4d9;
+      --fila-alt: #f7fbff;
+      --seleccion: #dff7ff;
       --texto: #142033;
       --muted: #627084;
       --ok: #147847;
       --warn: #d80000;
-      --shadow: 0 8px 22px rgba(30, 48, 76, .12);
+      --shadow: 0 14px 38px rgba(81,129,255,.14);
     }
     html, body { margin: 0; height: 100%; overflow: hidden; }
     body {
@@ -53,9 +53,11 @@
       align-items: center;
       gap: 14px;
       padding: 0 28px;
-      background: var(--rojo);
-      color: #fff;
-      box-shadow: 0 3px 10px rgba(0,0,0,.16);
+      background: rgba(255,255,255,.84);
+      color: var(--texto);
+      border-bottom: 1px solid #d8ecff;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
     }
     .topbar img { width: 34px; height: 26px; object-fit: contain; background: #fff; border-radius: 2px; }
     .title {
@@ -73,7 +75,7 @@
     }
     .status {
       min-width: 250px;
-      color: rgba(255,255,255,.88);
+      color: var(--muted);
       font-size: 13px;
       font-weight: 700;
       text-align: right;
@@ -195,6 +197,28 @@
       font-family: 'Barlow Condensed', Arial, sans-serif;
       font-size: 17px;
       font-weight: 700;
+    }
+    .sort-head {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      padding: 0;
+      cursor: pointer;
+      text-align: left;
+    }
+    .sort-head .sort-mark {
+      color: var(--rojo);
+      font-size: 14px;
+      line-height: 1;
+      min-width: 14px;
+      text-align: center;
     }
     .viewport {
       position: relative;
@@ -571,10 +595,10 @@
 
         <section class="table-card">
           <div class="grid-head">
-            <div>CodProveed</div>
-            <div>Artículo</div>
-            <div>PrecioCosto</div>
-            <div>Proveedor</div>
+            <div><button class="sort-head" type="button" data-sort-col="code"><span>CodProveed</span><span class="sort-mark" data-sort-mark="code">↕</span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="article"><span>Artículo</span><span class="sort-mark" data-sort-mark="article">↕</span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="price"><span>PrecioCosto</span><span class="sort-mark" data-sort-mark="price">↕</span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="provider"><span>Proveedor</span><span class="sort-mark" data-sort-mark="provider">↕</span></button></div>
           </div>
           <div class="viewport" id="viewport">
             <div class="spacer" id="spacer"></div>
@@ -655,6 +679,7 @@
       base: null,
       slots: [],
       excludeTerms: ['', '', '', '', ''],
+      sort: { col: null, dir: 0 },
       tableNav: { matchIndex: 0, col: 0, pending: null },
       currentRows: []
     };
@@ -821,6 +846,24 @@
           if (f.price && !String(row.precio_costo || '').includes(f.price)) return false;
           return true;
         }
+        function valueFor(row, col) {
+          if (col === 'code') return row.cod_proveedor_norm || norm(row.cod_proveedor || '');
+          if (col === 'article') return row.articulo_norm || norm(row.articulo || '');
+          if (col === 'provider') return row.proveedor_norm || norm(row.proveedor || '');
+          if (col === 'price') return Number(row.precio_costo || 0);
+          return '';
+        }
+        function applySort(sort) {
+          if (!sort || !sort.col || !sort.dir) return;
+          const dir = Number(sort.dir) || 1;
+          const col = sort.col;
+          matches.sort((a, b) => {
+            const av = valueFor(data[a] || {}, col);
+            const bv = valueFor(data[b] || {}, col);
+            if (col === 'price') return (av - bv) * dir;
+            return String(av).localeCompare(String(bv), 'es', { numeric:true, sensitivity:'base' }) * dir;
+          });
+        }
         self.onmessage = (event) => {
           const msg = event.data || {};
           if (msg.type === 'load') {
@@ -839,6 +882,7 @@
             };
             matches = [];
             for (let i = 0; i < data.length; i++) if (test(data[i], f)) matches.push(i);
+            applySort(msg.sort);
             self.postMessage({ type:'filtered', count:matches.length });
           }
           if (msg.type === 'slice') {
@@ -933,7 +977,7 @@
     function requestFilter() {
       clearTimeout(state.filterTimer);
       state.filterTimer = setTimeout(() => {
-        workerPost({ type: 'filter', filter: currentFilter() });
+        workerPost({ type: 'filter', filter: currentFilter(), sort: state.sort });
       }, 35);
     }
     function requestSlice() {
@@ -941,6 +985,19 @@
       const start = Math.max(0, Math.floor(el.viewport.scrollTop / ROW_HEIGHT) - BUFFER);
       const visible = Math.ceil(el.viewport.clientHeight / ROW_HEIGHT) + BUFFER * 2;
       workerPost({ type: 'slice', start, limit: visible });
+    }
+    function updateSortMarks() {
+      document.querySelectorAll('[data-sort-mark]').forEach((mark) => {
+        const col = mark.dataset.sortMark;
+        mark.textContent = state.sort.col === col && state.sort.dir ? (state.sort.dir > 0 ? '▲' : '▼') : '↕';
+      });
+    }
+    function cycleSort(col) {
+      if (state.sort.col !== col) state.sort = { col, dir: 1 };
+      else if (state.sort.dir === 1) state.sort.dir = -1;
+      else state.sort = { col: null, dir: 0 };
+      updateSortMarks();
+      requestFilter();
     }
     function renderSlice(start, rows) {
       el.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
@@ -1338,6 +1395,9 @@
     [el.filterCode, el.filterArticle, el.filterPrice, el.filterProvider].forEach((input) => {
       input.addEventListener('input', requestFilter);
       input.addEventListener('focus', () => input.select());
+    });
+    document.querySelectorAll('[data-sort-col]').forEach((button) => {
+      button.addEventListener('click', () => cycleSort(button.dataset.sortCol));
     });
     el.basePrice.addEventListener('input', renderSlots);
     el.basePrice.addEventListener('focus', () => el.basePrice.select());
