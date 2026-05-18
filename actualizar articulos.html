@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Actualizar Articulos</title>
+  <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="corralon-system.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    :root{--red:#d21f31;--red2:#84101f;--line:#df6a76;--soft:#f8dfe2;--bg:#f6eee8;--row:#fff7f8;--text:#172033;--muted:#657080}
+    html,body{margin:0;height:100%;overflow:hidden}
+    body{font-family:Barlow,Arial,sans-serif;color:var(--text);background:var(--bg)}
+    .app{height:100dvh;display:grid;grid-template-rows:52px 1fr}
+    header{display:flex;align-items:center;gap:14px;padding:0 24px;background:var(--red);color:#fff;box-shadow:0 3px 12px #0002}
+    header img{width:34px;background:#fff;border-radius:3px}
+    h1{font:900 30px 'Barlow Condensed';margin:0}
+    .actions{margin-left:auto;display:flex;gap:10px;align-items:center}.status{font-weight:800;font-size:13px;opacity:.9}
+    button{height:34px;border:1px solid var(--red2);border-radius:7px;background:#fff;color:var(--red2);font:800 17px 'Barlow Condensed';padding:5px 14px;cursor:pointer;box-shadow:0 2px 5px #0002}
+    button.primary{background:linear-gradient(#e84d5b,var(--red));color:#fff}
+    main{display:grid;grid-template-columns:minmax(850px,1fr) 250px;gap:18px;padding:16px 24px;min-height:0}
+    .left{display:grid;grid-template-rows:auto auto 1fr auto;gap:12px;min-height:0}.right{display:grid;grid-template-rows:auto 1fr;gap:12px;min-height:0}
+    .bar,.provider,.filter-card,.note{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden;box-shadow:0 8px 22px #1e304c17}
+    .bar{display:grid;grid-template-columns:170px 1fr auto auto;align-items:center;gap:10px;padding:8px 10px}
+    .bar label{font:800 18px 'Barlow Condensed';color:var(--red2)} select,input,textarea{font:17px 'Barlow Condensed';color:var(--text);outline:0}
+    select,.bar input{height:32px;border:1px solid #f0b9c0;border-radius:5px;padding:3px 7px;background:#fff}
+    .provider{display:grid;grid-template-columns:140px 1fr 140px 180px}
+    .p-label{height:28px;background:var(--soft);padding:4px 7px;border-right:1px solid #f0b9c0;border-bottom:1px solid #f0b9c0;color:var(--muted);font:700 18px 'Barlow Condensed'}
+    .p-value{height:30px;padding:4px 7px;border-right:1px solid #f0b9c0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .table{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;display:grid;grid-template-rows:30px 1fr 24px;min-height:0;box-shadow:0 8px 22px #1e304c17}
+    .head,.row{display:grid;grid-template-columns:28px 130px minmax(360px,1fr) 140px 140px 120px}
+    .head{background:var(--soft);font:800 17px 'Barlow Condensed';color:var(--red2);padding-right:14px}
+    .head div,.row div{padding:4px 7px;border-right:1px solid #f0c0c6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .selector-cell{display:flex;align-items:center;justify-content:center;padding:0!important;color:var(--muted);cursor:pointer;user-select:none}
+    .corner-selector{position:relative;background:#f4d7dc}
+    .corner-selector::before{content:"";width:0;height:0;border-top:9px solid #9d8990;border-right:9px solid transparent}
+    .head .selectable-head{cursor:pointer;user-select:none}
+    .head .selectable-head:hover,.head .selectable-head.active{background:#f0c2ca;color:var(--red2)}
+    .body{overflow:auto}.row{height:26px;border-bottom:1px solid #eee;font-size:15px}.row:nth-child(even){background:var(--row)}.row.selected,.table.all-selected .row{background:#ffd7dc}.row .col-selected{background:#ffe1e5}.money{text-align:right;font-variant-numeric:tabular-nums}
+    .foot{display:flex;align-items:center;gap:8px;background:#fff;padding:2px 7px;border-top:1px solid #f0c0c6;font-size:12px;color:var(--muted)}
+    .note{display:grid;grid-template-columns:80px 1fr;height:72px}.note div{padding:6px;background:var(--soft);border-right:1px solid #f0c0c6;color:var(--muted)}.note textarea{border:0;padding:6px;resize:none}
+    .filter-card{display:grid;grid-template-rows:28px 32px}.filter-card div{background:var(--soft);padding:4px 7px;color:var(--muted);font:700 18px 'Barlow Condensed'}.filter-card input{border:0;border-top:1px solid #f0c0c6;padding:4px 7px}
+    .hidden{display:none}.toast{position:fixed;left:50%;bottom:26px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none}.toast.visible{opacity:1}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
+    <h1>Actualizar Articulos</h1>
+    <div class="actions"><span class="status" id="status">Inicializando...</span><button onclick="location.href='proveedores.html'">Ver Proveedor</button><button onclick="location.href='listasproveedores.html'">Comparar</button><button onclick="location.href='menu.html'">Menu</button></div>
+  </header>
+  <main>
+    <section class="left">
+      <div class="bar">
+        <label>Buscar Proveedor</label>
+        <input id="providerSearch" list="providerOptions" autocomplete="off" value="Independiente">
+        <datalist id="providerOptions"></datalist>
+        <button id="clearBtn">Borrar</button>
+        <button class="primary" id="exportBtn">Exportar</button>
+      </div>
+      <div class="provider">
+        <div class="p-label">IDProveedor</div><div class="p-label">Proveedor</div><div class="p-label">Descuento</div><div class="p-label">Ultima Actualizacion</div>
+        <div class="p-value" id="provId"></div><div class="p-value" id="provName"></div><div class="p-value money" id="provDiscount">0,00%</div><div class="p-value" id="provDate"></div>
+      </div>
+      <section class="table">
+        <div class="head">
+          <div class="selector-cell corner-selector" id="tableSelector" title="Seleccionar tabla"></div>
+          <div class="selectable-head" data-select-col="cod">CodProveedor</div>
+          <div class="selectable-head" data-select-col="art">Descripcion</div>
+          <div class="selectable-head" data-select-col="lista">Precio de Lista</div>
+          <div>Precio Costo</div>
+          <div>ID</div>
+        </div>
+        <div class="body" id="rows"></div>
+        <div class="foot"><span>Registro:</span><span id="count">0</span><span id="saveHint"></span></div>
+      </section>
+      <div class="note"><div>Nota:</div><textarea id="note"></textarea></div>
+    </section>
+    <aside class="right">
+      <section class="filter-card"><div>Filtrar</div><input id="filterInput"></section>
+      <section class="filter-card"><div>Estado</div><input id="stateBox" readonly></section>
+    </aside>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const SUPABASE_URL='https://tizyjenayrcdkcodsjnc.supabase.co';
+const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+const P_TABLE='proveedores', A_TABLE='lista_precios', DB='actualizar_articulos_v1', PROVIDERS_DB='proveedores_cache_v1';
+let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, selectionMode={type:null,cols:[]};
+const statusEl = document.getElementById('status');
+function h(extra={}){return CorralonSystem.headers(extra)}
+function norm(v){return CorralonSystem.norm(v)}
+function money(v){return `$ ${Number(v||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`}
+function pct(v){return `${(Number(v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}%`}
+function parseMoney(v){return CorralonSystem.parseMoney(v)}
+function today(){return CorralonSystem.today()}
+function show(msg){toast.textContent=msg;toast.classList.add('visible');clearTimeout(show.t);show.t=setTimeout(()=>toast.classList.remove('visible'),2200)}
+function openDb(){return new Promise((res,rej)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>{r.result.createObjectStore('providers',{keyPath:'id_proveedor'});r.result.createObjectStore('settings',{keyPath:'id'})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function setStore(store,data){return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).clear();data.forEach(x=>tx.objectStore(store).put(x));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
+function putStoreItem(store,item){return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).put(item);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
+function getStore(store){return new Promise((res,rej)=>{const r=db.transaction(store).objectStore(store).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
+function putSetting(id,value){return putStoreItem('settings',{id,value,updated_at:new Date().toISOString()})}
+function getSetting(id){return new Promise((res,rej)=>{const r=db.transaction('settings').objectStore('settings').get(id);r.onsuccess=()=>res(r.result?.value);r.onerror=()=>rej(r.error)})}
+function openProvidersDb(){return new Promise((res,rej)=>{const r=indexedDB.open(PROVIDERS_DB,1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('data'))r.result.createObjectStore('data',{keyPath:'id_proveedor'})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function getProvidersCache(){try{const pdb=await openProvidersDb();return await new Promise((res,rej)=>{const r=pdb.transaction('data').objectStore('data').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}catch(error){console.warn(error);return[]}}
+async function setProvidersCache(data){try{const pdb=await openProvidersDb();await new Promise((res,rej)=>{const tx=pdb.transaction('data','readwrite');const store=tx.objectStore('data');store.clear();data.forEach(x=>store.put(x));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(error){console.warn(error)}}
+async function putProvidersCacheItem(item){try{const pdb=await openProvidersDb();await new Promise((res,rej)=>{const tx=pdb.transaction('data','readwrite');tx.objectStore('data').put(item);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(error){console.warn(error)}}
+function renderProviders(){providers.sort((a,b)=>String(a.proveedor||'').localeCompare(String(b.proveedor||''),'es'));providerOptions.innerHTML=providers.map(p=>`<option value="${p.proveedor}">${p.id_proveedor}</option>`).join('')}
+function providerMatches(text){const q=norm(text);return providers.filter(p=>norm(p.proveedor).includes(q)||norm(p.id_proveedor).includes(q))}
+function selectProviderByText(text){const q=norm(text);const found=providers.find(p=>norm(p.proveedor)===q||norm(p.id_proveedor)===q)||providerMatches(text)[0]||null;selectProvider(found)}
+function selectProvider(found){provider=found||null;providerSearch.value=provider?.proveedor||'Independiente';provId.textContent=provider?.id_proveedor||'';provName.textContent=provider?.proveedor||'';provDiscount.textContent=pct(provider?.descuento_lista||0);provDate.textContent=provider?.ultima_actualizacion||'';note.value=provider?.nota||'';recalcArticles();render()}
+function recalcArticles(){if(!provider)return;const desc=Number(provider.descuento_lista||0);for(const a of articles){a.id_proveedor=provider.id_proveedor;a.proveedor=provider.proveedor;a.precio_costo=Number((Number(a.precio_lista||0)*(1-desc)).toFixed(2));a.descuento_lista=desc;a.ultima_actualizacion=provider.ultima_actualizacion||'';a.proveedor_norm=norm(provider.proveedor)}}
+function rowHtml(a,i){const cols=selectionMode.cols||[];return `<div class="row" data-i="${i}"><div class="selector-cell"> </div><div class="${cols.includes('cod')?'col-selected':''}">${a.cod_proveedor}</div><div class="${cols.includes('art')?'col-selected':''}" title="${a.articulo}">${a.articulo}</div><div class="money ${cols.includes('lista')?'col-selected':''}">${money(a.precio_lista)}</div><div class="money">${money(a.precio_costo)}</div><div>${a.id_proveedor||''}</div></div>`}
+function paintRows(reset=true){const limit=Math.min(renderedCount,view.length);const html=[];for(let i=0;i<limit;i++)html.push(rowHtml(view[i],i));rows.innerHTML=html.join('');count.textContent=`${limit.toLocaleString('es-AR')} de ${view.length.toLocaleString('es-AR')}`;stateBox.value=`${articles.length.toLocaleString('es-AR')} articulos cargados`}
+function render(){const words=norm(filterInput.value).split(' ').filter(Boolean);view=articles.filter(a=>!words.length||words.every(w=>a.articulo_norm.includes(w)||a.cod_proveedor_norm.includes(w)));renderedCount=100;paintRows()}
+function loadMoreRows(){if(renderedCount>=view.length)return;renderedCount=Math.min(renderedCount+100,view.length);paintRows(false)}
+function articleFromObject(o,i){const keys=Object.keys(o);const get=(...names)=>{for(const n of names){const k=keys.find(x=>norm(x)===norm(n)); if(k)return o[k]} return ''};const list=parseMoney(get('Precio de Lista','Preciolista','precio lista','preciolista'));const art=String(get('Descripcion','Articulo','articulo','descripcion')).trim();const cod=String(get('CodProveedor','Cod Proveedor','codigo')).trim();if(!art&&!cod)return null;return{cod_proveedor:cod,articulo:art,precio_lista:list,precio_costo:parseMoney(get('Precio Costo','PrecioCosto'))||list,id_proveedor:String(get('ID Proveedor','IDProveedor','idproveedor')).trim(),proveedor:provider?.proveedor||'',cod_proveedor_norm:norm(cod),articulo_norm:norm(art),proveedor_norm:norm(provider?.proveedor||''),idorden:Date.now()*1000+i}}
+async function readExcel(file){const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}).map(articleFromObject).filter(Boolean)}
+function dateOnly(v){return CorralonSystem.dateOnly(v)}
+function providerFromObject(o){return CorralonSystem.providerFromObject(o)}
+async function loadProvidersFromBundledExcel(){try{statusEl.textContent='Cargando Proveedores.xlsx...';const response=await fetch('Proveedores.xlsx');if(!response.ok)throw new Error('No encontre Proveedores.xlsx');const wb=XLSX.read(await response.arrayBuffer(),{type:'array',cellDates:true});const data=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});providers=data.map(providerFromObject).filter(Boolean);await Promise.all([setStore('providers',providers),setProvidersCache(providers)]);renderProviders();statusEl.textContent=`${providers.length.toLocaleString('es-AR')} proveedores cargados`;return true}catch(error){console.warn(error);return false}}
+function parsePasted(text){
+  const lines=String(text||'').split(/\r?\n/).filter(line=>line.trim());
+  const parsed=lines.map((line,i)=>{
+    const cols=line.split('\t');
+    const cod=String(cols[0]??'').trim();
+    const art=String(cols[1]??'').trim();
+    const list=parseMoney(cols[2]??'');
+    if(!cod&&!art&&!list)return null;
+    return {
+      cod_proveedor:cod,
+      articulo:art,
+      precio_lista:list,
+      precio_costo:list,
+      id_proveedor:provider?.id_proveedor||'',
+      proveedor:provider?.proveedor||'',
+      cod_proveedor_norm:norm(cod),
+      articulo_norm:norm(art),
+      proveedor_norm:norm(provider?.proveedor||''),
+      idorden:Date.now()*1000+i
+    };
+  }).filter(Boolean);
+  if(parsed.length)return parsed;
+  const wb=XLSX.read(text,{type:'string'});
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}).map(articleFromObject).filter(Boolean);
+}
+async function importProvidersCloud(){const out=await CorralonSystem.importProvidersCloud();if(out.length){providers=out;await setStore('providers',providers);renderProviders();statusEl.textContent=`${providers.length.toLocaleString('es-AR')} proveedores sincronizados`}}
+async function loadProviders(){providers=await getProvidersCache();if(!providers.length)providers=await getStore('providers');if(providers.length){renderProviders();statusEl.textContent=`${providers.length.toLocaleString('es-AR')} proveedores listos`}else{await loadProvidersFromBundledExcel()}importProvidersCloud().catch(error=>{console.warn(error);if(!providers.length)statusEl.textContent='No pude sincronizar proveedores'})}
+async function deleteProviderArticles(id){const r=await fetch(`${SUPABASE_URL}/rest/v1/${A_TABLE}?id_proveedor=eq.${encodeURIComponent(id)}`,{method:'DELETE',headers:h()});if(!r.ok)throw new Error(await r.text())}
+async function insertArticles(data){for(let i=0;i<data.length;i+=1000){const chunk=data.slice(i,i+1000).map((a,n)=>({...a,idorden:Date.now()*1000+i+n,articulo_source:'actualizar_articulos'}));const r=await fetch(`${SUPABASE_URL}/rest/v1/${A_TABLE}?on_conflict=idorden`,{method:'POST',headers:h({Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(chunk)});if(!r.ok)throw new Error(await r.text())}}
+async function updateProviderDate(){if(!provider)return;const value=today();provider.ultima_actualizacion=value;const stored=providers.find(p=>String(p.id_proveedor)===String(provider.id_proveedor));if(stored)stored.ultima_actualizacion=value;provDate.textContent=value;await Promise.all([putStoreItem('providers',stored||provider),CorralonSystem.updateProviderDateOnly(stored||provider)])}
+async function syncProviderArticles(){await CorralonSystem.replaceProviderArticles(provider.id_proveedor,articles)}
+async function exportAndUpdate(){if(!provider)throw new Error('Selecciona proveedor');if(!articles.length)throw new Error('No hay articulos');statusEl.textContent='Exportando Articulos.xls...';const blob=CorralonSystem.buildArticlesXlsBlob(articles);await CorralonSystem.saveBlobAs(blob,'Articulos.xls');show('Articulos.xls generado');statusEl.textContent='XLS generado. Sincronizando Supabase...';try{await Promise.all([syncProviderArticles(),updateProviderDate()])}catch(error){statusEl.textContent='XLS generado, pero fallo la sincronizacion.';throw error}statusEl.textContent='XLS generado y proveedor actualizado.'}
+async function saveArticlesCache(){await putSetting('articles_cache',articles)}
+async function loadArticlesCache(){const cached=await getSetting('articles_cache');if(Array.isArray(cached)){articles=cached;render()}}
+async function pasteArticlesFromClipboard(){const text=await navigator.clipboard.readText();articles=parsePasted(text);await saveArticlesCache();render()}
+function orderedSelectedCols(){const order=['cod','art','lista'];return order.filter(col=>(selectionMode.cols||[]).includes(col))}
+function setSelection(type,col=null,event=null){if(type==='table'){selectionMode=selectionMode.type==='table'?{type:null,cols:[]}:{type:'table',cols:[]}}else if(type==='column'){let cols=event?.ctrlKey&&selectionMode.type==='column'?[...selectionMode.cols]:[];if(event?.ctrlKey){cols=cols.includes(col)?cols.filter(x=>x!==col):[...cols,col]}else{cols=selectionMode.type==='column'&&selectionMode.cols.length===1&&selectionMode.cols[0]===col?[]:[col]}selectionMode=cols.length?{type:'column',cols}:{type:null,cols:[]}}document.querySelector('.table').classList.toggle('all-selected',selectionMode.type==='table');document.querySelectorAll('.selectable-head').forEach(head=>head.classList.toggle('active',selectionMode.type==='column'&&(selectionMode.cols||[]).includes(head.dataset.selectCol)));paintRows()}
+function selectedText(){const source=view.length?view:articles;if(selectionMode.type==='table')return source.map(a=>[a.cod_proveedor,a.articulo,a.precio_lista].join('\t')).join('\n');if(selectionMode.type==='column'){const keys={cod:'cod_proveedor',art:'articulo',lista:'precio_lista'};const cols=orderedSelectedCols();return source.map(a=>cols.map(col=>a[keys[col]]??'').join('\t')).join('\n')}return''}
+async function copySelection(){const text=selectedText();if(!text)return;await navigator.clipboard.writeText(text);show('Seleccion copiada')}
+function makeBlankArticle(i){return{cod_proveedor:'',articulo:'',precio_lista:0,precio_costo:0,id_proveedor:provider?.id_proveedor||'',proveedor:provider?.proveedor||'',cod_proveedor_norm:'',articulo_norm:'',proveedor_norm:norm(provider?.proveedor||''),idorden:Date.now()*1000+i}}
+function applyColumnValue(article,col,value){if(col==='cod'){article.cod_proveedor=String(value??'').trim();article.cod_proveedor_norm=norm(article.cod_proveedor)}else if(col==='art'){article.articulo=String(value??'').trim();article.articulo_norm=norm(article.articulo)}else if(col==='lista'){const list=parseMoney(value);article.precio_lista=list;const desc=Number(provider?.descuento_lista||article.descuento_lista||0);article.precio_costo=Number((list*(1-desc)).toFixed(2))}if(provider){article.id_proveedor=provider.id_proveedor;article.proveedor=provider.proveedor;article.descuento_lista=Number(provider.descuento_lista||0);article.ultima_actualizacion=provider.ultima_actualizacion||'';article.proveedor_norm=norm(provider.proveedor)}}
+async function pasteSelectedColumnsFromClipboard(){const cols=orderedSelectedCols();if(!cols.length){await pasteArticlesFromClipboard();return}const text=await navigator.clipboard.readText();const lines=String(text||'').split(/\r?\n/).filter(line=>line.trim().length);const target=view.length?view:articles;lines.forEach((line,i)=>{const values=line.split('\t');let article=target[i];if(!article){article=makeBlankArticle(articles.length+i);articles.push(article);if(target!==articles)target.push(article)}cols.forEach((col,n)=>applyColumnValue(article,col,values[n]??''))});await saveArticlesCache();render();show('Columnas pegadas')}
+providerSearch.addEventListener('focus',()=>providerSearch.select());
+providerSearch.addEventListener('change',()=>selectProviderByText(providerSearch.value));
+providerSearch.addEventListener('keydown',(event)=>{if(event.key==='Enter'){event.preventDefault();selectProviderByText(providerSearch.value)}});
+document.querySelector('.body').addEventListener('scroll',(event)=>{const box=event.currentTarget;if(box.scrollTop+box.clientHeight>=box.scrollHeight-80)loadMoreRows()});
+tableSelector.addEventListener('click',()=>setSelection('table'));
+document.querySelectorAll('.selectable-head').forEach(head=>head.addEventListener('click',(event)=>setSelection('column',head.dataset.selectCol,event)));
+document.addEventListener('keydown',(event)=>{const key=event.key.toLowerCase();if(event.ctrlKey&&key==='v'){event.preventDefault();(selectionMode.type==='column'?pasteSelectedColumnsFromClipboard():pasteArticlesFromClipboard()).catch(e=>{console.error(e);show('No pude pegar')})}else if(event.ctrlKey&&key==='c'&&selectionMode.type){event.preventDefault();copySelection().catch(e=>{console.error(e);show('No pude copiar')})}});
+filterInput.oninput=render;clearBtn.onclick=()=>{if(confirm('Eliminar todos los articulos cargados?')){articles=[];saveArticlesCache().catch(console.error);render()}};exportBtn.onclick=()=>exportAndUpdate().catch(e=>{console.error(e);show(e.message||'Error')});
+(async()=>{db=await openDb();await Promise.all([loadProviders(),loadArticlesCache()]);render()})();
+</script>
+</body>
+</html>
