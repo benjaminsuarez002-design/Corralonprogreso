@@ -1,0 +1,247 @@
+﻿<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pedidos</title>
+  <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="corralon-system.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    :root{--bg:#f7fdff;--panel:#fff;--line:#8ad7ff;--soft:#eefbff;--soft2:#f4f1ff;--accent:#7d8cff;--red:#df1731;--cyan:#16c8ff;--green:#00c878;--pink:#ff5c8a;--text:#20223a;--muted:#66708e;--row:#f8fcff;--select:#dff8ff;--shadow:0 14px 38px rgba(67,140,255,.14)}
+    html,body{margin:0;height:100%;overflow:hidden}
+    body{font-family:Barlow,Arial,sans-serif;color:var(--text);background:linear-gradient(135deg,#f8feff,#edfaff 58%,#f6f2ff)}
+    body.syncing .status{color:var(--red)}
+    .app{height:100dvh;display:flex;flex-direction:column;gap:12px;padding-bottom:14px;overflow:hidden}
+    header{display:flex;align-items:center;gap:14px;padding:0 24px;background:rgba(255,255,255,.9);border-bottom:1px solid #d8ecff;box-shadow:var(--shadow);backdrop-filter:blur(10px)}
+    header img{width:36px;background:#fff;border-radius:7px}
+    h1{font:900 34px 'Barlow Condensed';margin:0;color:var(--red)}
+    .top-actions{margin-left:auto;display:flex;gap:10px;align-items:center}.status{font-weight:800;color:var(--muted)}.order-counter{min-width:54px;text-align:center;padding:7px 10px;border:1px solid var(--line);border-radius:12px;background:#fff;font:900 18px 'Barlow Condensed';color:var(--accent);box-shadow:0 8px 20px #6aa8ff22}
+    .icon-btn{width:38px;padding:0;font-size:24px;line-height:1}
+    button{height:36px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--text);font:800 17px 'Barlow Condensed';padding:6px 16px;cursor:pointer;box-shadow:0 8px 20px #6aa8ff22}
+    button.primary{background:linear-gradient(135deg,#df1731,#ff5c8a);color:#fff;border-color:#ff8ba5}
+    .order-head,.table,.totals{margin:0 22px}
+    .order-head{display:grid;grid-template-columns:minmax(460px,1.35fr) 150px 132px 166px 214px;gap:10px;align-items:end}
+    .field,.toggle-card{border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.94);overflow:hidden;box-shadow:var(--shadow)}
+    .label{height:26px;padding:4px 8px;background:var(--soft);color:var(--muted);font:800 17px 'Barlow Condensed'}
+    input{width:100%;height:32px;border:0;outline:0;background:#fff;color:var(--text);font:18px 'Barlow Condensed';padding:5px 8px}
+    input[readonly]{background:#f9fdff;color:var(--muted)}
+    input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+    .toggle-card{height:58px;display:flex;align-items:center;gap:8px;padding:0 10px;font:800 16px 'Barlow Condensed';color:var(--muted)}
+    .toggle-card.catalog-syncing{border-color:var(--red);box-shadow:0 0 0 2px rgba(223,23,49,.18),var(--shadow)}
+    .toggle-card.catalog-ready{border-color:var(--green);box-shadow:0 0 0 2px rgba(0,200,120,.18),var(--shadow)}
+    .table{border:1px solid var(--line);border-radius:14px;background:#fff;display:grid;grid-template-rows:34px 1fr 26px;height:clamp(310px,48dvh,560px);min-height:0;overflow:hidden;box-shadow:var(--shadow)}
+    .head,.row{display:grid;grid-template-columns:26px 190px 150px minmax(410px,1fr) 110px 140px 140px 150px 150px 150px 220px}
+    .head{background:linear-gradient(90deg,var(--soft2),var(--soft));font:900 17px 'Barlow Condensed';padding-right:14px;border-bottom:1px solid var(--line)}
+    .head div,.row div{border-right:1px solid #d9edff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .head div{padding:6px 8px}.body{overflow:auto;min-height:0}.row{min-height:30px;border-bottom:1px solid #eef4ff;font-size:16px}.row:nth-child(even){background:var(--row)}.row:hover,.row.active{background:var(--select)}.row.selected{background:#cfefff!important}.row.sync-pending{background:#ffe5eb!important;box-shadow:inset 3px 0 0 var(--red)}
+    .selector{display:flex;align-items:center;justify-content:center;background:#f6fbff;color:var(--accent);font-weight:900;cursor:default;user-select:none}.row.selected .selector{background:#bfe6ff}.row input{height:30px;background:transparent;border:0;padding:0 7px;font:16px Barlow,Arial;color:var(--text)}.row input:focus{background:#fff}
+    .money,.qty{text-align:right;font-variant-numeric:tabular-nums}.diff.bad{color:var(--pink);font-weight:800}.diff.good{color:var(--green);font-weight:800}
+    .foot{display:flex;align-items:center;gap:10px;background:#fff;padding:3px 8px;border-top:1px solid #d9edff;color:var(--muted);font-size:13px;font-weight:800}
+    .totals{display:flex;justify-content:center;align-items:center;gap:14px}.total-box{display:grid;grid-template-columns:90px 170px;border:1px solid var(--line);background:#fff;border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}.total-box span{padding:8px 10px;background:var(--soft);font:800 18px 'Barlow Condensed';color:var(--muted)}.total-box strong{padding:8px 10px;text-align:right;font-size:18px}
+    .combo-menu{position:fixed;z-index:60;display:none;max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:var(--shadow);min-width:360px}.combo-menu.visible{display:block}.combo-option{display:grid;grid-template-columns:120px 1fr 150px 120px;gap:8px;padding:6px 8px;border-bottom:1px solid #edf4ff;cursor:pointer;font-size:15px}.combo-option:hover,.combo-option.active{background:var(--select)}.combo-price{text-align:right;color:var(--green);font-weight:800}
+    .modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;background:rgba(12,24,48,.28);backdrop-filter:blur(5px)}.modal.visible{display:flex}.modal-card{width:min(980px,94vw);height:min(680px,86vh);display:grid;grid-template-rows:auto 1fr;background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.detail-card{grid-template-rows:auto 1fr auto}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:linear-gradient(90deg,var(--soft),#fff)}.modal-head h2{margin:0;font:900 27px 'Barlow Condensed';color:var(--red)}.modal-head button{margin-left:auto}.history-list{overflow:auto;padding:12px}.history-row{display:grid;grid-template-columns:90px 1fr 120px 120px 130px 92px;gap:8px;align-items:center;min-height:38px;border-bottom:1px solid #edf4ff;font-size:16px}.history-row:not(.head){cursor:pointer}.history-row:not(.head):hover{background:var(--select)}.history-row.head{position:sticky;top:0;z-index:1;background:var(--soft);font:900 17px 'Barlow Condensed';padding-right:0}.history-row div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-row button{height:30px;padding:4px 12px}
+    .order-detail{overflow:auto;padding:14px}.detail-summary{display:grid;grid-template-columns:90px 1fr 130px 150px;gap:8px;margin-bottom:12px}.detail-summary div{border:1px solid #d9edff;border-radius:10px;background:#fff;padding:8px}.detail-summary span{display:block;color:var(--muted);font:800 15px 'Barlow Condensed'}.detail-summary strong{font-size:17px}.detail-table{border:1px solid var(--line);border-radius:12px;overflow:hidden}.detail-row{display:grid;grid-template-columns:120px minmax(260px,1fr) 80px 120px 120px 130px 160px;min-height:32px;border-bottom:1px solid #edf4ff}.detail-row:nth-child(even){background:var(--row)}.detail-row.head{background:var(--soft);font:900 16px 'Barlow Condensed'}.detail-row div{padding:6px 8px;border-right:1px solid #d9edff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-actions{display:flex;justify-content:flex-end;gap:10px;padding:12px 16px;border-top:1px solid #d9edff;background:#fff}.danger{background:linear-gradient(135deg,#df1731,#ff5c8a);border-color:#ff8ba5;color:#fff}
+    .context-menu{position:fixed;z-index:95;display:none;min-width:170px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:var(--shadow);padding:5px}.context-menu.visible{display:block}.context-menu button{width:100%;height:32px;border:0;border-radius:7px;box-shadow:none;text-align:left;background:#fff}.context-menu button:hover{background:var(--select)}
+    @media(max-width:1000px){.order-head{grid-template-columns:1fr}.head,.row{grid-template-columns:26px 120px 95px minmax(230px,1fr) 70px 105px 105px 115px 95px 95px 130px}.status{display:none}}
+  </style>
+  <script src="nav-helper.js"></script>
+</head>
+<body>
+<div class="app">
+  <header>
+    <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
+    <h1>Pedidos</h1>
+    <div class="top-actions">
+      <span class="status" id="status">Inicializando...</span>
+      <button class="icon-btn" id="prevOrderBtn" type="button" title="Pedido anterior">‹</button>
+      <button class="icon-btn" id="nextOrderBtn" type="button" title="Pedido siguiente">›</button>
+      <span class="order-counter" id="orderCounter">0/0</span>
+      <button id="newOrderBtn" type="button">Nuevo pedido</button>
+      <button id="historyBtn" type="button">Historial</button>
+      <button data-nav-url="menu.html">Menu</button>
+    </div>
+  </header>
+  <section class="order-head">
+    <div class="field"><div class="label">Proveedor</div><input id="providerInput" autocomplete="off"></div>
+    <div class="field"><div class="label">Nro Pedido</div><input id="orderNumber" inputmode="numeric" readonly></div>
+    <label class="toggle-card"><input id="confirmedCheck" type="checkbox"> Pedido?</label>
+    <div class="field"><div class="label">Fecha</div><input id="dateInput" type="date"></div>
+    <label class="toggle-card catalog-syncing" id="catalogToggleCard"><input id="filterPriceList" type="checkbox"> Filtrar en listas de precio</label>
+  </section>
+  <section class="table">
+    <div class="head">
+      <div></div><div>Codigo Proveedor</div><div>Filtro</div><div>Articulos</div><div>Cantidad</div><div>s.iva</div><div>c.iva</div><div>Subtotal</div><div>antes</div><div>Diferencia</div><div>Proveedor</div>
+    </div>
+    <div class="body" id="rows"></div>
+    <div class="foot"><span>Registro:</span><span id="recordInfo">0 de 0</span><span id="sourceInfo" style="margin-left:auto"></span></div>
+  </section>
+  <section class="totals">
+    <button class="primary" id="confirmBtn" type="button">Confirmar Pedido</button>
+    <div class="total-box"><span>Total</span><strong id="totalValue">$ 0,00</strong></div>
+  </section>
+</div>
+<div class="combo-menu" id="comboMenu"></div>
+<div class="context-menu" id="rowContextMenu">
+  <button type="button" id="compareRowBtn">Comparar</button>
+  <button type="button" id="deleteRowsBtn">Eliminar fila</button>
+</div>
+<div class="modal" id="historyModal">
+  <div class="modal-card">
+    <div class="modal-head"><h2>Historial de pedidos confirmados</h2><button id="closeHistoryBtn" type="button">Cerrar</button></div>
+    <div class="history-list" id="historyList"></div>
+  </div>
+</div>
+<div class="modal" id="orderDetailModal">
+  <div class="modal-card detail-card">
+    <div class="modal-head"><h2 id="orderDetailTitle">Pedido</h2><button id="closeOrderDetailBtn" type="button">Cerrar</button></div>
+    <div class="order-detail" id="orderDetailBody"></div>
+    <div class="detail-actions">
+      <button id="editOrderDetailBtn" type="button">Editar</button>
+      <button class="danger" id="deleteOrderDetailBtn" type="button">Eliminar pedido</button>
+    </div>
+  </div>
+</div>
+<script>
+const Core=CorralonSystem;
+const Catalog=CorralonSystem.faltantes;
+const LOCAL_KEY='corralon_pedidos_actual_v1';
+const ORDER_COUNTER_LOCAL_KEY='corralon_pedidos_ultimo_numero_v2';
+const ORDER_COUNTER_DOC='pedidos_secuencial_v1';
+const FIREBASE_CONFIG={apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',authDomain:'corralon-progreso.firebaseapp.com',projectId:'corralon-progreso',storageBucket:'corralon-progreso.firebasestorage.app',messagingSenderId:'466583614632',appId:'1:466583614632:web:42cb839f83e97475fabe9d'};
+const cols=[1,2,3,4,5,6];
+let db=null,catalog=[],catalogCache={index:null,proveedores:null},providerRows=[],rows=[],headerProviderId='',orderList=[],currentOrderIndex=-1,detailOrderId='',activeCell={row:0,col:3},contextRowIndex=-1,selectedRows=new Set(),pendingRows=new Set(),suppressArticleChange=new Set(),lastSelectedRow=-1,suppressNextFocusCombo=false,combo={input:null,rowIndex:-1,active:0,options:[],mode:'article',navigated:false},saveTimer=null,savingRemote=false,saveAgain=false;
+const els={
+  status:document.getElementById('status'),
+  orderCounter:document.getElementById('orderCounter'),
+  rows:document.getElementById('rows'),
+  recordInfo:document.getElementById('recordInfo'),
+  sourceInfo:document.getElementById('sourceInfo'),
+  filterPriceList:document.getElementById('filterPriceList'),
+  providerInput:document.getElementById('providerInput'),
+  orderNumber:document.getElementById('orderNumber'),
+  confirmedCheck:document.getElementById('confirmedCheck'),
+  dateInput:document.getElementById('dateInput'),
+  confirmBtn:document.getElementById('confirmBtn'),
+  prevOrderBtn:document.getElementById('prevOrderBtn'),
+  nextOrderBtn:document.getElementById('nextOrderBtn'),
+  newOrderBtn:document.getElementById('newOrderBtn'),
+  historyBtn:document.getElementById('historyBtn'),
+  historyModal:document.getElementById('historyModal'),
+  historyList:document.getElementById('historyList'),
+  closeHistoryBtn:document.getElementById('closeHistoryBtn'),
+  orderDetailModal:document.getElementById('orderDetailModal'),
+  orderDetailTitle:document.getElementById('orderDetailTitle'),
+  orderDetailBody:document.getElementById('orderDetailBody'),
+  closeOrderDetailBtn:document.getElementById('closeOrderDetailBtn'),
+  editOrderDetailBtn:document.getElementById('editOrderDetailBtn'),
+  deleteOrderDetailBtn:document.getElementById('deleteOrderDetailBtn'),
+  rowContextMenu:document.getElementById('rowContextMenu'),
+  compareRowBtn:document.getElementById('compareRowBtn'),
+  deleteRowsBtn:document.getElementById('deleteRowsBtn'),
+  totalValue:document.getElementById('totalValue'),
+  comboMenu:document.getElementById('comboMenu')
+};
+function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function money(v){return Core.money(v)}
+function parseMoney(v){return Core.parseMoney(v)}
+function today(){return new Date().toISOString().slice(0,10)}
+function orderId(){return String(els.orderNumber.value||'').trim()||String(Date.now()).slice(-6)}
+function firebaseDb(){if(db)return db;if(!window.firebase?.firestore)return null;if(!window.firebase.apps.length)window.firebase.initializeApp(FIREBASE_CONFIG);db=window.firebase.firestore();return db}
+async function nextOrderNumber(){const localLast=Number(localStorage.getItem(ORDER_COUNTER_LOCAL_KEY)||0);const firestore=firebaseDb();if(!firestore){const next=localLast+1;localStorage.setItem(ORDER_COUNTER_LOCAL_KEY,String(next));return next}try{const ref=firestore.collection('contadores').doc(ORDER_COUNTER_DOC);const next=await firestore.runTransaction(async tx=>{const snap=await tx.get(ref);const remoteLast=Number(snap.exists?snap.data().ultimo:0)||0;const value=Math.max(localLast,remoteLast)+1;tx.set(ref,{ultimo:value,updatedAt:window.firebase.firestore.FieldValue.serverTimestamp()},{merge:true});return value});localStorage.setItem(ORDER_COUNTER_LOCAL_KEY,String(next));return next}catch(error){console.warn(error);const next=localLast+1;localStorage.setItem(ORDER_COUNTER_LOCAL_KEY,String(next));return next}}
+async function ensureOrderNumber(){if(String(els.orderNumber.value||'').trim())return;els.orderNumber.value=String(await nextOrderNumber())}
+function cleanProviderId(value){return String(value??'').trim().replace(/\.0+$/,'')}
+function providerDisplay(provider){const id=cleanProviderId(provider?.id_proveedor||provider?.idProveedor||'');const name=String(provider?.proveedor||'').trim();return id&&name?`${id} - ${name}`:name||id}
+function selectedProviderName(){return String(els.providerInput.value||'').replace(/^\s*\d+\s*[-–]\s*/,'').trim()}
+function makeRowUid(){return crypto.randomUUID?crypto.randomUUID():`pedido-${Date.now()}-${Math.random().toString(16).slice(2)}`}
+function ensureRowUid(row){if(row&&!row.localUid)row.localUid=makeRowUid();return row}
+function blankRow(){return{localUid:makeRowUid(),codProv:'',filtro:'',articulo:'',cantidad:'',precioSiva:0,precioCiva:0,subtotal:0,antes:0,diferencia:0,proveedor:'',idProveedor:''}}
+function isBlank(row){return !String(row.codProv||row.filtro||row.articulo||row.cantidad||'').trim()}
+function isSelectableRow(index){return rows[index]&&!isBlank(rows[index])}
+function ensureBlank(){rows.forEach(ensureRowUid);while(rows.length>1&&isBlank(rows[rows.length-1])&&isBlank(rows[rows.length-2]))rows.pop();if(!rows.length||!isBlank(rows[rows.length-1]))rows.push(blankRow())}
+function recalc(row){row.precioCiva=Number(row.precioSiva||0)*1.21;row.subtotal=Number(row.precioCiva||0)*Number(row.cantidad||0);row.diferencia=Number(row.precioSiva||0)?((Number(row.antes||0)-Number(row.precioSiva||0))/Number(row.precioSiva||0))*100:0}
+function total(){return rows.reduce((sum,row)=>sum+Number(row.subtotal||0),0)}
+function saveLocal(){localStorage.setItem(LOCAL_KEY,JSON.stringify({header:headerData(),rows}))}
+function loadLocal(){try{const data=JSON.parse(localStorage.getItem(LOCAL_KEY)||'null');if(data){headerProviderId=cleanProviderId(data.header?.idProveedor||data.header?.id_proveedor||'');Object.assign(els.providerInput,{value:data.header?.proveedor||''});els.orderNumber.value=data.header?.id||'';els.confirmedCheck.checked=Boolean(data.header?.confirmado);els.dateInput.value=data.header?.fecha||today();els.filterPriceList.checked=false;rows=Array.isArray(data.rows)?data.rows:[]}}catch{}}
+function hasOrderContent(){return String(els.providerInput.value||'').trim()||rows.some(row=>!isBlank(row))}
+function normalizeOrderDoc(doc){const data=doc.data?doc.data():doc;return{...data,id:String(data.id||doc.id||''),detalles:Array.isArray(data.detalles)?data.detalles:[]}}
+function pendingOrders(){return orderList.filter(order=>!order.confirmado).sort((a,b)=>Number(a.id)-Number(b.id))}
+function updateOrderCounter(){const pending=pendingOrders();const index=pending.findIndex(order=>String(order.id)===orderId());if(els.orderCounter)els.orderCounter.textContent=pending.length?`${index>=0?index+1:0}/${pending.length}`:'0/0'}
+function clearSelection(){selectedRows.clear();lastSelectedRow=-1}
+function loadOrder(order){clearSelection();headerProviderId=cleanProviderId(order.idProveedor||order.id_proveedor||'');els.providerInput.value=order.proveedor||'';els.orderNumber.value=String(order.id||'');els.confirmedCheck.checked=Boolean(order.confirmado);els.dateInput.value=order.fecha||today();els.filterPriceList.checked=false;rows=Array.isArray(order.detalles)&&order.detalles.length?order.detalles.map(row=>({...blankRow(),...row})): [blankRow()];ensureBlank();saveLocal();paint();updateOrderCounter();focusCell(0,3)}
+async function refreshOrderList(){const firestore=firebaseDb();if(!firestore){updateOrderCounter();return[]}try{const snap=await firestore.collection('pedidos').orderBy('id','asc').get();orderList=snap.docs.map(normalizeOrderDoc).sort((a,b)=>Number(a.id)-Number(b.id));currentOrderIndex=orderList.findIndex(order=>String(order.id)===orderId());updateOrderCounter();return orderList}catch(error){console.warn(error);updateOrderCounter();return orderList}}
+async function newBlankOrder(){clearSelection();headerProviderId='';rows=[blankRow()];els.providerInput.value='';els.orderNumber.value='';els.confirmedCheck.checked=false;els.dateInput.value=today();els.filterPriceList.checked=false;await ensureOrderNumber();currentOrderIndex=-1;saveLocal();paint();updateOrderCounter();focusCell(0,3)}
+async function openNewOrder(saveCurrent=true){clearTimeout(saveTimer);if(saveCurrent&&hasOrderContent()){const ok=await saveRemote();if(!ok){els.status.textContent='No se pudo guardar el pedido actual';return}}await newBlankOrder();els.status.textContent='Pedido nuevo'}
+function setSyncing(value,text='Sincronizando...'){document.body.classList.toggle('syncing',value);if(value)els.status.textContent=text}
+function paintRowSyncState(){els.rows.querySelectorAll('.row').forEach(rowEl=>rowEl.classList.toggle('sync-pending',pendingRows.has(rowEl.dataset.uid)))}
+function markPending(row){if(!row||isBlank(row))return;ensureRowUid(row);pendingRows.add(row.localUid);paintRowSyncState();els.status.textContent='Pendiente de sincronizar'}
+function queueSave(row=null){if(row)markPending(row);saveLocal();clearTimeout(saveTimer)}
+function syncPendingRows(){if(!pendingRows.size)return;clearTimeout(saveTimer);saveRemote()}
+function headerData(){return{id:orderId(),idProveedor:headerProviderId,proveedor:els.providerInput.value.trim(),fecha:els.dateInput.value||today(),confirmado:els.confirmedCheck.checked,total:total(),updatedAt:Date.now()}}
+async function saveRemote(){if(!hasOrderContent())return true;if(savingRemote){saveAgain=true;return false}const firestore=firebaseDb();if(!firestore){setSyncing(false,'Sin conexion a Firebase');paintRowSyncState();return false}savingRemote=true;setSyncing(true);try{const filled=rows.filter(row=>!isBlank(row));const payload={...headerData(),detalles:filled};if(window.firebase?.firestore?.FieldValue?.delete)payload.usarLista=window.firebase.firestore.FieldValue.delete();await firestore.collection('pedidos').doc(orderId()).set(payload,{merge:true});const localPayload={...headerData(),detalles:filled};const existing=orderList.findIndex(order=>String(order.id)===String(localPayload.id));if(existing>=0)orderList[existing]={...orderList[existing],...localPayload};else orderList.push(localPayload);orderList.sort((a,b)=>Number(a.id)-Number(b.id));pendingRows.clear();paintRowSyncState();updateOrderCounter();setSyncing(false);els.status.textContent='Sincronizado';return true}catch(error){console.warn(error);setSyncing(false);paintRowSyncState();els.status.textContent='Error al sincronizar';return false}finally{savingRemote=false;if(saveAgain){saveAgain=false;syncPendingRows()}}}
+async function loadProviders(){try{providerRows=await Catalog.loadProviderNames()}catch(error){console.warn(error);providerRows=[]}}
+async function loadCatalog(force=false){els.status.textContent='Cargando articulos...';const useProviderList=Boolean(els.filterPriceList.checked);const loaded=await Catalog.loadCatalog(useProviderList,force?{}:catalogCache,force);catalog=loaded.catalog;catalogCache=loaded.cache;els.sourceInfo.textContent=`Combo: ${Catalog.catalogSourceLabel(useProviderList)}`;els.status.textContent=`${catalog.length.toLocaleString('es-AR')} articulos disponibles`}
+function editingCatalogFlow(){return Boolean(document.activeElement?.closest?.('#rows [data-col]')||els.comboMenu.classList.contains('visible'))}
+function syncCatalogBackground(){const useProviderList=Boolean(els.filterPriceList.checked);Catalog.syncCatalogInBackground(useProviderList,catalogCache,(updated,cache)=>{catalogCache=cache;if(Boolean(els.filterPriceList.checked)!==useProviderList)return;catalog=updated;els.sourceInfo.textContent=`Combo: ${Catalog.catalogSourceLabel(useProviderList)} actualizado`;if(!editingCatalogFlow())els.status.textContent=`${catalog.length.toLocaleString('es-AR')} articulos disponibles`})}
+function warmOppositeCatalog(){const other=!Boolean(els.filterPriceList.checked);Catalog.loadCatalog(other,catalogCache,false).then(loaded=>{catalogCache=loaded.cache;Catalog.syncCatalogInBackground(other,catalogCache)}).catch(console.warn)}
+function articleFilter(text='',rowIndex=-1){const row=rows[rowIndex]||{};const useProviderList=Boolean(els.filterPriceList.checked);return Catalog.catalogFilter({code:row.codProv,article:'',extra:`${row.filtro||''} ${text||''}`,providerId:'',provider:useProviderList?selectedProviderName():''})}
+function articleOptions(text,rowIndex=combo.rowIndex){if(els.filterPriceList.checked&&!selectedProviderName())return[];return Catalog.catalogOptions(catalog,articleFilter(text,rowIndex),100)}
+function providerOptions(text){return Catalog.providerOptions(providerRows,text,100)}
+function showCombo(input,keepActive=false,mode='article'){combo.input=input;combo.mode=mode;combo.rowIndex=Number(input.closest('.row')?.dataset.row??-1);if(!keepActive){combo.active=0;combo.navigated=false}combo.options=mode==='provider'?providerOptions(input.value):articleOptions(input.value,combo.rowIndex);combo.active=Math.max(0,Math.min(combo.active,combo.options.length-1));const rect=input.getBoundingClientRect();const tableRect=els.rows.getBoundingClientRect();const below=window.innerHeight-rect.bottom-8;const above=rect.top-8;const openUp=below<210&&above>below;const maxHeight=Math.max(120,Math.min(280,openUp?above:below));els.comboMenu.style.left=`${mode==='article'?tableRect.left:rect.left}px`;els.comboMenu.style.top=`${openUp?Math.max(8,rect.top-maxHeight-3):rect.bottom+3}px`;els.comboMenu.style.width=`${mode==='article'?tableRect.width:Math.max(rect.width,420)}px`;els.comboMenu.style.maxHeight=`${maxHeight}px`;els.comboMenu.innerHTML=combo.options.map((row,i)=>mode==='provider'?`<div class="combo-option ${i===combo.active?'active':''}" data-index="${i}" style="grid-template-columns:100px 1fr"><span>${esc(row.id_proveedor)}</span><span>${esc(row.proveedor)}</span></div>`:`<div class="combo-option ${i===combo.active?'active':''}" data-index="${i}"><span>${esc(row.codProv||row.idart)}</span><span>${esc(row.descripcion)}</span><span>${esc(row.proveedor)}</span><span class="combo-price">${money(row.precioCosto)}</span></div>`).join('')||'<div class="combo-option">Sin coincidencias</div>';els.comboMenu.classList.add('visible');if(openUp)requestAnimationFrame(()=>{els.comboMenu.style.top=`${Math.max(8,rect.top-els.comboMenu.offsetHeight-3)}px`})}
+function hideCombo(){els.comboMenu.classList.remove('visible');combo.input=null}
+function pickCombo(index=combo.active){const item=combo.options[index];if(!item)return;if(combo.mode==='provider'){headerProviderId=cleanProviderId(item.id_proveedor||item.idProveedor||'');els.providerInput.value=providerDisplay(item);hideCombo();queueSave();focusCell(0,3,false);return}const row=rows[combo.rowIndex];if(!row)return;ensureRowUid(row);suppressArticleChange.add(row.localUid);row.idProveedor=item.idProveedor||headerProviderId||'';row.codProv=item.codProv||item.idart||'';row.articulo=item.descripcion||'';row.precioSiva=Number(item.precioCosto||0);row.proveedor=row.idProveedor&&item.proveedor?`${row.idProveedor} - ${item.proveedor}`:item.proveedor||els.providerInput.value||'';if(!row.cantidad)row.cantidad=1;recalc(row);ensureBlank();hideCombo();paint();queueSave(row);focusCell(combo.rowIndex,4)}
+function normalizeSelection(){selectedRows=new Set([...selectedRows].filter(index=>isSelectableRow(index)))}
+function selectRow(index,event={}){if(!isSelectableRow(index))return;hideCombo();if(event.shiftKey&&lastSelectedRow>=0){const start=Math.min(lastSelectedRow,index),end=Math.max(lastSelectedRow,index);if(!event.ctrlKey&&!event.metaKey)selectedRows.clear();for(let i=start;i<=end;i++)if(isSelectableRow(i))selectedRows.add(i)}else if(event.ctrlKey||event.metaKey){if(selectedRows.has(index))selectedRows.delete(index);else selectedRows.add(index);lastSelectedRow=index}else{selectedRows.clear();selectedRows.add(index);lastSelectedRow=index}paint()}
+function deleteSelectedRows(){normalizeSelection();if(!selectedRows.size)return;const focusIndex=Math.min(...selectedRows);[...selectedRows].sort((a,b)=>b-a).forEach(index=>rows.splice(index,1));clearSelection();ensureBlank();paint();saveLocal();saveRemote();focusCell(Math.min(focusIndex,rows.length-1),3)}
+function showRowContextMenu(event){event.preventDefault();els.rowContextMenu.style.left=`${event.clientX}px`;els.rowContextMenu.style.top=`${event.clientY}px`;els.rowContextMenu.classList.add('visible')}
+function hideRowContextMenu(){els.rowContextMenu.classList.remove('visible')}
+function compareUrlFromRow(row){const params=new URLSearchParams({baseCode:row.codProv||'',baseArticle:row.articulo||'',basePrice:String(row.precioSiva||row.precioCiva||0),baseProvider:row.proveedor||els.providerInput.value||''});return `listasproveedores.html?${params.toString()}`}
+function openCompareForContextRow(){const row=rows[contextRowIndex];if(!row||isBlank(row))return;window.open(compareUrlFromRow(row),'comparar-listas','popup=yes,width=1320,height=820,resizable=yes,scrollbars=yes')}
+function paint(){ensureBlank();rows.forEach(recalc);normalizeSelection();const visible=rows;els.rows.innerHTML=visible.map((row,i)=>`<div class="row ${activeCell.row===i?'active':''} ${selectedRows.has(i)?'selected':''} ${pendingRows.has(row.localUid)?'sync-pending':''}" data-row="${i}" data-uid="${esc(row.localUid)}"><div class="selector" data-selector="1">${isBlank(row)?'*':(selectedRows.has(i)?'▶':'›')}</div><div><input data-col="1" value="${esc(row.codProv)}"></div><div><input data-col="2" value="${esc(row.filtro)}"></div><div><input data-col="3" class="article-input" value="${esc(row.articulo)}" autocomplete="off"></div><div><input data-col="4" class="qty" value="${esc(row.cantidad)}"></div><div><input data-col="5" class="money" value="${money(row.precioSiva)}"></div><div><input data-col="6" class="money" value="${money(row.precioCiva)}"></div><div class="money">${money(row.subtotal)}</div><div><input data-col="7" class="money" value="${money(row.antes)}"></div><div class="money diff ${row.diferencia<0?'bad':'good'}">${Number.isFinite(row.diferencia)?row.diferencia.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%':''}</div><div>${esc(row.proveedor)}</div></div>`).join('');els.recordInfo.textContent=`${rows.length-1} de ${rows.length-1}`;els.totalValue.textContent=money(total());updateOrderCounter();paintRowSyncState()}
+function clearArticleData(row){row.codProv='';row.idProveedor='';row.proveedor='';row.precioSiva=0;row.precioCiva=0;row.subtotal=0;row.diferencia=0}
+function updateCell(input,repaint=false){const rowIndex=Number(input.closest('.row')?.dataset.row);const col=Number(input.dataset.col);const row=rows[rowIndex];if(!row)return;activeCell={row:rowIndex,col};const val=input.value;if(col===1)row.codProv=val;if(col===2){row.filtro=val;if(combo.input&&combo.mode==='article')showCombo(combo.input,true,'article')}if(col===3){if(val!==row.articulo)clearArticleData(row);row.articulo=val}if(col===4)row.cantidad=parseMoney(val)||val;if(col===5)row.precioSiva=parseMoney(val);if(col===6)row.precioSiva=parseMoney(val)/1.21;if(col===7)row.antes=parseMoney(val);recalc(row);ensureBlank();queueSave(row);if(repaint)paint()}
+function focusCell(row,col,openCombo=true){requestAnimationFrame(()=>{const input=els.rows.querySelector(`.row[data-row="${row}"] [data-col="${col}"]`);if(input){suppressNextFocusCombo=!openCombo;input.focus();input.select?.();if(openCombo&&col===3)showCombo(input,false,'article');else hideCombo()}})}
+function moveCell(dr,dc){const fromRow=activeCell.row;let ci=cols.indexOf(activeCell.col);if(ci<0)ci=2;let row=activeCell.row+dr;ci+=dc;if(ci<0){ci=cols.length-1;row--}if(ci>=cols.length){ci=0;row++}row=Math.max(0,Math.min(rows.length-1,row));if(row!==fromRow)syncPendingRows();activeCell={row,col:cols[ci]};focusCell(row,cols[ci])}
+els.rows.addEventListener('click',e=>{const selector=e.target.closest('[data-selector]');if(!selector)return;e.preventDefault();selectRow(Number(selector.closest('.row')?.dataset.row),e)})
+els.rows.addEventListener('contextmenu',e=>{const rowEl=e.target.closest('.row');if(!rowEl)return;const index=Number(rowEl.dataset.row);contextRowIndex=index;if(isSelectableRow(index)&&!selectedRows.has(index))selectRow(index,e);if(selectedRows.size)showRowContextMenu(e)})
+els.rows.addEventListener('input',e=>{const input=e.target.closest('[data-col]');if(!input)return;updateCell(input,false);if(Number(input.dataset.col)===3)showCombo(input,false,'article')})
+els.rows.addEventListener('change',e=>{const input=e.target.closest('[data-col]');if(!input)return;const rowEl=input.closest('.row');if(Number(input.dataset.col)===3&&rowEl&&suppressArticleChange.has(rowEl.dataset.uid)){suppressArticleChange.delete(rowEl.dataset.uid);return}updateCell(input,true)})
+els.rows.addEventListener('focusin',e=>{const input=e.target.closest('[data-col]');if(!input)return;activeCell={row:Number(input.closest('.row').dataset.row),col:Number(input.dataset.col)};input.select?.();if(suppressNextFocusCombo)suppressNextFocusCombo=false;hideCombo()})
+els.rows.addEventListener('focusout',e=>{const rowEl=e.target.closest('.row');if(!rowEl)return;const nextRow=e.relatedTarget?.closest?.('.row');if(nextRow===rowEl)return;setTimeout(()=>{const activeRow=document.activeElement?.closest?.('.row');if(activeRow===rowEl)return;const row=rows[Number(rowEl.dataset.row)];if(row&&pendingRows.has(row.localUid))syncPendingRows()},0)})
+els.comboMenu.addEventListener('mousedown',e=>{e.preventDefault();const opt=e.target.closest('[data-index]');if(opt)pickCombo(Number(opt.dataset.index))})
+document.addEventListener('mousedown',e=>{if(!e.target.closest('#comboMenu')&&!e.target.closest('.article-input')&&!e.target.closest('#providerInput'))hideCombo()})
+document.addEventListener('mousedown',e=>{if(!e.target.closest('#rowContextMenu'))hideRowContextMenu()})
+els.rowContextMenu.addEventListener('mousedown',e=>e.stopPropagation())
+els.compareRowBtn.addEventListener('click',()=>{hideRowContextMenu();openCompareForContextRow()})
+els.deleteRowsBtn.addEventListener('click',()=>{hideRowContextMenu();deleteSelectedRows()})
+els.providerInput.addEventListener('focus',()=>{els.providerInput.select();showCombo(els.providerInput,false,'provider')})
+els.providerInput.addEventListener('input',()=>{headerProviderId='';showCombo(els.providerInput,false,'provider')})
+;[els.orderNumber,els.dateInput,els.confirmedCheck].forEach(input=>input.addEventListener('change',()=>{queueSave();saveRemote()}))
+Catalog.bindCatalogToggle(els.filterPriceList,()=>loadCatalog(false).then(()=>{if(combo.input)showCombo(combo.input,true,combo.mode);syncCatalogBackground();warmOppositeCatalog()}))
+els.confirmBtn.addEventListener('click',async()=>{clearTimeout(saveTimer);els.confirmedCheck.checked=true;paint();saveLocal();els.status.textContent='Guardando pedido...';const ok=await saveRemote();if(ok){await refreshOrderList();await newBlankOrder();els.status.textContent='Pedido confirmado. Nuevo pedido listo'}else els.status.textContent='No se pudo guardar en nube'})
+els.newOrderBtn.addEventListener('click',()=>openNewOrder(true))
+els.prevOrderBtn.addEventListener('click',async()=>{clearTimeout(saveTimer);if(hasOrderContent())await saveRemote();await refreshOrderList();const pending=pendingOrders();if(!pending.length)return;let idx=pending.findIndex(order=>String(order.id)===orderId());idx=idx<=0?pending.length-1:idx-1;loadOrder(pending[idx]);els.status.textContent='Pedido pendiente cargado'})
+els.nextOrderBtn.addEventListener('click',async()=>{clearTimeout(saveTimer);if(hasOrderContent())await saveRemote();await refreshOrderList();const pending=pendingOrders();if(!pending.length)return;let idx=pending.findIndex(order=>String(order.id)===orderId());idx=idx<0||idx>=pending.length-1?0:idx+1;loadOrder(pending[idx]);els.status.textContent='Pedido pendiente cargado'})
+function renderHistory(orders){const confirmed=orders.filter(order=>order.confirmado).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||''))||Number(b.id)-Number(a.id));els.historyList.innerHTML=`<div class="history-row head"><div>Nro</div><div>Proveedor</div><div>Fecha</div><div>Total</div><div>Lineas</div><div></div></div>`+(confirmed.map(order=>`<div class="history-row" data-history-order="${esc(order.id)}"><div>${esc(order.id)}</div><div>${esc(order.proveedor||'')}</div><div>${esc(order.fecha||'')}</div><div>${money(order.total||0)}</div><div>${(order.detalles||[]).length}</div><div>Abrir</div></div>`).join('')||'<div style="padding:18px;font-weight:800;color:var(--muted)">No hay pedidos confirmados todavia.</div>')}
+function renderOrderDetail(order){detailOrderId=String(order.id||'');els.orderDetailTitle.textContent=`Pedido ${detailOrderId}`;const details=Array.isArray(order.detalles)?order.detalles:[];els.orderDetailBody.innerHTML=`<div class="detail-summary"><div><span>Nro</span><strong>${esc(order.id)}</strong></div><div><span>Proveedor</span><strong>${esc(order.proveedor||'')}</strong></div><div><span>Fecha</span><strong>${esc(order.fecha||'')}</strong></div><div><span>Total</span><strong>${money(order.total||0)}</strong></div></div><div class="detail-table"><div class="detail-row head"><div>Cod Prov</div><div>Articulo</div><div>Cant.</div><div>s.iva</div><div>c.iva</div><div>Subtotal</div><div>Proveedor</div></div>${details.map(row=>`<div class="detail-row"><div>${esc(row.codProv||'')}</div><div>${esc(row.articulo||'')}</div><div class="money">${esc(row.cantidad||'')}</div><div class="money">${money(row.precioSiva||0)}</div><div class="money">${money(row.precioCiva||0)}</div><div class="money">${money(row.subtotal||0)}</div><div>${esc(row.proveedor||'')}</div></div>`).join('')||'<div style="padding:16px;font-weight:800;color:var(--muted)">Este pedido no tiene articulos.</div>'}</div>`}
+function openOrderDetail(id){const order=orderList.find(item=>String(item.id)===String(id));if(!order)return;renderOrderDetail(order);els.orderDetailModal.classList.add('visible')}
+async function deleteOrder(id){const firestore=firebaseDb();if(!firestore){els.status.textContent='Sin conexion a Firebase';return false}try{await firestore.collection('pedidos').doc(String(id)).delete();orderList=orderList.filter(order=>String(order.id)!==String(id));if(String(orderId())===String(id))await newBlankOrder();updateOrderCounter();return true}catch(error){console.warn(error);els.status.textContent='No se pudo eliminar el pedido';return false}}
+els.historyBtn.addEventListener('click',async()=>{els.historyModal.classList.add('visible');renderHistory(await refreshOrderList())})
+els.closeHistoryBtn.addEventListener('click',()=>els.historyModal.classList.remove('visible'))
+els.historyModal.addEventListener('mousedown',e=>{if(e.target===els.historyModal)els.historyModal.classList.remove('visible')})
+els.historyList.addEventListener('click',e=>{const row=e.target.closest('[data-history-order]');if(row)openOrderDetail(row.dataset.historyOrder)})
+els.closeOrderDetailBtn.addEventListener('click',()=>els.orderDetailModal.classList.remove('visible'))
+els.orderDetailModal.addEventListener('mousedown',e=>{if(e.target===els.orderDetailModal)els.orderDetailModal.classList.remove('visible')})
+els.editOrderDetailBtn.addEventListener('click',()=>{const order=orderList.find(item=>String(item.id)===String(detailOrderId));if(order){els.orderDetailModal.classList.remove('visible');els.historyModal.classList.remove('visible');loadOrder(order);els.status.textContent='Pedido cargado para editar'}})
+els.deleteOrderDetailBtn.addEventListener('click',async()=>{if(!detailOrderId)return;if(!confirm('Eliminar este pedido?'))return;const ok=await deleteOrder(detailOrderId);if(ok){els.orderDetailModal.classList.remove('visible');renderHistory(orderList);els.status.textContent='Pedido eliminado'}})
+document.addEventListener('keydown',e=>{if(e.key==='F1'){e.preventDefault();els.providerInput.focus();els.providerInput.select();return}if(e.key==='Escape'&&els.comboMenu.classList.contains('visible')){e.preventDefault();hideCombo();return}if(e.key==='Delete'&&selectedRows.size){e.preventDefault();hideRowContextMenu();deleteSelectedRows();return}const input=document.activeElement?.closest?.('[data-col]');if(input){const col=Number(input.dataset.col);if(col===3&&els.comboMenu.classList.contains('visible')){if(e.key==='ArrowDown'){e.preventDefault();combo.active=combo.navigated?Math.min(combo.options.length-1,combo.active+1):0;combo.navigated=true;showCombo(combo.input,true,combo.mode);return}if(e.key==='ArrowUp'){e.preventDefault();combo.active=Math.max(0,combo.active-1);combo.navigated=true;showCombo(combo.input,true,combo.mode);return}if(e.key==='Enter'&&combo.options.length&&combo.navigated){e.preventDefault();pickCombo();return}if(e.key==='Enter')hideCombo()}if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();updateCell(input,true);moveCell(0,e.shiftKey?-1:1);return}if(e.key==='ArrowDown'){e.preventDefault();updateCell(input,true);moveCell(1,0);return}if(e.key==='ArrowUp'){e.preventDefault();updateCell(input,true);moveCell(-1,0);return}if(e.key==='ArrowRight'||e.key==='ArrowLeft'){const all=input.selectionStart===0&&input.selectionEnd===input.value.length;const atStart=input.selectionStart===0&&input.selectionEnd===0;const atEnd=input.selectionStart===input.value.length&&input.selectionEnd===input.value.length;if(all||(e.key==='ArrowLeft'&&atStart)||(e.key==='ArrowRight'&&atEnd)){e.preventDefault();moveCell(0,e.key==='ArrowRight'?1:-1)}}}})
+async function init(){els.dateInput.value=today();loadLocal();if(!localStorage.getItem(ORDER_COUNTER_LOCAL_KEY)&&Number(els.orderNumber.value)>1000)els.orderNumber.value='';if(!els.dateInput.value)els.dateInput.value=today();await ensureOrderNumber();if(!rows.length)rows=[blankRow()];paint();await Promise.all([loadProviders(),loadCatalog(),refreshOrderList()]);syncCatalogBackground();warmOppositeCatalog();paint();focusCell(0,3,false)}
+init();
+</script>
+</body>
+</html>
+
+

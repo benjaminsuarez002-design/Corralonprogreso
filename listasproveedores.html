@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
@@ -541,6 +541,7 @@
       margin-top: 14px;
     }
   </style>
+  <script src="nav-helper.js"></script>
 </head>
 <body>
   <div class="app">
@@ -551,7 +552,7 @@
         <span class="status" id="statusText">Inicializando...</span>
         <button class="btn primary" id="uploadBtn" type="button">Subir / Exportar</button>
         <button class="btn" id="importBtn" type="button">Importar</button>
-        <button class="btn" type="button" onclick="location.href='menu.html'">Menú</button>
+        <button class="btn" type="button" data-nav-url="menu.html">Menú</button>
       </div>
       <input class="hidden-file" id="fileInput" type="file" accept=".xlsx,.xls,.csv">
     </header>
@@ -1098,6 +1099,22 @@
       el.baseProvider.value = row.proveedor || '';
       renderSlots();
     }
+    function applyBaseFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const article = params.get('baseArticle') || '';
+      const code = params.get('baseCode') || '';
+      const provider = params.get('baseProvider') || '';
+      const priceText = params.get('basePrice') || '';
+      if (!article && !code && !provider && !priceText) return;
+      setBase({
+        idorden: `externo-${Date.now()}`,
+        cod_proveedor: code,
+        articulo: article,
+        precio_costo: parseMoney(priceText),
+        proveedor: provider
+      });
+      setStatus('Artículo cargado para comparar.');
+    }
     function copyToSlot(row) {
       if (!row) return;
       state.slots.push({ ...row, pickedAt: Date.now() });
@@ -1575,6 +1592,7 @@
       renderSlots();
       renderExcludeRows();
       syncComparisonHeight();
+      applyBaseFromUrl();
       window.addEventListener('resize', syncResponsiveScale);
       try {
         const hadCache = await loadCacheIntoWorker();
@@ -1603,3 +1621,5 @@
   </script>
 </body>
 </html>
+
+
