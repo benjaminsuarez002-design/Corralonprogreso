@@ -53,6 +53,12 @@
     return new Date().toISOString().slice(0, 10);
   }
 
+  function nowTimestamp() {
+    const date = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
   function percent(value) {
     return `${(Number(value || 0) * 100).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
   }
@@ -174,8 +180,8 @@
     await setProvidersCache(data);
   }
 
-  async function updateProviderDateOnly(provider) {
-    const value = today();
+  async function updateProviderDateOnly(provider, timestamp = nowTimestamp()) {
+    const value = timestamp;
     const updated = { ...provider, ultima_actualizacion: value };
     await putProviderCacheItem(updated);
     const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.providers}?id_proveedor=eq.${encodeURIComponent(provider.id_proveedor)}`, {
@@ -494,6 +500,21 @@
         batch.set(db.collection(COLLECTION).doc(row.localUid), rowToRemote(row, index), { merge: true });
       });
       await batch.commit();
+    }
+
+    async function addRow(row) {
+      const item = {
+        ...blankRow(row?.filtro || '', row?.source || 'proveedores'),
+        ...row,
+        localUid: row?.localUid || makeLocalUid(),
+        pedido: Boolean(row?.pedido)
+      };
+      const localRows = loadLocalRows();
+      localRows.push(item);
+      saveLocalRows(localRows, loadColumnFiltro());
+      const db = firebaseDatabase();
+      if (db) await db.collection(COLLECTION).doc(item.localUid).set(rowToRemote(item, Date.now()), { merge: true });
+      return item;
     }
 
     async function deleteRowsByUid(uids) {
@@ -826,6 +847,7 @@
       loadRemoteRows,
       subscribeRows,
       saveRows,
+      addRow,
       deleteRowsByUid,
       loadProviderNames,
       catalogSource,
@@ -854,6 +876,7 @@
     parseMoney,
     dateOnly,
     today,
+    nowTimestamp,
     money,
     percent,
     providerFromObject,
