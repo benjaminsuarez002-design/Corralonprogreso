@@ -46,6 +46,7 @@
     .modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;background:rgba(12,24,48,.28);backdrop-filter:blur(5px)}.modal.visible{display:flex}.modal-card{width:min(980px,94vw);height:min(680px,86vh);display:grid;grid-template-rows:auto 1fr;background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.detail-card{grid-template-rows:auto 1fr auto}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:linear-gradient(90deg,var(--soft),#fff)}.modal-head h2{margin:0;font:900 27px 'Barlow Condensed';color:var(--red)}.modal-head button{margin-left:auto}.history-list{overflow:auto;padding:12px}.history-row{display:grid;grid-template-columns:90px 1fr 120px 120px 130px 92px;gap:8px;align-items:center;min-height:38px;border-bottom:1px solid #edf4ff;font-size:16px}.history-row:not(.head){cursor:pointer}.history-row:not(.head):hover{background:var(--select)}.history-row.head{position:sticky;top:0;z-index:1;background:var(--soft);font:900 17px 'Barlow Condensed';padding-right:0}.history-row div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-row button{height:30px;padding:4px 12px}
     .order-detail{overflow:auto;padding:14px}.detail-summary{display:grid;grid-template-columns:90px 1fr 130px 150px;gap:8px;margin-bottom:12px}.detail-summary div{border:1px solid #d9edff;border-radius:10px;background:#fff;padding:8px}.detail-summary span{display:block;color:var(--muted);font:800 15px 'Barlow Condensed'}.detail-summary strong{font-size:17px}.detail-table{border:1px solid var(--line);border-radius:12px;overflow:hidden}.detail-row{display:grid;grid-template-columns:120px minmax(260px,1fr) 80px 120px 120px 130px 160px;min-height:32px;border-bottom:1px solid #edf4ff}.detail-row:nth-child(even){background:var(--row)}.detail-row.head{background:var(--soft);font:900 16px 'Barlow Condensed'}.detail-row div{padding:6px 8px;border-right:1px solid #d9edff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-actions{display:flex;justify-content:flex-end;gap:10px;padding:12px 16px;border-top:1px solid #d9edff;background:#fff}.danger{background:linear-gradient(135deg,#df1731,#ff5c8a);border-color:#ff8ba5;color:#fff}
     .context-menu{position:fixed;z-index:95;display:none;min-width:170px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:var(--shadow);padding:5px}.context-menu.visible{display:block}.context-menu button{width:100%;height:32px;border:0;border-radius:7px;box-shadow:none;text-align:left;background:#fff}.context-menu button:hover{background:var(--select)}
+    .faltantes-list{overflow:auto;padding:10px}.faltante-row{display:grid;grid-template-columns:1fr 70px 130px;gap:8px;align-items:center;min-height:36px;border-bottom:1px solid #edf4ff;font-size:15px;padding:4px 8px}.faltante-row:not(.faltante-head){cursor:pointer}.faltante-row:not(.faltante-head):hover{background:var(--select)}.faltante-row.faltante-head{position:sticky;top:0;z-index:1;background:var(--soft);font:900 16px 'Barlow Condensed';border-radius:6px 6px 0 0}.faltante-row div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     @media(max-width:1000px){.order-head{grid-template-columns:1fr}.head,.row{grid-template-columns:26px 120px 95px minmax(230px,1fr) 70px 105px 105px 115px 95px 95px 130px}.status{display:none}}
   </style>
   <script src="nav-helper.js"></script>
@@ -87,6 +88,7 @@
 </div>
 <div class="combo-menu" id="comboMenu"></div>
 <div class="context-menu" id="rowContextMenu">
+  <button type="button" id="addFaltanteBtn">Agregar faltante</button>
   <button type="button" id="compareRowBtn">Comparar</button>
   <button type="button" id="deleteRowsBtn">Eliminar fila</button>
 </div>
@@ -104,6 +106,12 @@
       <button id="editOrderDetailBtn" type="button">Editar</button>
       <button class="danger" id="deleteOrderDetailBtn" type="button">Eliminar pedido</button>
     </div>
+  </div>
+</div>
+<div class="modal" id="faltantesModal">
+  <div class="modal-card">
+    <div class="modal-head"><h2 id="faltantesModalTitle">Faltantes</h2><button id="closeFaltantesBtn" type="button">Cerrar</button></div>
+    <div class="faltantes-list" id="faltantesList"></div>
   </div>
 </div>
 <script>
@@ -143,8 +151,13 @@ const els={
   editOrderDetailBtn:document.getElementById('editOrderDetailBtn'),
   deleteOrderDetailBtn:document.getElementById('deleteOrderDetailBtn'),
   rowContextMenu:document.getElementById('rowContextMenu'),
+  addFaltanteBtn:document.getElementById('addFaltanteBtn'),
   compareRowBtn:document.getElementById('compareRowBtn'),
   deleteRowsBtn:document.getElementById('deleteRowsBtn'),
+  faltantesModal:document.getElementById('faltantesModal'),
+  faltantesModalTitle:document.getElementById('faltantesModalTitle'),
+  faltantesList:document.getElementById('faltantesList'),
+  closeFaltantesBtn:document.getElementById('closeFaltantesBtn'),
   totalValue:document.getElementById('totalValue'),
   comboMenu:document.getElementById('comboMenu')
 };
@@ -247,6 +260,14 @@ document.addEventListener('mousedown',e=>{if(!e.target.closest('#rowContextMenu'
 els.rowContextMenu.addEventListener('mousedown',e=>e.stopPropagation())
 els.compareRowBtn.addEventListener('click',()=>{hideRowContextMenu();openCompareForContextRow()})
 els.deleteRowsBtn.addEventListener('click',()=>{hideRowContextMenu();deleteSelectedRows()})
+function normProv(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim()}
+function faltantesForCurrentProvider(){const all=CorralonSystem.faltantes.loadLocalRows();const provName=normProv(selectedProviderName());const provId=String(headerProviderId||'').trim();if(!provName&&!provId)return all.filter(f=>!CorralonSystem.faltantes.isBlank(f));return all.filter(f=>{if(CorralonSystem.faltantes.isBlank(f))return false;if(provId&&f.idProveedor&&String(f.idProveedor).trim()===provId)return true;const fn=normProv(f.proveedor);return provName&&fn&&fn===provName})}
+function openFaltantesPopup(){const provName=selectedProviderName();els.faltantesModalTitle.textContent=provName?`Faltantes de ${provName}`:'Faltantes';const faltantes=faltantesForCurrentProvider();els._faltantesData=faltantes;if(!faltantes.length){els.faltantesList.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">No hay faltantes para este proveedor</div>'}else{els.faltantesList.innerHTML='<div class="faltante-row faltante-head"><div>Descripción</div><div>Cant.</div><div>Cod.Prov</div></div>'+faltantes.map((f,i)=>`<div class="faltante-row" data-index="${i}" title="Doble clic para agregar al pedido"><div>${esc(f.descripcion)}</div><div>${esc(String(f.cantidad||''))}</div><div>${esc(f.codProv)}</div></div>`).join('')}els.faltantesModal.classList.add('visible')}
+function addFaltanteToOrder(faltante){ensureBlank();const row=rows[rows.length-1];ensureRowUid(row);row.codProv=faltante.codProv||'';row.filtro=faltante.filtro||'';row.articulo=faltante.descripcion||'';row.cantidad=Number(faltante.cantidad)||1;row.precioSiva=Number(faltante.precioCosto||0);row.proveedor=faltante.proveedor||els.providerInput.value||'';row.idProveedor=faltante.idProveedor||headerProviderId||'';recalc(row);pendingRows.add(row.localUid);ensureBlank();paint();saveLocal();syncPendingRows();els.status.textContent=`"${faltante.descripcion}" agregado al pedido`}
+els.addFaltanteBtn.addEventListener('click',()=>{hideRowContextMenu();openFaltantesPopup()})
+els.closeFaltantesBtn.addEventListener('click',()=>els.faltantesModal.classList.remove('visible'))
+els.faltantesModal.addEventListener('mousedown',e=>{if(e.target===els.faltantesModal)els.faltantesModal.classList.remove('visible')})
+els.faltantesList.addEventListener('dblclick',e=>{const rowEl=e.target.closest('[data-index]');if(!rowEl)return;const faltante=els._faltantesData?.[Number(rowEl.dataset.index)];if(!faltante)return;addFaltanteToOrder(faltante);els.faltantesModal.classList.remove('visible')})
 els.providerInput.addEventListener('focus',()=>{els.providerInput.select();showCombo(els.providerInput,false,'provider')})
 els.providerInput.addEventListener('input',()=>{headerProviderId='';resetProviderCatalog();showCombo(els.providerInput,false,'provider')})
 ;[els.orderNumber,els.dateInput,els.confirmedCheck].forEach(input=>input.addEventListener('change',()=>{queueSave();saveRemote()}))
