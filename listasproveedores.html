@@ -789,6 +789,18 @@
       if (Number.isNaN(date.getTime())) return String(value);
       return date.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
+    function formatProviderDateTime(value) {
+      if (!value) return '';
+      const text = String(value).trim();
+      const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(text) ? text.replace(' ', 'T') : text;
+      const date = new Date(normalized);
+      const pad = (number) => String(number).padStart(2, '0');
+      if (!Number.isNaN(date.getTime())) {
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      }
+      const match = text.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2}(?::\d{2})?))?/);
+      return match ? `${match[1]} ${match[2] || '00:00:00'}` : text;
+    }
     function syncLabel() {
       return `Última sincronización: ${formatSyncDate(state.lastSyncAt)}`;
     }
@@ -1291,6 +1303,8 @@
     async function sendSlotToMissing() {
       const row = state.slots[state.slotContextIndex];
       if (!row) return;
+      hideSlotContextMenu();
+      showToast('Enviando a faltantes...');
       const missingRow = {
         idart: row.idart ? String(row.idart).padStart(6, '0') : '',
         idProveedor: String(row.id_proveedor || row.idProveedor || '').trim(),
@@ -1305,8 +1319,7 @@
         source: 'proveedores'
       };
       await CorralonSystem.faltantes.addRow(missingRow);
-      hideSlotContextMenu();
-      showToast('Artículo enviado a faltantes.');
+      showToast('Enviado a faltantes.');
     }
     function slotDiff(row) {
       const base = parseMoney(el.basePrice.value) || Number(state.base?.precio_costo || 0);
@@ -1318,7 +1331,7 @@
       if (!row) return '';
       const id = String(row.id_proveedor || row.idProveedor || '').trim();
       const name = normalize(row.proveedor || '');
-      return row.ultima_actualizacion || (id ? state.providerDates.get(`id:${id}`) : '') || (name ? state.providerDates.get(`name:${name}`) : '') || '';
+      return row.updated_at || row.ultima_actualizacion || (id ? state.providerDates.get(`id:${id}`) : '') || (name ? state.providerDates.get(`name:${name}`) : '') || '';
     }
     async function loadProviderDates() {
       try {
@@ -1326,7 +1339,7 @@
         if (!providers.length) providers = await CorralonSystem.importProvidersCloud();
         state.providerDates = new Map();
         providers.forEach((provider) => {
-          const date = provider.ultima_actualizacion || '';
+          const date = provider.updated_at || provider.ultima_actualizacion || '';
           if (!date) return;
           const id = String(provider.id_proveedor || '').trim();
           const name = normalize(provider.proveedor || '');
@@ -1349,6 +1362,7 @@
         const diff = slotDiff(row);
         const diffNum = Number(diff.replace(',', '.').replace('%', '')) || 0;
         const providerDate = providerDateForRow(row);
+        const providerDateText = formatProviderDateTime(providerDate);
         return `<div class="slot ${row && Number(row.precio_costo || 0) === min ? 'winner' : ''}" data-slot-index="${i}">
           <button class="slot-clear" type="button" data-clear-slot="${i}" title="Eliminar comparación">×</button>
           <div class="slot-label">Cod. proveedor</div>
@@ -1360,7 +1374,7 @@
           <div class="slot-label">Precio</div>
           <div class="slot-value money">${row ? formatMoney(row.precio_costo) : ''}</div>
           <div class="slot-label">Última act.</div>
-          <div class="slot-value" title="${escapeHtml(providerDate)}">${escapeHtml(providerDate || 'Sin fecha')}</div>
+          <div class="slot-value" title="${escapeHtml(providerDateText || providerDate)}">${escapeHtml(providerDateText || 'Sin fecha')}</div>
           <div class="slot-label last">% diferencia</div>
           <div class="slot-value last diff ${diffNum >= 0 ? 'positive' : 'negative'}">${escapeHtml(diff || 'Sin precio inicial')}</div>
         </div>`;
@@ -1473,14 +1487,14 @@
       return Number.isNaN(day.getTime()) ? 0 : day.getTime();
     }
     async function fetchProvidersUpdatedAfter(lastSyncAt) {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/${PROVIDERS_TABLE}?select=id_proveedor,proveedor,ultima_actualizacion&order=ultima_actualizacion.asc`, {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${PROVIDERS_TABLE}?select=id_proveedor,proveedor,ultima_actualizacion,updated_at&order=updated_at.asc`, {
         headers: supabaseHeaders()
       });
       if (!response.ok) throw new Error(await response.text());
       const providers = await response.json();
       const lastValue = timestampValue(lastSyncAt);
       return (providers || []).filter((provider) => {
-        const providerValue = timestampValue(provider.ultima_actualizacion);
+        const providerValue = timestampValue(provider.updated_at || provider.ultima_actualizacion);
         return provider.id_proveedor && providerValue && (!lastValue || providerValue > lastValue);
       });
     }
@@ -1526,12 +1540,17 @@
       updateCounts();
       return next;
     }
-    async function syncProvidersUpdatedAfterLocalMeta() {
+    async function syncProvidersUpdatedAfterLocalMeta(remoteMeta = null) {
       const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
-      const lastSyncAt = local.last_provider_sync_at || local.last_provider_sync_date || '';
+      const lastSyncAt = local.last_provider_sync_at || local.updated_at || local.last_provider_sync_date || '';
+      if (!lastSyncAt) {
+        if (remoteMeta) await downloadRemoteArticles(remoteMeta);
+        return Boolean(remoteMeta);
+      }
       const changed = await fetchProvidersUpdatedAfter(lastSyncAt);
       if (!changed.length) {
-        state.lastSyncAt = local.last_provider_sync_at || state.lastSyncAt;
+        if (remoteMeta) await saveLocalSyncMeta({ ...remoteMeta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() });
+        else state.lastSyncAt = local.last_provider_sync_at || state.lastSyncAt;
         updateCounts();
         return false;
       }
@@ -1544,7 +1563,7 @@
         setStatus(`Sincronizado ${provider.proveedor || provider.id_proveedor}: ${rows.length.toLocaleString('es-AR')} artículos`);
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
-      await saveLocalSyncMeta({ last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() });
+      await saveLocalSyncMeta({ ...(remoteMeta || {}), last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() });
       await loadCacheIntoWorker();
       showToast(`Sincronización parcial: ${total.toLocaleString('es-AR')} artículos`);
       return true;
@@ -1567,10 +1586,17 @@
       }
       const local = await idbGet('meta', 'principal');
       if (!local || Number(local.lista_version) !== Number(meta.lista_version)) {
-        setStatus('Hay una lista nueva. Descargando...');
-        await downloadRemoteArticles(meta);
-        await loadCacheIntoWorker();
-        showToast('Lista actualizada desde Supabase.');
+        if (!local) {
+          setStatus('Hay una lista nueva. Descargando...');
+          await downloadRemoteArticles(meta);
+          await loadCacheIntoWorker();
+          showToast('Lista actualizada desde Supabase.');
+          return true;
+        }
+        setStatus('Hay proveedores actualizados. Sincronizando por proveedor...');
+        const updated = await syncProvidersUpdatedAfterLocalMeta(meta);
+        if (updated) return true;
+        setStatus(localListStatus(meta.total_articulos));
         return true;
       }
       syncProvidersUpdatedAfterLocalMeta().then((updated) => {

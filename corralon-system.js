@@ -97,10 +97,10 @@
     return provider.id_proveedor && provider.proveedor ? provider : null;
   }
 
-  function openDb(name, upgrade) {
+  function openDb(name, upgrade, version = 1) {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(name, 1);
-      request.onupgradeneeded = () => upgrade(request.result);
+      const request = indexedDB.open(name, version);
+      request.onupgradeneeded = () => upgrade(request.result, request.transaction);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -193,6 +193,15 @@
     return value;
   }
 
+  async function touchPriceListMeta() {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListMeta}?on_conflict=id`, {
+      method: 'POST',
+      headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify({ id: 'principal', lista_version: Date.now() })
+    });
+    if (!response.ok) throw new Error(await response.text());
+  }
+
   async function replaceProviderArticles(providerId, articles) {
     const del = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceList}?id_proveedor=eq.${encodeURIComponent(providerId)}`, { method: 'DELETE', headers: headers() });
     if (!del.ok) throw new Error(await del.text());
@@ -209,6 +218,7 @@
       });
       if (!response.ok) throw new Error(await response.text());
     }
+    await touchPriceListMeta();
   }
 
   function xmlCell(value, type = 'String') {
@@ -604,9 +614,14 @@
     }
 
     function openListDb() {
-      return openDb(LIST_DB, (database) => {
-        if (!database.objectStoreNames.contains('articulos')) database.createObjectStore('articulos', { keyPath: 'idorden' });
-      });
+      return openDb(LIST_DB, (database, transaction) => {
+        let store;
+        if (!database.objectStoreNames.contains('articulos')) store = database.createObjectStore('articulos', { keyPath: 'idorden' });
+        else store = transaction.objectStore('articulos');
+        if (!store.indexNames.contains('id_proveedor')) store.createIndex('id_proveedor', 'id_proveedor', { unique: false });
+        if (!store.indexNames.contains('proveedor')) store.createIndex('proveedor', 'proveedor', { unique: false });
+        if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta', { keyPath: 'id' });
+      }, 3);
     }
 
     async function readProviderArticlesCache() {
@@ -643,6 +658,30 @@
       if (meta) localStorage.setItem(PROVIDER_LIST_META_KEY, JSON.stringify({ id: 'principal', ...meta }));
     }
 
+    function timestampValue(value) {
+      if (!value) return 0;
+      const text = String(value).trim();
+      const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(text) ? text.replace(' ', 'T') : text;
+      const date = new Date(normalized);
+      if (!Number.isNaN(date.getTime())) return date.getTime();
+      const day = new Date(text.slice(0, 10));
+      return Number.isNaN(day.getTime()) ? 0 : day.getTime();
+    }
+
+    async function providerCacheHasRows() {
+      try {
+        const database = await openListDb();
+        return await new Promise((resolve, reject) => {
+          const request = database.transaction('articulos').objectStore('articulos').count();
+          request.onsuccess = () => resolve(request.result > 0);
+          request.onerror = () => reject(request.error);
+        });
+      } catch (error) {
+        console.warn(error);
+        return false;
+      }
+    }
+
     async function replaceProviderArticlesCache(rows, meta) {
       const database = await openListDb();
       return new Promise((resolve, reject) => {
@@ -651,23 +690,71 @@
         store.clear();
         rows.forEach((row) => store.put(row));
         tx.oncomplete = () => {
-          setLocalProviderListMeta(meta);
+          setLocalProviderListMeta({ ...meta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: today() });
           resolve();
         };
         tx.onerror = () => reject(tx.error);
       });
     }
 
+    async function replaceProviderArticlesCacheBlock(providerId, rows) {
+      const database = await openListDb();
+      return new Promise((resolve, reject) => {
+        const tx = database.transaction('articulos', 'readwrite');
+        const store = tx.objectStore('articulos');
+        const request = store.openCursor();
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (cursor) {
+            if (String(cursor.value?.id_proveedor || '') === String(providerId)) cursor.delete();
+            cursor.continue();
+            return;
+          }
+          rows.forEach((row) => store.put(row));
+        };
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function fetchProvidersUpdatedAfter(lastSyncAt) {
+      const providers = await fetchAll(TABLES.providers, 'select=id_proveedor,proveedor,ultima_actualizacion,updated_at&order=updated_at.asc');
+      const lastValue = timestampValue(lastSyncAt);
+      return (providers || []).filter((provider) => {
+        const providerValue = timestampValue(provider.updated_at || provider.ultima_actualizacion);
+        return provider.id_proveedor && providerValue && (!lastValue || providerValue > lastValue);
+      });
+    }
+
+    async function fetchProviderArticles(providerId) {
+      return fetchAll(
+        TABLES.priceList,
+        `select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&id_proveedor=eq.${encodeURIComponent(providerId)}&order=idorden.asc`
+      );
+    }
+
     async function downloadProviderArticlesCloud(meta) {
-      const rows = [];
-      let from = 0;
-      while (true) {
-        const part = await fetchAll(TABLES.priceList, `select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&order=idorden.asc`);
-        rows.push(...part);
-        break;
-      }
+      const rows = await fetchAll(TABLES.priceList, `select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&order=idorden.asc`);
       await replaceProviderArticlesCache(rows, meta);
       return sortCatalogByDescription(rows.map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart));
+    }
+
+    async function syncProviderArticleBlocks(meta) {
+      const local = localProviderListMeta() || {};
+      const lastSyncAt = local.last_provider_sync_at || local.updated_at || local.last_provider_sync_date || '';
+      if (!lastSyncAt) return downloadProviderArticlesCloud(meta);
+      const changedProviders = await fetchProvidersUpdatedAfter(lastSyncAt);
+      if (!changedProviders.length) {
+        setLocalProviderListMeta({ ...local, ...meta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: today() });
+        return null;
+      }
+      for (const provider of changedProviders) {
+        const rows = await fetchProviderArticles(provider.id_proveedor);
+        await replaceProviderArticlesCacheBlock(provider.id_proveedor, rows);
+      }
+      setLocalProviderListMeta({ ...local, ...meta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: today() });
+      return sortCatalogByDescription(await readProviderArticlesCache());
     }
 
     async function readProviderArticlesRemoteIfChanged() {
@@ -676,6 +763,7 @@
         if (!meta) return null;
         const local = localProviderListMeta();
         if (local && Number(local.lista_version) === Number(meta.lista_version)) return null;
+        if (local && await providerCacheHasRows()) return syncProviderArticleBlocks(meta);
         return downloadProviderArticlesCloud(meta);
       } catch (error) {
         console.warn(error);
@@ -886,6 +974,7 @@
     importProvidersCloud,
     uploadProviders,
     updateProviderDateOnly,
+    touchPriceListMeta,
     replaceProviderArticles,
     buildArticlesXlsBlob,
     saveBlobAs,
