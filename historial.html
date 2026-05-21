@@ -932,6 +932,53 @@ async function cargarHistorial() {
 }
 
 // ── DETALLE ──
+function renderDetalleRemito(remito) {
+  const items = remito.items || [];
+  const total = Number(remito.total || items.reduce((s,it) => s + (Number(it.cant)||0)*(Number(it.precio)||0), 0));
+  _detalleTipoActual = 'remito';
+  _presupuestoDetalleActual = null;
+  _remitoDetalleActual = { ...remito, items };
+  setAccionesDetalleModo('remito');
+  document.getElementById('detalleNro').textContent = remito.nro || '—';
+  const body = document.getElementById('detalleBody');
+  body.innerHTML = `
+    <div class="detalle-info">
+      <div class="detalle-campo" style="grid-column:1/3">
+        <div class="detalle-lbl">Cliente</div>
+        <div class="detalle-val">${esc(remito.cliente||'—')}</div>
+      </div>
+      <div class="detalle-campo">
+        <div class="detalle-lbl">Fecha</div>
+        <div class="detalle-val">${esc(remito.fecha||'—')}</div>
+      </div>
+      <div class="detalle-campo">
+        <div class="detalle-lbl">N° Remito</div>
+        <div class="detalle-val">${esc(remito.nro||'—')}</div>
+      </div>
+    </div>
+    <div class="detalle-tabla-head">
+      <div class="detalle-th" style="text-align:center">Cant.</div>
+      <div class="detalle-th">Descripción</div>
+      <div class="detalle-th" style="text-align:right">Precio</div>
+      <div class="detalle-th" style="text-align:right">Subtotal</div>
+    </div>
+    ${items.length ? items.map(it => {
+      const cant = Number(it.cant) || 0;
+      const precio = Number(it.precio) || 0;
+      return `
+        <div class="detalle-fila">
+          <div class="detalle-td" style="text-align:center">${cant}</div>
+          <div class="detalle-td">${esc(it.descripcion||'')}</div>
+          <div class="detalle-td num">$${precio.toLocaleString('es-AR')}</div>
+          <div class="detalle-td num bold">$${Number(cant*precio).toLocaleString('es-AR')}</div>
+        </div>`;
+    }).join('') : '<div style="padding:12px 8px;color:#bbb;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;">Sin ítems registrados</div>'}
+    <div class="detalle-total">
+      <div class="detalle-total-lbl">Total</div>
+      <div class="detalle-total-val">$${total.toLocaleString('es-AR')}</div>
+    </div>`;
+}
+
 async function abrirDetalle(id) {
   _detalleTipoActual = 'remito';
   _presupuestoDetalleActual = null;
@@ -945,41 +992,7 @@ async function abrirDetalle(id) {
     const [remitos, itemsR] = await Promise.all([resR.json(), resI.json()]);
     const r = remitos[0];
     if(!r) { toast('❌ No se encontró el remito'); loading(false); return; }
-    _remitoDetalleActual = { ...r, items: itemsR || [] };
-    document.getElementById('detalleNro').textContent = r.nro || '—';
-    const body = document.getElementById('detalleBody');
-    body.innerHTML = `
-      <div class="detalle-info">
-        <div class="detalle-campo" style="grid-column:1/3">
-          <div class="detalle-lbl">Cliente</div>
-          <div class="detalle-val">${r.cliente||'—'}</div>
-        </div>
-        <div class="detalle-campo">
-          <div class="detalle-lbl">Fecha</div>
-          <div class="detalle-val">${r.fecha||'—'}</div>
-        </div>
-        <div class="detalle-campo">
-          <div class="detalle-lbl">N° Remito</div>
-          <div class="detalle-val">${r.nro||'—'}</div>
-        </div>
-      </div>
-      <div class="detalle-tabla-head">
-        <div class="detalle-th" style="text-align:center">Cant.</div>
-        <div class="detalle-th">Descripción</div>
-        <div class="detalle-th" style="text-align:right">Precio</div>
-        <div class="detalle-th" style="text-align:right">Subtotal</div>
-      </div>
-      ${(itemsR||[]).length ? itemsR.map(it => `
-        <div class="detalle-fila">
-          <div class="detalle-td" style="text-align:center">${it.cant}</div>
-          <div class="detalle-td">${it.descripcion||''}</div>
-          <div class="detalle-td num">$${Number(it.precio||0).toLocaleString('es-AR')}</div>
-          <div class="detalle-td num bold">$${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR')}</div>
-        </div>`).join('') : '<div style="padding:12px 8px;color:#bbb;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;">Sin ítems registrados</div>'}
-      <div class="detalle-total">
-        <div class="detalle-total-lbl">Total</div>
-        <div class="detalle-total-val">$${Number(r.total||0).toLocaleString('es-AR')}</div>
-      </div>`;
+    renderDetalleRemito({ ...r, items: itemsR || [] });
     loading(false);
     document.getElementById('detalleBg').classList.add('open');
   } catch(e) {
@@ -1192,34 +1205,48 @@ async function guardarEdicion() {
   const fecha    = document.getElementById('editFecha').value.trim();
   const nroCorto = document.getElementById('editNro').value.trim();
   if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return; }
-  loading(true);
-  try {
-    const total = editItems.reduce((s,it) => s + (it.cant||0)*(it.precio||0), 0);
-    await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${r.id}`, {
-      method: 'PATCH',
+  const nextItems = editItems.map(it => ({ id: it.id, cant: it.cant, descripcion: it.desc, precio: it.precio }));
+  const nextRemito = {
+    ...r,
+    nro: '0001-' + nroCorto.padStart(5,'0'),
+    cliente,
+    fecha,
+    total: nextItems.reduce((s,it) => s + (it.cant||0)*(it.precio||0), 0),
+    items: nextItems
+  };
+  _remitoDetalleActual = nextRemito;
+  const cacheIndex = _remitosCache.findIndex(item => String(item.id) === String(r.id));
+  if(cacheIndex >= 0) _remitosCache[cacheIndex] = { ..._remitosCache[cacheIndex], ...nextRemito };
+  cerrarEditar();
+  renderDetalleRemito(nextRemito);
+  document.getElementById('detalleBg').classList.add('open');
+  toast('✅ Remito actualizado');
+  guardarEdicionRemota(nextRemito).catch(error => {
+    console.error(error);
+    toast('⚠️ Se guardó local, falta sincronizar');
+  });
+}
+
+async function guardarEdicionRemota(remito) {
+  const nroCorto = String(remito.nro || '').split('-').pop() || '';
+  const items = remito.items || [];
+  await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${remito.id}`, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    body: JSON.stringify({ nro: '0001-' + nroCorto.padStart(5,'0'), cliente: remito.cliente, fecha: remito.fecha, total: remito.total })
+  });
+  await fetch(`${SUPABASE_URL}/rest/v1/items_remito?remito_id=eq.${remito.id}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
+  });
+  if(items.length) {
+    await fetch(`${SUPABASE_URL}/rest/v1/items_remito`, {
+      method: 'POST',
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ nro: '0001-' + nroCorto.padStart(5,'0'), cliente, fecha, total })
+      body: JSON.stringify(items.map(it => ({ remito_id: remito.id, cant: it.cant, descripcion: it.descripcion, precio: it.precio })))
     });
-    await fetch(`${SUPABASE_URL}/rest/v1/items_remito?remito_id=eq.${r.id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
-    });
-    if(editItems.length) {
-      await fetch(`${SUPABASE_URL}/rest/v1/items_remito`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify(editItems.map(it => ({ remito_id: r.id, cant: it.cant, descripcion: it.desc, precio: it.precio })))
-      });
-    }
-    loading(false);
-    cerrarEditar();
-    cerrarDetalle();
-    toast('✅ Remito actualizado');
-    cargarHistorial();
-  } catch(e) {
-    loading(false);
-    toast('❌ Error: ' + e.message);
   }
+  cargarHistorial();
 }
 
 // ── NAVEGACIÓN TECLADO EDITAR ──
