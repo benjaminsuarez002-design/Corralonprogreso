@@ -1120,27 +1120,65 @@
     function focusPendingTableCell() {
       const pending = state.tableNav.pending;
       if (!pending) return;
-      const cell = el.rows.querySelector(`.row[data-match-index="${pending.matchIndex}"] [data-col="${pending.col}"]`);
-      if (!cell) return;
-      state.tableNav.pending = null;
+      if (focusRenderedTableCell(pending.matchIndex, pending.col)) state.tableNav.pending = null;
+    }
+    function focusRenderedTableCell(matchIndex, col) {
+      const cell = el.rows.querySelector(`.row[data-match-index="${matchIndex}"] [data-col="${col}"]`);
+      if (!cell) return false;
       const rowEl = cell.closest('.row');
       selectRow(rowById(rowEl?.dataset.id));
       selectCellText(cell);
+      return true;
     }
-    function focusTableCell(matchIndex = 0, col = 0) {
+    function scrollTableIndexIntoView(matchIndex, fromIndex = null) {
+      const viewTop = el.viewport.scrollTop;
+      const direction = Number.isFinite(fromIndex) ? Math.sign(matchIndex - fromIndex) : 0;
+      const maxTop = Math.max(0, el.viewport.scrollHeight - el.viewport.clientHeight);
+      const activeCell = document.activeElement?.closest?.('.row [data-col]');
+      if (activeCell && direction) {
+        const activeRow = activeCell.closest('.row');
+        const rowRect = activeRow?.getBoundingClientRect();
+        const viewportRect = el.viewport.getBoundingClientRect();
+        const topWall = viewportRect.top + 1;
+        const bottomWall = viewportRect.top + el.viewport.clientHeight - 1;
+        let nextTop = null;
+        if (direction > 0 && rowRect?.bottom >= bottomWall) nextTop = viewTop + ROW_HEIGHT;
+        else if (direction < 0 && rowRect?.top <= topWall) nextTop = viewTop - ROW_HEIGHT;
+        if (nextTop !== null) {
+          el.viewport.scrollTop = Math.max(0, Math.min(nextTop, maxTop));
+          return Math.abs(el.viewport.scrollTop - viewTop) >= 1;
+        }
+      }
+      const viewBottom = viewTop + el.viewport.clientHeight;
+      const targetTop = matchIndex * ROW_HEIGHT;
+      const targetBottom = targetTop + ROW_HEIGHT;
+      const fromTop = Number.isFinite(fromIndex) ? fromIndex * ROW_HEIGHT : targetTop;
+      const fromBottom = fromTop + ROW_HEIGHT;
+      let nextTop = viewTop;
+      if (direction > 0 && fromBottom >= viewBottom - 1) nextTop = viewTop + ROW_HEIGHT;
+      else if (direction < 0 && fromTop <= viewTop + 1) nextTop = viewTop - ROW_HEIGHT;
+      else if (targetTop < viewTop) nextTop = targetTop;
+      else if (targetBottom > viewBottom) nextTop = targetBottom - el.viewport.clientHeight;
+      if (Math.abs(nextTop - viewTop) < 1) return false;
+      el.viewport.scrollTop = Math.max(0, Math.min(nextTop, maxTop));
+      return true;
+    }
+    function focusTableCell(matchIndex = 0, col = 0, fromIndex = null) {
       if (!state.matchCount) return;
       const nextIndex = Math.max(0, Math.min(state.matchCount - 1, matchIndex));
       const nextCol = Math.max(0, Math.min(3, col));
       state.tableNav.matchIndex = nextIndex;
       state.tableNav.col = nextCol;
-      const cell = el.rows.querySelector(`.row[data-match-index="${nextIndex}"] [data-col="${nextCol}"]`);
-      if (cell) {
-        const rowEl = cell.closest('.row');
-        selectRow(rowById(rowEl?.dataset.id));
-        selectCellText(cell);
+      const didScroll = scrollTableIndexIntoView(nextIndex, fromIndex);
+      state.tableNav.pending = { matchIndex: nextIndex, col: nextCol };
+      if (didScroll) {
+        requestSlice();
         return;
       }
-      state.tableNav.pending = { matchIndex: nextIndex, col: nextCol };
+      if (focusRenderedTableCell(nextIndex, nextCol)) {
+        state.tableNav.pending = null;
+        return;
+      }
       el.viewport.scrollTop = nextIndex * ROW_HEIGHT;
       requestSlice();
     }
@@ -1851,7 +1889,7 @@
           ArrowUp: [-1, 0],
           ArrowDown: [1, 0]
         }[event.key];
-        focusTableCell(currentIndex + delta[0], currentCol + delta[1]);
+        focusTableCell(currentIndex + delta[0], currentCol + delta[1], currentIndex);
         return;
       }
       if (event.key === 'F3' && state.selectedRow) {
