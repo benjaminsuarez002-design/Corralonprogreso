@@ -4656,6 +4656,10 @@ searchAssist.addEventListener('click', (e) => {
 let searchSelectAllOnFocus = false;
 let searchWasFocusedOnPointerDown = false;
 let searchPointerClientX = 0;
+let searchUseNativeSelection = false;
+function usarSeleccionNativaBusqueda(event) {
+  return window.matchMedia('(min-width: 980px)').matches && (!event || event.pointerType === 'mouse');
+}
 function caretBusquedaDesdePunto(clientX) {
   const value = searchInput.value || '';
   if (!value) return 0;
@@ -4693,20 +4697,26 @@ function seleccionarTextoBusqueda() {
   setTimeout(() => { searchSelectAllOnFocus = false; }, 180);
 }
 searchInput.addEventListener('focus', () => {
-  if (!searchWasFocusedOnPointerDown) seleccionarTextoBusqueda();
+  if (!searchWasFocusedOnPointerDown && !searchUseNativeSelection) seleccionarTextoBusqueda();
   mostrarAsistenteBusqueda();
 });
 searchInput.addEventListener('pointerdown', (event) => {
-  searchWasFocusedOnPointerDown = document.activeElement === searchInput;
+  searchUseNativeSelection = usarSeleccionNativaBusqueda(event);
+  searchWasFocusedOnPointerDown = searchUseNativeSelection || document.activeElement === searchInput;
   searchPointerClientX = event.clientX;
   if (searchWasFocusedOnPointerDown) searchSelectAllOnFocus = false;
 });
 searchInput.addEventListener('mouseup', (event) => {
+  if (searchUseNativeSelection) return;
   if (!searchSelectAllOnFocus || searchWasFocusedOnPointerDown) return;
   event.preventDefault();
   seleccionarTextoBusqueda();
 });
 searchInput.addEventListener('pointerup', (event) => {
+  if (searchUseNativeSelection) {
+    searchUseNativeSelection = false;
+    return;
+  }
   searchPointerClientX = event.clientX;
   if (searchWasFocusedOnPointerDown) {
     setTimeout(ubicarCursorBusquedaEnToque, 0);
@@ -4721,6 +4731,7 @@ searchWrap.addEventListener('focusout', () => {
     if (!searchWrap.contains(document.activeElement)) {
       ocultarAsistenteBusqueda();
       searchWasFocusedOnPointerDown = false;
+      searchUseNativeSelection = false;
     }
   });
 });
