@@ -1578,34 +1578,23 @@
       return true;
     }
     async function checkCloudUpdates() {
-      setStatus('Consultando versión...');
       const meta = await remoteMeta();
-      if (!meta) {
-        setStatus('Sin lista en Supabase. Importá el Excel.');
-        return false;
-      }
+      if (!meta) return false;
       const local = await idbGet('meta', 'principal');
       if (!local || Number(local.lista_version) !== Number(meta.lista_version)) {
         if (!local) {
-          setStatus('Hay una lista nueva. Descargando...');
           await downloadRemoteArticles(meta);
           await loadCacheIntoWorker();
           showToast('Lista actualizada desde Supabase.');
           return true;
         }
-        setStatus('Hay proveedores actualizados. Sincronizando por proveedor...');
         const updated = await syncProvidersUpdatedAfterLocalMeta(meta);
         if (updated) return true;
-        setStatus(localListStatus(meta.total_articulos));
         return true;
       }
-      syncProvidersUpdatedAfterLocalMeta().then((updated) => {
-        if (!updated) setStatus(localListStatus(meta.total_articulos));
-      }).catch((error) => {
+      syncProvidersUpdatedAfterLocalMeta().catch((error) => {
         console.error(error);
-        setStatus('Lista local cargada. No pude revisar proveedores actualizados.');
       });
-      setStatus(localListStatus(meta.total_articulos));
       return false;
     }
     async function importFromCloud() {
@@ -1877,10 +1866,9 @@
       try {
         const hadCache = await loadCacheIntoWorker();
         if (hadCache) {
-          setStatus('Lista local cargada. Revisando cambios en segundo plano...');
+          setStatus(localListStatus(state.total));
           checkCloudUpdates().catch((error) => {
             console.error(error);
-            setStatus('Lista local cargada. No pude revisar Supabase.');
           });
           return;
         }
