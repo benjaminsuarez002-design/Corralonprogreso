@@ -63,6 +63,26 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 }
 .hist-panel { display: none; }
 .hist-panel.active { display: block; }
+.hist-search {
+  padding: 10px 14px;
+  background: #fff;
+  border-bottom: 1px solid var(--borde);
+}
+.hist-search input {
+  width: 100%;
+  border: 1.5px solid var(--borde);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--texto-dark);
+  outline: none;
+}
+.hist-search input:focus {
+  border-color: var(--violeta);
+  box-shadow: 0 0 0 3px rgba(108,79,199,.12);
+}
 
 /* ── HISTORIAL LIST ── */
 .h-item { padding: 13px 16px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background .15s; background: #fff; }
@@ -254,6 +274,9 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     <button class="hist-tab" id="tabGarantias" onclick="activarTabHistorial('garantias')">Garantías</button>
   </div>
   <div class="hist-panel active" id="panelRemitos">
+    <div class="hist-search">
+      <input id="remitosSearch" type="text" placeholder="Buscar remito, cliente, fecha o total..." autocomplete="off">
+    </div>
     <div id="historialBody"></div>
   </div>
   <div class="hist-panel" id="panelPresupuestos">
@@ -870,24 +893,42 @@ async function cargarHistorial() {
     });
     const data = await res.json();
     _remitosCache = Array.isArray(data) ? data : [];
-    if(!Array.isArray(data) || !data.length) {
-      body.innerHTML = '<div class="h-empty">Sin remitos todavía</div>';
-      return;
-    }
-    body.innerHTML = data.map(r => `
-      <div class="h-item" onclick="abrirDetalle(${r.id})">
-        <div class="h-nro">${r.nro ? remitoFull(r.nro) : '—'}</div>
-        <div class="h-info">
-          <div class="h-cliente">${r.cliente||'—'}</div>
-          <div class="h-meta">${r.fecha||''}</div>
-        </div>
-        <div class="h-total">${fmt(r.total||0)}</div>
-        <span style="color:#ccc;font-size:18px;">›</span>
-      </div>`).join('');
+    renderRemitosHistorial();
   } catch(e) {
     _remitosCache = [];
     body.innerHTML = '<div class="h-empty">Error cargando historial</div>';
   }
+}
+
+function renderRemitosHistorial() {
+  const body = document.getElementById('historialBody');
+  const search = String(document.getElementById('remitosSearch')?.value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  let rows = _remitosCache;
+  if(search) {
+    rows = rows.filter((r) => {
+      const text = `${r.nro ? remitoFull(r.nro) : ''} ${r.nro || ''} ${r.cliente || ''} ${r.fecha || ''} ${fmt(r.total || 0)} ${r.total || ''}`
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      return text.includes(search);
+    });
+  }
+  if(!_remitosCache.length) {
+    body.innerHTML = '<div class="h-empty">Sin remitos todavía</div>';
+    return;
+  }
+  if(!rows.length) {
+    body.innerHTML = '<div class="h-empty">Sin coincidencias</div>';
+    return;
+  }
+  body.innerHTML = rows.map(r => `
+    <div class="h-item" onclick="abrirDetalle(${r.id})">
+      <div class="h-nro">${r.nro ? remitoFull(r.nro) : '—'}</div>
+      <div class="h-info">
+        <div class="h-cliente">${r.cliente||'—'}</div>
+        <div class="h-meta">${r.fecha||''}</div>
+      </div>
+      <div class="h-total">${fmt(r.total||0)}</div>
+      <span style="color:#ccc;font-size:18px;">›</span>
+    </div>`).join('');
 }
 
 // ── DETALLE ──
@@ -1428,6 +1469,7 @@ function generarPDFPresupuestoDoc(p) {
 }
 // Estado inicial
 inicializarHistorial();
+document.getElementById('remitosSearch')?.addEventListener('input', renderRemitosHistorial);
 </script>
 </body>
 </html>
