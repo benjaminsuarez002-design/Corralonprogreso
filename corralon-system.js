@@ -87,6 +87,7 @@
       ultima_actualizacion: dateOnly(getByHeader(obj, ['Ultima actualizacion', 'ultima_actualizacion'])),
       vendedor: String(getByHeader(obj, ['Vendedor', 'vendedor'])).trim(),
       telefono: String(getByHeader(obj, ['Numero de Telefono', 'telefono'])).trim(),
+      pagina_link: String(getByHeader(obj, ['Pagina', 'Página', 'Link pagina', 'Link página', 'pagina_link', 'pagina', 'web', 'reserva_texto_1'])).trim(),
       nota: String(getByHeader(obj, ['Nota', 'nota'])).trim(),
       porc_flete: Number(getByHeader(obj, ['Porc.Flete', 'porc_flete'])) || 0,
       porc_iva: Number(getByHeader(obj, ['Porc.IVA', 'porc_iva'])) || 0,
@@ -95,6 +96,30 @@
     };
     provider.proveedor_norm = norm(provider.proveedor);
     return provider.id_proveedor && provider.proveedor ? provider : null;
+  }
+
+  const PROVIDER_REMOTE_COLUMNS = [
+    'id_proveedor', 'proveedor', 'descuento_factura', 'descuento_lista', 'ultima_actualizacion',
+    'vendedor', 'telefono', 'nota', 'porc_flete', 'porc_iva', 'iva_incluido',
+    'descuento_total_fc', 'proveedor_norm', 'reserva_texto_1', 'reserva_texto_2',
+    'reserva_texto_3', 'reserva_texto_4', 'reserva_numero_1', 'reserva_numero_2',
+    'reserva_numero_3', 'reserva_fecha_1', 'reserva_fecha_2', 'reserva_json_1'
+  ];
+
+  function normalizeProviderPageLink(provider) {
+    if (!provider) return provider;
+    const link = String(provider.pagina_link || provider.pagina || provider.web || provider.reserva_texto_1 || '').trim();
+    return link ? { ...provider, pagina_link: link, reserva_texto_1: link } : { ...provider, pagina_link: '', reserva_texto_1: provider.reserva_texto_1 || null };
+  }
+
+  function providerRemotePayload(provider) {
+    const normalized = normalizeProviderPageLink(provider) || {};
+    const payload = {};
+    for (const column of PROVIDER_REMOTE_COLUMNS) {
+      if (Object.prototype.hasOwnProperty.call(normalized, column)) payload[column] = normalized[column];
+    }
+    payload.reserva_texto_1 = normalized.pagina_link || normalized.reserva_texto_1 || null;
+    return payload;
   }
 
   function openDb(name, upgrade, version = 1) {
@@ -157,7 +182,7 @@
   }
 
   async function importProvidersCloud() {
-    const providers = await fetchAll(TABLES.providers, 'select=*&order=proveedor.asc');
+    const providers = (await fetchAll(TABLES.providers, 'select=*&order=proveedor.asc')).map(normalizeProviderPageLink);
     if (providers.length) await setProvidersCache(providers);
     return providers;
   }
@@ -168,7 +193,7 @@
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.providers}?on_conflict=id_proveedor`, {
         method: 'POST',
         headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-        body: JSON.stringify(data.slice(i, i + 1000))
+        body: JSON.stringify(data.slice(i, i + 1000).map(providerRemotePayload))
       });
       if (!response.ok) throw new Error(await response.text());
     }
@@ -177,7 +202,7 @@
       headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
       body: JSON.stringify({ id: 'principal', version: Date.now(), total_proveedores: data.length, archivo_nombre: fileName })
     });
-    await setProvidersCache(data);
+    await setProvidersCache(data.map(normalizeProviderPageLink));
   }
 
   async function updateProviderDateOnly(provider, timestamp = nowTimestamp()) {
@@ -1007,6 +1032,8 @@
     money,
     percent,
     providerFromObject,
+    normalizeProviderPageLink,
+    providerRemotePayload,
     getProvidersCache,
     setProvidersCache,
     putProviderCacheItem,

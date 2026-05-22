@@ -409,6 +409,7 @@
         <label>Ultima act.</label><input id="modalDate" readonly>
         <label>Vendedor</label><input id="modalSeller" readonly>
         <label>Telefono</label><input id="modalPhone" readonly>
+        <label>Pagina</label><input id="modalPageLink" readonly>
         <label>Porc. flete</label><input id="modalFreight" readonly>
         <label>Porc. IVA</label><input id="modalIva" readonly>
         <label>Iva incluido?</label><input id="modalIvaIncluded" type="checkbox" disabled>
@@ -638,6 +639,7 @@
       $('modalDate').value = provider.ultima_actualizacion || '';
       $('modalSeller').value = provider.vendedor || '';
       $('modalPhone').value = provider.telefono || '';
+      $('modalPageLink').value = provider.pagina_link || provider.pagina || '';
       $('modalFreight').value = percentDisplay(provider.porc_flete);
       $('modalIva').value = percentDisplay(provider.porc_iva);
       $('modalIvaIncluded').checked = boolInput(provider.iva_incluido);
@@ -651,7 +653,7 @@
     }
 
     function setProviderModalEditing(enabled) {
-      ['modalProviderName','modalDiscountInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalFreight','modalIva','modalNote'].forEach((id) => {
+      ['modalProviderName','modalDiscountInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
         const field = $(id);
         if (field) field.readOnly = !enabled;
       });
@@ -662,6 +664,7 @@
     async function saveProviderModal() {
       const id = providerState.modalProviderId || $('modalProviderId').value;
       const current = providerState.rows.find((provider) => String(provider.id_proveedor) === String(id)) || {};
+      const pageLink = String($('modalPageLink').value).trim();
       const provider = {
         ...current,
         id_proveedor: String(id).trim(),
@@ -671,6 +674,8 @@
         ultima_actualizacion: $('modalDate').value || null,
         vendedor: String($('modalSeller').value).trim(),
         telefono: String($('modalPhone').value).trim(),
+        pagina_link: pageLink,
+        reserva_texto_1: pageLink || null,
         nota: String($('modalNote').value).trim(),
         porc_flete: parsePercentField('modalFreight'),
         porc_iva: parsePercentField('modalIva'),
@@ -682,16 +687,17 @@
       const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?on_conflict=id_proveedor`, {
         method: 'POST',
         headers: CorralonSystem.headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-        body: JSON.stringify(provider)
+        body: JSON.stringify(CorralonSystem.providerRemotePayload(provider))
       });
       if (!response.ok) throw new Error(await response.text());
 
+      const localProvider = CorralonSystem.normalizeProviderPageLink(provider);
       const index = providerState.rows.findIndex((item) => String(item.id_proveedor) === String(provider.id_proveedor));
-      if (index >= 0) providerState.rows[index] = provider;
-      else providerState.rows.push(provider);
+      if (index >= 0) providerState.rows[index] = localProvider;
+      else providerState.rows.push(localProvider);
       providerState.rows.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
       await CorralonSystem.setProvidersCache(providerState.rows);
-      providerInput.value = providerDisplay(provider);
+      providerInput.value = providerDisplay(localProvider);
       renderProviderDropdown(false);
       applyProvider(providerInput.value);
       setProviderModalEditing(false);

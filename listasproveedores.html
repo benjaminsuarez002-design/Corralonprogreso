@@ -259,6 +259,11 @@
       outline-offset: -2px;
       background: #ffe8eb;
     }
+    .provider-link {
+      color: #1f63d8;
+      text-decoration: underline;
+      cursor: pointer;
+    }
     .exclude-card {
       min-height: 0;
       border: 1px solid var(--borde-fuerte);
@@ -689,6 +694,7 @@
       calcRow: null,
       slotContextIndex: -1,
       providerDates: new Map(),
+      providerLinks: new Map(),
       filterTimer: null,
       base: null,
       slots: [],
@@ -805,6 +811,23 @@
       }
       const match = text.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2}(?::\d{2})?))?/);
       return match ? `${match[1]} ${match[2] || '00:00:00'}` : text;
+    }
+    function providerUrl(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      return /^https?:\/\//i.test(text) ? text : `https://${text}`;
+    }
+    function providerLinkForRow(row) {
+      if (!row) return '';
+      const id = String(row.id_proveedor || row.idProveedor || '').trim();
+      const name = normalize(row.proveedor || '');
+      return (id ? state.providerLinks.get(`id:${id}`) : '') || (name ? state.providerLinks.get(`name:${name}`) : '') || '';
+    }
+    function openProviderPage(row) {
+      const url = providerUrl(providerLinkForRow(row));
+      if (!url) return false;
+      window.open(url, '_blank', 'noopener');
+      return true;
     }
     function syncLabel() {
       return `Última sincronización: ${formatSyncDate(state.lastSyncAt)}`;
@@ -1066,7 +1089,7 @@
           <div tabindex="-1" data-col="0">${escapeHtml(row.cod_proveedor)}</div>
           <div tabindex="-1" data-col="1">${escapeHtml(row.articulo)}</div>
           <div tabindex="-1" data-col="2" class="money">${formatMoney(row.precio_costo)}</div>
-          <div tabindex="-1" data-col="3">${escapeHtml(row.proveedor)}</div>
+          <div tabindex="-1" data-col="3" class="${providerLinkForRow(row) ? 'provider-link' : ''}" title="${providerLinkForRow(row) ? 'Doble clic para abrir la pagina del proveedor' : escapeHtml(row.proveedor)}">${escapeHtml(row.proveedor)}</div>
         </div>
       `).join('');
       focusPendingTableCell();
@@ -1404,15 +1427,23 @@
         let providers = await CorralonSystem.getProvidersCache();
         if (!providers.length) providers = await CorralonSystem.importProvidersCloud();
         state.providerDates = new Map();
+        state.providerLinks = new Map();
         providers.forEach((provider) => {
           const date = provider.updated_at || provider.ultima_actualizacion || '';
-          if (!date) return;
           const id = String(provider.id_proveedor || '').trim();
           const name = normalize(provider.proveedor || '');
-          if (id) state.providerDates.set(`id:${id}`, date);
-          if (name) state.providerDates.set(`name:${name}`, date);
+          const link = String(provider.pagina_link || provider.pagina || provider.web || '').trim();
+          if (date) {
+            if (id) state.providerDates.set(`id:${id}`, date);
+            if (name) state.providerDates.set(`name:${name}`, date);
+          }
+          if (link) {
+            if (id) state.providerLinks.set(`id:${id}`, link);
+            if (name) state.providerLinks.set(`name:${name}`, link);
+          }
         });
         renderSlots();
+        requestSlice();
       } catch (error) {
         console.warn(error);
       }
@@ -1436,7 +1467,7 @@
           <div class="slot-label">Articulo</div>
           <div class="slot-value" title="${escapeHtml(row?.articulo || '')}">${escapeHtml(row?.articulo || '')}</div>
           <div class="slot-label">Proveedor</div>
-          <div class="slot-value" title="${escapeHtml(row?.proveedor || '')}">${escapeHtml(row?.proveedor || '')}</div>
+          <div class="slot-value ${providerLinkForRow(row) ? 'provider-link' : ''}" data-slot-provider="1" title="${providerLinkForRow(row) ? 'Doble clic para abrir la pagina del proveedor' : escapeHtml(row?.proveedor || '')}">${escapeHtml(row?.proveedor || '')}</div>
           <div class="slot-label">Precio</div>
           <div class="slot-value money">${row ? formatMoney(row.precio_costo) : ''}</div>
           <div class="slot-label">Última act.</div>
@@ -1780,6 +1811,10 @@
       selectRow(row);
       state.tableNav.matchIndex = Number(rowEl.dataset.matchIndex) || 0;
       state.tableNav.col = Number(event.target.closest('[data-col]')?.dataset.col) || 0;
+      if (event.detail === 2 && Number(event.target.closest('[data-col]')?.dataset.col) === 3) {
+        if (openProviderPage(row)) event.preventDefault();
+        return;
+      }
       if (event.detail >= 4) {
         event.preventDefault();
         selectRowText(rowEl);
@@ -1845,6 +1880,13 @@
     el.slots.addEventListener('click', (event) => {
       const btn = event.target.closest('[data-clear-slot]');
       if (btn) clearSlot(Number(btn.dataset.clearSlot));
+    });
+    el.slots.addEventListener('dblclick', (event) => {
+      const providerCell = event.target.closest('[data-slot-provider]');
+      if (!providerCell) return;
+      const slot = providerCell.closest('[data-slot-index]');
+      const row = state.slots[Number(slot?.dataset.slotIndex)];
+      if (openProviderPage(row)) event.preventDefault();
     });
     el.slots.addEventListener('contextmenu', (event) => {
       const slot = event.target.closest('[data-slot-index]');
