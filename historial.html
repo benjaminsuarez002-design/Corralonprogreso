@@ -37,7 +37,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .btn-volver { width: 100%; padding: 12px; background: transparent; color: #aaa; border: 1.5px solid var(--borde); border-radius: 12px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; }
 
 /* ── APP ── */
-#appContent { display: none; flex-direction: column; min-height: 100dvh; position: relative; z-index: 1; }
+#appContent { display: flex; flex-direction: column; min-height: 100dvh; position: relative; z-index: 1; }
 .header { background: #fff; border-bottom: 2px solid var(--borde); padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; box-shadow: var(--sombra); position: sticky; top: 0; z-index: 5; }
 .header img { height: 38px; width: auto; }
 .header-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; color: var(--rojo); text-transform: uppercase; letter-spacing: 1px; flex: 1; }
@@ -235,27 +235,9 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .loading-txt { color: var(--violeta); font-size: 16px; letter-spacing: 1px; text-transform: uppercase; font-family: 'Barlow Condensed', sans-serif; }
 </style>
   <script src="nav-helper.js"></script>
+  <script src="menu-auth-guard.js" data-menu-guard="historial"></script>
 </head>
 <body>
-
-<!-- ── PANTALLA DE CONTRASEÑA ── -->
-<div id="loginBg">
-  <div class="login-box">
-    <img class="login-logo" src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Logo">
-    <div class="login-title">📋 Historial</div>
-    <div class="login-sub">Ingresá la contraseña para continuar</div>
-    <input type="password" class="login-input" id="loginInput" placeholder="••••••••"
-      autocomplete="new-password"
-      onkeydown="if(event.key==='Enter')verificarPass()">
-    <div class="login-error" id="loginError"></div>
-    <div class="login-remember">
-      <input type="checkbox" id="rememberLogin">
-      <label for="rememberLogin">Mantenerme logueado</label>
-    </div>
-    <button class="btn-login" onclick="verificarPass()">Acceder</button>
-    <button class="btn-volver" data-nav-url="remitos.html">← Volver a remitos</button>
-  </div>
-</div>
 
 <!-- ── CONTENIDO HISTORIAL ── -->
 <div id="appContent">
@@ -387,9 +369,10 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const SUPABASE_BUCKET = 'Archivos';
-const ADMIN_PASS = 'Akashiya2301';
 const PRESUPUESTOS_TABLE = 'presupuestos_web';
 const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
+const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
+const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
 const GARANTIAS_COLLECTION = 'garantiasHistorial';
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -467,47 +450,14 @@ function remitoFull(value) {
   });
 })();
 
-// ── LOGIN ──
-function mostrarApp() {
-  document.getElementById('loginBg').style.display = 'none';
-  document.getElementById('appContent').style.display = 'flex';
-  document.getElementById('appContent').style.flexDirection = 'column';
-  document.getElementById('appContent').style.minHeight = '100dvh';
-}
-
-function recordarSesion(activar) {
-  if (activar) localStorage.setItem(HISTORIAL_LOGIN_STORAGE_KEY, '1');
-  else localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
-}
-
-function tieneSesionRecordada() {
-  return localStorage.getItem(HISTORIAL_LOGIN_STORAGE_KEY) === '1';
-}
-
-function verificarPass() {
-  const val = document.getElementById('loginInput').value;
-  if(val === ADMIN_PASS) {
-    recordarSesion(document.getElementById('rememberLogin').checked);
-    mostrarApp();
-    inicializarHistorial();
-  } else {
-    document.getElementById('loginError').textContent = '❌ Contraseña incorrecta';
-    document.getElementById('loginInput').value = '';
-    document.getElementById('loginInput').focus();
-  }
-}
-
 function cerrarSesion() {
   localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
-  document.getElementById('appContent').style.display = 'none';
-  document.getElementById('loginBg').style.display = 'flex';
-  document.getElementById('loginInput').value = '';
-  document.getElementById('loginError').textContent = '';
-  document.getElementById('rememberLogin').checked = false;
+  localStorage.removeItem(MENU_ACTIVE_USER_KEY);
+  localStorage.removeItem(MENU_ACTIVE_USER_SNAPSHOT_KEY);
   cerrarDetalle();
   cerrarEditar();
   cerrarConfirm();
-  document.getElementById('loginInput').focus();
+  location.replace('index.html');
 }
 
 // ── HISTORIAL ──
@@ -1476,14 +1426,8 @@ function generarPDFPresupuestoDoc(p) {
     headerName: p?.tipo || 'Presupuesto web'
   });
 }
-// Estado inicial de login
-document.getElementById('rememberLogin').checked = tieneSesionRecordada();
-if (tieneSesionRecordada()) {
-  mostrarApp();
-  inicializarHistorial();
-} else {
-  document.getElementById('loginInput').focus();
-}
+// Estado inicial
+inicializarHistorial();
 </script>
 </body>
 </html>
