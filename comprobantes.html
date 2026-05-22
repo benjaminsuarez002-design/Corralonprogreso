@@ -1037,6 +1037,29 @@
       display: none;
     }
 
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      z-index: 2200;
+      transform: translate(-50%, 18px);
+      opacity: 0;
+      pointer-events: none;
+      border: 1px solid rgba(125, 105, 255, .35);
+      border-radius: 999px;
+      background: #172033;
+      color: #fff;
+      padding: 10px 18px;
+      font-weight: 900;
+      box-shadow: 0 14px 38px rgba(0,0,0,.22);
+      transition: opacity .16s ease, transform .16s ease;
+    }
+
+    .toast.visible {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
     @media (max-width: 900px) {
       .alias-form,
       .alias-row,
@@ -1445,6 +1468,8 @@
     <img class="viewer-full-img" id="viewer-full-image" alt="Comprobante en pantalla completa">
   </div>
 
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
   <input class="hidden-file" id="file-input" type="file" accept="image/*,.pdf">
 
   <script>
@@ -1636,7 +1661,8 @@
         viewerZoomOut: $("#viewer-zoom-out"),
         viewerZoomReset: $("#viewer-zoom-reset"),
         viewerZoomIn: $("#viewer-zoom-in"),
-        fileInput: $("#file-input")
+        fileInput: $("#file-input"),
+        toast: $("#toast")
       };
 
       const state = {
@@ -1891,16 +1917,20 @@
           alert("El navegador no permite leer texto del portapapeles desde este botón.");
           return;
         }
+        syncDraftFromInputs();
+        const wasEmpty = !hasDraftData();
         const text = await navigator.clipboard.readText();
         const parsed = parseAccessClipboard(text);
         if (!parsed || !(parsed.client || parsed.machine || parsed.amount)) {
           alert("No pude leer el formato de Access del portapapeles.");
           return;
         }
+        if (wasEmpty) refreshDraftTimestamp();
         if (parsed.client) el.draftClient.value = parsed.client;
         if (parsed.machine) el.draftMachine.value = formatMachine(parsed.machine);
         if (parsed.amount) el.draftAmount.value = formatAmountInput(parsed.amount);
         syncDraftFromInputs();
+        syncDraftToInputs();
         saveDraftToStorage();
         if (parsed.client && parsed.machine && parsed.amount) {
           continueDraftAfterAmount();
@@ -1992,6 +2022,14 @@
         }
       }
 
+      function showToast(message) {
+        if (!el.toast) return;
+        el.toast.textContent = message;
+        el.toast.classList.add("visible");
+        clearTimeout(showToast.timer);
+        showToast.timer = setTimeout(() => el.toast.classList.remove("visible"), 1900);
+      }
+
       function hasDraftData() {
         const draft = state.draft;
         return !!(draft.client.trim() || draft.machine.trim() || draft.amountNumber || draft.transfer || draft.attachment);
@@ -2043,6 +2081,12 @@
         state.editingId = null;
         clearDraftStorage();
         syncDraftToInputs();
+      }
+
+      function refreshDraftTimestamp() {
+        state.draft.dateIso = todayIso();
+        state.draft.dateText = formatDate(state.draft.dateIso);
+        state.draft.timeText = currentTime();
       }
 
       function activateTab(name) {
@@ -2976,7 +3020,9 @@
             await state.db.collection(COMPROBANTES_COLLECTION).add(payload);
           }
           resetDraft();
-          activateTab("resumen");
+          activateTab("comp");
+          showToast("Comprobante guardado");
+          setTimeout(() => el.draftClient.focus(), 0);
         } finally {
           setDraftSaving(false);
         }
@@ -3183,7 +3229,7 @@
           syncDraftFromInputs();
           state.draft.transfer = aliasDoc;
           syncDraftToInputs();
-          openFilePicker({ type: "draft" });
+          el.draftAdd.focus();
           return;
         }
         updateRecordAlias(target.id, aliasDoc).then(() => {
