@@ -571,13 +571,19 @@
     async function loadProviderOptions() {
       const dropdown = $('providerDropdown');
       if (!dropdown || !window.CorralonSystem) return;
-      try {
-        let providers = await CorralonSystem.getProvidersCache();
-        if (!providers.length) providers = await CorralonSystem.importProvidersCloud();
-        providerState.rows = providers
+      const applyRows = (providers) => {
+        providerState.rows = (providers || [])
+          .map((provider) => CorralonSystem.normalizeProviderPageLink ? CorralonSystem.normalizeProviderPageLink(provider) : provider)
           .filter((provider) => provider?.id_proveedor && provider?.proveedor)
           .sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
         renderProviderDropdown(false);
+        if (providerInput?.value) applyProvider(providerInput.value);
+      };
+      try {
+        const cachedProviders = await CorralonSystem.getProvidersCache();
+        if (cachedProviders.length) applyRows(cachedProviders);
+        const cloudProviders = await CorralonSystem.importProvidersCloud();
+        if (cloudProviders.length) applyRows(cloudProviders);
       } catch (error) {
         console.warn(error);
       }
