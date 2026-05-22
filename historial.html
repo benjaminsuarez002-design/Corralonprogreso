@@ -448,6 +448,15 @@ function parseMonto(valor) {
   }
   return Number.parseFloat(texto.replace(/[^0-9.-]/g, '')) || 0;
 }
+const REMITO_DIGITS = 8;
+function remitoShort(value) {
+  const raw = String(value ?? '').split('-').pop() || '';
+  const n = parseInt(raw.replace(/\D/g, ''), 10) || 0;
+  return String(n).padStart(REMITO_DIGITS, '0');
+}
+function remitoFull(value) {
+  return '0001-' + remitoShort(value);
+}
 
 (function precacheLogo() {
   const imgEl = document.querySelector('.header img') || document.querySelector('.login-logo');
@@ -917,7 +926,7 @@ async function cargarHistorial() {
     }
     body.innerHTML = data.map(r => `
       <div class="h-item" onclick="abrirDetalle(${r.id})">
-        <div class="h-nro">${r.nro||'—'}</div>
+        <div class="h-nro">${r.nro ? remitoFull(r.nro) : '—'}</div>
         <div class="h-info">
           <div class="h-cliente">${r.cliente||'—'}</div>
           <div class="h-meta">${r.fecha||''}</div>
@@ -939,7 +948,7 @@ function renderDetalleRemito(remito) {
   _presupuestoDetalleActual = null;
   _remitoDetalleActual = { ...remito, items };
   setAccionesDetalleModo('remito');
-  document.getElementById('detalleNro').textContent = remito.nro || '—';
+  document.getElementById('detalleNro').textContent = remito.nro ? remitoFull(remito.nro) : '—';
   const body = document.getElementById('detalleBody');
   body.innerHTML = `
     <div class="detalle-info">
@@ -953,7 +962,7 @@ function renderDetalleRemito(remito) {
       </div>
       <div class="detalle-campo">
         <div class="detalle-lbl">N° Remito</div>
-        <div class="detalle-val">${esc(remito.nro||'—')}</div>
+        <div class="detalle-val">${esc(remito.nro ? remitoFull(remito.nro) : '—')}</div>
       </div>
     </div>
     <div class="detalle-tabla-head">
@@ -1040,12 +1049,13 @@ function generarPdfDetalleActual() {
     precio: it.precio
   }));
   const total = its.reduce((s,it) => s + (it.precio||0)*(it.cantidad||0), 0);
-  const doc = generarPDFDoc(r.cliente, r.fecha, r.nro || '-', total, its);
+  const nroRemito = r.nro ? remitoFull(r.nro) : '-';
+  const doc = generarPDFDoc(r.cliente, r.fecha, nroRemito, total, its);
   return {
     doc,
-    titulo: `${r.cliente || 'Cliente'} - ${r.nro || '-'} - ${r.fecha || '-'}`,
-    archivo: nombreArchivoPdfDetalle(`${r.cliente || 'Cliente'}-${r.nro || '-'}-${r.fecha || '-'}`),
-    info: `<strong>Remito:</strong> ${esc(r.nro || '-')}<br><strong>Cliente:</strong> ${esc(r.cliente || 'Cliente')}<br><strong>Total:</strong> ${fmt(total)}`
+    titulo: `${r.cliente || 'Cliente'} - ${nroRemito} - ${r.fecha || '-'}`,
+    archivo: nombreArchivoPdfDetalle(`${r.cliente || 'Cliente'}-${nroRemito}-${r.fecha || '-'}`),
+    info: `<strong>Remito:</strong> ${esc(nroRemito)}<br><strong>Cliente:</strong> ${esc(r.cliente || 'Cliente')}<br><strong>Total:</strong> ${fmt(total)}`
   };
 }
 
@@ -1085,7 +1095,7 @@ function confirmarEliminar() {
   if(!r) return;
   pedirConfirm({
     icon: '🗑', titulo: 'Eliminar remito',
-    sub: `¿Eliminar el remito ${r.nro} de ${r.cliente}? Esta acción no se puede deshacer.`,
+    sub: `¿Eliminar el remito ${r.nro ? remitoFull(r.nro) : '-'} de ${r.cliente}? Esta acción no se puede deshacer.`,
     color: 'var(--rojo)', btnTxt: 'Eliminar',
     callback: async () => {
       loading(true);
@@ -1122,7 +1132,7 @@ function cerrarEditar() {
 
 function renderEditForm() {
   const r = _remitoDetalleActual;
-  const nroCorto = (r.nro||'').split('-').pop() || '';
+  const nroCorto = r.nro ? remitoShort(r.nro) : '';
   document.getElementById('editBody').innerHTML = `
     <div class="edit-section">
       <div class="edit-lbl">Cliente</div>
@@ -1135,7 +1145,7 @@ function renderEditForm() {
       </div>
       <div>
         <div class="edit-lbl">N° Remito</div>
-        <input class="edit-inp" id="editNro" value="${nroCorto}" placeholder="00001" autocomplete="off">
+        <input class="edit-inp" id="editNro" value="${nroCorto}" placeholder="00000001" autocomplete="off" onblur="normalizarEditNro()">
       </div>
     </div>
     <div class="edit-section">
@@ -1176,6 +1186,12 @@ function renderEditItems() {
         onchange="calcularPrecioEditDesdeSubtotal(${i}, this)">
       <button class="btn-del-item" style="font-size:13px" onclick="editItems.splice(${i},1);renderEditItems()">✕</button>
     </div>`).join('');
+}
+
+function normalizarEditNro() {
+  const input = document.getElementById('editNro');
+  if(!input) return;
+  input.value = remitoShort(input.value);
 }
 
 function actualizarSubEdit() {
@@ -1234,7 +1250,7 @@ async function guardarEdicion() {
   const nextItems = editItems.map(it => ({ id: it.id, cant: it.cant, descripcion: it.desc, precio: it.precio }));
   const nextRemito = {
     ...r,
-    nro: '0001-' + nroCorto.padStart(5,'0'),
+    nro: remitoFull(nroCorto),
     cliente,
     fecha,
     total: nextItems.reduce((s,it) => s + (it.cant||0)*(it.precio||0), 0),
@@ -1254,12 +1270,12 @@ async function guardarEdicion() {
 }
 
 async function guardarEdicionRemota(remito) {
-  const nroCorto = String(remito.nro || '').split('-').pop() || '';
+  const nroCorto = remitoShort(remito.nro);
   const items = remito.items || [];
   await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${remito.id}`, {
     method: 'PATCH',
     headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-    body: JSON.stringify({ nro: '0001-' + nroCorto.padStart(5,'0'), cliente: remito.cliente, fecha: remito.fecha, total: remito.total })
+    body: JSON.stringify({ nro: remitoFull(nroCorto), cliente: remito.cliente, fecha: remito.fecha, total: remito.total })
   });
   await fetch(`${SUPABASE_URL}/rest/v1/items_remito?remito_id=eq.${remito.id}`, {
     method: 'DELETE',
@@ -1319,7 +1335,12 @@ document.addEventListener('keydown', function(e) {
   if(e.key === 'Enter') {
     const headerInputs = ['editCliente','editFecha','editNro'].map(id => document.getElementById(id)).filter(Boolean);
     const hi = headerInputs.indexOf(active);
-    if(hi !== -1) { e.preventDefault(); if(hi < headerInputs.length-1) headerInputs[hi+1].focus(); else if(agInputs[0]) agInputs[0].focus(); }
+    if(hi !== -1) {
+      e.preventDefault();
+      if(active.id === 'editNro') normalizarEditNro();
+      if(hi < headerInputs.length-1) headerInputs[hi+1].focus();
+      else if(agInputs[0]) agInputs[0].focus();
+    }
   }
 });
 

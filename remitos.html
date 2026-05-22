@@ -268,6 +268,7 @@ const ADMIN_PASS       = 'Akashiya2301';
 let items = [];
 let logoCacheData = null;
 let remitoConfirmadoActual = null;
+let remitoNumberRefreshTimer = null;
 
 // ── UTILS ──────────────────────────────────────────────────────
 function fmt(n) {
@@ -549,29 +550,71 @@ document.addEventListener('click', e => {
   if(!popup.contains(e.target) && e.target !== btn) popup.classList.remove('open');
 });
 
+const REMITO_DIGITS = 8;
+function remitoShort(value) {
+  const raw = String(value ?? '').split('-').pop() || '';
+  const n = parseInt(raw.replace(/\D/g, ''), 10) || 0;
+  return String(n).padStart(REMITO_DIGITS, '0');
+}
+function remitoFull(value) {
+  return '0001-' + remitoShort(value);
+}
+async function contarRemitosGuardados() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=nro`, {
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'apikey': SUPABASE_KEY
+    }
+  });
+  if(!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []).reduce((max, row) => {
+    const n = parseInt(String(row.nro || '').split('-').pop().replace(/\D/g, ''), 10) || 0;
+    return n > 0 && n < 10000 ? Math.max(max, n) : max;
+  }, 0);
+}
+
 // ── NÚMERO DE REMITO DESDE SUPABASE ─────────────────────────────
 async function cargarNroRemito() {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=nro&order=id.desc&limit=1`, {
-      headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
-    });
-    const data = await res.json();
-    let nro = 1;
-    if(Array.isArray(data) && data.length) {
-      const ultimo = parseInt((data[0].nro || '').split('-').pop() || '0');
-      nro = ultimo + 1;
-    }
-    document.getElementById('nroRemito').textContent = String(nro).padStart(5,'0');
+    const nro = (await contarRemitosGuardados()) + 1;
+    document.getElementById('nroRemito').textContent = remitoShort(nro);
     return nro;
   } catch(e) {
     const local = parseInt(localStorage.getItem('nroRemito')||'0') + 1;
-    document.getElementById('nroRemito').textContent = String(local).padStart(5,'0');
+    document.getElementById('nroRemito').textContent = remitoShort(local);
     return local;
   }
 }
 
+function remitoActualVacio() {
+  return !items.length && !document.getElementById('cliente').value.trim() &&
+    !document.getElementById('nCant').value.trim() &&
+    !document.getElementById('nDesc').value.trim() &&
+    !document.getElementById('nPrecio').value.trim();
+}
+
+async function refrescarNroRemitoSiCorresponde(force = false) {
+  if (!force && !remitoActualVacio()) return;
+  const actual = document.getElementById('nroRemito').textContent;
+  const siguiente = remitoShort((await contarRemitosGuardados()) + 1);
+  if (siguiente !== actual) document.getElementById('nroRemito').textContent = siguiente;
+}
+
+function iniciarAutoRefreshNroRemito() {
+  clearInterval(remitoNumberRefreshTimer);
+  remitoNumberRefreshTimer = setInterval(() => {
+    refrescarNroRemitoSiCorresponde(false).catch(() => {});
+  }, 5000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refrescarNroRemitoSiCorresponde(false).catch(() => {});
+  });
+  window.addEventListener('focus', () => refrescarNroRemitoSiCorresponde(false).catch(() => {}));
+}
+
 // ── GUARDAR EN SUPABASE (remito + ítems) ─────────────────────────
 async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar) {
+  const nroShort = remitoShort(nro);
   // 1. Guardar remito
   const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos`, {
     method: 'POST',
@@ -581,7 +624,7 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar)
       'Content-Type': 'application/json',
       'Prefer': 'return=representation'
     },
-    body: JSON.stringify({ nro: '0001-' + nro, cliente, fecha, total, link_pdf: linkPdf || null })
+    body: JSON.stringify({ nro: remitoFull(nroShort), cliente, fecha, total, link_pdf: linkPdf || null })
   });
   const data = await res.json();
   const remitoId = Array.isArray(data) && data[0] ? data[0].id : null;
@@ -606,7 +649,7 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar)
     });
   }
 
-  localStorage.setItem('nroRemito', parseInt(nro));
+  localStorage.setItem('nroRemito', parseInt(nroShort, 10));
   return remitoId;
 }
 
@@ -619,7 +662,7 @@ function generarPDFDoc(cliente, fecha, nro, total, itsOverride) {
     precio: Number(it.precio) || 0
   }));
   return window.PresupuestoShared.generarPDFRemitoDoc({
-    numero: '0001-' + nro,
+    numero: remitoFull(nro),
     fecha,
     total,
     items: lista,
@@ -657,6 +700,7 @@ function _hacerLimpiar(msg) {
   initDp();
   renderItems();
   cargarNroRemito();
+  refrescarNroRemitoSiCorresponde(true).catch(() => {});
   toast(msg || '🗑 Remito eliminado');
 }
 function limpiarTodo() {
@@ -666,7 +710,7 @@ function limpiarTodo() {
 
 function nombreArchivoRemito(remito) {
   const cliente = (remito.cliente || 'Cliente').replace(/[\\/:*?"<>|]+/g, '').trim() || 'Cliente';
-  const nro = ('0001-' + remito.nro).replace(/[\\/:*?"<>|]+/g, '-');
+  const nro = remitoFull(remito.nro).replace(/[\\/:*?"<>|]+/g, '-');
   return `${cliente} - ${nro}`;
 }
 
@@ -690,7 +734,7 @@ function prepararRemitoDesdeFormulario() {
   if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return null; }
   if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return null; }
   const fecha = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
-  const nro = document.getElementById('nroRemito').textContent || '00001';
+  const nro = document.getElementById('nroRemito').textContent || remitoShort(1);
   const itemsSnapshot = items.map(it => ({
     cant: Number(it.cant) || 0,
     desc: it.desc || '',
@@ -703,7 +747,7 @@ function prepararRemitoDesdeFormulario() {
 function abrirRemitoActions(remito) {
   const info = document.getElementById('remitoActionsInfo');
   info.innerHTML = `
-    <strong>Remito:</strong> 0001-${remito.nro}<br>
+    <strong>Remito:</strong> ${remitoFull(remito.nro)}<br>
     <strong>Cliente:</strong> ${escapeHtml(remito.cliente)}<br>
     <strong>Total:</strong> ${fmt(remito.total)}
   `;
@@ -715,6 +759,7 @@ function cerrarRemitoActions() {
 }
 
 async function confirmarRemitoFinal() {
+  await refrescarNroRemitoSiCorresponde(true).catch(() => {});
   const remito = prepararRemitoDesdeFormulario();
   if(!remito) return;
   loading(true);
@@ -752,22 +797,22 @@ function imprimirRemitoConfirmado() {
 
 function whatsappRemitoConfirmado() {
   if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
-  const msg = 'Realice el siguiente remito: 0001-' + remitoConfirmadoActual.nro + '.';
+  const msg = 'Realice el siguiente remito: ' + remitoFull(remitoConfirmadoActual.nro) + '.';
   window.open('https://wa.me/' + WA_NUM + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
 async function _hacerVerPDF() {
   const cliente = document.getElementById('cliente').value.trim();
   const fecha   = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
-  const nro     = document.getElementById('nroRemito').textContent || '00001';
+  const nro     = document.getElementById('nroRemito').textContent || remitoShort(1);
   const total   = items.reduce((s,it) => s + it.precio*it.cant, 0);
   loading(true);
   try {
     const doc = generarPDFDoc(cliente, fecha, nro, total);
     window.PresupuestoShared.openPdfPreview(
       doc,
-      `${cliente || 'Cliente'} - 0001-${nro} - ${fecha}`,
-      `${cliente || 'Cliente'}-0001-${nro}-${fecha}`
+      `${cliente || 'Cliente'} - ${remitoFull(nro)} - ${fecha}`,
+      `${cliente || 'Cliente'}-${remitoFull(nro)}-${fecha}`
     );
     await guardarRemito(nro, cliente, fecha, total, null, items);
   } catch(e) { toast('❌ Error guardando: ' + e.message); }
@@ -784,12 +829,12 @@ async function verPDF() {
 async function _hacerEnviarWhatsapp() {
   const cliente = document.getElementById('cliente').value.trim();
   const fecha   = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
-  const nro     = document.getElementById('nroRemito').textContent || '00001';
+  const nro     = document.getElementById('nroRemito').textContent || remitoShort(1);
   loading(true);
   try {
     const total = items.reduce((s,it) => s + it.precio*it.cant, 0);
     await guardarRemito(nro, cliente, fecha, total, null, items);
-    const msg = 'Realice el siguiente remito: 0001-' + nro + '.';
+    const msg = 'Realice el siguiente remito: ' + remitoFull(nro) + '.';
     loading(false);
     window.open('https://wa.me/' + WA_NUM + '?text=' + encodeURIComponent(msg), '_blank');
     setTimeout(() => { _hacerLimpiar('✅ Remito guardado'); }, 600);
@@ -810,6 +855,7 @@ async function enviarWhatsapp() {
 initDp();
 renderItems();
 cargarNroRemito();
+iniciarAutoRefreshNroRemito();
 
 // Precargar logo
 window.PresupuestoShared.ensureLogoDataUrl(document.querySelector('.header img').src).then(dataUrl => {
