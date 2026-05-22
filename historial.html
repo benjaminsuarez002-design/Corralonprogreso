@@ -1152,7 +1152,8 @@ function renderEditForm() {
         <input type="text" class="edit-item-inp num" id="eNuevoCant" placeholder="1" inputmode="numeric" autocomplete="off" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
         <input type="text" class="edit-item-inp" id="eNuevoDesc" placeholder="Descripción..." autocomplete="off">
         <input type="text" class="edit-item-inp num" id="eNuevoPrecio" placeholder="0" inputmode="numeric" autocomplete="off">
-        <div></div>
+        <input type="text" class="edit-item-inp num" id="eNuevoSubtotal" placeholder="0" inputmode="numeric" autocomplete="off"
+          onchange="calcularPrecioNuevoDesdeSubtotal()">
         <button class="btn-add" style="width:22px;height:22px;font-size:14px" onclick="editAgregarItem()">+</button>
       </div>
     </div>`;
@@ -1171,9 +1172,8 @@ function renderEditItems() {
         onchange="editItems[${i}].desc=this.value">
       <input type="text" class="edit-item-inp num" value="${it.precio||0}" inputmode="numeric" autocomplete="off"
         onchange="editItems[${i}].precio=parseMonto(this.value);this.value=editItems[${i}].precio;actualizarSubEdit()">
-      <div class="edit-item-inp num" id="editSub${i}" style="color:var(--violeta);font-weight:700;font-size:13px;text-align:right;padding:2px 3px">
-        $${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR')}
-      </div>
+      <input type="text" class="edit-item-inp num" id="editSub${i}" value="${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR')}" inputmode="numeric" autocomplete="off"
+        onchange="calcularPrecioEditDesdeSubtotal(${i}, this)">
       <button class="btn-del-item" style="font-size:13px" onclick="editItems.splice(${i},1);renderEditItems()">✕</button>
     </div>`).join('');
 }
@@ -1181,8 +1181,33 @@ function renderEditItems() {
 function actualizarSubEdit() {
   editItems.forEach((it, i) => {
     const el = document.getElementById('editSub' + i);
-    if(el) el.textContent = '$' + Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR');
+    if(el) el.value = Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR');
   });
+}
+
+function calcularPrecioEditDesdeSubtotal(i, input) {
+  const it = editItems[i];
+  if(!it) return;
+  const cant = Number(it.cant) || 1;
+  const subtotal = parseMonto(input.value);
+  it.precio = cant ? subtotal / cant : subtotal;
+  const row = input.closest('.edit-item-row');
+  const priceInput = row?.querySelectorAll('input.edit-item-inp')[2];
+  if(priceInput) priceInput.value = Number(it.precio || 0).toLocaleString('es-AR');
+  input.value = Number(subtotal || 0).toLocaleString('es-AR');
+}
+
+function calcularPrecioNuevoDesdeSubtotal() {
+  const cantEl = document.getElementById('eNuevoCant');
+  const precioEl = document.getElementById('eNuevoPrecio');
+  const subtotalEl = document.getElementById('eNuevoSubtotal');
+  if(!precioEl || !subtotalEl) return;
+  const cant = parseFloat(cantEl?.value) || 1;
+  const subtotal = parseMonto(subtotalEl.value);
+  if(!subtotal) return;
+  const precio = cant ? subtotal / cant : subtotal;
+  precioEl.value = Number(precio || 0).toLocaleString('es-AR');
+  subtotalEl.value = Number(subtotal || 0).toLocaleString('es-AR');
 }
 
 function editAgregarItem() {
@@ -1194,6 +1219,7 @@ function editAgregarItem() {
   document.getElementById('eNuevoCant').value = '';
   document.getElementById('eNuevoDesc').value = '';
   document.getElementById('eNuevoPrecio').value = '';
+  document.getElementById('eNuevoSubtotal').value = '';
   renderEditItems();
   setTimeout(() => document.getElementById('eNuevoCant').focus(), 30);
 }
@@ -1261,13 +1287,13 @@ document.addEventListener('keydown', function(e) {
   const editBg = document.getElementById('editBg');
   if(!editBg.classList.contains('open') || !editBg.contains(active)) return;
   const rows = [...document.querySelectorAll('.edit-item-row')];
-  const agInputs = [document.getElementById('eNuevoCant'), document.getElementById('eNuevoDesc'), document.getElementById('eNuevoPrecio')];
-  const COL = 3;
+  const agInputs = [document.getElementById('eNuevoCant'), document.getElementById('eNuevoDesc'), document.getElementById('eNuevoPrecio'), document.getElementById('eNuevoSubtotal')];
+  const COL = 4;
   function focusEditCell(rowIdx, colIdx) {
     colIdx = Math.max(0, Math.min(COL-1, colIdx));
     if(rowIdx === rows.length) { agInputs[colIdx] && agInputs[colIdx].focus(); }
     else if(rowIdx >= 0 && rowIdx < rows.length) {
-      const ins = [...rows[rowIdx].querySelectorAll('input.edit-item-inp')];
+    const ins = [...rows[rowIdx].querySelectorAll('input.edit-item-inp')];
       ins[colIdx] && ins[colIdx].focus();
     }
   }
@@ -1284,7 +1310,7 @@ document.addEventListener('keydown', function(e) {
   }
   const agIdx = agInputs.indexOf(active);
   if(agIdx !== -1) {
-    if(e.key === 'Enter' && agIdx === COL-1) { e.preventDefault(); editAgregarItem(); return; }
+    if(e.key === 'Enter' && agIdx === COL-1) { e.preventDefault(); calcularPrecioNuevoDesdeSubtotal(); editAgregarItem(); return; }
     if(e.key === 'ArrowUp' && rows.length>0) { e.preventDefault(); focusEditCell(rows.length-1, agIdx); }
     else if(e.key === 'ArrowRight' && active.selectionStart === active.value.length && agIdx < COL-1) { e.preventDefault(); agInputs[agIdx+1].focus(); }
     else if(e.key === 'ArrowLeft' && active.selectionStart === 0 && agIdx > 0) { e.preventDefault(); agInputs[agIdx-1].focus(); }

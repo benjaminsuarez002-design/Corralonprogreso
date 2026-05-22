@@ -330,22 +330,16 @@
 
         <div class="title-row"><div class="title">Convertir Pulgada A MM</div></div>
         <div class="grid">
-          <div class="lbl">Entero</div>
+          <div class="lbl">Pulgadas</div>
           <div class="val">
             <div class="row-inline">
-              <input id="inchEntero" type="number" step="1" value="0">
+              <input id="inchValue" type="text" inputmode="decimal" value="0">
               <span class="small">″</span>
             </div>
           </div>
 
-          <div class="lbl">Numerador</div>
-          <div class="val"><input id="inchNum" type="number" step="1" value="0"></div>
-
-          <div class="lbl">Denominador</div>
-          <div class="val"><input id="inchDen" type="number" step="1" value="1"></div>
-
           <div class="lbl">Total</div>
-          <div class="val mono" id="inchTotal" tabindex="0">0 milímetros</div>
+          <div class="val mono nav-output" id="inchTotal" tabindex="0">0 milímetros</div>
         </div>
       </section>
 
@@ -739,12 +733,27 @@
       $('totalFacturaFinal').textContent = fmtMoney(totalFactura + totalFlete);
     }
 
+    function parseInchesValue(value) {
+      const text = String(value || '').trim().replace(/["”″]/g, '').replace(/\s+/g, ' ');
+      if (!text) return 0;
+      const parts = text.split(' ');
+      let total = 0;
+      for (const part of parts) {
+        if (!part) continue;
+        if (part.includes('/')) {
+          const [numRaw, denRaw] = part.split('/');
+          const num = parseEsNumber(numRaw);
+          const den = parseEsNumber(denRaw);
+          if (den) total += num / den;
+        } else {
+          total += parseEsNumber(part);
+        }
+      }
+      return total;
+    }
+
     function calcInches() {
-      const e = n('inchEntero');
-      const num = n('inchNum');
-      let den = n('inchDen');
-      if (!den) den = 1;
-      const total = (e + (num / den)) * 25.4;
+      const total = parseInchesValue($('inchValue')?.value) * 25.4;
       $('inchTotal').textContent = Number(total).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' milímetros';
     }
 
