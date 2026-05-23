@@ -392,6 +392,13 @@
         }
         return 0;
       };
+      const firstText = (...values) => {
+        for (const value of values) {
+          const text = String(value ?? '').trim();
+          if (text) return text;
+        }
+        return '';
+      };
       const idart = String(item.idArt || item.IDArt || item.id || item.codigo || item._codigoArticulo || index + 1).trim();
       const descripcion = String(item.descripcion || item.Descripcion || item.nombre || item.articulo || item._descripcionPrincipal || '').trim();
       const precioCosto = firstNumber(
@@ -411,13 +418,48 @@
         item.codprov || item.codProv || item.cod_prov || item.codigo_proveedor || item.codigoProveedor || item.codigo_prov ||
         item.codProveedor || item.CodProveedor || item.CodProveed || ''
       ).trim();
+      const idProveedor = cleanId(firstText(
+        item.id_proveedor,
+        item.idProveedor,
+        item.IDProveedor,
+        item.IDPROVEEDOR,
+        item['ID Proveedor'],
+        item['Id Proveedor'],
+        item['id proveedor'],
+        item.idproveedor,
+        item.idProveed,
+        item.IDProveed,
+        item.idproveed,
+        item.idprov,
+        item.id_cliente,
+        item.idCliente,
+        item.IDCliente
+      ));
+      const proveedor = firstText(
+        item.proveedor,
+        item.Proveedor,
+        item.nombreProveedor,
+        item.NombreProveedor,
+        item.proveedor_nombre,
+        item.nombre_proveedor,
+        item.proveedorDescripcion,
+        item.proveedor_descripcion,
+        item.Proveedores_Descripcion,
+        item.proveedores_descripcion,
+        item.razonSocial,
+        item.razon_social,
+        item.RazonSocial,
+        item.razonsocial,
+        item.cliente,
+        item.Cliente
+      );
       return withSearch({
         source: 'index',
         idart,
-        idProveedor: cleanId(item.id_proveedor || item.idProveedor || item.IDProveedor || item.idproveedor || item.idProveed || item.IDProveed || item.idproveed || item.idprov || ''),
+        idProveedor,
         codProv,
         filtro: String(item.filtro || ''),
-        proveedor: String(item.proveedor || item.Proveedor || item.nombreProveedor || item.NombreProveedor || item.proveedor_nombre || item.nombre_proveedor || '').trim(),
+        proveedor,
         descripcion,
         precioCosto,
         precioFinal
@@ -428,6 +470,7 @@
       return withSearch({
         source: 'proveedores',
         idart: String(item.idart || item.idorden || '').padStart(6, '0'),
+        idProveedor: cleanId(item.id_proveedor || item.idProveedor || ''),
         codProv: String(item.cod_proveedor || '').trim(),
         filtro: String(item.filtro || ''),
         proveedor: String(item.proveedor || '').trim(),
@@ -787,7 +830,7 @@
         const meta = await remoteProviderListMeta();
         if (!meta) return null;
         const local = localProviderListMeta();
-        if (local && Number(local.lista_version) === Number(meta.lista_version)) return null;
+        if (local && Number(local.lista_version) === Number(meta.lista_version) && await providerCacheHasRows()) return null;
         if (local && await providerCacheHasRows()) return syncProviderArticleBlocks(meta);
         return downloadProviderArticlesCloud(meta);
       } catch (error) {
