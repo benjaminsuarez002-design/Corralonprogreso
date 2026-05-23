@@ -1064,6 +1064,13 @@
         workerPost({ type: 'filter', filter: currentFilter(), sort: state.sort });
       }, 35);
     }
+    function clearSearchFilters() {
+      el.filterCode.value = '';
+      el.filterArticle.value = '';
+      el.filterPrice.value = '';
+      el.filterProvider.value = '';
+      requestFilter();
+    }
     function requestSlice() {
       if (!state.loaded) return;
       const start = Math.max(0, Math.floor(el.viewport.scrollTop / ROW_HEIGHT) - BUFFER);
@@ -1250,6 +1257,23 @@
       const provider = params.get('baseProvider') || '';
       const priceText = params.get('basePrice') || '';
       if (!article && !code && !provider && !priceText) return;
+      setBase({
+        idorden: `externo-${Date.now()}`,
+        cod_proveedor: code,
+        articulo: article,
+        precio_costo: parseMoney(priceText),
+        proveedor: provider
+      });
+      setStatus('Artículo cargado para comparar.');
+    }
+    function applyBaseFromMessage(data) {
+      const payload = data || {};
+      const article = payload.baseArticle || payload.article || '';
+      const code = payload.baseCode || payload.code || '';
+      const provider = payload.baseProvider || payload.provider || '';
+      const priceText = payload.basePrice ?? payload.price ?? '';
+      if (!article && !code && !provider && !priceText) return;
+      clearSearchFilters();
       setBase({
         idorden: `externo-${Date.now()}`,
         cod_proveedor: code,
@@ -1754,6 +1778,11 @@
     }
     document.getElementById('uploadBtn').addEventListener('click', () => el.fileInput.click());
     document.getElementById('importBtn').addEventListener('click', () => importFromCloud().catch((error) => showToast(error.message)));
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin && event.origin !== 'null') return;
+      const message = event.data || {};
+      if (message.type === 'setCompareBase') applyBaseFromMessage(message.payload || message);
+    });
     el.fileInput.addEventListener('change', () => {
       const file = el.fileInput.files?.[0];
       if (!file) return;
