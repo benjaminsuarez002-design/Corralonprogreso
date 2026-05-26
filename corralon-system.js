@@ -11,6 +11,7 @@
   const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
   const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
   const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
+  const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
 
   function headers(extra = {}) {
     return {
@@ -253,8 +254,31 @@
     return (await response.json())?.[0] || null;
   }
 
-  async function uploadRawJsonToCloudinary(payload, publicId) {
-    const jsonText = JSON.stringify(payload);
+  function jsonByteLength(text) {
+    return new TextEncoder().encode(String(text || '')).length;
+  }
+
+  function splitJsonRows(rows = [], maxBytes = CLOUDINARY_JSON_MAX_BYTES) {
+    const chunks = [];
+    let current = [];
+    let currentBytes = 2;
+    for (const row of rows) {
+      const rowText = JSON.stringify(row);
+      const rowBytes = jsonByteLength(rowText);
+      const separatorBytes = current.length ? 1 : 0;
+      if (current.length && currentBytes + separatorBytes + rowBytes > maxBytes) {
+        chunks.push(current);
+        current = [];
+        currentBytes = 2;
+      }
+      current.push(row);
+      currentBytes += (current.length > 1 ? 1 : 0) + rowBytes;
+    }
+    if (current.length || !chunks.length) chunks.push(current);
+    return chunks;
+  }
+
+  async function uploadRawJsonTextToCloudinary(jsonText, publicId) {
     const formData = new FormData();
     formData.append('file', new Blob([jsonText], { type: 'application/json' }), `${publicId}.json`);
     formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
@@ -267,6 +291,26 @@
     if (!response.ok) throw new Error(data?.error?.message || text || 'Error subiendo JSON');
     if (!data?.secure_url) throw new Error('Cloudinary no devolvio URL del JSON');
     return data.secure_url;
+  }
+
+  async function uploadRawJsonToCloudinary(payload, publicId) {
+    return uploadRawJsonTextToCloudinary(JSON.stringify(payload), publicId);
+  }
+
+  async function uploadProviderRowsJsonChunks(rows, basePublicId) {
+    const chunks = splitJsonRows(rows);
+    const uploaded = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      const suffix = chunks.length > 1 ? `_parte_${index + 1}` : '';
+      const jsonUrl = await uploadRawJsonToCloudinary(chunks[index], `${basePublicId}${suffix}`);
+      uploaded.push({
+        index: index + 1,
+        total: chunks.length,
+        rows: chunks[index].length,
+        json_url: jsonUrl
+      });
+    }
+    return uploaded;
   }
 
   async function loadProviderJsonManifest() {
@@ -317,7 +361,8 @@
     const rows = providerArticleJsonRows(id, articles);
     const version = Date.now();
     const providerName = String(rows.find((row) => row.proveedor)?.proveedor || articles.find((row) => row?.proveedor)?.proveedor || '').trim();
-    const jsonUrl = await uploadRawJsonToCloudinary(rows, `listas_proveedores/proveedor_${id}_${version}`);
+    const chunks = await uploadProviderRowsJsonChunks(rows, `listas_proveedores/proveedor_${id}_${version}`);
+    const jsonUrl = chunks[0]?.json_url || '';
     const loaded = await loadProviderJsonManifest();
     const manifest = loaded.manifest || { id: 'provider-json-manifest-v1', providers: {} };
     const providers = { ...(manifest.providers || {}) };
@@ -327,7 +372,9 @@
       version,
       updated_at: new Date().toISOString(),
       total_articulos: rows.length,
-      json_url: jsonUrl
+      json_url: jsonUrl,
+      chunk_count: chunks.length,
+      chunks
     };
     const nextManifest = {
       id: 'provider-json-manifest-v1',
@@ -370,7 +417,6 @@
         lista_version: published.manifest.version,
         archivo_nombre: `${PROVIDER_MANIFEST_PREFIX}${published.manifestUrl}`
       });
-      replaceProviderArticlesSupabase(id, rows).catch((error) => console.warn(error));
       return published;
     } catch (error) {
       console.warn(error);
@@ -957,14 +1003,19 @@
     }
 
     function providerJsonManifestEntries(manifest) {
-      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && entry?.json_url);
+      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length);
+    }
+
+    function providerJsonUrls(entry) {
+      const chunks = Array.isArray(entry?.chunks) ? entry.chunks.map((chunk) => String(chunk?.json_url || '').trim()).filter(Boolean) : [];
+      return chunks.length ? chunks : [String(entry?.json_url || '').trim()].filter(Boolean);
     }
 
     function needsProviderJsonSync(entry, localManifest) {
       const id = cleanId(entry.id_proveedor);
       const local = localManifest[id];
       if (!local) return true;
-      if (String(local.json_url || '') !== String(entry.json_url || '')) return true;
+      if (providerJsonUrls(local).join('|') !== providerJsonUrls(entry).join('|')) return true;
       return Number(local.version || 0) < Number(entry.version || 0);
     }
 
@@ -988,14 +1039,18 @@
     }
 
     async function fetchProviderJsonRows(entry) {
-      const url = String(entry.json_url || '').trim();
-      if (!url) return [];
-      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(entry.version || '')}`);
-      if (!response.ok) throw new Error(await response.text());
-      const rows = await response.json();
-      return Array.isArray(rows)
-        ? rows.map((row, index) => normalizeProviderJsonCacheRow(row, entry, index)).filter((row) => row.articulo || row.cod_proveedor)
-        : [];
+      const urls = providerJsonUrls(entry);
+      const out = [];
+      for (const url of urls) {
+        const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(entry.version || '')}`);
+        if (!response.ok) throw new Error(await response.text());
+        const rows = await response.json();
+        if (Array.isArray(rows)) {
+          const offset = out.length;
+          out.push(...rows.map((row, index) => normalizeProviderJsonCacheRow(row, entry, offset + index)).filter((row) => row.articulo || row.cod_proveedor));
+        }
+      }
+      return out;
     }
 
     async function downloadProviderArticlesCloud(meta) {
@@ -1035,7 +1090,9 @@
           version: Number(entry.version || 0),
           updated_at: entry.updated_at || '',
           total_articulos: Number(entry.total_articulos || rows.length),
-          json_url: entry.json_url
+          json_url: entry.json_url,
+          chunk_count: Number(entry.chunk_count || providerJsonUrls(entry).length || 1),
+          chunks: Array.isArray(entry.chunks) ? entry.chunks : null
         };
       }
       setLocalProviderListMeta({

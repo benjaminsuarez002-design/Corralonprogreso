@@ -1654,13 +1654,17 @@
         : {};
     }
     function providerManifestEntries(manifest) {
-      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && entry?.json_url);
+      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length);
+    }
+    function providerJsonUrls(entry) {
+      const chunks = Array.isArray(entry?.chunks) ? entry.chunks.map((chunk) => String(chunk?.json_url || '').trim()).filter(Boolean) : [];
+      return chunks.length ? chunks : [String(entry?.json_url || '').trim()].filter(Boolean);
     }
     function needsProviderJsonSync(entry, localManifest) {
       const id = String(entry.id_proveedor || '').trim();
       const local = localManifest[id];
       if (!local) return true;
-      if (String(local.json_url || '') !== String(entry.json_url || '')) return true;
+      if (providerJsonUrls(local).join('|') !== providerJsonUrls(entry).join('|')) return true;
       return Number(local.version || 0) < Number(entry.version || 0);
     }
     function normalizeProviderJsonRow(row, entry, index) {
@@ -1681,12 +1685,69 @@
         articulo_source: row?.articulo_source || 'provider_json'
       };
     }
-    async function fetchProviderJsonRows(entry) {
-      const url = String(entry.json_url || '');
-      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(entry.version || '')}`);
+    function expectedProviderJsonRows(entry) {
+      const chunkRows = Array.isArray(entry?.chunks)
+        ? entry.chunks.reduce((sum, chunk) => sum + (Number(chunk?.rows || 0) || 0), 0)
+        : 0;
+      return Number(entry?.total_articulos || 0) || chunkRows || 0;
+    }
+    async function fetchJsonTextWithProgress(url, onProgress = null) {
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
       if (!response.ok) throw new Error(await response.text());
-      const rows = await response.json();
-      return Array.isArray(rows) ? rows.map((row, index) => normalizeProviderJsonRow(row, entry, index)).filter((row) => row.articulo || row.cod_proveedor) : [];
+      const totalBytes = Number(response.headers.get('content-length') || 0) || 0;
+      if (!response.body?.getReader) {
+        const text = await response.text();
+        if (onProgress) onProgress(1);
+        return text;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let receivedBytes = 0;
+      let text = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        receivedBytes += value.byteLength || value.length || 0;
+        text += decoder.decode(value, { stream: true });
+        if (onProgress) {
+          const progress = totalBytes ? receivedBytes / totalBytes : Math.min(0.95, receivedBytes / (8 * 1024 * 1024));
+          onProgress(Math.max(0, Math.min(1, progress)));
+        }
+      }
+      text += decoder.decode();
+      if (onProgress) onProgress(1);
+      return text;
+    }
+    async function fetchProviderJsonRows(entry, progress = {}) {
+      const out = [];
+      const urls = providerJsonUrls(entry);
+      const texts = [];
+      for (let index = 0; index < urls.length; index += 1) {
+        const url = urls[index];
+        const text = await fetchJsonTextWithProgress(url, (partProgress) => {
+          const downloadProgress = (index + partProgress) / Math.max(1, urls.length);
+          if (progress.onDownload) progress.onDownload(downloadProgress);
+        });
+        texts.push(text);
+      }
+      const expectedTotal = expectedProviderJsonRows(entry);
+      let processed = 0;
+      if (progress.onProcess) progress.onProcess(0, expectedTotal);
+      for (const text of texts) {
+        const rows = JSON.parse(text);
+        if (Array.isArray(rows)) {
+          for (let i = 0; i < rows.length; i += 1000) {
+            const chunk = rows.slice(i, i + 1000);
+            const offset = out.length;
+            out.push(...chunk.map((row, index) => normalizeProviderJsonRow(row, entry, offset + index)).filter((row) => row.articulo || row.cod_proveedor));
+            processed += chunk.length;
+            if (progress.onProcess) progress.onProcess(processed, expectedTotal || processed);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+        }
+      }
+      if (progress.onProcess) progress.onProcess(expectedTotal || processed || out.length, expectedTotal || processed || out.length);
+      return out;
     }
     async function downloadRemoteArticles(meta) {
       await idbClear('articulos');
@@ -1826,13 +1887,29 @@
         const label = entry.proveedor || entry.id_proveedor;
         const startProgress = (index / changed.length) * 88 + 6;
         const endProgress = ((index + 1) / changed.length) * 88 + 6;
+        const providerSpan = endProgress - startProgress;
+        const downloadEnd = startProgress + providerSpan / 3;
+        const processEnd = startProgress + (providerSpan * 2) / 3;
         setSyncProgress(startProgress);
-        setStatus(`Descargando ${label}...`);
-        const rows = await fetchProviderJsonRows(entry);
+        setStatus(`1/3 Descargando ${label}...`);
+        const rows = await fetchProviderJsonRows(entry, {
+          onDownload: (progress) => {
+            const pct = Math.round(Math.max(0, Math.min(1, progress)) * 100);
+            setSyncProgress(startProgress + (downloadEnd - startProgress) * Math.max(0, Math.min(1, progress)));
+            setStatus(`1/3 Descargando ${label}: ${pct}%`);
+          },
+          onProcess: (done, totalRows) => {
+            const progress = totalRows ? done / totalRows : 1;
+            const clamped = Math.max(0, Math.min(1, progress));
+            setSyncProgress(downloadEnd + (processEnd - downloadEnd) * clamped);
+            setStatus(`2/3 Procesando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+          }
+        });
         await idbReplaceProviderArticles(entry.id_proveedor, rows, (done, totalRows) => {
           const articleProgress = totalRows ? done / totalRows : 1;
-          setSyncProgress(startProgress + (endProgress - startProgress) * articleProgress);
-          setStatus(`Aplicando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+          const clamped = Math.max(0, Math.min(1, articleProgress));
+          setSyncProgress(processEnd + (endProgress - processEnd) * clamped);
+          setStatus(`3/3 Aplicando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
         });
         total += rows.length;
         nextLocalManifest[String(entry.id_proveedor)] = {
@@ -1841,7 +1918,9 @@
           version: Number(entry.version || 0),
           updated_at: entry.updated_at || '',
           total_articulos: Number(entry.total_articulos || rows.length),
-          json_url: entry.json_url
+          json_url: entry.json_url,
+          chunk_count: Number(entry.chunk_count || providerJsonUrls(entry).length || 1),
+          chunks: Array.isArray(entry.chunks) ? entry.chunks : null
         };
         setSyncProgress(endProgress);
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1910,11 +1989,12 @@
       workerPost({ type: 'load', rows });
       return true;
     }
-    async function checkCloudUpdates() {
+    async function checkCloudUpdates(options = {}) {
       const meta = await remoteMeta();
       if (!meta) return false;
       const local = await idbGet('meta', 'principal');
       if (!local || Number(local.lista_version) !== Number(meta.lista_version)) {
+        setStatus('Buscando actualización JSON...');
         if (!local) {
           await downloadRemoteArticles(meta);
           const jsonUpdated = await syncProviderJsonManifest(meta);
@@ -1928,6 +2008,7 @@
         if (updated) return true;
         return true;
       }
+      if (options.skipSameVersionBackground) return false;
       syncProviderJsonManifest(meta).then((jsonUpdated) => {
         if (!jsonUpdated) return syncProvidersUpdatedAfterLocalMeta();
         return null;
@@ -2225,12 +2306,16 @@
       applyBaseFromUrl();
       window.addEventListener('resize', syncResponsiveScale);
       try {
+        setStatus('Cargando lista local...');
         const hadCache = await loadCacheIntoWorker();
         if (hadCache) {
           setStatus(localListStatus(state.total));
-          checkCloudUpdates().catch((error) => {
-            console.error(error);
-          });
+          setTimeout(() => {
+            checkCloudUpdates().catch((error) => {
+              console.error(error);
+              hideSyncProgress(1200);
+            });
+          }, 0);
           return;
         }
         setStatus('Sin cache local. Importando desde Supabase...');
