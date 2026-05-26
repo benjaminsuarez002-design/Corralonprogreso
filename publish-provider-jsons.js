@@ -6,7 +6,7 @@ const META_TABLE = 'lista_precios_meta';
 const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
 const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
 const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
-const CLOUDINARY_JSON_MAX_BYTES = 1024 * 1024;
+const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
 const FORCE_RECHUNK = process.argv.includes('--force-rechunk');
 
 function headers(extra = {}) {

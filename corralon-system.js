@@ -11,7 +11,7 @@
   const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
   const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
   const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
-  const CLOUDINARY_JSON_MAX_BYTES = 1024 * 1024;
+  const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
 
   function headers(extra = {}) {
     return {
@@ -869,7 +869,7 @@
         if (!store.indexNames.contains('id_proveedor')) store.createIndex('id_proveedor', 'id_proveedor', { unique: false });
         if (!store.indexNames.contains('proveedor')) store.createIndex('proveedor', 'proveedor', { unique: false });
         if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta', { keyPath: 'id' });
-      }, 3);
+      }, 4);
     }
 
     async function readProviderArticlesCache() {
@@ -880,6 +880,35 @@
           request.onsuccess = () => resolve((request.result || []).map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart));
           request.onerror = () => reject(request.error);
         });
+      } catch (error) {
+        console.warn(error);
+        return [];
+      }
+    }
+
+    async function readProviderArticlesCacheByProvider(providerId = '', providerName = '') {
+      try {
+        const database = await openListDb();
+        const id = cleanId(providerId);
+        const name = String(providerName || '').trim();
+        const rawItems = await new Promise((resolve, reject) => {
+          const tx = database.transaction('articulos', 'readonly');
+          const store = tx.objectStore('articulos');
+          if (id && store.indexNames.contains('id_proveedor')) {
+            const request = store.index('id_proveedor').getAll(id);
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => reject(request.error);
+            return;
+          }
+          if (name && store.indexNames.contains('proveedor')) {
+            const request = store.index('proveedor').getAll(name);
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => reject(request.error);
+            return;
+          }
+          resolve([]);
+        });
+        return sortCatalogByDescription(rawItems.map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart));
       } catch (error) {
         console.warn(error);
         return [];
@@ -948,13 +977,17 @@
     async function replaceProviderArticlesCacheBlock(providerId, rows) {
       const database = await openListDb();
       return new Promise((resolve, reject) => {
+        const id = String(providerId || '');
         const tx = database.transaction('articulos', 'readwrite');
         const store = tx.objectStore('articulos');
-        const request = store.openCursor();
+        const source = store.indexNames.contains('id_proveedor')
+          ? store.index('id_proveedor')
+          : store;
+        const request = source.openCursor(store.indexNames.contains('id_proveedor') ? IDBKeyRange.only(id) : null);
         request.onsuccess = () => {
           const cursor = request.result;
           if (cursor) {
-            if (String(cursor.value?.id_proveedor || '') === String(providerId)) cursor.delete();
+            if (source !== store || String(cursor.value?.id_proveedor || '') === id) cursor.delete();
             cursor.continue();
             return;
           }
@@ -1004,6 +1037,19 @@
 
     function providerJsonManifestEntries(manifest) {
       return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length);
+    }
+    function findProviderJsonEntry(manifest, provider = '', providerId = '') {
+      const id = cleanId(providerId || String(provider || '').match(/^\s*([0-9.]+)\s*[-–]/)?.[1] || '');
+      const name = norm(String(provider || '').replace(/^\s*\d+\s*[-–]\s*/, ''));
+      const entries = providerJsonManifestEntries(manifest);
+      if (id) {
+        const byId = entries.find((entry) => cleanId(entry.id_proveedor) === id);
+        if (byId) return byId;
+      }
+      if (name) {
+        return entries.find((entry) => norm(entry.proveedor) === name) || entries.find((entry) => norm(entry.proveedor).includes(name) || name.includes(norm(entry.proveedor)));
+      }
+      return null;
     }
 
     function providerJsonUrls(entry) {
@@ -1067,7 +1113,8 @@
       if (!manifest) return null;
       const local = localProviderListMeta() || {};
       const localManifest = localProviderJsonManifest(local);
-      const changed = providerJsonManifestEntries(manifest).filter((entry) => needsProviderJsonSync(entry, localManifest));
+      const entries = providerJsonManifestEntries(manifest);
+      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest));
       if (!changed.length) {
         if (options.updateWhenNoChanges !== false) {
           setLocalProviderListMeta({
@@ -1080,9 +1127,19 @@
         }
         return false;
       }
-      const nextLocalManifest = { ...localManifest };
+      const nextLocalManifest = options.forceAll ? {} : { ...localManifest };
+      if (options.clearBeforeImport) {
+        const database = await openListDb();
+        await new Promise((resolve, reject) => {
+          const request = database.transaction('articulos', 'readwrite').objectStore('articulos').clear();
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      }
       for (const entry of changed) {
+        const deletePromise = options.clearBeforeImport ? Promise.resolve() : replaceProviderArticlesCacheBlock(entry.id_proveedor, []);
         const rows = await fetchProviderJsonRows(entry);
+        await deletePromise;
         await replaceProviderArticlesCacheBlock(entry.id_proveedor, rows);
         nextLocalManifest[cleanId(entry.id_proveedor)] = {
           id_proveedor: cleanId(entry.id_proveedor),
@@ -1103,6 +1160,43 @@
         last_provider_sync_date: today()
       });
       return sortCatalogByDescription(await readProviderArticlesCache());
+    }
+
+    async function syncSingleProviderJson(provider = '', providerId = '') {
+      const meta = await remoteProviderListMeta();
+      if (!meta) return [];
+      const manifest = await fetchProviderJsonManifest(meta);
+      if (!manifest) return [];
+      const entry = findProviderJsonEntry(manifest, provider, providerId);
+      if (!entry) return [];
+      const local = localProviderListMeta() || {};
+      const localManifest = localProviderJsonManifest(local);
+      if (!needsProviderJsonSync(entry, localManifest)) {
+        const cached = await readProviderArticlesCacheByProvider(entry.id_proveedor, entry.proveedor);
+        if (cached.length) return cached;
+      }
+      const rows = await fetchProviderJsonRows(entry);
+      await replaceProviderArticlesCacheBlock(entry.id_proveedor, rows);
+      setLocalProviderListMeta({
+        ...local,
+        ...meta,
+        provider_json_manifest: {
+          ...localManifest,
+          [cleanId(entry.id_proveedor)]: {
+            id_proveedor: cleanId(entry.id_proveedor),
+            proveedor: entry.proveedor || '',
+            version: Number(entry.version || 0),
+            updated_at: entry.updated_at || '',
+            total_articulos: Number(entry.total_articulos || rows.length),
+            json_url: entry.json_url,
+            chunk_count: Number(entry.chunk_count || providerJsonUrls(entry).length || 1),
+            chunks: Array.isArray(entry.chunks) ? entry.chunks : null
+          }
+        },
+        last_provider_sync_at: new Date().toISOString(),
+        last_provider_sync_date: today()
+      });
+      return rows.map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart);
     }
 
     async function syncProviderArticleBlocks(meta) {
@@ -1133,9 +1227,11 @@
         if (local && hasCachedRows) {
           const jsonResult = await syncProviderJsonBlocks(meta, { updateWhenNoChanges: Boolean(metaVersionMatches) });
           if (jsonResult) return jsonResult;
+          if (jsonResult === false && manifestUrlFromMetaValue(meta.archivo_nombre)) return null;
           if (jsonResult === false && metaVersionMatches) return null;
           return syncProviderArticleBlocks(meta);
         }
+        if (manifestUrlFromMetaValue(meta.archivo_nombre)) return null;
         const jsonResult = await syncProviderJsonBlocks(meta);
         if (jsonResult) return jsonResult;
         return downloadProviderArticlesCloud(meta);
@@ -1357,6 +1453,7 @@
       loadCorralonCatalog,
       loadProviderCatalog,
       loadProviderCatalogWithProgress,
+      syncSingleProviderJson,
       loadCatalog,
       syncCatalogInBackground,
       catalogFilter,

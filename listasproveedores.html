@@ -519,6 +519,74 @@
       box-shadow: 0 18px 42px rgba(20, 32, 51, .28);
       padding: 16px;
     }
+    .updates-modal {
+      width: min(620px, calc(100vw - 28px));
+      max-height: min(78vh, 680px);
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(20, 32, 51, .28);
+      overflow: hidden;
+    }
+    .updates-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--borde);
+    }
+    .updates-title {
+      margin: 0;
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 25px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .updates-list {
+      overflow: auto;
+      padding: 10px 14px 14px;
+    }
+    .update-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 14px;
+      align-items: center;
+      padding: 9px 10px;
+      border: 1px solid var(--borde);
+      border-radius: 6px;
+      background: #f7fbff;
+      margin-bottom: 8px;
+    }
+    .update-provider {
+      min-width: 0;
+      color: var(--texto);
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .update-date {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .update-count {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .updates-empty {
+      padding: 18px 10px;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: center;
+    }
     .calc-title {
       margin: 0 0 12px;
       color: var(--acento-oscuro);
@@ -589,7 +657,7 @@
           <span class="status" id="statusText">Inicializando...</span>
           <div class="sync-progress" id="syncProgress"><div class="sync-progress-fill" id="syncProgressFill"></div></div>
         </div>
-        <button class="btn primary" id="uploadBtn" type="button">Subir / Exportar</button>
+        <button class="btn primary" id="updatesBtn" type="button">Ver últimas actualizaciones</button>
         <button class="btn" id="importBtn" type="button">Importar</button>
         <button class="btn" type="button" data-nav-url="menu.html">Menú</button>
       </div>
@@ -670,6 +738,15 @@
     </footer>
   </div>
   <div class="toast" id="toast"></div>
+  <div class="modal-backdrop" id="updatesBackdrop">
+    <div class="updates-modal" role="dialog" aria-modal="true" aria-labelledby="updatesTitle">
+      <div class="updates-head">
+        <h2 class="updates-title" id="updatesTitle">Últimas actualizaciones</h2>
+        <button class="btn" type="button" id="updatesCloseBtn">Cerrar</button>
+      </div>
+      <div class="updates-list" id="updatesList"></div>
+    </div>
+  </div>
   <div class="context-menu" id="rowContextMenu">
     <button type="button" id="compareContextBtn">Comparar</button>
     <button type="button" id="calcContextBtn">Dividir / multiplicar</button>
@@ -733,7 +810,8 @@
       sort: { col: null, dir: 0 },
       tableNav: { matchIndex: 0, col: 0, pending: null },
       currentRows: [],
-      lastSyncAt: ''
+      lastSyncAt: '',
+      latestUpdates: []
     };
     const el = {
       status: document.getElementById('statusText'),
@@ -770,6 +848,10 @@
       slotContextMenu: document.getElementById('slotContextMenu'),
       sendSlotMissingBtn: document.getElementById('sendSlotMissingBtn'),
       toast: document.getElementById('toast'),
+      updatesBtn: document.getElementById('updatesBtn'),
+      updatesBackdrop: document.getElementById('updatesBackdrop'),
+      updatesList: document.getElementById('updatesList'),
+      updatesCloseBtn: document.getElementById('updatesCloseBtn'),
       fileInput: document.getElementById('fileInput')
     };
 
@@ -845,7 +927,72 @@
       if (!value) return 'sin datos';
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return String(value);
-      return date.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    function updateDateValue(item) {
+      const raw = item?.updated_at || item?.fecha || item?.synced_at || '';
+      const rawTime = timestampValue(raw);
+      if (rawTime) return rawTime;
+      const version = Number(item?.version || 0);
+      return version > 1000000000000 ? version : 0;
+    }
+    function updateDateText(item) {
+      const time = updateDateValue(item);
+      return time ? formatSyncDate(new Date(time).toISOString()) : 'sin fecha';
+    }
+    function normalizeUpdateItem(item) {
+      return {
+        id_proveedor: String(item?.id_proveedor || ''),
+        proveedor: String(item?.proveedor || item?.nombre || item?.id_proveedor || '').trim(),
+        updated_at: item?.updated_at || '',
+        version: Number(item?.version || 0),
+        total_articulos: Number(item?.total_articulos || item?.articulos || 0),
+        synced_at: item?.synced_at || ''
+      };
+    }
+    function sortUpdates(items) {
+      return (items || [])
+        .map(normalizeUpdateItem)
+        .filter((item) => item.id_proveedor || item.proveedor)
+        .sort((a, b) => updateDateValue(b) - updateDateValue(a));
+    }
+    function syncToastMessage(items) {
+      const updates = sortUpdates(items);
+      if (updates.length === 1) return `Proveedor actualizado: ${updates[0].proveedor || updates[0].id_proveedor}`;
+      return `${updates.length.toLocaleString('es-AR')} proveedores actualizados`;
+    }
+    function updatesFromManifest(manifest) {
+      return sortUpdates(Object.values(manifest || {}));
+    }
+    function renderUpdatesModal() {
+      const items = sortUpdates(state.latestUpdates);
+      if (!items.length) {
+        el.updatesList.innerHTML = '<div class="updates-empty">Sin actualizaciones registradas.</div>';
+        return;
+      }
+      el.updatesList.innerHTML = items.map((item) => `
+        <div class="update-row">
+          <div class="update-provider">${escapeHtml(item.proveedor || item.id_proveedor)}</div>
+          <div class="update-date">${escapeHtml(updateDateText(item))}</div>
+          <div class="update-count">${Number(item.total_articulos || 0).toLocaleString('es-AR')} artículos${item.id_proveedor ? ` · ID ${escapeHtml(item.id_proveedor)}` : ''}</div>
+        </div>
+      `).join('');
+    }
+    async function loadLatestUpdatesForModal() {
+      const local = await idbGet('meta', 'principal').catch(() => null);
+      const saved = Array.isArray(local?.last_provider_updates) ? local.last_provider_updates : [];
+      state.latestUpdates = saved.length ? sortUpdates(saved) : updatesFromManifest(localProviderManifest(local || {}));
+    }
+    function openUpdatesModal() {
+      loadLatestUpdatesForModal()
+        .then(() => {
+          renderUpdatesModal();
+          el.updatesBackdrop.classList.add('visible');
+        })
+        .catch((error) => showToast(error.message || 'No pude cargar actualizaciones.'));
+    }
+    function closeUpdatesModal() {
+      el.updatesBackdrop.classList.remove('visible');
     }
     function formatProviderDateTime(value) {
       if (!value) return '';
@@ -912,7 +1059,7 @@
     }
     function openDb() {
       return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, 3);
+        const req = indexedDB.open(DB_NAME, 4);
         req.onupgradeneeded = () => {
           const db = req.result;
           let store;
@@ -1749,16 +1896,16 @@
       const expectedTotal = expectedProviderJsonRows(entry);
       let processed = 0;
       if (progress.onProcess) progress.onProcess(0, expectedTotal);
-      for (let index = 0; index < urls.length; index += 1) {
-        const url = urls[index];
+      for (let i = 0; i < urls.length; i += 1) {
+        const url = urls[i];
         const text = await fetchJsonTextWithProgress(url, (partProgress) => {
-          const downloadProgress = (index + partProgress) / Math.max(1, urls.length);
+          const downloadProgress = (i + partProgress) / Math.max(1, urls.length);
           if (progress.onDownload) progress.onDownload(downloadProgress);
         });
         const rows = JSON.parse(text);
         if (Array.isArray(rows)) {
-          for (let i = 0; i < rows.length; i += 1000) {
-            const chunk = rows.slice(i, i + 1000);
+          for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1000) {
+            const chunk = rows.slice(rowIndex, rowIndex + 1000);
             const offset = out.length;
             out.push(...chunk.map((row, index) => normalizeProviderJsonRow(row, entry, offset + index)).filter((row) => row.articulo || row.cod_proveedor));
             processed += chunk.length;
@@ -1831,13 +1978,17 @@
     }
     function idbDeleteProviderArticles(providerId) {
       return new Promise((resolve, reject) => {
+        const id = String(providerId || '');
         const tx = state.db.transaction('articulos', 'readwrite');
         const store = tx.objectStore('articulos');
-        const request = store.openCursor();
+        const source = store.indexNames.contains('id_proveedor')
+          ? store.index('id_proveedor')
+          : store;
+        const request = source.openCursor(store.indexNames.contains('id_proveedor') ? IDBKeyRange.only(id) : null);
         request.onsuccess = () => {
           const cursor = request.result;
           if (cursor) {
-            if (String(cursor.value?.id_proveedor || '') === String(providerId)) cursor.delete();
+            if (source !== store || String(cursor.value?.id_proveedor || '') === id) cursor.delete();
             cursor.continue();
             return;
           }
@@ -1856,8 +2007,8 @@
         tx.onerror = () => reject(tx.error);
       });
     }
-    async function idbReplaceProviderArticles(providerId, rows, onProgress = null) {
-      await idbDeleteProviderArticles(providerId);
+    async function idbReplaceProviderArticles(providerId, rows, onProgress = null, options = {}) {
+      if (!options.skipDelete) await idbDeleteProviderArticles(providerId);
       const total = rows.length;
       if (!total) {
         if (onProgress) onProgress(0, 0);
@@ -1890,6 +2041,13 @@
       updateCounts();
       return next;
     }
+    async function markSyncFinished(metaPatch = {}) {
+      return saveLocalSyncMeta({
+        ...metaPatch,
+        last_provider_sync_at: new Date().toISOString(),
+        last_provider_sync_date: todayDate()
+      });
+    }
     async function syncProviderJsonManifest(meta, options = {}) {
       const manifest = await fetchProviderManifest(meta).catch((error) => {
         console.warn(error);
@@ -1898,14 +2056,13 @@
       if (!manifest) return false;
       const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
       const localManifest = localProviderManifest(local);
-      const changed = providerManifestEntries(manifest).filter((entry) => needsProviderJsonSync(entry, localManifest));
+      const entries = providerManifestEntries(manifest);
+      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest));
       if (!changed.length) {
         if (options.updateWhenNoChanges !== false) {
-          await saveLocalSyncMeta({
+          await markSyncFinished({
             ...meta,
-            provider_json_manifest: manifest.providers,
-            last_provider_sync_at: new Date().toISOString(),
-            last_provider_sync_date: todayDate()
+            provider_json_manifest: manifest.providers
           });
         }
         return false;
@@ -1913,7 +2070,12 @@
       setStatus(`Sincronizando ${changed.length} proveedor(es) desde JSON...`);
       setSyncProgress(3);
       let total = 0;
-      const nextLocalManifest = { ...localManifest };
+      const nextLocalManifest = options.forceAll ? {} : { ...localManifest };
+      const updatedProviders = [];
+      if (options.clearBeforeImport) {
+        setStatus('Limpiando base local...');
+        await idbClear('articulos');
+      }
       for (let index = 0; index < changed.length; index += 1) {
         const entry = changed[index];
         const label = entry.proveedor || entry.id_proveedor;
@@ -1924,27 +2086,38 @@
         const processEnd = startProgress + (providerSpan * 2) / 3;
         setSyncProgress(startProgress);
         setStatus(`1/3 Descargando ${label}...`);
-        const rows = await fetchProviderJsonRows(entry, {
+        const deletePromise = options.clearBeforeImport ? Promise.resolve() : idbDeleteProviderArticles(entry.id_proveedor);
+        const rowsPromise = fetchProviderJsonRows(entry, {
           onDownload: (progress) => {
-            const pct = Math.round(Math.max(0, Math.min(1, progress)) * 100);
-            setSyncProgress(startProgress + (downloadEnd - startProgress) * Math.max(0, Math.min(1, progress)));
+            const clamped = Math.max(0, Math.min(1, progress));
+            const pct = Math.round(clamped * 100);
+            setSyncProgress(startProgress + (downloadEnd - startProgress) * clamped);
             setStatus(`1/3 Descargando ${label}: ${pct}%`);
           },
           onProcess: (done, totalRows) => {
-            const progress = totalRows ? done / totalRows : 1;
-            const clamped = Math.max(0, Math.min(1, progress));
+            const clamped = totalRows ? Math.max(0, Math.min(1, done / totalRows)) : 1;
             setSyncProgress(downloadEnd + (processEnd - downloadEnd) * clamped);
             setStatus(`2/3 Procesando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
           }
         });
+        const [rows] = await Promise.all([rowsPromise, deletePromise]);
+        setSyncProgress(processEnd);
         await idbReplaceProviderArticles(entry.id_proveedor, rows, (done, totalRows) => {
           const articleProgress = totalRows ? done / totalRows : 1;
           const clamped = Math.max(0, Math.min(1, articleProgress));
           setSyncProgress(processEnd + (endProgress - processEnd) * clamped);
           setStatus(`3/3 Aplicando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
-        });
+        }, { skipDelete: true });
         replaceProviderInWorker(entry.id_proveedor, rows);
         total += rows.length;
+        updatedProviders.push({
+          id_proveedor: String(entry.id_proveedor),
+          proveedor: entry.proveedor || '',
+          updated_at: entry.updated_at || '',
+          version: Number(entry.version || 0),
+          total_articulos: Number(entry.total_articulos || rows.length),
+          synced_at: new Date().toISOString()
+        });
         nextLocalManifest[String(entry.id_proveedor)] = {
           id_proveedor: String(entry.id_proveedor),
           proveedor: entry.proveedor || '',
@@ -1959,16 +2132,16 @@
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
       setSyncProgress(96);
-      await saveLocalSyncMeta({
+      await markSyncFinished({
         ...meta,
         provider_json_manifest: nextLocalManifest,
-        last_provider_sync_at: new Date().toISOString(),
-        last_provider_sync_date: todayDate()
+        last_provider_updates: updatedProviders
       });
+      state.latestUpdates = sortUpdates(updatedProviders);
       if (!state.worker || !state.loaded) await loadCacheIntoWorker();
       setSyncProgress(100);
       hideSyncProgress();
-      showToast(`JSON aplicado: ${total.toLocaleString('es-AR')} artículos`);
+      showToast(syncToastMessage(updatedProviders));
       return true;
     }
     async function syncProvidersUpdatedAfterLocalMeta(remoteMeta = null) {
@@ -1980,7 +2153,7 @@
       }
       const changed = await fetchProvidersUpdatedAfter(lastSyncAt);
       if (!changed.length) {
-        if (remoteMeta) await saveLocalSyncMeta({ ...remoteMeta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() });
+        if (remoteMeta) await markSyncFinished(remoteMeta);
         else state.lastSyncAt = local.last_provider_sync_at || state.lastSyncAt;
         updateCounts();
         return false;
@@ -1988,29 +2161,45 @@
       setStatus(`Sincronizando ${changed.length} proveedor(es) actualizado(s)...`);
       setSyncProgress(3);
       let total = 0;
+      const updatedProviders = [];
       for (let index = 0; index < changed.length; index += 1) {
         const provider = changed[index];
         const startProgress = (index / changed.length) * 88 + 6;
         const endProgress = ((index + 1) / changed.length) * 88 + 6;
+        const downloadEnd = startProgress + (endProgress - startProgress) * 0.45;
+        const prepareEnd = startProgress + (endProgress - startProgress) * 0.62;
         setSyncProgress(startProgress);
-        setStatus(`Descargando ${provider.proveedor || provider.id_proveedor}...`);
+        setStatus(`1/3 Descargando ${provider.proveedor || provider.id_proveedor}...`);
+        const deletePromise = idbDeleteProviderArticles(provider.id_proveedor);
         const rows = await fetchProviderArticles(provider.id_proveedor);
+        setSyncProgress(downloadEnd);
+        setStatus(`2/3 Preparando ${provider.proveedor || provider.id_proveedor}...`);
+        await deletePromise;
+        setSyncProgress(prepareEnd);
         await idbReplaceProviderArticles(provider.id_proveedor, rows, (done, totalRows) => {
           const articleProgress = totalRows ? done / totalRows : 1;
-          setSyncProgress(startProgress + (endProgress - startProgress) * articleProgress);
-          setStatus(`Sincronizando ${provider.proveedor || provider.id_proveedor}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
-        });
+          setSyncProgress(prepareEnd + (endProgress - prepareEnd) * articleProgress);
+          setStatus(`3/3 Aplicando ${provider.proveedor || provider.id_proveedor}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+        }, { skipDelete: true });
         total += rows.length;
+        updatedProviders.push({
+          id_proveedor: String(provider.id_proveedor || ''),
+          proveedor: provider.proveedor || '',
+          updated_at: provider.updated_at || provider.ultima_actualizacion || '',
+          total_articulos: rows.length,
+          synced_at: new Date().toISOString()
+        });
         setStatus(`Sincronizado ${provider.proveedor || provider.id_proveedor}: ${rows.length.toLocaleString('es-AR')} artículos`);
         setSyncProgress(endProgress);
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
       setSyncProgress(96);
-      await saveLocalSyncMeta({ ...(remoteMeta || {}), last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() });
+      await markSyncFinished({ ...(remoteMeta || {}), last_provider_updates: updatedProviders });
+      state.latestUpdates = sortUpdates(updatedProviders);
       await loadCacheIntoWorker();
       setSyncProgress(100);
       hideSyncProgress();
-      showToast(`Sincronización parcial: ${total.toLocaleString('es-AR')} artículos`);
+      showToast(syncToastMessage(updatedProviders));
       return true;
     }
     async function loadCacheIntoWorker() {
@@ -2043,6 +2232,7 @@
         if (jsonUpdated) return true;
         const updated = await syncProvidersUpdatedAfterLocalMeta(meta);
         if (updated) return true;
+        await markSyncFinished(meta);
         return true;
       }
       if (options.skipSameVersionBackground) return false;
@@ -2066,12 +2256,14 @@
         setStatus('Sin lista en Supabase. Subí el Excel primero.');
         return;
       }
-      const jsonUpdated = await syncProviderJsonManifest(meta);
-      if (!jsonUpdated) {
+      const hasManifest = Boolean(providerManifestUrl(meta));
+      if (hasManifest) {
+        await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true });
+      } else {
         setStatus('Importando lista desde Supabase...');
         await downloadRemoteArticles(meta);
-        await loadCacheIntoWorker();
       }
+      await loadCacheIntoWorker();
       setStatus(`Lista importada: ${Number(meta.total_articulos || state.total).toLocaleString('es-AR')} artículos`);
       showToast('Lista importada a esta computadora.');
     }
@@ -2111,7 +2303,11 @@
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
-    document.getElementById('uploadBtn').addEventListener('click', () => el.fileInput.click());
+    el.updatesBtn.addEventListener('click', openUpdatesModal);
+    el.updatesCloseBtn.addEventListener('click', closeUpdatesModal);
+    el.updatesBackdrop.addEventListener('click', (event) => {
+      if (event.target === el.updatesBackdrop) closeUpdatesModal();
+    });
     document.getElementById('importBtn').addEventListener('click', () => importFromCloud().catch((error) => showToast(error.message)));
     window.addEventListener('message', (event) => {
       if (event.origin !== window.location.origin && event.origin !== 'null') return;
@@ -2249,6 +2445,7 @@
       if (event.key === 'Escape') {
         hideRowContextMenu();
         hideSlotContextMenu();
+        closeUpdatesModal();
       }
     });
     el.slots.addEventListener('click', (event) => {

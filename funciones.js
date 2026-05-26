@@ -157,8 +157,10 @@
     const openOnAltArrow = options.openOnAltArrow !== false;
     const openOnF4 = options.openOnF4 !== false;
     const enterPicksFirst = options.enterPicksFirst !== false;
+    const suppressEnterAfterDelete = options.suppressEnterAfterDelete === true;
     const focusedClass = options.focusedClass || '';
     let focusedInput = null;
+    const deletedInputs = new WeakSet();
 
     function inputFromEvent(event) {
       return event?.target?.closest?.(inputSelector) || null;
@@ -234,8 +236,18 @@
         return;
       }
 
+      if (suppressEnterAfterDelete && (event.key === 'Delete' || event.key === 'Supr') && isOpen && isOpen(input)) {
+        deletedInputs.add(input);
+        return;
+      }
+
       if (event.key === 'Enter' && isOpen && isOpen(input) && pickActive) {
         event.preventDefault();
+        if (suppressEnterAfterDelete && deletedInputs.has(input)) {
+          deletedInputs.delete(input);
+          hideDropdown(input, 'delete-enter', event);
+          return;
+        }
         const picked = pickActive(input, event);
         if (picked === false && enterPicksFirst && pickFirst) pickFirst(input, event);
         return;
@@ -243,15 +255,23 @@
 
       if (event.key === 'Enter' && isOpen && isOpen(input) && enterPicksFirst && pickFirst) {
         event.preventDefault();
+        if (suppressEnterAfterDelete && deletedInputs.has(input)) {
+          deletedInputs.delete(input);
+          hideDropdown(input, 'delete-enter', event);
+          return;
+        }
         pickFirst(input, event);
         return;
       }
 
       if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && isOpen && isOpen(input) && moveActive) {
         event.preventDefault();
+        if (suppressEnterAfterDelete) deletedInputs.delete(input);
         moveActive(input, event.key === 'ArrowDown' ? 1 : -1, event);
         return;
       }
+
+      if (suppressEnterAfterDelete && isPrintableTypingKey(event)) deletedInputs.delete(input);
 
       if (openOnTyping && isPrintableTypingKey(event) && !(isOpen && isOpen(input)) && show) {
         setTimeout(() => showDropdown(input, 'typing-key', event), 0);
