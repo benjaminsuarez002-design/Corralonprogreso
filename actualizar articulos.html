@@ -17,7 +17,7 @@
     header{display:flex;align-items:center;gap:14px;padding:0 24px;background:rgba(255,255,255,.84);color:var(--text);box-shadow:0 12px 34px rgba(81,129,255,.14);border-bottom:1px solid #d8ecff;backdrop-filter:blur(10px)}
     header img{width:34px;background:#fff;border-radius:3px}
     h1{font:900 30px 'Barlow Condensed';margin:0}
-    .actions{margin-left:auto;display:flex;gap:10px;align-items:center}.status{font-weight:800;font-size:13px;opacity:.9}
+    .actions{margin-left:auto;display:flex;gap:10px;align-items:center}.status-wrap{min-width:250px;display:grid;gap:4px}.status{font-weight:800;font-size:13px;opacity:.9;text-align:right;white-space:nowrap}.sync-progress{height:5px;border:1px solid #cce8ff;border-radius:999px;background:#eef8ff;overflow:hidden;opacity:0;transform:translateY(-2px);transition:opacity .14s ease,transform .14s ease}.sync-progress.active{opacity:1;transform:translateY(0)}.sync-progress-fill{height:100%;width:0%;border-radius:inherit;background:linear-gradient(90deg,var(--red),#17c7ff);transition:width .18s ease}
     button{height:34px;border:1px solid var(--red2);border-radius:7px;background:#fff;color:var(--red2);font:800 17px 'Barlow Condensed';padding:5px 14px;cursor:pointer;box-shadow:0 2px 5px #0002}
     button.primary{background:linear-gradient(#a8ddff,var(--red));color:#fff}
     main{display:grid;grid-template-columns:minmax(850px,1fr) 250px;gap:18px;padding:16px 24px;min-height:0}
@@ -63,7 +63,7 @@
   <header>
     <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
     <h1>Actualizar Articulos</h1>
-    <div class="actions"><span class="status" id="status">Inicializando...</span><button data-nav-url="proveedores.html">Ver Proveedor</button><button data-nav-url="listasproveedores.html">Comparar</button><button data-nav-url="menu.html">Menu</button></div>
+    <div class="actions"><div class="status-wrap"><span class="status" id="status">Inicializando...</span><div class="sync-progress" id="syncProgress"><div class="sync-progress-fill" id="syncProgressFill"></div></div></div><button data-nav-url="proveedores.html">Ver Proveedor</button><button data-nav-url="listasproveedores.html">Comparar</button><button data-nav-url="menu.html">Menu</button></div>
   </header>
   <main>
     <section class="left">
@@ -108,6 +108,8 @@ const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6
 const P_TABLE='proveedores', A_TABLE='lista_precios', DB='actualizar_articulos_v1', PROVIDERS_DB='proveedores_cache_v1';
 let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, selectionMode={type:null,cols:[]}, comboMatches=[], comboActive=0;
 const statusEl = document.getElementById('status');
+const syncProgress = document.getElementById('syncProgress');
+const syncProgressFill = document.getElementById('syncProgressFill');
 function h(extra={}){return CorralonSystem.headers(extra)}
 function norm(v){return CorralonSystem.norm(v)}
 function money(v){return `$ ${Number(v||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`}
@@ -115,6 +117,8 @@ function pct(v){return `${(Number(v||0)*100).toLocaleString('es-AR',{minimumFrac
 function parseMoney(v){return CorralonSystem.parseMoney(v)}
 function today(){return CorralonSystem.today()}
 function show(msg){toast.textContent=msg;toast.classList.add('visible');clearTimeout(show.t);show.t=setTimeout(()=>toast.classList.remove('visible'),2200)}
+function setSyncProgress(value=0,visible=true){const pct=Math.max(0,Math.min(100,Number(value)||0));if(!syncProgress||!syncProgressFill)return;syncProgress.classList.toggle('active',Boolean(visible));syncProgressFill.style.width=`${pct}%`}
+function hideSyncProgress(delay=450){clearTimeout(hideSyncProgress.t);hideSyncProgress.t=setTimeout(()=>{if(syncProgress)syncProgress.classList.remove('active');if(syncProgressFill)syncProgressFill.style.width='0%'},delay)}
 function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function providerPageValue(p){return String(p?.pagina_link||p?.pagina||p?.web||'').trim()}
 function providerUrl(value){const text=String(value||'').trim();return text?/^https?:\/\//i.test(text)?text:`https://${text}`:''}
@@ -182,8 +186,40 @@ async function insertArticles(data){for(let i=0;i<data.length;i+=1000){const chu
 function currentProviderTimestamp(){return CorralonSystem.nowTimestamp ? CorralonSystem.nowTimestamp() : `${today()} ${new Date().toLocaleTimeString('es-AR',{hour12:false})}`}
 function applyProviderTimestamp(value){if(!provider)return null;provider.ultima_actualizacion=value;const stored=providers.find(p=>String(p.id_proveedor)===String(provider.id_proveedor));if(stored)stored.ultima_actualizacion=value;provDate.textContent=value;articles.forEach(article=>{article.ultima_actualizacion=value});return stored||provider}
 async function updateProviderDate(value=currentProviderTimestamp()){if(!provider)return;const updated=applyProviderTimestamp(value);await Promise.all([putStoreItem('providers',updated),CorralonSystem.updateProviderDateOnly(updated,value)])}
-async function syncProviderArticles(){await CorralonSystem.replaceProviderArticles(provider.id_proveedor,articles)}
-async function exportAndUpdate(){if(!provider)throw new Error('Selecciona proveedor');if(!articles.length)throw new Error('No hay articulos');statusEl.textContent='Exportando Articulos.xls...';const stamp=currentProviderTimestamp();applyProviderTimestamp(stamp);const blob=CorralonSystem.buildArticlesXlsBlob(articles);await CorralonSystem.saveBlobAs(blob,'Articulos.xls');show('Articulos.xls generado');statusEl.textContent='XLS generado. Sincronizando Supabase...';try{await Promise.all([syncProviderArticles(),updateProviderDate(stamp)])}catch(error){statusEl.textContent='XLS generado, pero fallo la sincronizacion.';throw error}statusEl.textContent='XLS generado y proveedor actualizado.'}
+async function syncProviderArticles(){
+  await CorralonSystem.replaceProviderArticles(provider.id_proveedor,articles,(done,total)=>{
+    const pct=total?done/total:1;
+    setSyncProgress(45+pct*40);
+    statusEl.textContent=`Sincronizando artículos ${done.toLocaleString('es-AR')} / ${total.toLocaleString('es-AR')}`;
+  })
+}
+async function exportAndUpdate(){
+  if(!provider)throw new Error('Selecciona proveedor');
+  if(!articles.length)throw new Error('No hay articulos');
+  setSyncProgress(4);
+  statusEl.textContent='Exportando Articulos.xls...';
+  const stamp=currentProviderTimestamp();
+  applyProviderTimestamp(stamp);
+  const blob=CorralonSystem.buildArticlesXlsBlob(articles);
+  setSyncProgress(22);
+  await CorralonSystem.saveBlobAs(blob,'Articulos.xls');
+  show('Articulos.xls generado');
+  setSyncProgress(38);
+  statusEl.textContent='XLS generado. Publicando lista...';
+  try{
+    setSyncProgress(45);
+    await syncProviderArticles();
+    setSyncProgress(88);
+    await updateProviderDate(stamp);
+    setSyncProgress(100);
+  }catch(error){
+    statusEl.textContent='XLS generado, pero fallo la sincronizacion.';
+    hideSyncProgress(1200);
+    throw error;
+  }
+  statusEl.textContent='XLS generado y proveedor actualizado.';
+  hideSyncProgress();
+}
 async function saveArticlesCache(){await putSetting('articles_cache',articles)}
 async function loadArticlesCache(){const cached=await getSetting('articles_cache');if(Array.isArray(cached)){articles=cached;render()}}
 async function pasteArticlesFromClipboard(){const text=await navigator.clipboard.readText();articles=parsePasted(text);await saveArticlesCache();render()}
@@ -207,7 +243,7 @@ document.querySelector('.body').addEventListener('scroll',(event)=>{const box=ev
 tableSelector.addEventListener('click',()=>setSelection('table'));
 document.querySelectorAll('.selectable-head').forEach(head=>head.addEventListener('click',(event)=>setSelection('column',head.dataset.selectCol,event)));
 document.addEventListener('keydown',(event)=>{const key=event.key.toLowerCase();if(event.key==='F1'){event.preventDefault();filterInput.focus();filterInput.select()}else if(event.ctrlKey&&key==='v'&&selectionMode.type){event.preventDefault();(selectionMode.type==='column'?pasteSelectedColumnsFromClipboard():pasteArticlesFromClipboard()).catch(e=>{console.error(e);show('No pude pegar')})}else if(event.ctrlKey&&key==='c'&&selectionMode.type){event.preventDefault();copySelection().catch(e=>{console.error(e);show('No pude copiar')})}});
-filterInput.oninput=render;clearBtn.onclick=()=>{if(confirm('Eliminar todos los articulos cargados?')){articles=[];saveArticlesCache().catch(console.error);render()}};exportBtn.onclick=()=>exportAndUpdate().catch(e=>{console.error(e);show(e.message||'Error')});
+filterInput.oninput=render;clearBtn.onclick=()=>{if(confirm('Eliminar todos los articulos cargados?')){articles=[];saveArticlesCache().catch(console.error);render()}};exportBtn.onclick=()=>exportAndUpdate().catch(e=>{console.error(e);hideSyncProgress(1200);show(e.message||'Error')});
 (async()=>{db=await openDb();await Promise.all([loadProviders(),loadArticlesCache()]);render()})();
 </script>
 </body>

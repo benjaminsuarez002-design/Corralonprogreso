@@ -8,6 +8,9 @@
     priceListMeta: 'lista_precios_meta'
   };
   const PROVIDERS_DB = 'proveedores_cache_v1';
+  const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
+  const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
+  const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
 
   function headers(extra = {}) {
     return {
@@ -218,23 +221,133 @@
     return value;
   }
 
-  async function touchPriceListMeta() {
+  function priceListMetaPayload(extra = {}) {
+    const payload = { id: 'principal', lista_version: Date.now(), ...extra };
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === undefined) delete payload[key];
+    });
+    return payload;
+  }
+
+  async function touchPriceListMeta(extra = {}) {
+    const payload = priceListMetaPayload(extra);
     const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListMeta}?on_conflict=id`, {
       method: 'POST',
       headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-      body: JSON.stringify({ id: 'principal', lista_version: Date.now() })
+      body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error(await response.text());
+    return payload;
   }
 
-  async function replaceProviderArticles(providerId, articles) {
+  function manifestUrlFromMetaValue(value) {
+    const text = String(value || '').trim();
+    return text.startsWith(PROVIDER_MANIFEST_PREFIX) ? text.slice(PROVIDER_MANIFEST_PREFIX.length) : '';
+  }
+
+  async function remotePriceListMeta() {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListMeta}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,updated_at&limit=1`, {
+      headers: headers()
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return (await response.json())?.[0] || null;
+  }
+
+  async function uploadRawJsonToCloudinary(payload, publicId) {
+    const jsonText = JSON.stringify(payload);
+    const formData = new FormData();
+    formData.append('file', new Blob([jsonText], { type: 'application/json' }), `${publicId}.json`);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    formData.append('public_id', publicId);
+    formData.append('resource_type', 'raw');
+    const response = await fetch(CLOUDINARY_RAW_UPLOAD_URL, { method: 'POST', body: formData });
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (_) {}
+    if (!response.ok) throw new Error(data?.error?.message || text || 'Error subiendo JSON');
+    if (!data?.secure_url) throw new Error('Cloudinary no devolvio URL del JSON');
+    return data.secure_url;
+  }
+
+  async function loadProviderJsonManifest() {
+    const meta = await remotePriceListMeta().catch(() => null);
+    const manifestUrl = manifestUrlFromMetaValue(meta?.archivo_nombre);
+    if (!manifestUrl) {
+      return {
+        meta,
+        manifest: { id: 'provider-json-manifest-v1', version: 0, updated_at: '', providers: {} },
+        manifestUrl: ''
+      };
+    }
+    const response = await fetch(`${manifestUrl}${manifestUrl.includes('?') ? '&' : '?'}t=${Date.now()}`);
+    if (!response.ok) throw new Error(await response.text());
+    const manifest = await response.json();
+    return {
+      meta,
+      manifest: {
+        id: 'provider-json-manifest-v1',
+        version: Number(manifest?.version || 0),
+        updated_at: manifest?.updated_at || '',
+        providers: manifest?.providers && typeof manifest.providers === 'object' ? manifest.providers : {}
+      },
+      manifestUrl
+    };
+  }
+
+  function providerArticleJsonRows(providerId, articles = []) {
+    const id = cleanId(providerId);
+    const baseOrder = Date.now() * 1000;
+    return (articles || []).map((article, index) => ({
+      idorden: Number(article.idorden || 0) || baseOrder + index,
+      cod_proveedor: String(article.cod_proveedor || article.codProv || '').trim(),
+      articulo: String(article.articulo || article.descripcion || '').trim(),
+      precio_costo: Number(article.precio_costo ?? article.precioCosto ?? 0) || 0,
+      id_proveedor: cleanId(article.id_proveedor || article.idProveedor || id),
+      proveedor: String(article.proveedor || '').trim(),
+      cod_proveedor_norm: norm(article.cod_proveedor_norm || article.cod_proveedor || article.codProv || ''),
+      articulo_norm: norm(article.articulo_norm || article.articulo || article.descripcion || ''),
+      proveedor_norm: norm(article.proveedor_norm || article.proveedor || ''),
+      articulo_source: article.articulo_source || 'actualizar_articulos_json'
+    }));
+  }
+
+  async function publishProviderArticlesJson(providerId, articles = []) {
+    const id = cleanId(providerId);
+    if (!id) throw new Error('Proveedor sin ID para publicar JSON');
+    const rows = providerArticleJsonRows(id, articles);
+    const version = Date.now();
+    const providerName = String(rows.find((row) => row.proveedor)?.proveedor || articles.find((row) => row?.proveedor)?.proveedor || '').trim();
+    const jsonUrl = await uploadRawJsonToCloudinary(rows, `listas_proveedores/proveedor_${id}_${version}`);
+    const loaded = await loadProviderJsonManifest();
+    const manifest = loaded.manifest || { id: 'provider-json-manifest-v1', providers: {} };
+    const providers = { ...(manifest.providers || {}) };
+    providers[id] = {
+      id_proveedor: id,
+      proveedor: providerName,
+      version,
+      updated_at: new Date().toISOString(),
+      total_articulos: rows.length,
+      json_url: jsonUrl
+    };
+    const nextManifest = {
+      id: 'provider-json-manifest-v1',
+      version,
+      updated_at: new Date().toISOString(),
+      providers
+    };
+    const manifestUrl = await uploadRawJsonToCloudinary(nextManifest, `listas_proveedores/manifest_${version}`);
+    return { manifest: nextManifest, manifestUrl, entry: providers[id] };
+  }
+
+  async function replaceProviderArticlesSupabase(providerId, articles, onProgress = null) {
     const del = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceList}?id_proveedor=eq.${encodeURIComponent(providerId)}`, { method: 'DELETE', headers: headers() });
     if (!del.ok) throw new Error(await del.text());
+    if (typeof onProgress === 'function') onProgress(0, articles.length);
     for (let i = 0; i < articles.length; i += 1000) {
       const chunk = articles.slice(i, i + 1000).map((article, n) => ({
         ...article,
-        idorden: Date.now() * 1000 + i + n,
-        articulo_source: 'actualizar_articulos'
+        idorden: Number(article.idorden || 0) || Date.now() * 1000 + i + n,
+        articulo_source: article.articulo_source || 'actualizar_articulos'
       }));
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceList}?on_conflict=idorden`, {
         method: 'POST',
@@ -242,8 +355,29 @@
         body: JSON.stringify(chunk)
       });
       if (!response.ok) throw new Error(await response.text());
+      if (typeof onProgress === 'function') onProgress(Math.min(i + 1000, articles.length), articles.length);
     }
-    await touchPriceListMeta();
+  }
+
+  async function replaceProviderArticles(providerId, articles, onProgress = null) {
+    const id = cleanId(providerId);
+    const rows = providerArticleJsonRows(id, articles).map((row) => ({ ...row, articulo_source: 'actualizar_articulos' }));
+    if (typeof onProgress === 'function') onProgress(0, rows.length);
+    try {
+      const published = await publishProviderArticlesJson(id, rows);
+      if (typeof onProgress === 'function') onProgress(rows.length, rows.length);
+      await touchPriceListMeta({
+        lista_version: published.manifest.version,
+        archivo_nombre: `${PROVIDER_MANIFEST_PREFIX}${published.manifestUrl}`
+      });
+      replaceProviderArticlesSupabase(id, rows).catch((error) => console.warn(error));
+      return published;
+    } catch (error) {
+      console.warn(error);
+      await replaceProviderArticlesSupabase(id, rows, onProgress);
+      await touchPriceListMeta();
+      return null;
+    }
   }
 
   function xmlCell(value, type = 'String') {
@@ -802,10 +936,116 @@
       );
     }
 
+    async function fetchProviderJsonManifest(meta) {
+      const url = manifestUrlFromMetaValue(meta?.archivo_nombre);
+      if (!url) return null;
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
+      if (!response.ok) throw new Error(await response.text());
+      const manifest = await response.json();
+      return {
+        id: 'provider-json-manifest-v1',
+        version: Number(manifest?.version || 0),
+        updated_at: manifest?.updated_at || '',
+        providers: manifest?.providers && typeof manifest.providers === 'object' ? manifest.providers : {}
+      };
+    }
+
+    function localProviderJsonManifest(meta) {
+      return meta?.provider_json_manifest && typeof meta.provider_json_manifest === 'object'
+        ? meta.provider_json_manifest
+        : {};
+    }
+
+    function providerJsonManifestEntries(manifest) {
+      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && entry?.json_url);
+    }
+
+    function needsProviderJsonSync(entry, localManifest) {
+      const id = cleanId(entry.id_proveedor);
+      const local = localManifest[id];
+      if (!local) return true;
+      if (String(local.json_url || '') !== String(entry.json_url || '')) return true;
+      return Number(local.version || 0) < Number(entry.version || 0);
+    }
+
+    function normalizeProviderJsonCacheRow(row, entry, index) {
+      const id = cleanId(row?.id_proveedor || row?.idProveedor || entry?.id_proveedor || '');
+      const providerName = String(row?.proveedor || entry?.proveedor || '').trim();
+      const cod = String(row?.cod_proveedor || row?.codProv || row?.codprov || '').trim();
+      const article = String(row?.articulo || row?.descripcion || row?.nombre || '').trim();
+      return {
+        idorden: Number(row?.idorden || 0) || Number(entry?.version || Date.now()) * 1000 + index,
+        cod_proveedor: cod,
+        articulo: article,
+        precio_costo: Number(row?.precio_costo ?? row?.precioCosto ?? row?.precio ?? 0) || 0,
+        id_proveedor: id,
+        proveedor: providerName,
+        cod_proveedor_norm: norm(row?.cod_proveedor_norm || cod),
+        articulo_norm: norm(row?.articulo_norm || article),
+        proveedor_norm: norm(row?.proveedor_norm || providerName),
+        articulo_source: row?.articulo_source || 'provider_json'
+      };
+    }
+
+    async function fetchProviderJsonRows(entry) {
+      const url = String(entry.json_url || '').trim();
+      if (!url) return [];
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(entry.version || '')}`);
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      return Array.isArray(rows)
+        ? rows.map((row, index) => normalizeProviderJsonCacheRow(row, entry, index)).filter((row) => row.articulo || row.cod_proveedor)
+        : [];
+    }
+
     async function downloadProviderArticlesCloud(meta) {
       const rows = await fetchAll(TABLES.priceList, `select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&order=idorden.asc`);
       await replaceProviderArticlesCache(rows, meta);
       return sortCatalogByDescription(rows.map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart));
+    }
+
+    async function syncProviderJsonBlocks(meta, options = {}) {
+      const manifest = await fetchProviderJsonManifest(meta).catch((error) => {
+        console.warn(error);
+        return null;
+      });
+      if (!manifest) return null;
+      const local = localProviderListMeta() || {};
+      const localManifest = localProviderJsonManifest(local);
+      const changed = providerJsonManifestEntries(manifest).filter((entry) => needsProviderJsonSync(entry, localManifest));
+      if (!changed.length) {
+        if (options.updateWhenNoChanges !== false) {
+          setLocalProviderListMeta({
+            ...local,
+            ...meta,
+            provider_json_manifest: manifest.providers,
+            last_provider_sync_at: new Date().toISOString(),
+            last_provider_sync_date: today()
+          });
+        }
+        return false;
+      }
+      const nextLocalManifest = { ...localManifest };
+      for (const entry of changed) {
+        const rows = await fetchProviderJsonRows(entry);
+        await replaceProviderArticlesCacheBlock(entry.id_proveedor, rows);
+        nextLocalManifest[cleanId(entry.id_proveedor)] = {
+          id_proveedor: cleanId(entry.id_proveedor),
+          proveedor: entry.proveedor || '',
+          version: Number(entry.version || 0),
+          updated_at: entry.updated_at || '',
+          total_articulos: Number(entry.total_articulos || rows.length),
+          json_url: entry.json_url
+        };
+      }
+      setLocalProviderListMeta({
+        ...local,
+        ...meta,
+        provider_json_manifest: nextLocalManifest,
+        last_provider_sync_at: new Date().toISOString(),
+        last_provider_sync_date: today()
+      });
+      return sortCatalogByDescription(await readProviderArticlesCache());
     }
 
     async function syncProviderArticleBlocks(meta) {
@@ -830,9 +1070,18 @@
         const meta = await remoteProviderListMeta();
         if (!meta) return null;
         const local = localProviderListMeta();
-        if (local && Number(local.lista_version) === Number(meta.lista_version) && await providerCacheHasRows()) return null;
-        if (local && await providerCacheHasRows()) return syncProviderArticleBlocks(meta);
-        return downloadProviderArticlesCloud(meta);
+        const hasCachedRows = await providerCacheHasRows();
+        const metaVersionMatches = local && Number(local.lista_version) === Number(meta.lista_version);
+        if (metaVersionMatches && hasCachedRows) return null;
+        if (local && hasCachedRows) {
+          const jsonResult = await syncProviderJsonBlocks(meta, { updateWhenNoChanges: Boolean(metaVersionMatches) });
+          if (jsonResult) return jsonResult;
+          if (jsonResult === false && metaVersionMatches) return null;
+          return syncProviderArticleBlocks(meta);
+        }
+        const baseRows = await downloadProviderArticlesCloud(meta);
+        const jsonResult = await syncProviderJsonBlocks(meta);
+        return jsonResult || baseRows;
       } catch (error) {
         console.warn(error);
         return null;
@@ -1066,6 +1315,7 @@
     SUPABASE_URL,
     SUPABASE_KEY,
     TABLES,
+    PROVIDER_MANIFEST_PREFIX,
     headers,
     norm,
     parseMoney,
@@ -1084,6 +1334,8 @@
     uploadProviders,
     updateProviderDateOnly,
     touchPriceListMeta,
+    loadProviderJsonManifest,
+    publishProviderArticlesJson,
     replaceProviderArticles,
     buildArticlesXlsBlob,
     saveBlobAs,

@@ -75,13 +75,39 @@
       align-items: center;
       gap: 10px;
     }
-    .status {
+    .status-wrap {
       min-width: 250px;
+      display: grid;
+      gap: 4px;
+      justify-items: stretch;
+    }
+    .status {
       color: var(--muted);
       font-size: 13px;
       font-weight: 700;
       text-align: right;
       white-space: nowrap;
+    }
+    .sync-progress {
+      height: 5px;
+      border: 1px solid #cce8ff;
+      border-radius: 999px;
+      background: #eef8ff;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(-2px);
+      transition: opacity .14s ease, transform .14s ease;
+    }
+    .sync-progress.active {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .sync-progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--acento), #17c7ff);
+      transition: width .18s ease;
     }
     .btn {
       height: 36px;
@@ -559,7 +585,10 @@
       <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Corralon Progreso">
       <h1 class="title">Comparar Listas De Precios</h1>
       <div class="top-actions">
-        <span class="status" id="statusText">Inicializando...</span>
+        <div class="status-wrap">
+          <span class="status" id="statusText">Inicializando...</span>
+          <div class="sync-progress" id="syncProgress"><div class="sync-progress-fill" id="syncProgressFill"></div></div>
+        </div>
         <button class="btn primary" id="uploadBtn" type="button">Subir / Exportar</button>
         <button class="btn" id="importBtn" type="button">Importar</button>
         <button class="btn" type="button" data-nav-url="menu.html">Menú</button>
@@ -682,6 +711,7 @@
     const ROW_HEIGHT = 24;
     const BUFFER = 12;
     const PAGE_SIZE = 1000;
+    const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
     const state = {
       db: null,
       worker: null,
@@ -707,6 +737,8 @@
     };
     const el = {
       status: document.getElementById('statusText'),
+      syncProgress: document.getElementById('syncProgress'),
+      syncProgressFill: document.getElementById('syncProgressFill'),
       meta: document.getElementById('metaInfo'),
       filterCode: document.getElementById('filterCode'),
       filterArticle: document.getElementById('filterArticle'),
@@ -791,6 +823,20 @@
     }
     function setStatus(message) {
       el.status.textContent = message;
+    }
+    function setSyncProgress(value = 0, visible = true) {
+      const pct = Math.max(0, Math.min(100, Number(value) || 0));
+      if (!el.syncProgress || !el.syncProgressFill) return;
+      el.syncProgress.classList.toggle('active', Boolean(visible));
+      el.syncProgressFill.style.width = `${pct}%`;
+    }
+    function hideSyncProgress(delay = 450) {
+      if (!el.syncProgress || !el.syncProgressFill) return;
+      clearTimeout(hideSyncProgress.timer);
+      hideSyncProgress.timer = setTimeout(() => {
+        el.syncProgress.classList.remove('active');
+        el.syncProgressFill.style.width = '0%';
+      }, delay);
     }
     function todayDate() {
       return new Date().toISOString().slice(0, 10);
@@ -1585,6 +1631,63 @@
       if (!response.ok) throw new Error(await response.text());
       return (await response.json())?.[0] || null;
     }
+    function providerManifestUrl(meta) {
+      const text = String(meta?.archivo_nombre || '').trim();
+      return text.startsWith(PROVIDER_MANIFEST_PREFIX) ? text.slice(PROVIDER_MANIFEST_PREFIX.length) : '';
+    }
+    async function fetchProviderManifest(meta) {
+      const url = providerManifestUrl(meta);
+      if (!url) return null;
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
+      if (!response.ok) throw new Error(await response.text());
+      const manifest = await response.json();
+      return {
+        id: 'provider-json-manifest-v1',
+        version: Number(manifest?.version || 0),
+        updated_at: manifest?.updated_at || '',
+        providers: manifest?.providers && typeof manifest.providers === 'object' ? manifest.providers : {}
+      };
+    }
+    function localProviderManifest(meta) {
+      return meta?.provider_json_manifest && typeof meta.provider_json_manifest === 'object'
+        ? meta.provider_json_manifest
+        : {};
+    }
+    function providerManifestEntries(manifest) {
+      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && entry?.json_url);
+    }
+    function needsProviderJsonSync(entry, localManifest) {
+      const id = String(entry.id_proveedor || '').trim();
+      const local = localManifest[id];
+      if (!local) return true;
+      if (String(local.json_url || '') !== String(entry.json_url || '')) return true;
+      return Number(local.version || 0) < Number(entry.version || 0);
+    }
+    function normalizeProviderJsonRow(row, entry, index) {
+      const id = String(row?.id_proveedor || row?.idProveedor || entry?.id_proveedor || '').trim();
+      const providerName = String(row?.proveedor || entry?.proveedor || '').trim();
+      const cod = String(row?.cod_proveedor || row?.codProv || row?.codprov || '').trim();
+      const article = String(row?.articulo || row?.descripcion || row?.nombre || '').trim();
+      return {
+        idorden: Number(row?.idorden || 0) || Number(entry?.version || Date.now()) * 1000 + index,
+        cod_proveedor: cod,
+        articulo: article,
+        precio_costo: Number(row?.precio_costo ?? row?.precioCosto ?? row?.precio ?? 0) || 0,
+        id_proveedor: id,
+        proveedor: providerName,
+        cod_proveedor_norm: normalize(row?.cod_proveedor_norm || cod),
+        articulo_norm: normalize(row?.articulo_norm || article),
+        proveedor_norm: normalize(row?.proveedor_norm || providerName),
+        articulo_source: row?.articulo_source || 'provider_json'
+      };
+    }
+    async function fetchProviderJsonRows(entry) {
+      const url = String(entry.json_url || '');
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(entry.version || '')}`);
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      return Array.isArray(rows) ? rows.map((row, index) => normalizeProviderJsonRow(row, entry, index)).filter((row) => row.articulo || row.cod_proveedor) : [];
+    }
     async function downloadRemoteArticles(meta) {
       await idbClear('articulos');
       let from = 0;
@@ -1644,7 +1747,7 @@
         if (rows.length < PAGE_SIZE) return out;
       }
     }
-    async function idbReplaceProviderArticles(providerId, rows) {
+    function idbDeleteProviderArticles(providerId) {
       return new Promise((resolve, reject) => {
         const tx = state.db.transaction('articulos', 'readwrite');
         const store = tx.objectStore('articulos');
@@ -1656,12 +1759,35 @@
             cursor.continue();
             return;
           }
-          rows.forEach((row) => store.put(row));
         };
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
+    }
+    function idbPutArticleChunk(rows) {
+      return new Promise((resolve, reject) => {
+        const tx = state.db.transaction('articulos', 'readwrite');
+        const store = tx.objectStore('articulos');
+        rows.forEach((row) => store.put(row));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    async function idbReplaceProviderArticles(providerId, rows, onProgress = null) {
+      await idbDeleteProviderArticles(providerId);
+      const total = rows.length;
+      if (!total) {
+        if (onProgress) onProgress(0, 0);
+        return;
+      }
+      const chunkSize = 500;
+      for (let i = 0; i < total; i += chunkSize) {
+        const done = Math.min(i + chunkSize, total);
+        await idbPutArticleChunk(rows.slice(i, done));
+        if (onProgress) onProgress(done, total);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
     }
     async function saveLocalSyncMeta(metaPatch = {}) {
       const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
@@ -1670,6 +1796,68 @@
       await idbSet('meta', next);
       updateCounts();
       return next;
+    }
+    async function syncProviderJsonManifest(meta, options = {}) {
+      const manifest = await fetchProviderManifest(meta).catch((error) => {
+        console.warn(error);
+        return null;
+      });
+      if (!manifest) return false;
+      const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
+      const localManifest = localProviderManifest(local);
+      const changed = providerManifestEntries(manifest).filter((entry) => needsProviderJsonSync(entry, localManifest));
+      if (!changed.length) {
+        if (options.updateWhenNoChanges !== false) {
+          await saveLocalSyncMeta({
+            ...meta,
+            provider_json_manifest: manifest.providers,
+            last_provider_sync_at: new Date().toISOString(),
+            last_provider_sync_date: todayDate()
+          });
+        }
+        return false;
+      }
+      setStatus(`Sincronizando ${changed.length} proveedor(es) desde JSON...`);
+      setSyncProgress(3);
+      let total = 0;
+      const nextLocalManifest = { ...localManifest };
+      for (let index = 0; index < changed.length; index += 1) {
+        const entry = changed[index];
+        const label = entry.proveedor || entry.id_proveedor;
+        const startProgress = (index / changed.length) * 88 + 6;
+        const endProgress = ((index + 1) / changed.length) * 88 + 6;
+        setSyncProgress(startProgress);
+        setStatus(`Descargando ${label}...`);
+        const rows = await fetchProviderJsonRows(entry);
+        await idbReplaceProviderArticles(entry.id_proveedor, rows, (done, totalRows) => {
+          const articleProgress = totalRows ? done / totalRows : 1;
+          setSyncProgress(startProgress + (endProgress - startProgress) * articleProgress);
+          setStatus(`Aplicando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+        });
+        total += rows.length;
+        nextLocalManifest[String(entry.id_proveedor)] = {
+          id_proveedor: String(entry.id_proveedor),
+          proveedor: entry.proveedor || '',
+          version: Number(entry.version || 0),
+          updated_at: entry.updated_at || '',
+          total_articulos: Number(entry.total_articulos || rows.length),
+          json_url: entry.json_url
+        };
+        setSyncProgress(endProgress);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      setSyncProgress(96);
+      await saveLocalSyncMeta({
+        ...meta,
+        provider_json_manifest: nextLocalManifest,
+        last_provider_sync_at: new Date().toISOString(),
+        last_provider_sync_date: todayDate()
+      });
+      await loadCacheIntoWorker();
+      setSyncProgress(100);
+      hideSyncProgress();
+      showToast(`JSON aplicado: ${total.toLocaleString('es-AR')} artículos`);
+      return true;
     }
     async function syncProvidersUpdatedAfterLocalMeta(remoteMeta = null) {
       const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
@@ -1686,16 +1874,30 @@
         return false;
       }
       setStatus(`Sincronizando ${changed.length} proveedor(es) actualizado(s)...`);
+      setSyncProgress(3);
       let total = 0;
-      for (const provider of changed) {
+      for (let index = 0; index < changed.length; index += 1) {
+        const provider = changed[index];
+        const startProgress = (index / changed.length) * 88 + 6;
+        const endProgress = ((index + 1) / changed.length) * 88 + 6;
+        setSyncProgress(startProgress);
+        setStatus(`Descargando ${provider.proveedor || provider.id_proveedor}...`);
         const rows = await fetchProviderArticles(provider.id_proveedor);
-        await idbReplaceProviderArticles(provider.id_proveedor, rows);
+        await idbReplaceProviderArticles(provider.id_proveedor, rows, (done, totalRows) => {
+          const articleProgress = totalRows ? done / totalRows : 1;
+          setSyncProgress(startProgress + (endProgress - startProgress) * articleProgress);
+          setStatus(`Sincronizando ${provider.proveedor || provider.id_proveedor}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+        });
         total += rows.length;
         setStatus(`Sincronizado ${provider.proveedor || provider.id_proveedor}: ${rows.length.toLocaleString('es-AR')} artículos`);
+        setSyncProgress(endProgress);
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
+      setSyncProgress(96);
       await saveLocalSyncMeta({ ...(remoteMeta || {}), last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() });
       await loadCacheIntoWorker();
+      setSyncProgress(100);
+      hideSyncProgress();
       showToast(`Sincronización parcial: ${total.toLocaleString('es-AR')} artículos`);
       return true;
     }
@@ -1715,16 +1917,27 @@
       if (!local || Number(local.lista_version) !== Number(meta.lista_version)) {
         if (!local) {
           await downloadRemoteArticles(meta);
-          await loadCacheIntoWorker();
-          showToast('Lista actualizada desde Supabase.');
+          const jsonUpdated = await syncProviderJsonManifest(meta);
+          if (!jsonUpdated) await loadCacheIntoWorker();
+          showToast('Lista actualizada.');
           return true;
         }
+        const jsonUpdated = await syncProviderJsonManifest(meta, { updateWhenNoChanges: false });
+        if (jsonUpdated) return true;
         const updated = await syncProvidersUpdatedAfterLocalMeta(meta);
         if (updated) return true;
         return true;
       }
-      syncProvidersUpdatedAfterLocalMeta().catch((error) => {
+      syncProviderJsonManifest(meta).then((jsonUpdated) => {
+        if (!jsonUpdated) return syncProvidersUpdatedAfterLocalMeta();
+        return null;
+      }).catch((error) => {
         console.error(error);
+        hideSyncProgress(1200);
+        return syncProvidersUpdatedAfterLocalMeta().catch((fallbackError) => {
+          console.error(fallbackError);
+          hideSyncProgress(1200);
+        });
       });
       return false;
     }
@@ -1736,7 +1949,8 @@
         return;
       }
       await downloadRemoteArticles(meta);
-      await loadCacheIntoWorker();
+      const jsonUpdated = await syncProviderJsonManifest(meta);
+      if (!jsonUpdated) await loadCacheIntoWorker();
       setStatus(`Lista importada: ${Number(meta.total_articulos || state.total).toLocaleString('es-AR')} artículos`);
       showToast('Lista importada a esta computadora.');
     }
