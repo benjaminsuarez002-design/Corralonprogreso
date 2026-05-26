@@ -682,15 +682,49 @@
       border-bottom: none !important;
     }
 
-    .alias-summary-modal {
-      width: min(100%, 560px);
-      max-height: 86vh;
+    .modal.alias-summary-modal {
+      width: min(calc(100vw - 28px), 560px);
+      height: auto;
+      max-height: calc(100dvh - 32px);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
     }
 
     .alias-summary-modal .modal-head {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: start;
+      flex: 0 0 auto;
+    }
+
+    .alias-summary-modal .modal-title {
+      line-height: 1.15;
+      overflow-wrap: anywhere;
+    }
+
+    .alias-summary-filter {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      align-items: end;
+    }
+
+    .alias-summary-filter .field {
+      min-width: 0;
+    }
+
+    .alias-summary-filter .input {
+      min-height: 38px;
+      font-size: 13px;
+    }
+
+    .alias-summary-clear {
+      min-height: 38px;
+      padding: 7px 10px;
+      white-space: nowrap;
     }
 
     #alias-summary-close {
@@ -702,14 +736,29 @@
     }
 
     .alias-summary-modal .modal-body {
-      max-height: calc(86vh - 58px);
+      max-height: min(56vh, 440px);
+      height: auto;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 1mm;
+      align-content: stretch;
+      scrollbar-gutter: stable;
+      overscroll-behavior: contain;
     }
 
     .alias-summary-card {
+      position: relative;
+      flex: 0 0 auto;
+      width: 100%;
+      margin: 0;
       border: 1px solid var(--line);
       border-radius: var(--radius);
       overflow: hidden;
       background: var(--panel);
+      min-height: auto;
     }
 
     .alias-summary-head {
@@ -1354,6 +1403,14 @@
         font-size: 10px;
       }
 
+      .alias-summary-filter {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .alias-summary-clear {
+        grid-column: 1 / -1;
+      }
+
       .summary-amount {
         font-size: 13px;
       }
@@ -1610,6 +1667,17 @@
         <h3 class="modal-title" id="alias-summary-title">Resumen de alias</h3>
         <button class="danger-btn" id="alias-summary-close" type="button">X</button>
       </div>
+      <div class="alias-summary-filter">
+        <label class="field">
+          <span class="field-label">Desde</span>
+          <input class="input" id="alias-summary-from" type="text" inputmode="numeric" placeholder="dd/mm/aaaa" autocomplete="off">
+        </label>
+        <label class="field">
+          <span class="field-label">Hasta</span>
+          <input class="input" id="alias-summary-to" type="text" inputmode="numeric" placeholder="dd/mm/aaaa" autocomplete="off">
+        </label>
+        <button class="ghost-btn alias-summary-clear" id="alias-summary-clear" type="button">Todo</button>
+      </div>
       <div class="modal-body" id="alias-summary-list"></div>
     </div>
   </div>
@@ -1833,6 +1901,9 @@
         aliasEditClose: $("#alias-edit-close"),
         aliasSummaryModalBg: $("#alias-summary-modal-bg"),
         aliasSummaryTitle: $("#alias-summary-title"),
+        aliasSummaryFrom: $("#alias-summary-from"),
+        aliasSummaryTo: $("#alias-summary-to"),
+        aliasSummaryClear: $("#alias-summary-clear"),
         aliasSummaryList: $("#alias-summary-list"),
         aliasSummaryClose: $("#alias-summary-close"),
         confirmModalBg: $("#confirm-modal-bg"),
@@ -1887,7 +1958,9 @@
         viewerFullZoom: 1,
         viewerPinchBaseZoom: 1,
         viewerPinchStartDistance: 0,
-        aliasSummaryId: ""
+        aliasSummaryId: "",
+        aliasSummaryFrom: "",
+        aliasSummaryTo: ""
       };
 
       function createDraft() {
@@ -2010,6 +2083,27 @@
           return `${match[3]}-${String(Number(match[2]) || 0).padStart(2, "0")}-${String(Number(match[1]) || 0).padStart(2, "0")}`;
         }
         return "";
+      }
+
+      function parseShortcutDateToIso(value) {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const today = new Date();
+        const parts = raw
+          .replace(/[.\-]+/g, "/")
+          .replace(/\s+/g, "/")
+          .split("/")
+          .map((part) => part.trim())
+          .filter(Boolean);
+        if (!parts.length || parts.length > 3) return "";
+        const day = Number(parts[0]);
+        const month = Number(parts[1] || (today.getMonth() + 1));
+        let year = parts[2] ? Number(parts[2]) : today.getFullYear();
+        if (parts[2] && parts[2].length <= 2) year = 2000 + year;
+        if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) return "";
+        const date = new Date(year, month - 1, day);
+        if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return "";
+        return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       }
 
       function parseAmount(value) {
@@ -2389,17 +2483,61 @@
         }).sort((a, b) => String(b.dateIso || "").localeCompare(String(a.dateIso || "")) || recordSort(a, b));
       }
 
+      function aliasSummaryDateBounds(rows) {
+        const dates = rows.map((item) => String(item.dateIso || "")).filter(Boolean).sort();
+        return {
+          from: dates[0] || "",
+          to: dates[dates.length - 1] || ""
+        };
+      }
+
+      function aliasSummaryRowsInRange(rows) {
+        const from = String(state.aliasSummaryFrom || "");
+        const to = String(state.aliasSummaryTo || "");
+        return rows.filter((item) => {
+          const date = String(item.dateIso || "");
+          if (!date) return false;
+          if (from && date < from) return false;
+          if (to && date > to) return false;
+          return true;
+        });
+      }
+
+      function commitAliasSummaryDateInput(input, stateKey) {
+        const raw = String(input.value || "").trim();
+        if (!raw) {
+          state[stateKey] = "";
+          input.value = "";
+          return true;
+        }
+        const iso = parseShortcutDateToIso(raw);
+        if (!iso) {
+          input.select();
+          return false;
+        }
+        state[stateKey] = iso;
+        input.value = formatDate(iso);
+        return true;
+      }
+
       function renderAliasSummary(aliasId) {
         const alias = findRecord(aliasId, state.aliases);
         if (!alias) return;
         const rows = recordsForAlias(aliasId);
         el.aliasSummaryTitle.textContent = `Resumen - ${alias.nombre || "Alias"}`;
+        el.aliasSummaryFrom.value = state.aliasSummaryFrom ? formatDate(state.aliasSummaryFrom) : "";
+        el.aliasSummaryTo.value = state.aliasSummaryTo ? formatDate(state.aliasSummaryTo) : "";
         if (!rows.length) {
           el.aliasSummaryList.innerHTML = '<div class="empty">No hay movimientos guardados para este alias.</div>';
           return;
         }
+        const filteredRows = aliasSummaryRowsInRange(rows);
+        if (!filteredRows.length) {
+          el.aliasSummaryList.innerHTML = '<div class="empty">No hay movimientos entre esas fechas.</div>';
+          return;
+        }
         const groups = new Map();
-        rows.forEach((item) => {
+        filteredRows.forEach((item) => {
           const key = item.dateIso || todayIso();
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key).push(item);
@@ -2433,12 +2571,16 @@
 
       function openAliasSummaryModal(aliasId) {
         state.aliasSummaryId = String(aliasId || "");
+        state.aliasSummaryFrom = "";
+        state.aliasSummaryTo = "";
         renderAliasSummary(state.aliasSummaryId);
         el.aliasSummaryModalBg.classList.add("open");
       }
 
       function closeAliasSummaryModal() {
         state.aliasSummaryId = "";
+        state.aliasSummaryFrom = "";
+        state.aliasSummaryTo = "";
         el.aliasSummaryModalBg.classList.remove("open");
       }
 
@@ -3628,6 +3770,27 @@
           if (event.target === el.aliasEditModalBg) closeEditAliasModal();
         });
         el.aliasSummaryClose.addEventListener("click", closeAliasSummaryModal);
+        [el.aliasSummaryFrom, el.aliasSummaryTo].forEach((input) => {
+          const stateKey = input === el.aliasSummaryFrom ? "aliasSummaryFrom" : "aliasSummaryTo";
+          const applyDate = () => {
+            if (!commitAliasSummaryDateInput(input, stateKey)) return;
+            if (state.aliasSummaryId) renderAliasSummary(state.aliasSummaryId);
+          };
+          input.addEventListener("change", applyDate);
+          input.addEventListener("blur", applyDate);
+          input.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            applyDate();
+            if (input === el.aliasSummaryFrom) el.aliasSummaryTo.focus();
+            else input.blur();
+          });
+        });
+        el.aliasSummaryClear.addEventListener("click", () => {
+          state.aliasSummaryFrom = "";
+          state.aliasSummaryTo = "";
+          if (state.aliasSummaryId) renderAliasSummary(state.aliasSummaryId);
+        });
         el.aliasSummaryModalBg.addEventListener("click", (event) => {
           if (event.target === el.aliasSummaryModalBg) closeAliasSummaryModal();
         });
@@ -3635,7 +3798,12 @@
           const dayButton = event.target.closest("[data-action='toggle-alias-summary-day']");
           if (dayButton) {
             const card = dayButton.closest(".alias-summary-card");
-            if (card) card.classList.toggle("collapsed");
+            if (card) {
+              card.classList.toggle("collapsed");
+              if (!card.classList.contains("collapsed")) {
+                requestAnimationFrame(() => card.scrollIntoView({ block: "nearest" }));
+              }
+            }
             return;
           }
           const actionButton = event.target.closest("[data-action]");
