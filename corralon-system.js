@@ -11,7 +11,7 @@
   const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
   const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
   const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
-  const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
+  const CLOUDINARY_JSON_MAX_BYTES = 1024 * 1024;
 
   function headers(extra = {}) {
     return {
@@ -1136,9 +1136,9 @@
           if (jsonResult === false && metaVersionMatches) return null;
           return syncProviderArticleBlocks(meta);
         }
-        const baseRows = await downloadProviderArticlesCloud(meta);
         const jsonResult = await syncProviderJsonBlocks(meta);
-        return jsonResult || baseRows;
+        if (jsonResult) return jsonResult;
+        return downloadProviderArticlesCloud(meta);
       } catch (error) {
         console.warn(error);
         return null;

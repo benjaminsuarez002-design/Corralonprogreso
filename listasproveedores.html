@@ -1026,6 +1026,23 @@
             const idx = data.findIndex(row => String(row.idorden) === String(msg.row?.idorden));
             if (idx >= 0) data[idx] = { ...data[idx], ...msg.row };
           }
+          if (msg.type === 'replaceProvider') {
+            const providerId = String(msg.providerId || '');
+            const incoming = Array.isArray(msg.rows) ? msg.rows : [];
+            data = data.filter(row => String(row.id_proveedor || '') !== providerId).concat(incoming);
+            const article = norm(msg.filter?.article || '');
+            const f = {
+              code: norm(msg.filter?.code || ''),
+              provider: norm(msg.filter?.provider || ''),
+              price: String(msg.filter?.price || '').replace(/[^0-9.,-]/g,'').trim(),
+              articleWords: article.split(' ').filter(Boolean),
+              excludeWords: (msg.filter?.exclude || []).map(norm).filter(Boolean)
+            };
+            matches = [];
+            for (let i = 0; i < data.length; i++) if (test(data[i], f)) matches.push(i);
+            applySort(msg.sort);
+            self.postMessage({ type:'providerReplaced', total:data.length, count:matches.length });
+          }
         };
       `;
       const blob = new Blob([code], { type: 'text/javascript' });
@@ -1056,6 +1073,14 @@
       if (msg.type === 'slice') {
         state.currentRows = msg.rows || [];
         renderSlice(msg.start || 0, state.currentRows);
+      }
+      if (msg.type === 'providerReplaced') {
+        state.loaded = true;
+        state.total = msg.total;
+        state.matchCount = msg.count;
+        updateCounts();
+        requestSlice();
+        syncComparisonHeight();
       }
     }
     function updateCounts() {
@@ -1721,19 +1746,15 @@
     async function fetchProviderJsonRows(entry, progress = {}) {
       const out = [];
       const urls = providerJsonUrls(entry);
-      const texts = [];
+      const expectedTotal = expectedProviderJsonRows(entry);
+      let processed = 0;
+      if (progress.onProcess) progress.onProcess(0, expectedTotal);
       for (let index = 0; index < urls.length; index += 1) {
         const url = urls[index];
         const text = await fetchJsonTextWithProgress(url, (partProgress) => {
           const downloadProgress = (index + partProgress) / Math.max(1, urls.length);
           if (progress.onDownload) progress.onDownload(downloadProgress);
         });
-        texts.push(text);
-      }
-      const expectedTotal = expectedProviderJsonRows(entry);
-      let processed = 0;
-      if (progress.onProcess) progress.onProcess(0, expectedTotal);
-      for (const text of texts) {
         const rows = JSON.parse(text);
         if (Array.isArray(rows)) {
           for (let i = 0; i < rows.length; i += 1000) {
@@ -1850,6 +1871,17 @@
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
+    function replaceProviderInWorker(providerId, rows) {
+      if (!state.worker || !state.loaded) return false;
+      workerPost({
+        type: 'replaceProvider',
+        providerId: String(providerId || ''),
+        rows,
+        filter: currentFilter(),
+        sort: state.sort
+      });
+      return true;
+    }
     async function saveLocalSyncMeta(metaPatch = {}) {
       const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
       const next = { ...local, ...metaPatch, id: 'principal' };
@@ -1911,6 +1943,7 @@
           setSyncProgress(processEnd + (endProgress - processEnd) * clamped);
           setStatus(`3/3 Aplicando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
         });
+        replaceProviderInWorker(entry.id_proveedor, rows);
         total += rows.length;
         nextLocalManifest[String(entry.id_proveedor)] = {
           id_proveedor: String(entry.id_proveedor),
@@ -1932,7 +1965,7 @@
         last_provider_sync_at: new Date().toISOString(),
         last_provider_sync_date: todayDate()
       });
-      await loadCacheIntoWorker();
+      if (!state.worker || !state.loaded) await loadCacheIntoWorker();
       setSyncProgress(100);
       hideSyncProgress();
       showToast(`JSON aplicado: ${total.toLocaleString('es-AR')} artículos`);
@@ -1996,9 +2029,13 @@
       if (!local || Number(local.lista_version) !== Number(meta.lista_version)) {
         setStatus('Buscando actualización JSON...');
         if (!local) {
-          await downloadRemoteArticles(meta);
+          setStatus('Importando base JSON...');
           const jsonUpdated = await syncProviderJsonManifest(meta);
-          if (!jsonUpdated) await loadCacheIntoWorker();
+          if (!jsonUpdated) {
+            setStatus('Importando lista desde Supabase...');
+            await downloadRemoteArticles(meta);
+            await loadCacheIntoWorker();
+          }
           showToast('Lista actualizada.');
           return true;
         }
@@ -2023,15 +2060,18 @@
       return false;
     }
     async function importFromCloud() {
-      setStatus('Importando lista desde Supabase...');
+      setStatus('Importando lista desde JSON...');
       const meta = await remoteMeta();
       if (!meta) {
         setStatus('Sin lista en Supabase. Subí el Excel primero.');
         return;
       }
-      await downloadRemoteArticles(meta);
       const jsonUpdated = await syncProviderJsonManifest(meta);
-      if (!jsonUpdated) await loadCacheIntoWorker();
+      if (!jsonUpdated) {
+        setStatus('Importando lista desde Supabase...');
+        await downloadRemoteArticles(meta);
+        await loadCacheIntoWorker();
+      }
       setStatus(`Lista importada: ${Number(meta.total_articulos || state.total).toLocaleString('es-AR')} artículos`);
       showToast('Lista importada a esta computadora.');
     }
