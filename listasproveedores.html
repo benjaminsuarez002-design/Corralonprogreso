@@ -855,6 +855,95 @@
       fileInput: document.getElementById('fileInput')
     };
 
+    const LISTAS_PROVEEDORES_TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const LISTAS_PROVEEDORES_SYNC_KEY = 'corralon_listasproveedores_tab_sync';
+    let listasProveedoresSyncReady = false;
+    let listasProveedoresChannel = null;
+
+    function cerrarEstaPestanaListasProveedores() {
+      try { window.close(); } catch (_) {}
+
+      setTimeout(() => {
+        try {
+          window.open('', '_self');
+          window.close();
+        } catch (_) {}
+
+        setTimeout(() => {
+          try {
+            document.title = 'Cerrado';
+            document.documentElement.innerHTML = '<head><title>Cerrado</title></head><body></body>';
+          } catch (_) {}
+        }, 120);
+      }, 80);
+    }
+
+    function aplicarCodigoAccessEnFiltro(codigo) {
+      const valor = String(codigo ?? '').trim();
+      if (!valor) return;
+
+      el.filterCode.value = valor;
+
+      try {
+        el.filterCode.focus();
+        el.filterCode.select();
+      } catch (_) {}
+
+      if (typeof requestFilter === 'function') requestFilter();
+    }
+
+    function recibirMensajeListasProveedores(data) {
+      if (!data || data.source !== 'corralon-listasproveedores') return;
+      if (data.tabId === LISTAS_PROVEEDORES_TAB_ID) return;
+
+      if (data.type === 'cerrar-otras-pestanas') {
+        cerrarEstaPestanaListasProveedores();
+      }
+    }
+
+    function prepararSyncListasProveedores() {
+      if (listasProveedoresSyncReady) return;
+      listasProveedoresSyncReady = true;
+
+      try {
+        listasProveedoresChannel = new BroadcastChannel(LISTAS_PROVEEDORES_SYNC_KEY);
+        listasProveedoresChannel.onmessage = (event) => recibirMensajeListasProveedores(event.data);
+      } catch (_) {}
+
+      window.addEventListener('storage', (event) => {
+        if (event.key !== LISTAS_PROVEEDORES_SYNC_KEY || !event.newValue) return;
+        try {
+          recibirMensajeListasProveedores(JSON.parse(event.newValue));
+        } catch (_) {}
+      });
+    }
+
+    function aplicarCodigoDesdeAccessYCerrarDuplicadas() {
+      prepararSyncListasProveedores();
+
+      const params = new URLSearchParams(window.location.search);
+      const codigo = params.get('codigo') || params.get('CODIGO') || '';
+
+      if (!codigo) return;
+
+      aplicarCodigoAccessEnFiltro(codigo);
+
+      const mensaje = {
+        source: 'corralon-listasproveedores',
+        type: 'cerrar-otras-pestanas',
+        tabId: LISTAS_PROVEEDORES_TAB_ID,
+        codigo,
+        ts: Date.now()
+      };
+
+      try { listasProveedoresChannel?.postMessage(mensaje); } catch (_) {}
+
+      try {
+        localStorage.setItem(LISTAS_PROVEEDORES_SYNC_KEY, JSON.stringify(mensaje));
+        localStorage.removeItem(LISTAS_PROVEEDORES_SYNC_KEY);
+      } catch (_) {}
+    }
+
     function syncComparisonHeight() {
       if (!el.slots) return;
       const rect = el.slots.getBoundingClientRect();
@@ -1483,12 +1572,6 @@
         proveedor: provider
       });
       setStatus('Artículo cargado para comparar.');
-    }
-    function aplicarCodigoProveedorAlCargar() {
-      const params = new URLSearchParams(window.location.search);
-      const codigo = params.get('codigo') || params.get('CODIGO') || params.get('cod') || params.get('code') || '';
-      if (!codigo) return;
-      el.filterCode.value = codigo.trim();
     }
     function applyBaseFromMessage(data) {
       const payload = data || {};
@@ -2546,8 +2629,8 @@
       loadProviderDates();
       renderExcludeRows();
       syncComparisonHeight();
-      aplicarCodigoProveedorAlCargar();
       applyBaseFromUrl();
+      aplicarCodigoDesdeAccessYCerrarDuplicadas();
       window.addEventListener('resize', syncResponsiveScale);
       try {
         setStatus('Cargando lista local...');
