@@ -1200,8 +1200,135 @@
       });
     });
 
+
+
+    const CALCULADORAS_CHANNEL = 'corralon-calculadoras-abierta';
+    const CALCULADORAS_ACTIVE_KEY = 'corralon_calculadoras_active_tab';
+    const calculadorasInstanceId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let calculadorasChannel = null;
+    let calculadorasHeartbeat = null;
+
+    function extraerPrecioLista(texto) {
+      const match = String(texto || '').match(/PRECIO\s*LISTA\s*=\s*([^\r\n]+)/i);
+      return match ? match[1].trim() : '';
+    }
+
+    function aplicarPrecioListaExterno(valor) {
+      if (!prelista || valor === undefined || valor === null || String(valor).trim() === '') return false;
+      const numero = parseEsNumber(valor);
+      prelista.dataset.raw = String(numero);
+      prelistaDecimalMode = false;
+      prelista.value = fmtMoney(numero);
+      recalcAll();
+      prelista.focus();
+      try { prelista.select(); } catch (_) {}
+      return true;
+    }
+
+    function leerPrecioListaDesdeUrl() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('precio_lista') || params.get('prelista') || '';
+    }
+
+    async function leerPrecioListaDesdePortapapeles() {
+      try {
+        if (!navigator.clipboard?.readText) return '';
+        const texto = await navigator.clipboard.readText();
+        return extraerPrecioLista(texto);
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function pestañaActivaReciente() {
+      try {
+        const raw = localStorage.getItem(CALCULADORAS_ACTIVE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data?.id || !data?.ts) return null;
+        if (data.id === calculadorasInstanceId) return null;
+        return (Date.now() - Number(data.ts)) < 5000 ? data : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function marcarEstaPestañaActiva() {
+      try {
+        localStorage.setItem(CALCULADORAS_ACTIVE_KEY, JSON.stringify({
+          id: calculadorasInstanceId,
+          ts: Date.now()
+        }));
+      } catch (_) {}
+    }
+
+    function mostrarAvisoDuplicado() {
+      const aviso = document.createElement('div');
+      aviso.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(255,255,255,.96);display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font:800 22px Barlow,Arial,sans-serif;color:#20223a;';
+      aviso.innerHTML = '<div>La calculadora ya estaba abierta.<br>Mandé el precio a la pestaña anterior.<br><span style="font-size:15px;color:#66708e">Podés cerrar esta pestaña.</span></div>';
+      document.body.appendChild(aviso);
+    }
+
+    async function obtenerPrecioListaEntrante() {
+      const desdeUrl = leerPrecioListaDesdeUrl();
+      if (desdeUrl) return desdeUrl;
+      return await leerPrecioListaDesdePortapapeles();
+    }
+
+    async function iniciarCapturaPrecioLista() {
+      const precio = await obtenerPrecioListaEntrante();
+      if (precio) aplicarPrecioListaExterno(precio);
+    }
+
+    async function iniciarControlDePestañaUnica() {
+      const yaAbierta = pestañaActivaReciente();
+
+      if ('BroadcastChannel' in window) {
+        calculadorasChannel = new BroadcastChannel(CALCULADORAS_CHANNEL);
+        calculadorasChannel.onmessage = (event) => {
+          const data = event.data || {};
+          if (data.id === calculadorasInstanceId) return;
+
+          if (data.type === 'precio-lista' && data.valor) {
+            aplicarPrecioListaExterno(data.valor);
+            marcarEstaPestañaActiva();
+            window.focus();
+          }
+
+          if (data.type === 'pedir-foco') {
+            window.focus();
+          }
+        };
+      }
+
+      if (yaAbierta) {
+        const precio = await obtenerPrecioListaEntrante();
+        if (calculadorasChannel) {
+          if (precio) calculadorasChannel.postMessage({ type: 'precio-lista', valor: precio, id: calculadorasInstanceId });
+          calculadorasChannel.postMessage({ type: 'pedir-foco', id: calculadorasInstanceId });
+        }
+        mostrarAvisoDuplicado();
+        setTimeout(() => window.close(), 350);
+        return;
+      }
+
+      marcarEstaPestañaActiva();
+      calculadorasHeartbeat = setInterval(marcarEstaPestañaActiva, 1500);
+      window.addEventListener('beforeunload', () => {
+        if (calculadorasHeartbeat) clearInterval(calculadorasHeartbeat);
+        try {
+          const raw = localStorage.getItem(CALCULADORAS_ACTIVE_KEY);
+          const data = raw ? JSON.parse(raw) : null;
+          if (data?.id === calculadorasInstanceId) localStorage.removeItem(CALCULADORAS_ACTIVE_KEY);
+        } catch (_) {}
+      });
+
+      iniciarCapturaPrecioLista();
+    }
+
     syncAllFormattedFields();
     syncPrelistaAsMoney();
+    iniciarControlDePestañaUnica();
     loadProviderOptions();
     recalcAll();
   </script>
