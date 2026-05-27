@@ -1262,12 +1262,6 @@
       } catch (_) {}
     }
 
-    function mostrarAvisoDuplicado() {
-      const aviso = document.createElement('div');
-      aviso.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(255,255,255,.96);display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font:800 22px Barlow,Arial,sans-serif;color:#20223a;';
-      aviso.innerHTML = '<div>La calculadora ya estaba abierta.<br>Mandé el precio a la pestaña anterior.<br><span style="font-size:15px;color:#66708e">Podés cerrar esta pestaña.</span></div>';
-      document.body.appendChild(aviso);
-    }
 
     async function obtenerPrecioListaEntrante() {
       const desdeUrl = leerPrecioListaDesdeUrl();
@@ -1301,14 +1295,36 @@
         };
       }
 
+      window.addEventListener('storage', (event) => {
+        if (event.key !== 'corralon_calculadoras_precio_lista' || !event.newValue) return;
+        try {
+          const data = JSON.parse(event.newValue);
+          if (data.id === calculadorasInstanceId) return;
+          if (data.valor) {
+            aplicarPrecioListaExterno(data.valor);
+            marcarEstaPestañaActiva();
+            window.focus();
+          }
+        } catch (_) {}
+      });
+
       if (yaAbierta) {
         const precio = await obtenerPrecioListaEntrante();
+        if (precio) {
+          try {
+            localStorage.setItem('corralon_calculadoras_precio_lista', JSON.stringify({
+              valor: precio,
+              id: calculadorasInstanceId,
+              ts: Date.now()
+            }));
+          } catch (_) {}
+        }
         if (calculadorasChannel) {
           if (precio) calculadorasChannel.postMessage({ type: 'precio-lista', valor: precio, id: calculadorasInstanceId });
           calculadorasChannel.postMessage({ type: 'pedir-foco', id: calculadorasInstanceId });
         }
-        mostrarAvisoDuplicado();
-        setTimeout(() => window.close(), 350);
+        window.open('', '_self');
+        window.close();
         return;
       }
 
