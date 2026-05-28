@@ -342,6 +342,23 @@
           <div class="lbl">Total</div>
           <div class="val mono nav-output" id="inchTotal" tabindex="0">0 milímetros</div>
         </div>
+
+        <div class="spacer"></div>
+
+        <div class="title-row"><div class="title">Calculador De Netos</div></div>
+        <div class="grid">
+          <div class="lbl">IVA 10,5%</div>
+          <div class="val"><input id="ivaNeto10" type="text" inputmode="decimal" data-format="money" value="$ 0,00"></div>
+
+          <div class="lbl">Neto 10,5%</div>
+          <div class="val"><input id="neto10" type="text" inputmode="decimal" data-format="money" value="$ 0,00"></div>
+
+          <div class="lbl">IVA 21%</div>
+          <div class="val"><input id="ivaNeto21" type="text" inputmode="decimal" data-format="money" value="$ 0,00"></div>
+
+          <div class="lbl">Neto 21%</div>
+          <div class="val"><input id="neto21" type="text" inputmode="decimal" data-format="money" value="$ 0,00"></div>
+        </div>
       </section>
 
       <section class="right-col">
@@ -761,7 +778,27 @@
 
     function calcInches() {
       const total = parseInchesValue($('inchValue')?.value) * 25.4;
-      $('inchTotal').textContent = Number(total).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' MM';
+      $('inchTotal').textContent = Number(total).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' milímetros';
+    }
+
+    function calcNetos() {
+      if (activeNetoField === 'neto10') $('ivaNeto10').value = fmtMoney(n('neto10') * 0.105);
+      else $('neto10').value = fmtMoney(n('ivaNeto10') / 0.105);
+
+      if (activeNetoField === 'neto21') $('ivaNeto21').value = fmtMoney(n('neto21') * 0.21);
+      else $('neto21').value = fmtMoney(n('ivaNeto21') / 0.21);
+    }
+
+    function formatMoneyThousandsLive(el) {
+      const raw = String(el.value || '');
+      const cleaned = raw.replace(/\$/g, '').replace(/\s/g, '').replace(/[^\d,.-]/g, '');
+      const hasDecimal = cleaned.includes(',');
+      const start = el.selectionStart ?? raw.length;
+      const prevLen = raw.length;
+      el.value = formatMoneyTyping(raw, hasDecimal);
+      const nextLen = el.value.length;
+      const nextPos = Math.max(0, Math.min(nextLen, start + (nextLen - prevLen)));
+      try { el.setSelectionRange(nextPos, nextPos); } catch (_) {}
     }
 
     function calcDif() {
@@ -792,6 +829,7 @@
       calcPrecio();
       calcFlete();
       calcInches();
+      calcNetos();
       calcDif();
       calcPctInicial();
       calcSinPct();
@@ -930,6 +968,7 @@
     const saveProviderModalBtn = $('saveProviderModalBtn');
     let ivaSkipFocusToTotal = false;
     let prelistaDecimalMode = false;
+    let activeNetoField = '';
 
     function syncPrelistaAsMoney() {
       const v = parseEsNumber(prelista.value);
@@ -1016,6 +1055,24 @@
         recalcAll();
       });
     }
+
+    ['ivaNeto10', 'neto10', 'ivaNeto21', 'neto21'].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener('keydown', (event) => {
+        if (event.key !== '.') return;
+        event.preventDefault();
+        const start = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? start;
+        el.value = `${el.value.slice(0, start)},${el.value.slice(end)}`;
+        try { el.setSelectionRange(start + 1, start + 1); } catch (_) {}
+        activeNetoField = id;
+        formatMoneyThousandsLive(el);
+        recalcAll();
+      });
+      el.addEventListener('input', () => { activeNetoField = id; formatMoneyThousandsLive(el); });
+      el.addEventListener('focus', () => { activeNetoField = id; });
+    });
 
     const ivaInput = $('iva');
     const ivaChips = $('ivaChips');
@@ -1200,151 +1257,8 @@
       });
     });
 
-
-
-    const CALCULADORAS_CHANNEL = 'corralon-calculadoras-abierta';
-    const CALCULADORAS_ACTIVE_KEY = 'corralon_calculadoras_active_tab';
-    const calculadorasInstanceId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    let calculadorasChannel = null;
-    let calculadorasHeartbeat = null;
-
-    function extraerPrecioLista(texto) {
-      const match = String(texto || '').match(/PRECIO\s*LISTA\s*=\s*([^\r\n]+)/i);
-      return match ? match[1].trim() : '';
-    }
-
-    function aplicarPrecioListaExterno(valor) {
-      if (!prelista || valor === undefined || valor === null || String(valor).trim() === '') return false;
-      const numero = parseEsNumber(valor);
-      prelista.dataset.raw = String(numero);
-      prelistaDecimalMode = false;
-      prelista.value = fmtMoney(numero);
-      recalcAll();
-      prelista.focus();
-      try { prelista.select(); } catch (_) {}
-      return true;
-    }
-
-    function leerPrecioListaDesdeUrl() {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('precio_lista') || params.get('prelista') || '';
-    }
-
-    async function leerPrecioListaDesdePortapapeles() {
-      try {
-        if (!navigator.clipboard?.readText) return '';
-        const texto = await navigator.clipboard.readText();
-        return extraerPrecioLista(texto);
-      } catch (_) {
-        return '';
-      }
-    }
-
-    function pestañaActivaReciente() {
-      try {
-        const raw = localStorage.getItem(CALCULADORAS_ACTIVE_KEY);
-        if (!raw) return null;
-        const data = JSON.parse(raw);
-        if (!data?.id || !data?.ts) return null;
-        if (data.id === calculadorasInstanceId) return null;
-        return (Date.now() - Number(data.ts)) < 5000 ? data : null;
-      } catch (_) {
-        return null;
-      }
-    }
-
-    function marcarEstaPestañaActiva() {
-      try {
-        localStorage.setItem(CALCULADORAS_ACTIVE_KEY, JSON.stringify({
-          id: calculadorasInstanceId,
-          ts: Date.now()
-        }));
-      } catch (_) {}
-    }
-
-
-    async function obtenerPrecioListaEntrante() {
-      const desdeUrl = leerPrecioListaDesdeUrl();
-      if (desdeUrl) return desdeUrl;
-      return await leerPrecioListaDesdePortapapeles();
-    }
-
-    async function iniciarCapturaPrecioLista() {
-      const precio = await obtenerPrecioListaEntrante();
-      if (precio) aplicarPrecioListaExterno(precio);
-    }
-
-    async function iniciarControlDePestañaUnica() {
-      const yaAbierta = pestañaActivaReciente();
-
-      if ('BroadcastChannel' in window) {
-        calculadorasChannel = new BroadcastChannel(CALCULADORAS_CHANNEL);
-        calculadorasChannel.onmessage = (event) => {
-          const data = event.data || {};
-          if (data.id === calculadorasInstanceId) return;
-
-          if (data.type === 'precio-lista' && data.valor) {
-            aplicarPrecioListaExterno(data.valor);
-            marcarEstaPestañaActiva();
-            window.focus();
-          }
-
-          if (data.type === 'pedir-foco') {
-            window.focus();
-          }
-        };
-      }
-
-      window.addEventListener('storage', (event) => {
-        if (event.key !== 'corralon_calculadoras_precio_lista' || !event.newValue) return;
-        try {
-          const data = JSON.parse(event.newValue);
-          if (data.id === calculadorasInstanceId) return;
-          if (data.valor) {
-            aplicarPrecioListaExterno(data.valor);
-            marcarEstaPestañaActiva();
-            window.focus();
-          }
-        } catch (_) {}
-      });
-
-      if (yaAbierta) {
-        const precio = await obtenerPrecioListaEntrante();
-        if (precio) {
-          try {
-            localStorage.setItem('corralon_calculadoras_precio_lista', JSON.stringify({
-              valor: precio,
-              id: calculadorasInstanceId,
-              ts: Date.now()
-            }));
-          } catch (_) {}
-        }
-        if (calculadorasChannel) {
-          if (precio) calculadorasChannel.postMessage({ type: 'precio-lista', valor: precio, id: calculadorasInstanceId });
-          calculadorasChannel.postMessage({ type: 'pedir-foco', id: calculadorasInstanceId });
-        }
-        window.open('', '_self');
-        window.close();
-        return;
-      }
-
-      marcarEstaPestañaActiva();
-      calculadorasHeartbeat = setInterval(marcarEstaPestañaActiva, 1500);
-      window.addEventListener('beforeunload', () => {
-        if (calculadorasHeartbeat) clearInterval(calculadorasHeartbeat);
-        try {
-          const raw = localStorage.getItem(CALCULADORAS_ACTIVE_KEY);
-          const data = raw ? JSON.parse(raw) : null;
-          if (data?.id === calculadorasInstanceId) localStorage.removeItem(CALCULADORAS_ACTIVE_KEY);
-        } catch (_) {}
-      });
-
-      iniciarCapturaPrecioLista();
-    }
-
     syncAllFormattedFields();
     syncPrelistaAsMoney();
-    iniciarControlDePestañaUnica();
     loadProviderOptions();
     recalcAll();
   </script>
