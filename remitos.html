@@ -56,6 +56,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .item-row:nth-child(even) { background: var(--fila-body); }
 .item-input { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; color: var(--texto-dark); border: none; background: transparent; outline: none; width: 100%; padding: 2px 4px; border-radius: 4px; transition: background .15s; }
 .item-input:focus { background: rgba(108,79,199,.08); }
+.item-input[readonly], .inp[readonly] { color:#aaa; pointer-events:none; }
 .item-input.num { text-align: right; }
 .item-subtotal { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; color: var(--violeta); text-align: right; }
 .btn-del-item { background: none; border: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 2px; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
@@ -134,6 +135,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .print-val { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 900; color: var(--violeta); }
 </style>
   <script src="nav-helper.js"></script>
+  <script src="funciones.js"></script>
   <script src="menu-auth-guard.js" data-menu-guard="remitos"></script>
 </head>
 <body>
@@ -181,12 +183,13 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 
 <div class="items-list" id="itemsList">
   <div class="fila-agregar" id="filaAgregar">
-    <input type="text" class="inp num" id="nCant" placeholder="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-      oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+    <input type="text" class="inp num" id="nCant" placeholder="1" inputmode="decimal" autocomplete="off"
+      oninput="updatePreview('cant')">
     <input type="text" class="inp" id="nDesc" placeholder="Descripción..." autocomplete="off">
     <input type="text" class="inp num" id="nPrecio" placeholder="0" inputmode="numeric" autocomplete="off"
-      oninput="updatePreview()">
-    <div class="sub-preview" id="nSub">—</div>
+      oninput="updatePreview('precio')">
+    <input type="text" class="inp num" id="nSub" placeholder="0" inputmode="decimal" autocomplete="off"
+      oninput="updatePreview('subtotal')">
     <button class="btn-add" onclick="agregarItem()">+</button>
   </div>
 </div>
@@ -308,14 +311,14 @@ function renderItems() {
     const row = document.createElement('div');
     row.className = 'item-row';
     row.innerHTML = `
-      <input type="text" class="item-input num" value="${it.cant}" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-        oninput="this.value=this.value.replace(/[^0-9]/g,'')"
-        onchange="items[${i}].cant=parseFloat(this.value)||1;recalc()">
+      <input type="text" class="item-input num" value="${it.cant}" inputmode="decimal" autocomplete="off"
+        onchange="actualizarItemDesdeCampo(${i}, 'cant', this)">
       <input type="text" class="item-input" value="${it.desc}" autocomplete="off"
         onchange="items[${i}].desc=this.value">
       <input type="text" class="item-input num" value="${it.precio}" inputmode="numeric" autocomplete="off"
-        onchange="items[${i}].precio=parseMonto(this.value);this.value=items[${i}].precio;recalc()">
-      <div class="item-subtotal">${fmt(it.precio*it.cant)}</div>
+        onchange="actualizarItemDesdeCampo(${i}, 'precio', this)">
+      <input type="text" class="item-input num" value="${fmt(it.precio*it.cant)}" inputmode="decimal" autocomplete="off" ${it.cant && it.precio ? 'readonly tabindex="-1"' : ''}
+        onchange="actualizarItemDesdeCampo(${i}, 'subtotal', this)">
       <button class="btn-del-item" onclick="items.splice(${i},1);renderItems()">✕</button>`;
     lista.insertBefore(row, fila);
   });
@@ -327,10 +330,11 @@ function remitoCamposNavegables() {
   return [
     document.getElementById('cliente'),
     document.getElementById('fechaInput'),
-    ...document.querySelectorAll('.item-row .item-input'),
+    ...document.querySelectorAll('.item-row .item-input:not([readonly])'),
     document.getElementById('nCant'),
     document.getElementById('nDesc'),
-    document.getElementById('nPrecio')
+    document.getElementById('nPrecio'),
+    document.getElementById('nSub')
   ].filter(Boolean);
 }
 
@@ -362,8 +366,8 @@ function moverCampo(actual, delta) {
 }
 
 function moverCampoVertical(actual, delta) {
-  const cols = 3;
-  const agInputs = [document.getElementById('nCant'), document.getElementById('nDesc'), document.getElementById('nPrecio')];
+  const cols = 4;
+  const agInputs = [document.getElementById('nCant'), document.getElementById('nDesc'), document.getElementById('nPrecio'), document.getElementById('nSub')];
   const rows = [...document.querySelectorAll('.item-row')];
   const agIdx = agInputs.indexOf(actual);
   if(agIdx >= 0) {
@@ -386,15 +390,15 @@ function moverCampoVertical(actual, delta) {
 }
 
 function manejarEnterRemito(event, target) {
-  if(event.key !== 'Enter' || !esCampoNavegable(target)) return false;
+  if(!['Enter','Tab'].includes(event.key) || !esCampoNavegable(target)) return false;
   event.preventDefault();
   if(target.id === 'fechaInput') parseFecha(target.value);
-  if(target.id === 'nPrecio') {
-    updatePreview();
+  if(target.id === 'nSub' && !event.shiftKey) {
+    updatePreview('subtotal');
     agregarItem();
     return true;
   }
-  moverCampo(target, 1);
+  moverCampo(target, event.shiftKey ? -1 : 1);
   return true;
 }
 
@@ -419,6 +423,16 @@ function manejarFlechasRemito(event, target) {
 document.addEventListener('keydown', e => {
   const target = document.activeElement;
   if(!target) return;
+  if(e.key === 'F2' && esCampoNavegable(target)) {
+    e.preventDefault();
+    if(campoTodoSeleccionado(target)) {
+      const pos = String(target.value || '').length;
+      try { target.setSelectionRange(pos, pos); } catch(_) {}
+    } else {
+      seleccionarCampo(target);
+    }
+    return;
+  }
   if(manejarEnterRemito(e, target)) return;
   manejarFlechasRemito(e, target);
 });
@@ -428,24 +442,66 @@ function recalc() {
   document.getElementById('totalValor').textContent  = fmt(total);
   document.getElementById('printTotal').textContent  = fmt(total);
   document.querySelectorAll('.item-row').forEach((row, i) => {
-    const sub = row.querySelector('.item-subtotal');
-    if(sub && items[i]) sub.textContent = fmt(items[i].precio * items[i].cant);
+    const sub = row.querySelectorAll('.item-input')[3];
+    if(sub && items[i] && document.activeElement !== sub) sub.value = fmt(items[i].precio * items[i].cant);
   });
 }
 
-function updatePreview() {
-  const p = parseMonto(document.getElementById('nPrecio').value);
-  const c = parseFloat(document.getElementById('nCant').value)  || 1;
-  const sub = document.getElementById('nSub');
-  if(p) { sub.textContent = fmt(p*c); sub.style.color = 'var(--violeta)'; }
-  else  { sub.textContent = '—';      sub.style.color = '#bbb'; }
+function actualizarItemDesdeCampo(i, campo, input) {
+  const it = items[i];
+  if(!it) return;
+  const row = input.closest('.item-row');
+  const inputs = row ? [...row.querySelectorAll('.item-input')] : [];
+  const subtotalActual = parseMonto(inputs[3]?.value);
+  if(campo === 'cant') it.cant = parseMonto(input.value) || 0;
+  if(campo === 'precio') it.precio = parseMonto(input.value);
+  if(campo === 'subtotal') {
+    const subtotal = parseMonto(input.value);
+    if(it.cant && !it.precio) it.precio = subtotal / it.cant;
+    else if(!it.cant && it.precio) it.cant = subtotal / it.precio;
+  } else if(campo === 'precio' && subtotalActual && it.precio) {
+    it.cant = subtotalActual / it.precio;
+  } else if(campo === 'cant' && subtotalActual && it.cant) {
+    it.precio = subtotalActual / it.cant;
+  } else {
+    const subtotalInput = inputs[3];
+    if(subtotalInput) subtotalInput.value = fmt((it.cant || 0) * (it.precio || 0));
+  }
+  input.value = campo === 'cant' ? (it.cant || '') : fmt(campo === 'subtotal' ? ((it.cant || 0) * (it.precio || 0)) : it.precio);
+  renderItems();
+}
+
+function updatePreview(campo = 'precio') {
+  const cantEl = document.getElementById('nCant');
+  const precioEl = document.getElementById('nPrecio');
+  const subEl = document.getElementById('nSub');
+  let c = parseMonto(cantEl.value);
+  let p = parseMonto(precioEl.value);
+  let s = parseMonto(subEl.value);
+  if(campo === 'subtotal') {
+    if(c && !p) p = s / c;
+    else if(!c && p) c = s / p;
+  } else if(campo === 'precio' && s && p) {
+    c = s / p;
+  } else if(campo === 'cant' && s && c) {
+    p = s / c;
+  } else {
+    s = c && p ? c * p : 0;
+  }
+  if(campo !== 'cant' && c) cantEl.value = c;
+  if(campo !== 'precio' && p) precioEl.value = fmt(p);
+  if(campo !== 'subtotal') subEl.value = s ? fmt(s) : '';
+  const bloquearSubtotal = Boolean(c && p);
+  subEl.readOnly = bloquearSubtotal;
+  subEl.tabIndex = bloquearSubtotal ? -1 : 0;
 }
 
 function hayArticuloPendiente() {
   const cant = document.getElementById('nCant').value.trim();
   const desc = document.getElementById('nDesc').value.trim();
   const precio = document.getElementById('nPrecio').value.trim();
-  return Boolean(cant || desc || precio);
+  const subtotal = document.getElementById('nSub').value.trim();
+  return Boolean(cant || desc || precio || subtotal);
 }
 
 function confirmarArticuloPendiente() {
@@ -455,16 +511,17 @@ function confirmarArticuloPendiente() {
 }
 
 function agregarItem() {
-  const cant  = parseFloat(document.getElementById('nCant').value)  || 1;
+  const cant  = parseMonto(document.getElementById('nCant').value)  || 1;
   const desc  = document.getElementById('nDesc').value.trim();
-  const precio= parseMonto(document.getElementById('nPrecio').value);
+  let precio= parseMonto(document.getElementById('nPrecio').value);
+  const subtotal = parseMonto(document.getElementById('nSub').value);
+  if(!precio && subtotal) precio = subtotal / cant;
   if(!desc && !precio) return;
   items.push({cant, desc, precio});
   document.getElementById('nCant').value  = '';
   document.getElementById('nDesc').value  = '';
   document.getElementById('nPrecio').value= '';
-  document.getElementById('nSub').textContent = '—';
-  document.getElementById('nSub').style.color = '#bbb';
+  document.getElementById('nSub').value = '';
   renderItems();
   setTimeout(() => document.getElementById('nCant').focus(), 30);
 }
@@ -490,16 +547,10 @@ function initDp() {
 }
 
 function parseFecha(val) {
-  if(!val.trim()) return;
-  const parts = val.trim().split(/[\s\/\-]/).filter(Boolean);
-  if(parts.length < 2) return;
-  const d = parseInt(parts[0]), m = parseInt(parts[1]);
-  let y = parts[2] ? parseInt(parts[2]) : new Date().getFullYear();
-  if(y < 100) y = 2000 + y;
-  if(!d||!m||d<1||d>31||m<1||m>12) return;
-  dpSel = new Date(y, m-1, d); dpY = y; dpM = m-1;
-  document.getElementById('fechaInput').value =
-    String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0') + '/' + y;
+  const parsed = window.CorralonFunciones?.parseFechaFlexible?.(val);
+  if(!parsed) return;
+  dpSel = parsed.date; dpY = parsed.year; dpM = parsed.month - 1;
+  document.getElementById('fechaInput').value = parsed.text;
 }
 
 function toggleDp() {

@@ -138,6 +138,25 @@
     }).join('\t')).join('\n');
   }
 
+  function parseFechaFlexible(value, now = new Date()) {
+    const parts = String(value || '').trim().replace(/\s+/g, '/').split(/[\/-]/).filter(Boolean);
+    if (!parts.length) return null;
+    const day = Number(parts[0]);
+    const month = Number(parts[1] || (now.getMonth() + 1));
+    let year = Number(parts[2] || now.getFullYear());
+    if (year < 100) year += 2000;
+    if (!day || !month || day < 1 || day > 31 || month < 1 || month > 12) return null;
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return {
+      date,
+      day,
+      month,
+      year,
+      text: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`
+    };
+  }
+
   function bindDropdownOnlyWhenTyping(options = {}) {
     const root = options.root || document;
     const inputSelector = options.inputSelector || 'input';
@@ -615,6 +634,7 @@
     dispatchInputChange,
     parseClipboardTable,
     formatClipboardTable,
+    parseFechaFlexible,
     isPrintableTypingKey,
     bindDropdownOnlyWhenTyping,
     bindDropdownF4,

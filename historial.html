@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="presupuesto-shared.js"></script>
+<script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <style>
@@ -824,6 +825,24 @@ function setAccionesDetalleModo(modo) {
   if (btnDel) btnDel.style.display = esRemito ? '' : 'none';
 }
 
+async function copiarPresupuestoColumna(tipo) {
+  const items = Array.isArray(_presupuestoDetalleActual?.items) ? _presupuestoDetalleActual.items : [];
+  const texto = items.map((it) => tipo === 'cantidad' ? (it.cantidad ?? '') : (it.idart || it.idArt || it.codigo || '')).join('\n');
+  if (!texto.trim()) { toast('No hay datos para copiar'); return; }
+  try {
+    await navigator.clipboard.writeText(texto);
+    toast(tipo === 'cantidad' ? 'Cantidades copiadas' : 'IDArt copiados');
+  } catch (_) {
+    const area = document.createElement('textarea');
+    area.value = texto;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+    toast(tipo === 'cantidad' ? 'Cantidades copiadas' : 'IDArt copiados');
+  }
+}
+
 function abrirDetallePresupuesto(index) {
   const p = _presupuestosCache[index];
   if (!p) {
@@ -879,6 +898,10 @@ function abrirDetallePresupuesto(index) {
     <div class="detalle-total">
       <div class="detalle-total-lbl">Total</div>
       <div class="detalle-total-val">$${Number(total).toLocaleString('es-AR')}</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('idart')">Copiar IDArt</button>
+      <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('cantidad')">Copiar cantidades</button>
     </div>`;
 
   document.getElementById('detalleBg').classList.add('open');
@@ -1132,7 +1155,7 @@ function renderEditForm() {
     <div class="edit-section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div>
         <div class="edit-lbl">Fecha</div>
-        <input class="edit-inp" id="editFecha" value="${r.fecha||''}" placeholder="DD/MM/AAAA" autocomplete="off">
+        <input class="edit-inp" id="editFecha" value="${r.fecha||''}" placeholder="DD/MM/AAAA" autocomplete="off" onblur="normalizarEditFecha()">
       </div>
       <div>
         <div class="edit-lbl">N° Remito</div>
@@ -1185,6 +1208,13 @@ function normalizarEditNro() {
   input.value = remitoShort(input.value);
 }
 
+function normalizarEditFecha() {
+  const input = document.getElementById('editFecha');
+  if(!input) return;
+  const parsed = window.CorralonFunciones?.parseFechaFlexible?.(input.value);
+  if(parsed) input.value = parsed.text;
+}
+
 function actualizarSubEdit() {
   editItems.forEach((it, i) => {
     const el = document.getElementById('editSub' + i);
@@ -1234,6 +1264,8 @@ function editAgregarItem() {
 async function guardarEdicion() {
   const r = _remitoDetalleActual;
   if(!r) return;
+  normalizarEditFecha();
+  normalizarEditNro();
   const cliente  = document.getElementById('editCliente').value.trim();
   const fecha    = document.getElementById('editFecha').value.trim();
   const nroCorto = document.getElementById('editNro').value.trim();
