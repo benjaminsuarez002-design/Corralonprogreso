@@ -626,6 +626,62 @@
     };
   }
 
+  function bindTableSort(options = {}) {
+    const root = options.root || document;
+    const headerSelector = options.headerSelector || '[data-sort-key]';
+    const sort = typeof options.sort === 'function' ? options.sort : null;
+    const activeClass = options.activeClass || 'sort-active';
+    const ascClass = options.ascClass || 'sort-asc';
+    const descClass = options.descClass || 'sort-desc';
+    let currentKey = options.initialKey || '';
+    let currentDir = options.initialDir || 'asc';
+
+    function applyHeaderState() {
+      root.querySelectorAll(headerSelector).forEach((header) => {
+        const active = header.dataset.sortKey === currentKey;
+        header.classList.toggle(activeClass, active);
+        header.classList.toggle(ascClass, active && currentDir === 'asc');
+        header.classList.toggle(descClass, active && currentDir === 'desc');
+      });
+    }
+
+    function setSort(key, dir = null) {
+      if (!key) return;
+      if (dir) {
+        currentKey = key;
+        currentDir = dir;
+      } else if (currentKey !== key) {
+        currentKey = key;
+        currentDir = 'asc';
+      } else if (currentDir === 'asc') {
+        currentDir = 'desc';
+      } else {
+        currentKey = '';
+        currentDir = '';
+      }
+      applyHeaderState();
+      if (sort) sort(currentKey, currentDir);
+    }
+
+    function handleClick(event) {
+      const header = event.target.closest?.(headerSelector);
+      if (!header || !root.contains(header)) return;
+      event.preventDefault();
+      setSort(header.dataset.sortKey);
+    }
+
+    root.addEventListener('click', handleClick);
+    applyHeaderState();
+
+    return {
+      destroy() {
+        root.removeEventListener('click', handleClick);
+      },
+      setSort,
+      getState: () => ({ key: currentKey, dir: currentDir })
+    };
+  }
+
   window.CorralonFunciones = {
     deepClone,
     statesEqual,
@@ -639,6 +695,7 @@
     bindDropdownOnlyWhenTyping,
     bindDropdownF4,
     bindGridNavigation,
-    bindTableSelectPaste
+    bindTableSelectPaste,
+    bindTableSort
   };
 })();
