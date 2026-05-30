@@ -72,6 +72,35 @@
       align-items: center;
       gap: 10px;
     }
+    .dolar-cards {
+      margin-left: auto;
+      display: flex;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .dolar-card {
+      min-width: 96px;
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+      box-shadow: 0 4px 14px rgba(58,35,120,.08);
+    }
+    .dolar-label {
+      color: var(--purple);
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .dolar-value {
+      margin-top: 2px;
+      color: var(--purple-dark);
+      font-size: 13px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
 
     .brand-logo {
       height: 34px;
@@ -1499,6 +1528,11 @@
         <div class="brand-row">
           <img class="brand-logo" src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Corralón Progreso">
           <h1 class="title">Comprobantes</h1>
+          <div class="dolar-cards" data-dolar-cards>
+            <div class="dolar-card"><div class="dolar-label">Oficial compra</div><div class="dolar-value" data-dolar-compra>...</div></div>
+            <div class="dolar-card"><div class="dolar-label">Oficial venta</div><div class="dolar-value" data-dolar-venta>...</div></div>
+            <div class="dolar-card"><div class="dolar-label">Promedio</div><div class="dolar-value" data-dolar-promedio>...</div></div>
+          </div>
         </div>
         <div class="tabs">
           <button class="tab active" data-tab="comp" type="button">Cargar</button>
@@ -4142,6 +4176,33 @@
         bindFooter();
         bindFileInput();
         bindPasteAndDrop();
+        loadDolarCards();
+      }
+
+      function formatDolarValue(value) {
+        const number = Number(value || 0);
+        return number ? `$ ${number.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "...";
+      }
+
+      async function loadDolarCards() {
+        const compraEl = document.querySelector("[data-dolar-compra]");
+        const ventaEl = document.querySelector("[data-dolar-venta]");
+        const promedioEl = document.querySelector("[data-dolar-promedio]");
+        if (!compraEl || !ventaEl || !promedioEl) return;
+        try {
+          const response = await fetch("https://dolarapi.com/v1/dolares/oficial", { cache: "no-store" });
+          if (!response.ok) throw new Error("No pude leer dolar oficial");
+          const data = await response.json();
+          const compra = Number(data.compra || 0);
+          const venta = Number(data.venta || 0);
+          compraEl.textContent = formatDolarValue(compra);
+          ventaEl.textContent = formatDolarValue(venta);
+          promedioEl.textContent = formatDolarValue((compra + venta) / 2);
+        } catch (error) {
+          compraEl.textContent = "Error";
+          ventaEl.textContent = "Error";
+          promedioEl.textContent = "Error";
+        }
       }
 
       async function initFirebase() {
