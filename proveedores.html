@@ -27,7 +27,7 @@
     .label{height:26px;background:var(--soft);padding:4px 7px;color:var(--muted);font:700 18px 'Barlow Condensed'}
     input{width:100%;height:30px;border:0;outline:0;padding:4px 7px;font:17px 'Barlow Condensed';color:var(--text)}
     .table{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;display:grid;grid-template-rows:30px 1fr;min-height:0}
-    .head,.row{display:grid;grid-template-columns:44px 120px minmax(260px,1fr) 140px 140px 150px 160px 160px}
+    .head,.row{display:grid;grid-template-columns:var(--provider-grid-columns,44px 120px minmax(260px,1fr) 140px 140px 150px 160px 160px)}
     .head{background:var(--soft);font:800 17px 'Barlow Condensed';color:var(--red2);padding-right:14px}
     .head div,.row div{padding:4px 7px;border-right:1px solid #f0c0c6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .body{overflow:auto}.row{height:26px;border-bottom:1px solid #eee;font-size:15px}.row:nth-child(even){background:#fff7f8}.row.selected{background:#ffd7dc}
@@ -39,6 +39,9 @@
     .head [data-sort-key]::after{content:"↕";position:absolute;right:6px;top:50%;transform:translateY(-50%);color:#8466ff;font-size:14px;line-height:1}
     .head [data-sort-key].sort-asc::after{content:"↑"}
     .head [data-sort-key].sort-desc::after{content:"↓"}
+    .col-resizer{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:3}
+    .head [data-resize-col]{position:relative}
+    body.resizing-columns{cursor:col-resize;user-select:none}
     .date-fresh{background:#bdf28f!important;color:#102600}
     .date-warn{background:#fff08a!important;color:#382900}
     .date-old{background:#ff9ca6!important;color:#420008}
@@ -81,7 +84,7 @@
       <div class="new-cell"><button class="primary new-provider-btn" id="newProviderBtn" type="button">Nuevo proveedor</button></div>
     </section>
     <section class="table" id="providersTable">
-      <div class="head"><div data-table-corner></div><div data-col-select="0" data-sort-key="id">ID</div><div data-col-select="1" data-sort-key="proveedor">Proveedor</div><div data-col-select="2" data-sort-key="desc_factura">Desc. factura</div><div data-col-select="3" data-sort-key="desc_lista">Desc. lista</div><div data-col-select="4" data-sort-key="ultima">Ultima act.</div><div data-col-select="5" data-sort-key="vendedor">Vendedor</div><div data-col-select="6" data-sort-key="telefono">Telefono</div></div>
+      <div class="head"><div data-table-corner></div><div data-col-select="0" data-sort-key="id" data-resize-col="1">ID<span class="col-resizer"></span></div><div data-col-select="1" data-sort-key="proveedor" data-resize-col="2">Proveedor<span class="col-resizer"></span></div><div data-col-select="2" data-sort-key="desc_factura" data-resize-col="3">Desc. factura<span class="col-resizer"></span></div><div data-col-select="3" data-sort-key="desc_lista" data-resize-col="4">Desc. lista<span class="col-resizer"></span></div><div data-col-select="4" data-sort-key="ultima" data-resize-col="5">Ultima act.<span class="col-resizer"></span></div><div data-col-select="5" data-sort-key="vendedor" data-resize-col="6">Vendedor<span class="col-resizer"></span></div><div data-col-select="6" data-sort-key="telefono" data-resize-col="7">Telefono<span class="col-resizer"></span></div></div>
       <div class="body" id="rows"></div>
     </section>
   </main>
@@ -116,6 +119,8 @@ const TABLE='proveedores', META='proveedores_meta', DB='proveedores_cache_v1';
 let db, providerRows=[], filtered=[], editingProviderId=null, sortState={key:'proveedor',dir:'asc'};
 const el={status:document.getElementById('status'),rows:document.getElementById('rows'),filterId:filterId,filterName:filterName,filterDiscount:filterDiscount,filterDate:filterDate};
 let providersTableAccess=null;
+const PROVIDER_COL_WIDTHS_KEY='proveedores_col_widths_v1';
+const providerColumnWidths=[44,120,360,140,140,150,160,160];
 function headers(extra={}){return{apikey:REAL_KEY,Authorization:`Bearer ${REAL_KEY}`,'Content-Type':'application/json',...extra}}
 function norm(v){return String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim()}
 function money(v){return `${(Number(v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}%`}
@@ -135,6 +140,11 @@ function providerCell(row,col,content,extra=''){return `<div class="access-cell 
 function sortValue(p,key){if(key==='id')return Number(p.id_proveedor)||String(p.id_proveedor||'');if(key==='desc_factura')return Number(p.descuento_factura||0);if(key==='desc_lista')return Number(p.descuento_lista||0);if(key==='ultima')return new Date(String(p.updated_at||p.ultima_actualizacion||'').replace(' ','T')).getTime()||0;if(key==='vendedor')return norm(p.vendedor);if(key==='telefono')return norm(p.telefono);return norm(p.proveedor)}
 function compareProviders(a,b){if(!sortState.key)return 0;const va=sortValue(a,sortState.key),vb=sortValue(b,sortState.key);let result=0;if(typeof va==='number'&&typeof vb==='number')result=va-vb;else result=String(va).localeCompare(String(vb),'es',{numeric:true,sensitivity:'base'});return sortState.dir==='desc'?-result:result}
 function render(){const f={id:norm(filterId.value),name:norm(filterName.value),disc:norm(filterDiscount.value),date:norm(filterDate.value)};filtered=providerRows.filter(p=>(!f.id||norm(p.id_proveedor).includes(f.id))&&(!f.name||p.proveedor_norm.includes(f.name))&&(!f.disc||norm(money(p.descuento_lista)).includes(f.disc))&&(!f.date||norm(`${p.ultima_actualizacion||''} ${p.updated_at||''} ${providerUpdatedDisplay(p)}`).includes(f.date))).sort(compareProviders); el.rows.innerHTML=filtered.map((p,row)=>{const link=p.pagina_link||p.pagina||'';return `<div class="row" data-id="${escapeHtml(p.id_proveedor)}"><div><button class="edit-btn" type="button" data-edit="${escapeHtml(p.id_proveedor)}" title="Editar">✎</button></div>${providerCell(row,0,escapeHtml(p.id_proveedor))}${providerCell(row,1,escapeHtml(p.proveedor),`${link?'provider-link':''}`)}${providerCell(row,2,money(p.descuento_factura),'money')}${providerCell(row,3,money(p.descuento_lista),'money')}${providerCell(row,4,escapeHtml(providerUpdatedDisplay(p)),providerDateClass(p))}${providerCell(row,5,escapeHtml(p.vendedor||''))}${providerCell(row,6,escapeHtml(p.telefono||''))}</div>`}).join(''); el.status.textContent=`${filtered.length.toLocaleString('es-AR')} / ${providerRows.length.toLocaleString('es-AR')} proveedores`}
+function applyProviderColumnWidths(){document.documentElement.style.setProperty('--provider-grid-columns',providerColumnWidths.map(w=>`${Math.max(44,Number(w)||80)}px`).join(' '))}
+function initProviderColumnResize(){
+  const table=document.getElementById('providersTable');
+  CorralonFunciones.bindResizableColumns({root:table,widths:providerColumnWidths,storageKey:PROVIDER_COL_WIDTHS_KEY,apply:applyProviderColumnWidths});
+}
 async function importCloud(){el.status.textContent='Importando proveedores...';providerRows=await CorralonSystem.importProvidersCloud();render()}
 function openProviderModal(provider=null){editingProviderId=provider?.id_proveedor||null;modalTitle.textContent=provider?'Editar proveedor':'Nuevo proveedor';editId.value=provider?.id_proveedor||'';editId.disabled=Boolean(provider);editName.value=provider?.proveedor||'';editDiscountInvoice.value=percentInput(provider?.descuento_factura);editDiscountList.value=percentInput(provider?.descuento_lista);editDate.value=provider?.ultima_actualizacion||'';editSeller.value=provider?.vendedor||'';editPhone.value=provider?.telefono||'';editPageLink.value=provider?.pagina_link||provider?.pagina||'';editFreightPercent.value=percentInput(provider?.porc_flete);editIvaPercent.value=percentInput(provider?.porc_iva);editIvaIncluded.checked=boolInput(provider?.iva_incluido);editNote.value=provider?.nota||'';providerModal.classList.add('visible');setTimeout(()=>provider?editName.focus():editId.focus(),0)}
 function closeProviderModal(){providerModal.classList.remove('visible');editingProviderId=null;providerForm.reset();editId.disabled=false}
@@ -192,6 +202,7 @@ document.addEventListener('keydown',(event)=>{
   }
 });
 initProvidersAccessTable();
+initProviderColumnResize();
 (async()=>{db=await openDb();providerRows=await getAll();render();importCloud().catch(()=>render())})();
 </script>
 </body>

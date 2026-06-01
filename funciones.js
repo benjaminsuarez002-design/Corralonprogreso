@@ -682,6 +682,81 @@
     };
   }
 
+  function bindResizableColumns(options = {}) {
+    const root = options.root || document;
+    const handleSelector = options.handleSelector || '.col-resizer';
+    const headerSelector = options.headerSelector || '[data-resize-col]';
+    const storageKey = options.storageKey || '';
+    const widths = Array.isArray(options.widths) ? options.widths : [];
+    const minWidth = Number(options.minWidth || 58);
+    const resizingClass = options.resizingClass || 'resizing-columns';
+    const apply = typeof options.apply === 'function' ? options.apply : null;
+    const getIndex = typeof options.getIndex === 'function'
+      ? options.getIndex
+      : (header) => Number(header?.dataset?.resizeCol);
+
+    function applyWidths() {
+      if (apply) apply(widths);
+    }
+
+    function load() {
+      if (!storageKey) {
+        applyWidths();
+        return;
+      }
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+        if (Array.isArray(saved)) saved.forEach((width, index) => {
+          if (Number(width) > 20) widths[index] = Number(width);
+        });
+      } catch {}
+      applyWidths();
+    }
+
+    function save() {
+      if (!storageKey) return;
+      localStorage.setItem(storageKey, JSON.stringify(widths));
+    }
+
+    function handleMouseDown(event) {
+      const handle = event.target.closest?.(handleSelector);
+      if (!handle || !root.contains(handle)) return;
+      const header = handle.closest?.(headerSelector);
+      const index = getIndex(header);
+      if (!Number.isFinite(index)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startWidth = Number(widths[index] || header.getBoundingClientRect().width || minWidth);
+      document.body.classList.add(resizingClass);
+      const onMove = (moveEvent) => {
+        widths[index] = Math.max(minWidth, startWidth + (moveEvent.clientX - startX));
+        applyWidths();
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.classList.remove(resizingClass);
+        save();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
+    root.addEventListener('mousedown', handleMouseDown);
+    load();
+
+    return {
+      destroy() {
+        root.removeEventListener('mousedown', handleMouseDown);
+      },
+      load,
+      save,
+      apply: applyWidths,
+      widths
+    };
+  }
+
   window.CorralonFunciones = {
     deepClone,
     statesEqual,
@@ -696,6 +771,7 @@
     bindDropdownF4,
     bindGridNavigation,
     bindTableSelectPaste,
-    bindTableSort
+    bindTableSort,
+    bindResizableColumns
   };
 })();

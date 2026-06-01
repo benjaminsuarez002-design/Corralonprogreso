@@ -2382,7 +2382,7 @@
       <div id="modalPrecio" style="margin-top:4px;color:var(--texto-dark);"></div>
       <div class="cantidad-selector" style="margin-top:12px;display:flex;align-items:center;gap:6px;justify-content:center;">
         <button id="modalMinus">-</button>
-        <input type="number" id="modalCantidad" value="1" min="1" style="width:60px;text-align:center;border:1px solid var(--borde);border-radius:6px;height:28px;">
+        <input type="text" id="modalCantidad" value="1" inputmode="decimal" style="width:60px;text-align:center;border:1px solid var(--borde);border-radius:6px;height:28px;">
         <button id="modalPlus">+</button>
       </div>
       <div style="margin-top:16px;text-align:right;">
@@ -2416,7 +2416,7 @@
         </div>
         <div class="product-detail-actions">
           <div class="product-detail-controls">
-            <input class="product-detail-qty" id="productDetailQty" type="number" min="1" value="" inputmode="numeric">
+            <input class="product-detail-qty" id="productDetailQty" type="text" value="" inputmode="decimal">
             <button class="agregar-btn" id="productDetailAddCart" type="button" aria-label="Agregar al carrito">🛒 Agregar</button>
             <button class="product-detail-btn-secondary" id="productDetailOpenCart" type="button">Mi Carrito</button>
             <button class="product-detail-btn-secondary" id="productDetailBack" type="button">Volver</button>
@@ -4984,6 +4984,15 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
 let carrito = {};
 function guardarCarrito() { localStorage.setItem('carrito', JSON.stringify(carrito)); }
 function cargarCarrito() { try { carrito = JSON.parse(localStorage.getItem('carrito')) || {}; } catch(e) { carrito = {}; } actualizarVistaCarrito(); }
+function parseCantidadCarrito(value, fallback = 1) {
+  const text = String(value ?? '').trim().replace(/\./g, '').replace(',', '.');
+  const number = Number(text);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+function formatCantidadCarrito(value) {
+  const number = Number(value || 0);
+  return Number.isInteger(number) ? String(number) : number.toLocaleString('es-AR', { maximumFractionDigits: 3 });
+}
 function actualizarBurbuja() {
   const total = Object.keys(carrito).length;
   const c1 = document.getElementById('cartCount');
@@ -5010,7 +5019,7 @@ function actualizarVistaCarrito() {
         <div style="font-weight:600;margin-top:4px;">Subtotal: ${fmtPrecio(importe)}</div>
         <div class="cart-item-controls">
           <button class="qty-minus" data-codigo="${itm.codigo}">-</button>
-          <input class="qty-input" type="number" min="1" value="${itm.cantidad}" data-codigo="${itm.codigo}">
+          <input class="qty-input" type="text" inputmode="decimal" value="${formatCantidadCarrito(itm.cantidad)}" data-codigo="${itm.codigo}">
           <button class="qty-plus" data-codigo="${itm.codigo}">+</button>
           <button class="remove-item" data-codigo="${itm.codigo}" style="margin-left:6px;background:#e50000;">x</button>
         </div>
@@ -5050,7 +5059,7 @@ document.getElementById('productDetailPhoto').addEventListener('click', () => {
 });
 document.getElementById('productDetailAddCart').addEventListener('click', () => {
   const btn = document.getElementById('productDetailAddCart');
-  const cantidad = Math.max(1, parseInt(document.getElementById('productDetailQty').value || '1', 10) || 1);
+  const cantidad = parseCantidadCarrito(document.getElementById('productDetailQty').value, 1);
   const codigo = btn.dataset.codigo;
   if (!codigo) return;
   if (!carrito[codigo]) {
@@ -5089,10 +5098,10 @@ document.getElementById('productDetailOpenCart').addEventListener('click', () =>
   abrirPanel();
 });
 document.getElementById('productDetailBack').addEventListener('click', cerrarDetalleProducto);
-document.getElementById('modalMinus').addEventListener('click', () => { const el = document.getElementById('modalCantidad'); let val = parseInt(el.value||1,10); if(val>1) el.value=val-1; });
-document.getElementById('modalPlus').addEventListener('click', () => { const el = document.getElementById('modalCantidad'); el.value = parseInt(el.value||1,10)+1; });
+document.getElementById('modalMinus').addEventListener('click', () => { const el = document.getElementById('modalCantidad'); let val = parseCantidadCarrito(el.value,1); if(val>1) el.value=formatCantidadCarrito(Math.max(1,val-1)); });
+document.getElementById('modalPlus').addEventListener('click', () => { const el = document.getElementById('modalCantidad'); el.value = formatCantidadCarrito(parseCantidadCarrito(el.value,1)+1); });
 document.getElementById('modalAddCart').addEventListener('click', () => {
-  const cant = parseInt(document.getElementById('modalCantidad').value||1,10);
+  const cant = parseCantidadCarrito(document.getElementById('modalCantidad').value,1);
   const btn = document.getElementById('modalAddCart');
   const codigo = btn.dataset.codigo;
   if(!codigo) return;
@@ -5146,13 +5155,13 @@ document.addEventListener('keyup', (e) => {
 document.getElementById('cartItems').addEventListener('click', e => {
   const codigo = e.target.dataset.codigo;
   if(e.target.classList.contains('qty-plus')) { carrito[codigo].cantidad++; guardarCarrito(); actualizarVistaCarrito(); }
-  else if(e.target.classList.contains('qty-minus')) { if(carrito[codigo].cantidad>1) carrito[codigo].cantidad--; guardarCarrito(); actualizarVistaCarrito(); }
+  else if(e.target.classList.contains('qty-minus')) { if(carrito[codigo].cantidad>1) carrito[codigo].cantidad=Math.max(1, carrito[codigo].cantidad-1); guardarCarrito(); actualizarVistaCarrito(); }
   else if(e.target.classList.contains('remove-item')) { delete carrito[codigo]; guardarCarrito(); actualizarVistaCarrito(); }
 });
 document.getElementById('cartItems').addEventListener('change', e => {
   if(e.target.classList.contains('qty-input')) {
     const codigo = e.target.dataset.codigo;
-    const val = parseInt(e.target.value, 10);
+    const val = parseCantidadCarrito(e.target.value, NaN);
     if(!isNaN(val) && val >= 1) { carrito[codigo].cantidad = val; } else { e.target.value = carrito[codigo].cantidad; }
     guardarCarrito(); actualizarVistaCarrito();
   }

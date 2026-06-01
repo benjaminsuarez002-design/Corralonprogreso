@@ -213,7 +213,7 @@
     }
     .grid-head {
       display: grid;
-      grid-template-columns: 116px minmax(360px, 1fr) 130px 220px;
+      grid-template-columns: var(--listas-grid-columns, 116px minmax(360px, 1fr) 130px 220px);
       background: var(--header);
       border-bottom: 1px solid var(--borde-fuerte);
       padding-right: 14px;
@@ -227,6 +227,7 @@
       font-weight: 700;
     }
     .sort-head {
+      position: relative;
       width: 100%;
       height: 100%;
       display: flex;
@@ -241,6 +242,16 @@
       cursor: pointer;
       text-align: left;
     }
+    .col-resizer {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 8px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 3;
+    }
+    body.resizing-columns { cursor: col-resize; user-select: none; }
     .sort-head .sort-mark {
       color: var(--rojo);
       font-size: 14px;
@@ -262,7 +273,7 @@
     .row {
       height: 24px;
       display: grid;
-      grid-template-columns: 116px minmax(360px, 1fr) 130px 220px;
+      grid-template-columns: var(--listas-grid-columns, 116px minmax(360px, 1fr) 130px 220px);
       border-bottom: 1px solid #ddd;
       cursor: default;
       font-size: 16px;
@@ -550,6 +561,22 @@
       overflow: auto;
       padding: 10px 14px 14px;
     }
+    .updates-search-wrap {
+      padding: 10px 14px 0;
+      border-bottom: 1px solid var(--borde);
+      background: #fff;
+    }
+    .updates-search {
+      width: 100%;
+      height: 32px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 7px;
+      padding: 4px 8px;
+      color: var(--texto);
+      font: 17px 'Barlow Condensed', Arial, sans-serif;
+      outline: 0;
+      box-sizing: border-box;
+    }
     .update-row {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -645,6 +672,7 @@
     body.popup-mode .app { grid-template-rows: 1fr auto; }
   </style>
   <script src="nav-helper.js"></script>
+  <script src="funciones.js"></script>
   <script src="menu-auth-guard.js" data-menu-guard="listas_proveedores"></script>
 </head>
 <body>
@@ -703,10 +731,10 @@
 
         <section class="table-card">
           <div class="grid-head">
-            <div><button class="sort-head" type="button" data-sort-col="code"><span>CodProveed</span><span class="sort-mark" data-sort-mark="code">↕</span></button></div>
-            <div><button class="sort-head" type="button" data-sort-col="article"><span>Artículo</span><span class="sort-mark" data-sort-mark="article">↕</span></button></div>
-            <div><button class="sort-head" type="button" data-sort-col="price"><span>PrecioCosto</span><span class="sort-mark" data-sort-mark="price">↕</span></button></div>
-            <div><button class="sort-head" type="button" data-sort-col="provider"><span>Proveedor</span><span class="sort-mark" data-sort-mark="provider">↕</span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="code" data-resize-col="0"><span>CodProveed</span><span class="sort-mark" data-sort-mark="code">↕</span><span class="col-resizer"></span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="article" data-resize-col="1"><span>Artículo</span><span class="sort-mark" data-sort-mark="article">↕</span><span class="col-resizer"></span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="price" data-resize-col="2"><span>PrecioCosto</span><span class="sort-mark" data-sort-mark="price">↕</span><span class="col-resizer"></span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="provider" data-resize-col="3"><span>Proveedor</span><span class="sort-mark" data-sort-mark="provider">↕</span><span class="col-resizer"></span></button></div>
           </div>
           <div class="viewport" id="viewport">
             <div class="spacer" id="spacer"></div>
@@ -743,6 +771,9 @@
       <div class="updates-head">
         <h2 class="updates-title" id="updatesTitle">Últimas actualizaciones</h2>
         <button class="btn" type="button" id="updatesCloseBtn">Cerrar</button>
+      </div>
+      <div class="updates-search-wrap">
+        <input class="updates-search" id="updatesSearch" autocomplete="off" placeholder="Buscar proveedor o ID">
       </div>
       <div class="updates-list" id="updatesList"></div>
     </div>
@@ -789,6 +820,8 @@
     const BUFFER = 12;
     const PAGE_SIZE = 1000;
     const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
+    const LISTAS_COL_WIDTHS_KEY = 'listasproveedores_col_widths_v1';
+    const listasColumnWidths = [116, 520, 130, 220];
     const state = {
       db: null,
       worker: null,
@@ -851,6 +884,7 @@
       updatesBtn: document.getElementById('updatesBtn'),
       updatesBackdrop: document.getElementById('updatesBackdrop'),
       updatesList: document.getElementById('updatesList'),
+      updatesSearch: document.getElementById('updatesSearch'),
       updatesCloseBtn: document.getElementById('updatesCloseBtn'),
       fileInput: document.getElementById('fileInput')
     };
@@ -859,6 +893,25 @@
     const LISTAS_PROVEEDORES_SYNC_KEY = 'corralon_listasproveedores_tab_sync';
     let listasProveedoresSyncReady = false;
     let listasProveedoresChannel = null;
+
+    function applyListasColumnWidths() {
+      document.documentElement.style.setProperty('--listas-grid-columns', listasColumnWidths.map((width) => `${Math.max(70, Number(width) || 100)}px`).join(' '));
+    }
+
+    function initListasColumnResize() {
+      if (!window.CorralonFunciones?.bindResizableColumns) {
+        applyListasColumnWidths();
+        return;
+      }
+      CorralonFunciones.bindResizableColumns({
+        root: document.querySelector('.table-card'),
+        widths: listasColumnWidths,
+        storageKey: LISTAS_COL_WIDTHS_KEY,
+        headerSelector: '[data-resize-col]',
+        minWidth: 70,
+        apply: applyListasColumnWidths
+      });
+    }
 
     function cerrarEstaPestanaListasProveedores() {
       try { window.close(); } catch (_) {}
@@ -1053,8 +1106,16 @@
     function updatesFromManifest(manifest) {
       return sortUpdates(Object.values(manifest || {}));
     }
+    function updatesLast30Days(items) {
+      const limit = Date.now() - 30 * 86400000;
+      return sortUpdates(items).filter((item) => updateDateValue(item) >= limit);
+    }
     function renderUpdatesModal() {
-      const items = sortUpdates(state.latestUpdates);
+      const term = normalize(el.updatesSearch?.value || '');
+      const items = updatesLast30Days(state.latestUpdates).filter((item) => {
+        if (!term) return true;
+        return normalize(`${item.proveedor || ''} ${item.id_proveedor || ''}`).includes(term);
+      });
       if (!items.length) {
         el.updatesList.innerHTML = '<div class="updates-empty">Sin actualizaciones registradas.</div>';
         return;
@@ -1070,13 +1131,20 @@
     async function loadLatestUpdatesForModal() {
       const local = await idbGet('meta', 'principal').catch(() => null);
       const saved = Array.isArray(local?.last_provider_updates) ? local.last_provider_updates : [];
-      state.latestUpdates = saved.length ? sortUpdates(saved) : updatesFromManifest(localProviderManifest(local || {}));
+      state.latestUpdates = updatesFromManifest(localProviderManifest(local || {}));
+      if (saved.length) {
+        const byId = new Map(state.latestUpdates.map((item) => [String(item.id_proveedor || item.proveedor), item]));
+        saved.forEach((item) => byId.set(String(item.id_proveedor || item.proveedor), normalizeUpdateItem(item)));
+        state.latestUpdates = sortUpdates(Array.from(byId.values()));
+      }
     }
     function openUpdatesModal() {
       loadLatestUpdatesForModal()
         .then(() => {
+          if (el.updatesSearch) el.updatesSearch.value = '';
           renderUpdatesModal();
           el.updatesBackdrop.classList.add('visible');
+          setTimeout(() => el.updatesSearch?.focus(), 0);
         })
         .catch((error) => showToast(error.message || 'No pude cargar actualizaciones.'));
     }
@@ -2393,6 +2461,7 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
     el.updatesBtn.addEventListener('click', openUpdatesModal);
+    el.updatesSearch.addEventListener('input', renderUpdatesModal);
     el.updatesCloseBtn.addEventListener('click', closeUpdatesModal);
     el.updatesBackdrop.addEventListener('click', (event) => {
       if (event.target === el.updatesBackdrop) closeUpdatesModal();
@@ -2412,9 +2481,17 @@
         showToast(error.message || 'No pude subir el Excel.');
       }).finally(() => el.fileInput.value = '');
     });
+    let suppressFilterSelectOnFocus = false;
+    window.addEventListener('blur', () => { suppressFilterSelectOnFocus = true; });
     [el.filterCode, el.filterArticle, el.filterPrice, el.filterProvider].forEach((input) => {
       input.addEventListener('input', requestFilter);
-      input.addEventListener('focus', () => input.select());
+      input.addEventListener('focus', () => {
+        if (suppressFilterSelectOnFocus) {
+          suppressFilterSelectOnFocus = false;
+          return;
+        }
+        input.select();
+      });
     });
     document.querySelectorAll('[data-sort-col]').forEach((button) => {
       button.addEventListener('click', () => cycleSort(button.dataset.sortCol));
@@ -2624,6 +2701,7 @@
     });
     async function init() {
       state.db = await openDb();
+      initListasColumnResize();
       syncResponsiveScale();
       renderSlots();
       loadProviderDates();
