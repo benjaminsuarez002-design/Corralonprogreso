@@ -79,6 +79,77 @@
     font-weight: 800;
     cursor: pointer;
   }
+  .menu-bell {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    width: 38px;
+    height: 34px;
+    background: #fff;
+    color: var(--purple-dark);
+    font-size: 18px;
+    font-weight: 900;
+    cursor: pointer;
+    display: none;
+  }
+  .menu-bell.visible { display: inline-flex; align-items: center; justify-content: center; }
+  .menu-bell-count {
+    position: absolute;
+    top: -7px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--red);
+    color: #fff;
+    font-size: 11px;
+    line-height: 18px;
+  }
+  .review-toast {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 60;
+    max-width: 360px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    color: var(--purple-dark);
+    box-shadow: var(--shadow);
+    font-weight: 900;
+    display: none;
+  }
+  .review-toast.visible { display: block; animation: loginPop .18s ease both; }
+  .review-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(31,34,51,.35);
+    backdrop-filter: blur(4px);
+  }
+  .review-modal.visible { display: flex; }
+  .review-box {
+    width: min(620px, 94vw);
+    max-height: min(720px, 86vh);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: var(--shadow);
+  }
+  .review-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: #faf8ff; }
+  .review-head h2 { margin: 0; color: var(--purple-dark); font-size: 22px; }
+  .review-head button { margin-left: auto; border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; background: #fff; color: var(--purple-dark); font-weight: 900; cursor: pointer; }
+  .review-list { max-height: 560px; overflow: auto; padding: 10px; }
+  .review-item { display: grid; grid-template-columns: 82px 1fr 120px; gap: 8px; align-items: center; min-height: 46px; padding: 8px 10px; border: 1px solid #e4dcfb; border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: pointer; font-weight: 800; }
+  .review-item:hover { background: #f4f0ff; }
+  .review-item strong { color: var(--purple-dark); }
   .menu-userbar {
     padding: 12px 16px 0;
     display: flex;
@@ -384,6 +455,7 @@
         <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Corralón Progreso">
         <h1 class="menu-title">Menú principal</h1>
         <div class="menu-sub">Accesos rápidos</div>
+        <button class="menu-bell" id="reviewBell" type="button" title="Pedidos en revisión">🔔<span class="menu-bell-count" id="reviewBellCount">0</span></button>
         <button class="menu-logout" id="logoutBtn" type="button">Salir</button>
       </header>
       <div class="menu-userbar">
@@ -408,10 +480,17 @@
       </div>
     </section>
   </div>
+  <div class="review-toast" id="reviewToast"></div>
+  <div class="review-modal" id="reviewModal">
+    <div class="review-box">
+      <div class="review-head"><h2>Pedidos en revisión</h2><button id="closeReviewModal" type="button">Cerrar</button></div>
+      <div class="review-list" id="reviewList"></div>
+    </div>
+  </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -423,10 +502,7 @@
     };
 
     const firebaseApp = initializeApp(firebaseConfig);
-    const db = getFirestore(firebaseApp);
-
-    const ADMIN_PASS = 'Akashiya2301';
-    const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
+    const db = getFirestore(firebaseApp);    const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
     const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
     const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
     const MENU_USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
@@ -442,13 +518,23 @@
     const loginError = document.getElementById('loginError');
     const rememberLogin = document.getElementById('rememberLogin');
     const activeUserLabel = document.getElementById('activeUserLabel');
+    const reviewBell = document.getElementById('reviewBell');
+    const reviewBellCount = document.getElementById('reviewBellCount');
+    const reviewToast = document.getElementById('reviewToast');
+    const reviewModal = document.getElementById('reviewModal');
+    const reviewList = document.getElementById('reviewList');
+    const closeReviewModal = document.getElementById('closeReviewModal');
     let usuariosMenu = [];
     let accesoManualEnPagina = false;
+    let reviewUnsubscribe = null;
+    let reviewOrders = [];
+    let knownReviewIds = new Set();
+    const REVIEW_DISMISSED_KEY = 'corralon_review_orders_dismissed_v1';
 
     function usuariosDefault() {
       return [
-        { id: 'admin', nombre: 'Administrador', usuario: 'admin', password: ADMIN_PASS, nivel: 'administrador', permisos: ALL_MENU_IDS },
-        { id: 'vendedor', nombre: 'Vendedor', usuario: 'vendedor', password: '1234', nivel: 'vendedor', permisos: DEFAULT_SELLER_IDS }
+        { id: 'admin', nombre: 'Administrador', usuario: 'admin', nivel: 'administrador', permisos: ALL_MENU_IDS },
+        { id: 'vendedor', nombre: 'Vendedor', usuario: 'vendedor', nivel: 'vendedor', permisos: DEFAULT_SELLER_IDS }
       ];
     }
 
@@ -457,7 +543,6 @@
         id: String(raw.id || ''),
         nombre: String(raw.nombre || ''),
         usuario: String(raw.usuario || ''),
-        password: String(raw.password || ''),
         nivel: String(raw.nivel || ''),
         permisos: Array.isArray(raw.permisos) ? raw.permisos : []
       };
@@ -579,6 +664,7 @@
         link.style.display = permisos.has(link.dataset.menuId) ? '' : 'none';
       });
       activeUserLabel.textContent = `${usuario?.nombre || '-'} (${usuario?.nivel || '-'})`;
+      setupReviewNotifications(usuario);
     }
 
     function mostrarMenu(usuario = obtenerUsuarioActivo()) {
@@ -617,8 +703,15 @@
       const usuarioIngresado = String(loginUserInput.value || '').trim().toLowerCase();
       const passIngresada = String(loginInput.value || '');
       const usuario = usuariosMenu.find((u) => String(u.usuario || u.nombre || '').trim().toLowerCase() === usuarioIngresado);
-      const password = String(usuario?.password || (usuario?.id === 'admin' ? ADMIN_PASS : ''));
-      if (usuario && passIngresada === password) {
+      let loginOk = false;
+      try {
+        const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: usuarioIngresado, password: passIngresada }) });
+        const data = await res.json();
+        loginOk = Boolean(data.ok);
+      } catch (error) {
+        console.error('No se pudo validar contra backend', error);
+      }
+      if (usuario && loginOk) {
         guardarUsuarioActivo(usuario);
         recordarSesion(usuario, rememberLogin.checked);
         accesoManualEnPagina = true;
@@ -643,6 +736,90 @@
       rememberLogin.checked = false;
       requestAnimationFrame(() => loginUserInput.focus());
     }
+
+    function isAdminUser(usuario) {
+      return String(usuario?.nivel || '').toLowerCase() === 'administrador';
+    }
+
+    function displayProviderName(value) {
+      return String(value || '').replace(/^\s*\d+\s*[-–]\s*/, '').trim();
+    }
+
+    function dismissedReviewIds() {
+      try { return new Set(JSON.parse(localStorage.getItem(REVIEW_DISMISSED_KEY) || '[]').map(String)); }
+      catch { return new Set(); }
+    }
+
+    function saveDismissedReviewIds(ids) {
+      localStorage.setItem(REVIEW_DISMISSED_KEY, JSON.stringify([...ids]));
+    }
+
+    function showReviewToast(order) {
+      const proveedor = displayProviderName(order?.proveedor) || 'sin proveedor';
+      reviewToast.textContent = `Pedido enviado a revisión de ${proveedor}`;
+      reviewToast.classList.add('visible');
+      clearTimeout(showReviewToast._timer);
+      showReviewToast._timer = setTimeout(() => reviewToast.classList.remove('visible'), 4200);
+    }
+
+    function renderReviewNotifications() {
+      const dismissed = dismissedReviewIds();
+      const visible = reviewOrders.filter((order) => !dismissed.has(String(order.id)));
+      reviewBell.classList.toggle('visible', visible.length > 0);
+      reviewBellCount.textContent = String(visible.length);
+      reviewList.innerHTML = visible.length ? visible.map((order) => `
+        <div class="review-item" data-review-id="${escapeHtml(order.id)}">
+          <strong>Pedido ${escapeHtml(order.id)}</strong>
+          <span>${escapeHtml(displayProviderName(order.proveedor) || 'Sin proveedor')}</span>
+          <span>${escapeHtml(order.fecha || '')}</span>
+        </div>
+      `).join('') : '<div style="padding:18px;font-weight:800;color:var(--muted)">No hay pedidos en revisión.</div>';
+    }
+
+    function setupReviewNotifications(usuario) {
+      if (!isAdminUser(usuario)) {
+        reviewBell.classList.remove('visible');
+        if (reviewUnsubscribe) reviewUnsubscribe();
+        reviewUnsubscribe = null;
+        return;
+      }
+      if (reviewUnsubscribe) return;
+      reviewUnsubscribe = onSnapshot(collection(db, 'pedidos'), (snap) => {
+        const dismissed = dismissedReviewIds();
+        const previous = knownReviewIds;
+        reviewOrders = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .filter((order) => order.confirmado && !order.pedido)
+          .sort((a, b) => Number(b.id) - Number(a.id));
+        const current = new Set(reviewOrders.map((order) => String(order.id)));
+        const fresh = reviewOrders.find((order) => !previous.has(String(order.id)) && !dismissed.has(String(order.id)));
+        knownReviewIds = current;
+        renderReviewNotifications();
+        if (fresh) showReviewToast(fresh);
+      }, (error) => console.warn('No se pudieron escuchar pedidos en revisión', error));
+    }
+
+    function openReviewOrder(id) {
+      const dismissed = dismissedReviewIds();
+      dismissed.add(String(id));
+      saveDismissedReviewIds(dismissed);
+      renderReviewNotifications();
+      reviewModal.classList.remove('visible');
+      localStorage.setItem('corralon_open_review_order_id', String(id));
+      location.href = 'pedidos.html';
+    }
+
+    reviewBell.addEventListener('click', () => {
+      renderReviewNotifications();
+      reviewModal.classList.add('visible');
+    });
+    closeReviewModal.addEventListener('click', () => reviewModal.classList.remove('visible'));
+    reviewModal.addEventListener('mousedown', (event) => {
+      if (event.target === reviewModal) reviewModal.classList.remove('visible');
+    });
+    reviewList.addEventListener('click', (event) => {
+      const item = event.target.closest('[data-review-id]');
+      if (item) openReviewOrder(item.dataset.reviewId);
+    });
 
     document.getElementById('loginBtn').addEventListener('click', verificarPass);
     document.getElementById('loginExitBtn').addEventListener('click', (event) => { corralonNavigate(event, 'index.html'); });
@@ -702,4 +879,8 @@
   </script>
 </body>
 </html>
+
+
+
+
 

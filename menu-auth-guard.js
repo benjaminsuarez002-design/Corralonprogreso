@@ -1,5 +1,4 @@
-(function () {
-  const ADMIN_PASS = 'Akashiya2301';
+﻿(function () {
   const KEEP_LOGIN_KEY = 'historial_keep_logged_v1';
   const ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
   const ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
@@ -26,7 +25,7 @@
     'proveedores.html': 'proveedores',
     'listasproveedores.html': 'listas_proveedores',
     'soloadmin.html': 'admin',
-    'garantías.html': 'garantias',
+    'garantÃ­as.html': 'garantias',
     'garantias.html': 'garantias',
     'usuarios.html': 'usuarios',
     'calculadoras.html': 'calculadoras'
@@ -43,8 +42,8 @@
 
   function defaultUsers() {
     return [
-      { id: 'admin', nombre: 'Administrador', usuario: 'admin', password: ADMIN_PASS, nivel: 'administrador', permisos: ALL_MENU_IDS },
-      { id: 'vendedor', nombre: 'Vendedor', usuario: 'vendedor', password: '1234', nivel: 'vendedor', permisos: DEFAULT_SELLER_IDS }
+      { id: 'admin', nombre: 'Administrador', usuario: 'admin', nivel: 'administrador', permisos: ALL_MENU_IDS },
+      { id: 'vendedor', nombre: 'Vendedor', usuario: 'vendedor', nivel: 'vendedor', permisos: DEFAULT_SELLER_IDS }
     ];
   }
 
@@ -53,7 +52,6 @@
       id: String(raw.id || raw.usuario || raw.nombre || '').trim(),
       nombre: String(raw.nombre || raw.usuario || '').trim(),
       usuario: String(raw.usuario || '').trim(),
-      password: String(raw.password || ''),
       nivel: String(raw.nivel || 'personalizado').trim(),
       permisos: Array.isArray(raw.permisos) ? raw.permisos : []
     };
@@ -167,3 +165,6 @@
 
   if (validateLocalSession()) setTimeout(validateRemoteSession, 0);
 })();
+
+
+
