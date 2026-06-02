@@ -452,20 +452,15 @@ function actualizarItemDesdeCampo(i, campo, input) {
   if(!it) return;
   const row = input.closest('.item-row');
   const inputs = row ? [...row.querySelectorAll('.item-input')] : [];
-  const subtotalActual = parseMonto(inputs[3]?.value);
   if(campo === 'cant') it.cant = parseMonto(input.value) || 0;
   if(campo === 'precio') it.precio = parseMonto(input.value);
   if(campo === 'subtotal') {
     const subtotal = parseMonto(input.value);
-    if(it.cant && !it.precio) it.precio = subtotal / it.cant;
-    else if(!it.cant && it.precio) it.cant = subtotal / it.precio;
-  } else if(campo === 'precio' && subtotalActual && it.precio) {
-    it.cant = subtotalActual / it.precio;
-  } else if(campo === 'cant' && subtotalActual && it.cant) {
-    it.precio = subtotalActual / it.cant;
+    if(subtotal && it.cant && !it.precio) it.precio = subtotal / it.cant;
+    else if(subtotal && !it.cant && it.precio) it.cant = subtotal / it.precio;
   } else {
     const subtotalInput = inputs[3];
-    if(subtotalInput) subtotalInput.value = fmt((it.cant || 0) * (it.precio || 0));
+    if(subtotalInput && it.cant && it.precio) subtotalInput.value = fmt(it.cant * it.precio);
   }
   input.value = campo === 'cant' ? (it.cant || '') : fmt(campo === 'subtotal' ? ((it.cant || 0) * (it.precio || 0)) : it.precio);
   renderItems();
@@ -479,18 +474,17 @@ function updatePreview(campo = 'precio') {
   let p = parseMonto(precioEl.value);
   let s = parseMonto(subEl.value);
   if(campo === 'subtotal') {
-    if(c && !p) p = s / c;
-    else if(!c && p) c = s / p;
-  } else if(campo === 'precio' && s && p) {
-    c = s / p;
-  } else if(campo === 'cant' && s && c) {
-    p = s / c;
-  } else {
-    s = c && p ? c * p : 0;
+    if(s && c && !p) p = s / c;
+    else if(s && !c && p) c = s / p;
+    if(c && p) s = c * p;
+  } else if(c && p) {
+    s = c * p;
   }
   if(campo !== 'cant' && c) cantEl.value = c;
   if(campo !== 'precio' && p) precioEl.value = fmt(p);
-  if(campo !== 'subtotal') subEl.value = s ? fmt(s) : '';
+  if(campo !== 'subtotal') {
+    subEl.value = c && p ? fmt(s) : '';
+  }
   const bloquearSubtotal = Boolean(c && p);
   subEl.readOnly = bloquearSubtotal;
   subEl.tabIndex = bloquearSubtotal ? -1 : 0;
