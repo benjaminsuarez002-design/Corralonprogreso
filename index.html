@@ -1844,6 +1844,10 @@
     font-size: 13px;
     background: rgba(255,255,255,.72);
   }
+  .home-mobile-compact-list {
+    display: grid;
+    gap: 10px;
+  }
   @keyframes heroFloat {
     0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
     50% { transform: translate3d(0, 12px, 0) scale(1.06); }
@@ -1988,12 +1992,36 @@
       border-radius: 20px;
     }
     .home-section-head {
-      flex-direction: column;
-      align-items: stretch;
-      margin-bottom: 10px;
+      display: none;
     }
     .home-section-link {
       width: 100%;
+    }
+    .home-mobile-compact-list .home-spotlight {
+      min-height: 98px;
+      grid-template-columns: 82px minmax(0, 1fr);
+      align-items: center;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(255,255,255,.95) 0%, rgba(234,248,255,.88) 100%);
+    }
+    .home-mobile-compact-list .home-spotlight-media {
+      width: 72px;
+      height: 72px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.75);
+    }
+    .home-mobile-compact-list .home-spotlight .card-tags {
+      display: none;
+    }
+    .home-mobile-compact-list .home-spotlight-title {
+      font-size: 16px;
+      color: var(--home-primary-2);
+    }
+    .home-mobile-compact-list .home-spotlight-meta {
+      font-size: 11px;
+    }
+    .home-mobile-compact-list .home-spotlight-price {
+      font-size: 18px;
     }
     .home-strip { gap: 10px; }
     .home-slide { width: clamp(214px, 80vw, 276px); }
@@ -3421,7 +3449,7 @@ function renderHomeSectionCard(articulo, index) {
   </article>`;
 }
 
-function renderHomeCompactItem(articulo, idxLocal) {
+function renderHomeCompactItem(articulo, idxLocal, label = '') {
   const descripcion = obtenerDescripcionArticulo(articulo);
   const codigo = obtenerIdArticulo(articulo);
   const { stockText } = obtenerStockInfo(articulo);
@@ -3431,7 +3459,7 @@ function renderHomeCompactItem(articulo, idxLocal) {
   return `<article class="home-spotlight" data-detail-code="${codigo}" style="--spotlight-index:${idxLocal};">
     <div class="home-spotlight-media">${renderHomeArticuloFoto(articulo, descripcion.principal)}</div>
     <div class="home-spotlight-copy">
-      ${construirTagsArticulo(articulo)}
+      ${label ? `<div class="home-spotlight-eyebrow">${escaparHtml(label)}</div>` : construirTagsArticulo(articulo)}
       <div class="home-spotlight-title">${escaparHtml(descripcion.principal)}</div>
       <div class="home-spotlight-meta">Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}</div>
       <div class="home-spotlight-price">${precioVisual.esCeramico ? `<span style="font-size:12px;color:#356b9f;margin-right:4px;">${precioVisual.precioBaseHtml}</span>` : (articulo.ofertaVigente ? `<span style="font-size:12px;text-decoration:line-through;color:#7890aa;margin-right:4px;">${fmtPrecio(precioLista)}</span>` : '')}${precioVisual.precioFinalHtml}</div>
@@ -3441,15 +3469,11 @@ function renderHomeCompactItem(articulo, idxLocal) {
 
 function renderHomeSection({ kicker, title, subtitle, chip, items }) {
   const isMobile = window.matchMedia('(max-width: 640px)').matches;
-  let slides;
-  if (isMobile) {
-    const chunks = [];
-    for (let i = 0; i < items.length; i += 3) chunks.push(items.slice(i, i + 3));
-    slides = chunks.map((grupo) => `<li class="splide__slide home-slide home-slide-compact"><div class="home-spotlights">${grupo.map((a, i) => renderHomeCompactItem(a, i)).join('')}</div></li>`).join('');
-  } else {
-    slides = items.map((articulo, index) => `<li class="splide__slide home-slide">${renderHomeSectionCard(articulo, index)}</li>`).join('');
-  }
-  const contenido = items.length
+  const compactMobile = `<div class="home-mobile-compact-list">${items.slice(0, 3).map((a, i) => renderHomeCompactItem(a, i, title)).join('')}</div>`;
+  const slides = items.map((articulo, index) => `<li class="splide__slide home-slide">${renderHomeSectionCard(articulo, index)}</li>`).join('');
+  const contenido = items.length && isMobile
+    ? compactMobile
+    : items.length
     ? `<div class="home-strip-shell">
         <button class="home-strip-arrow" type="button" data-home-carousel-move="-1" data-home-carousel-target="${escaparHtml(chip)}" aria-label="Ver anteriores">‹</button>
         <div class="home-carousel splide" data-home-carousel="${escaparHtml(chip)}">
