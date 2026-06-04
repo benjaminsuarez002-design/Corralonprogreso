@@ -774,6 +774,25 @@
       return Number.isFinite(parsed) ? parsed : Date.now();
     }
 
+    function notifFechaMs(value) {
+      const text = String(value || '').trim();
+      if (!text) return 0;
+      let match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (match) return new Date(`${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}T00:00:00-03:00`).getTime();
+      match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+      if (match) {
+        const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+        return new Date(`${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}T00:00:00-03:00`).getTime();
+      }
+      const parsed = Date.parse(text);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function notifDesdeHoy(item) {
+      const fecha = notifFechaMs(item?.fecha);
+      return (fecha || notifTimestampMs(item)) >= HISTORIAL_NOTIFS_START_MS;
+    }
+
     function allVisibleNotifications() {
       const dismissed = dismissedReviewIds();
       const pedidos = reviewOrders
@@ -812,7 +831,7 @@
           const dismissed = dismissedReviewIds();
           const previous = knownReviewIds;
           reviewOrders = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-            .filter((order) => order.confirmado && !order.pedido)
+            .filter((order) => order.confirmado && !order.pedido && notifDesdeHoy(order))
             .sort((a, b) => Number(b.id) - Number(a.id));
           const current = new Set(reviewOrders.map((order) => String(order.id)));
           const fresh = reviewOrders.find((order) => !previous.has(String(order.id)) && !dismissed.has(String(order.id)));
@@ -825,7 +844,7 @@
         historialUnsubscribe = onSnapshot(collection(db, 'historialNotificaciones'), (snap) => {
           const previous = knownHistorialIds;
           historialNotifications = snap.docs.map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
-            .filter((item) => !item.resuelta && notifTimestampMs(item) >= HISTORIAL_NOTIFS_START_MS)
+            .filter((item) => !item.resuelta && notifDesdeHoy(item))
             .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
           const current = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
           const fresh = historialNotifications.find((item) => !previous.has(`${item.tipo}:${item.id}`));
