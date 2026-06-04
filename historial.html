@@ -398,6 +398,7 @@ const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
 const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
 const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
 const GARANTIAS_COLLECTION = 'garantiasHistorial';
+const HISTORIAL_NOTIFS_COLLECTION = 'historialNotificaciones';
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
   authDomain: "corralon-progreso.firebaseapp.com",
@@ -427,6 +428,72 @@ let editItems = [];
 let _confirmCallback = null;
 let logoCacheData = null;
 let _pdfDetalleActual = null;
+
+function historialNotifId(tipo, id) {
+  return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
+}
+
+async function guardarHistorialNotificacion(data) {
+  if (!data?.tipo || !data?.id) return;
+  try {
+    await histDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(historialNotifId(data.tipo, data.id)).set({
+      ...data,
+      resuelta: Boolean(data.resuelta),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdAt: data.createdAt || firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('No se pudo guardar notificación de historial', error);
+  }
+}
+
+function notificarRemitoHistorial(r) {
+  return guardarHistorialNotificacion({
+    tipo: 'remito',
+    id: String(r.id || ''),
+    titulo: `Remito ${r.nro ? remitoFull(r.nro) : '-'}`,
+    detalle: `${r.cliente || 'Cliente'} - ${r.fecha || ''}`,
+    fecha: r.fecha || '',
+    total: Number(r.total || 0),
+    resuelta: false
+  });
+}
+
+function notificarPresupuestoHistorial(p) {
+  return guardarHistorialNotificacion({
+    tipo: 'presupuesto',
+    id: String(p.id || p.numero || ''),
+    titulo: `Presupuesto ${p.numero || '-'}`,
+    detalle: p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : ''),
+    fecha: p.fecha || '',
+    total: Number(p.total || 0),
+    resuelta: false
+  });
+}
+
+function notificarGarantiaHistorial(g) {
+  return guardarHistorialNotificacion({
+    tipo: 'garantia',
+    id: String(g.id || ''),
+    titulo: `Garantía ${g.boleta || '-'}`,
+    detalle: `${g.cliente || '-'} - ${g.codigo || '-'}`,
+    fecha: g.fecha || '',
+    resuelta: false
+  });
+}
+
+async function resolverHistorialNotificacion(tipo, id) {
+  if (!tipo || !id) return;
+  try {
+    await histDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(historialNotifId(tipo, id)).set({
+      resuelta: true,
+      resueltaAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('No se pudo resolver notificación de historial', error);
+  }
+}
 
 // ── UTILS ──
 function toast(msg) {
@@ -489,6 +556,7 @@ function inicializarHistorial() {
   activarTabHistorial('remitos');
   cargarPresupuestos();
   cargarGarantias();
+  setTimeout(abrirHistorialSolicitadoDesdeMenu, 900);
 }
 
 function activarTabHistorial(tab) {
@@ -541,6 +609,7 @@ async function cargarPresupuestos() {
     }
     const presupuestos = await res.json();
     _presupuestosCache = Array.isArray(presupuestos) ? presupuestos : [];
+    _presupuestosCache.forEach(notificarPresupuestoHistorial);
     if (!_presupuestosCache.length) {
       body.innerHTML = '<div class="h-empty">Sin presupuestos todavia</div>';
       return;
@@ -574,6 +643,7 @@ async function cargarGarantias() {
   try {
     const snap = await histDb.collection(GARANTIAS_COLLECTION).orderBy('createdAt', 'desc').limit(120).get();
     _garantiasCache = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    _garantiasCache.forEach(notificarGarantiaHistorial);
     if (!_garantiasCache.length) {
       body.innerHTML = '<div class="h-empty">Sin garantías todavía</div>';
       return;
@@ -907,6 +977,31 @@ function abrirDetallePresupuesto(index) {
   document.getElementById('detalleBg').classList.add('open');
 }
 
+async function abrirHistorialSolicitadoDesdeMenu() {
+  let target = null;
+  try { target = JSON.parse(localStorage.getItem('corralon_open_historial_notification') || 'null'); } catch {}
+  if (!target?.tipo || !target?.id) return;
+  localStorage.removeItem('corralon_open_historial_notification');
+  if (target.tipo === 'remito') {
+    activarTabHistorial('remitos');
+    abrirDetalle(target.id);
+    return;
+  }
+  if (target.tipo === 'presupuesto') {
+    activarTabHistorial('presupuestos');
+    await resolverHistorialNotificacion('presupuesto', target.id);
+    const idx = _presupuestosCache.findIndex(p => String(p.id || p.numero || '') === String(target.id));
+    if (idx >= 0) abrirDetallePresupuesto(idx);
+    return;
+  }
+  if (target.tipo === 'garantia') {
+    activarTabHistorial('garantias');
+    await resolverHistorialNotificacion('garantia', target.id);
+    const idx = _garantiasCache.findIndex(g => String(g.id || '') === String(target.id));
+    if (idx >= 0) abrirFotoGarantia(idx);
+  }
+}
+
 async function cargarHistorial() {
   const body = document.getElementById('historialBody');
   body.innerHTML = '<div class="h-empty">Cargando...</div>';
@@ -916,6 +1011,7 @@ async function cargarHistorial() {
     });
     const data = await res.json();
     _remitosCache = Array.isArray(data) ? data : [];
+    _remitosCache.forEach(notificarRemitoHistorial);
     renderRemitosHistorial();
   } catch(e) {
     _remitosCache = [];
@@ -1092,6 +1188,7 @@ function descargarPdfDetalle() {
 
 function imprimirPdfDetalle() {
   if(!_pdfDetalleActual) { toast('No hay PDF preparado'); return; }
+  if(_detalleTipoActual === 'remito' && _remitoDetalleActual?.id) resolverHistorialNotificacion('remito', _remitoDetalleActual.id);
   const pdfBlob = _pdfDetalleActual.doc.output('blob', { type: 'application/pdf' });
   const pdfUrl = URL.createObjectURL(pdfBlob);
   const popup = window.open(pdfUrl, '_blank');

@@ -483,14 +483,14 @@
   <div class="review-toast" id="reviewToast"></div>
   <div class="review-modal" id="reviewModal">
     <div class="review-box">
-      <div class="review-head"><h2>Pedidos en revisión</h2><button id="closeReviewModal" type="button">Cerrar</button></div>
+      <div class="review-head"><h2>Notificaciones</h2><button id="closeReviewModal" type="button">Cerrar</button></div>
       <div class="review-list" id="reviewList"></div>
     </div>
   </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, getDocs, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -527,8 +527,11 @@
     let usuariosMenu = [];
     let accesoManualEnPagina = false;
     let reviewUnsubscribe = null;
+    let historialUnsubscribe = null;
     let reviewOrders = [];
+    let historialNotifications = [];
     let knownReviewIds = new Set();
+    let knownHistorialIds = new Set();
     const REVIEW_DISMISSED_KEY = 'corralon_review_orders_dismissed_v1';
 
     function usuariosDefault() {
@@ -750,46 +753,79 @@
 
     function showReviewToast(order) {
       const proveedor = displayProviderName(order?.proveedor) || 'sin proveedor';
-      reviewToast.textContent = `Pedido enviado a revisión de ${proveedor}`;
+      reviewToast.textContent = order?.toastText || `Pedido enviado a revisión de ${proveedor}`;
       reviewToast.classList.add('visible');
       clearTimeout(showReviewToast._timer);
       showReviewToast._timer = setTimeout(() => reviewToast.classList.remove('visible'), 4200);
     }
 
-    function renderReviewNotifications() {
+    function historialTypeLabel(tipo) {
+      if (tipo === 'remito') return 'Remito';
+      if (tipo === 'presupuesto') return 'Presupuesto';
+      if (tipo === 'garantia') return 'Garantía';
+      return 'Historial';
+    }
+
+    function allVisibleNotifications() {
       const dismissed = dismissedReviewIds();
-      const visible = reviewOrders.filter((order) => !dismissed.has(String(order.id)));
+      const pedidos = reviewOrders
+        .filter((order) => !dismissed.has(String(order.id)))
+        .map((order) => ({ kind: 'pedido', id: String(order.id), title: `Pedido ${order.id}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '' }));
+      const historial = historialNotifications
+        .filter((item) => !item.resuelta)
+        .map((item) => ({ kind: 'historial', id: String(item.id), tipo: item.tipo, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', date: item.fecha || '' }));
+      return [...pedidos, ...historial];
+    }
+
+    function renderReviewNotifications() {
+      const visible = allVisibleNotifications();
       reviewBell.classList.toggle('visible', visible.length > 0);
       reviewBellCount.textContent = String(visible.length);
-      reviewList.innerHTML = visible.length ? visible.map((order) => `
-        <div class="review-item" data-review-id="${escapeHtml(order.id)}">
-          <strong>Pedido ${escapeHtml(order.id)}</strong>
-          <span>${escapeHtml(displayProviderName(order.proveedor) || 'Sin proveedor')}</span>
-          <span>${escapeHtml(order.fecha || '')}</span>
+      reviewList.innerHTML = visible.length ? visible.map((item) => `
+        <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
+          <strong>${escapeHtml(item.title)}</strong>
+          <span>${escapeHtml(item.detail)}</span>
+          <span>${escapeHtml(item.date || '')}</span>
         </div>
-      `).join('') : '<div style="padding:18px;font-weight:800;color:var(--muted)">No hay pedidos en revisión.</div>';
+      `).join('') : '<div style="padding:18px;font-weight:800;color:var(--muted)">No hay notificaciones.</div>';
     }
 
     function setupReviewNotifications(usuario) {
       if (!isAdminUser(usuario)) {
         reviewBell.classList.remove('visible');
         if (reviewUnsubscribe) reviewUnsubscribe();
+        if (historialUnsubscribe) historialUnsubscribe();
         reviewUnsubscribe = null;
+        historialUnsubscribe = null;
         return;
       }
-      if (reviewUnsubscribe) return;
-      reviewUnsubscribe = onSnapshot(collection(db, 'pedidos'), (snap) => {
-        const dismissed = dismissedReviewIds();
-        const previous = knownReviewIds;
-        reviewOrders = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter((order) => order.confirmado && !order.pedido)
-          .sort((a, b) => Number(b.id) - Number(a.id));
-        const current = new Set(reviewOrders.map((order) => String(order.id)));
-        const fresh = reviewOrders.find((order) => !previous.has(String(order.id)) && !dismissed.has(String(order.id)));
-        knownReviewIds = current;
-        renderReviewNotifications();
-        if (fresh) showReviewToast(fresh);
-      }, (error) => console.warn('No se pudieron escuchar pedidos en revisión', error));
+      if (!reviewUnsubscribe) {
+        reviewUnsubscribe = onSnapshot(collection(db, 'pedidos'), (snap) => {
+          const dismissed = dismissedReviewIds();
+          const previous = knownReviewIds;
+          reviewOrders = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+            .filter((order) => order.confirmado && !order.pedido)
+            .sort((a, b) => Number(b.id) - Number(a.id));
+          const current = new Set(reviewOrders.map((order) => String(order.id)));
+          const fresh = reviewOrders.find((order) => !previous.has(String(order.id)) && !dismissed.has(String(order.id)));
+          knownReviewIds = current;
+          renderReviewNotifications();
+          if (fresh) showReviewToast(fresh);
+        }, (error) => console.warn('No se pudieron escuchar pedidos en revisión', error));
+      }
+      if (!historialUnsubscribe) {
+        historialUnsubscribe = onSnapshot(collection(db, 'historialNotificaciones'), (snap) => {
+          const previous = knownHistorialIds;
+          historialNotifications = snap.docs.map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
+            .filter((item) => !item.resuelta)
+            .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
+          const current = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
+          const fresh = historialNotifications.find((item) => !previous.has(`${item.tipo}:${item.id}`));
+          knownHistorialIds = current;
+          renderReviewNotifications();
+          if (fresh) showReviewToast({ toastText: `${historialTypeLabel(fresh.tipo)} pendiente: ${fresh.titulo || fresh.id}` });
+        }, (error) => console.warn('No se pudieron escuchar notificaciones de historial', error));
+      }
     }
 
     function openReviewOrder(id) {
@@ -802,6 +838,16 @@
       location.href = 'pedidos.html';
     }
 
+    async function openHistorialNotification(tipo, id) {
+      const item = historialNotifications.find((notif) => String(notif.id) === String(id) && String(notif.tipo) === String(tipo));
+      if (item && tipo !== 'remito') {
+        await setDoc(doc(db, 'historialNotificaciones', item.firestoreId || `${tipo}_${id}`), { resuelta: true, resueltaAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
+      }
+      reviewModal.classList.remove('visible');
+      localStorage.setItem('corralon_open_historial_notification', JSON.stringify({ tipo, id }));
+      location.href = 'historial.html';
+    }
+
     reviewBell.addEventListener('click', () => {
       renderReviewNotifications();
       reviewModal.classList.add('visible');
@@ -812,7 +858,9 @@
     });
     reviewList.addEventListener('click', (event) => {
       const item = event.target.closest('[data-review-id]');
-      if (item) openReviewOrder(item.dataset.reviewId);
+      if (!item) return;
+      if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId);
+      else openReviewOrder(item.dataset.reviewId);
     });
 
     document.getElementById('loginBtn').addEventListener('click', verificarPass);

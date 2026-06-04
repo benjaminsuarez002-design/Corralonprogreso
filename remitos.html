@@ -389,10 +389,38 @@ function moverCampoVertical(actual, delta) {
   return false;
 }
 
+function moverDesdePrecioRemito(precioInput) {
+  const row = precioInput?.closest?.('.item-row');
+  if(!row) return false;
+  const rowInputs = [...row.querySelectorAll('.item-input')];
+  const cantidadInput = rowInputs[0];
+  const subtotalInput = rowInputs[3];
+  const cantidad = parseMonto(cantidadInput?.value);
+  const precio = parseMonto(precioInput.value);
+  actualizarItemDesdeCampo([...document.querySelectorAll('.item-row')].indexOf(row), 'precio', precioInput);
+  if(cantidad && precio) {
+    const nextRow = row.nextElementSibling?.classList?.contains('item-row') ? row.nextElementSibling : null;
+    const nextCantidad = nextRow ? nextRow.querySelectorAll('.item-input')[0] : document.getElementById('nCant');
+    return seleccionarCampo(nextCantidad);
+  }
+  return seleccionarCampo(subtotalInput);
+}
+
 function manejarEnterRemito(event, target) {
   if(!['Enter','Tab'].includes(event.key) || !esCampoNavegable(target)) return false;
   event.preventDefault();
   if(target.id === 'fechaInput') parseFecha(target.value);
+  if(target.id === 'nPrecio' && !event.shiftKey) {
+    updatePreview('precio');
+    if(parseMonto(document.getElementById('nCant')?.value) && parseMonto(target.value)) {
+      agregarItem();
+      return seleccionarCampo(document.getElementById('nCant'));
+    }
+    return seleccionarCampo(document.getElementById('nSub'));
+  }
+  if(target.matches('.item-row .item-input') && [...target.closest('.item-row').querySelectorAll('.item-input')].indexOf(target) === 2 && !event.shiftKey) {
+    return moverDesdePrecioRemito(target);
+  }
   if(target.id === 'nSub' && !event.shiftKey) {
     updatePreview('subtotal');
     agregarItem();
