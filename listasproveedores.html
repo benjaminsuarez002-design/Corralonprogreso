@@ -1267,6 +1267,13 @@
         req.onerror = () => reject(req.error);
       });
     }
+    function idbCountArticles() {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction('articulos', 'readonly').objectStore('articulos').count();
+        req.onsuccess = () => resolve(Number(req.result || 0));
+        req.onerror = () => reject(req.error);
+      });
+    }
     function createWorker() {
       const code = `
         let data = [];
@@ -2407,7 +2414,7 @@
       return false;
     }
     async function importFromCloud() {
-      setStatus('Importando lista desde JSON...');
+      setStatus('Importando todas las listas desde JSON...');
       const meta = await remoteMeta();
       if (!meta) {
         setStatus('Sin lista en Supabase. Subí el Excel primero.');
@@ -2416,6 +2423,12 @@
       const hasManifest = Boolean(providerManifestUrl(meta));
       if (hasManifest) {
         await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true });
+        const importedTotal = await idbCountArticles();
+        const remoteTotal = Number(meta.total_articulos || 0);
+        if (remoteTotal && importedTotal < remoteTotal) {
+          setStatus(`JSON incompleto (${importedTotal.toLocaleString('es-AR')} / ${remoteTotal.toLocaleString('es-AR')}). Descargando base completa...`);
+          await downloadRemoteArticles(meta);
+        }
       } else {
         setStatus('Importando lista desde Supabase...');
         await downloadRemoteArticles(meta);
