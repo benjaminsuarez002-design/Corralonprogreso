@@ -5,7 +5,8 @@
     providers: 'proveedores',
     providersMeta: 'proveedores_meta',
     priceList: 'lista_precios',
-    priceListMeta: 'lista_precios_meta'
+    priceListMeta: 'lista_precios_meta',
+    priceListJsonProviders: 'listas_json_proveedores'
   };
   const PROVIDERS_DB = 'proveedores_cache_v1';
   const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
@@ -242,6 +243,7 @@
       const text = await response.clone().text();
       if (text.includes('reserva_json_1')) {
         const fallback = { ...payload };
+        fallback.importado_por = fallback.importado_por || fallback.reserva_json_1;
         delete fallback.reserva_json_1;
         response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListMeta}?on_conflict=id`, {
           method: 'POST',
@@ -264,14 +266,9 @@
   }
 
   async function remotePriceListMeta() {
-    let response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListMeta}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,reserva_json_1,updated_at&limit=1`, {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListMeta}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,importado_por,updated_at&limit=1`, {
       headers: headers()
     });
-    if (!response.ok) {
-      response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListMeta}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,updated_at&limit=1`, {
-        headers: headers()
-      });
-    }
     if (!response.ok) throw new Error(await response.text());
     return (await response.json())?.[0] || null;
   }
@@ -335,6 +332,69 @@
     return uploaded;
   }
 
+  function providerJsonTableEntryFromManifestEntry(entry) {
+    return {
+      id_proveedor: cleanId(entry?.id_proveedor),
+      proveedor: String(entry?.proveedor || '').trim(),
+      json_url: String(entry?.json_url || '').trim(),
+      chunks: Array.isArray(entry?.chunks) ? entry.chunks : [],
+      chunk_count: Number(entry?.chunk_count || entry?.chunks?.length || 1) || 1,
+      total_articulos: Number(entry?.total_articulos || 0) || 0,
+      version: Number(entry?.version || 0) || 0,
+      fecha_actualizacion: entry?.updated_at || new Date().toISOString(),
+      manifest_updated_at: new Date().toISOString()
+    };
+  }
+
+  function providerJsonManifestFromTableRows(rows = []) {
+    const providers = {};
+    for (const row of rows || []) {
+      const id = cleanId(row?.id_proveedor);
+      if (!id) continue;
+      const chunks = Array.isArray(row?.chunks) ? row.chunks : [];
+      providers[id] = {
+        id_proveedor: id,
+        proveedor: row?.proveedor || '',
+        version: Number(row?.version || 0),
+        updated_at: row?.fecha_actualizacion || row?.updated_at || '',
+        total_articulos: Number(row?.total_articulos || 0),
+        json_url: row?.json_url || chunks[0]?.json_url || '',
+        chunk_count: Number(row?.chunk_count || chunks.length || 1),
+        chunks
+      };
+    }
+    return {
+      id: 'provider-json-table-v1',
+      version: Object.values(providers).reduce((max, entry) => Math.max(max, Number(entry.version || 0)), 0),
+      updated_at: new Date().toISOString(),
+      total_articulos: Object.values(providers).reduce((sum, entry) => sum + (Number(entry.total_articulos || 0) || 0), 0),
+      providers
+    };
+  }
+
+  async function upsertProviderJsonTableEntry(entry) {
+    const payload = providerJsonTableEntryFromManifestEntry(entry);
+    if (!payload.id_proveedor) return null;
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.priceListJsonProviders}?on_conflict=id_proveedor`, {
+      method: 'POST',
+      headers: headers({ Prefer: 'resolution=merge-duplicates,return=representation' }),
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return (await response.json())?.[0] || payload;
+  }
+
+  async function fetchProviderJsonTableRows(query = '') {
+    const select = 'select=id_proveedor,proveedor,json_url,chunks,chunk_count,total_articulos,version,fecha_actualizacion,updated_at';
+    const suffix = query ? `&${query}` : '&order=proveedor.asc';
+    return fetchAll(TABLES.priceListJsonProviders, `${select}${suffix}`);
+  }
+
+  async function fetchProviderJsonTableManifest() {
+    const rows = await fetchProviderJsonTableRows();
+    return providerJsonManifestFromTableRows(rows);
+  }
+
   async function loadProviderJsonManifest() {
     const meta = await remotePriceListMeta().catch(() => null);
     const manifestUrl = manifestUrlFromMetaValue(meta?.archivo_nombre);
@@ -360,7 +420,7 @@
     };
   }
   async function loadFullProviderJsonManifest(meta) {
-    const manifestUrl = fullManifestUrlFromMetaValue(meta?.reserva_json_1);
+    const manifestUrl = fullManifestUrlFromMetaValue(meta?.reserva_json_1 || meta?.importado_por);
     if (!manifestUrl) return null;
     const response = await fetch(`${manifestUrl}${manifestUrl.includes('?') ? '&' : '?'}t=${Date.now()}`);
     if (!response.ok) return null;
@@ -421,18 +481,17 @@
     const manifestUrl = await uploadRawJsonToCloudinary(nextManifest, `listas_proveedores/manifest_${version}`);
     let fullManifestUrl = '';
     const fullManifest = await loadFullProviderJsonManifest(loaded.meta).catch(() => null);
-    if (fullManifest) {
-      const fullProviders = { ...(fullManifest.providers || {}) };
-      fullProviders[id] = providers[id];
-      const nextFullManifest = {
-        id: 'provider-json-manifest-v1',
-        version,
-        updated_at: new Date().toISOString(),
-        total_articulos: Object.values(fullProviders).reduce((sum, entry) => sum + (Number(entry?.total_articulos || 0) || 0), 0),
-        providers: fullProviders
-      };
-      fullManifestUrl = await uploadRawJsonToCloudinary(nextFullManifest, `listas_proveedores/manifest_completo_${version}`);
-    }
+    const fullProviders = { ...(fullManifest?.providers || providers) };
+    fullProviders[id] = providers[id];
+    const nextFullManifest = {
+      id: 'provider-json-manifest-v1',
+      version,
+      updated_at: new Date().toISOString(),
+      total_articulos: Object.values(fullProviders).reduce((sum, entry) => sum + (Number(entry?.total_articulos || 0) || 0), 0),
+      providers: fullProviders
+    };
+    fullManifestUrl = await uploadRawJsonToCloudinary(nextFullManifest, `listas_proveedores/manifest_completo_${version}`);
+    await upsertProviderJsonTableEntry(providers[id]);
     return { manifest: nextManifest, manifestUrl, fullManifestUrl, entry: providers[id] };
   }
 
@@ -466,7 +525,7 @@
       await touchPriceListMeta({
         lista_version: published.manifest.version,
         archivo_nombre: `${PROVIDER_MANIFEST_PREFIX}${published.manifestUrl}`,
-        reserva_json_1: published.fullManifestUrl ? `${FULL_PROVIDER_MANIFEST_PREFIX}${published.fullManifestUrl}` : undefined
+        importado_por: published.fullManifestUrl ? `${FULL_PROVIDER_MANIFEST_PREFIX}${published.fullManifestUrl}` : undefined
       });
       return published;
     } catch (error) {
@@ -1067,6 +1126,11 @@
     }
 
     async function fetchProviderJsonManifest(meta) {
+      const tableManifest = await fetchProviderJsonTableManifest().catch((error) => {
+        console.warn(error);
+        return null;
+      });
+      if (tableManifest && Object.keys(tableManifest.providers || {}).length) return tableManifest;
       const url = manifestUrlFromMetaValue(meta?.archivo_nombre);
       if (!url) return null;
       const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
@@ -1540,6 +1604,9 @@
     updateProviderDateOnly,
     touchPriceListMeta,
     loadProviderJsonManifest,
+    fetchProviderJsonTableRows,
+    fetchProviderJsonTableManifest,
+    upsertProviderJsonTableEntry,
     publishProviderArticlesJson,
     replaceProviderArticles,
     buildArticlesXlsBlob,

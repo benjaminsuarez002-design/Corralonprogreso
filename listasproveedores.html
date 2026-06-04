@@ -1130,6 +1130,24 @@
       `).join('');
     }
     async function loadLatestUpdatesForModal() {
+      if (CorralonSystem.fetchProviderJsonTableRows) {
+        const rows = await CorralonSystem.fetchProviderJsonTableRows('order=fecha_actualizacion.desc');
+        state.latestUpdates = sortUpdates((rows || []).map((row) => ({
+          id_proveedor: row.id_proveedor,
+          proveedor: row.proveedor,
+          updated_at: row.fecha_actualizacion || row.updated_at,
+          version: Number(row.version || 0),
+          total_articulos: Number(row.total_articulos || 0)
+        })));
+        return;
+      }
+      const remote = await remoteMeta().catch(() => null);
+      const fullManifestUrl = fullProviderManifestUrl(remote);
+      if (fullManifestUrl) {
+        const manifest = await fetchProviderManifest(remote, fullManifestUrl);
+        state.latestUpdates = sortUpdates(updatesFromManifest(manifest?.providers || {}));
+        return;
+      }
       const local = await idbGet('meta', 'principal').catch(() => null);
       const saved = Array.isArray(local?.last_provider_updates) ? local.last_provider_updates : [];
       state.latestUpdates = updatesFromManifest(localProviderManifest(local || {}));
@@ -1962,14 +1980,9 @@
       updateCounts();
     }
     async function remoteMeta() {
-      let response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,reserva_json_1,updated_at&limit=1`, {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,importado_por,updated_at&limit=1`, {
         headers: supabaseHeaders()
       });
-      if (!response.ok) {
-        response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,updated_at&limit=1`, {
-          headers: supabaseHeaders()
-        });
-      }
       if (!response.ok) throw new Error(await response.text());
       return (await response.json())?.[0] || null;
     }
@@ -1978,10 +1991,17 @@
       return text.startsWith(PROVIDER_MANIFEST_PREFIX) ? text.slice(PROVIDER_MANIFEST_PREFIX.length) : '';
     }
     function fullProviderManifestUrl(meta) {
-      const text = String(meta?.reserva_json_1 || '').trim();
+      const text = String(meta?.importado_por || meta?.reserva_json_1 || '').trim();
       return text.startsWith(FULL_PROVIDER_MANIFEST_PREFIX) ? text.slice(FULL_PROVIDER_MANIFEST_PREFIX.length) : '';
     }
     async function fetchProviderManifest(meta, urlOverride = '') {
+      if (!urlOverride && CorralonSystem.fetchProviderJsonTableManifest) {
+        const tableManifest = await CorralonSystem.fetchProviderJsonTableManifest().catch((error) => {
+          console.warn(error);
+          return null;
+        });
+        if (tableManifest && Object.keys(tableManifest.providers || {}).length) return tableManifest;
+      }
       const url = String(urlOverride || providerManifestUrl(meta)).trim();
       if (!url) return null;
       const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
@@ -2440,8 +2460,11 @@
         setStatus('Sin lista en Supabase. Subí el Excel primero.');
         return;
       }
+      const tableManifest = CorralonSystem.fetchProviderJsonTableManifest ? await CorralonSystem.fetchProviderJsonTableManifest().catch(() => null) : null;
       const fullManifestUrl = fullProviderManifestUrl(meta);
-      if (fullManifestUrl) {
+      if (tableManifest && Object.keys(tableManifest.providers || {}).length) {
+        await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true });
+      } else if (fullManifestUrl) {
         await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true, manifestUrl: fullManifestUrl });
         const importedTotal = await idbCountArticles();
         const remoteTotal = Math.max(Number(meta.total_articulos || 0), await remoteArticleCount());

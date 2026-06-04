@@ -3,6 +3,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const PRICE_TABLE = 'lista_precios';
 const PROVIDERS_TABLE = 'proveedores';
 const META_TABLE = 'lista_precios_meta';
+const JSON_PROVIDERS_TABLE = 'listas_json_proveedores';
 const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
 const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
 const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
@@ -95,8 +96,13 @@ function manifestUrlFromMeta(value) {
   return text.startsWith(PROVIDER_MANIFEST_PREFIX) ? text.slice(PROVIDER_MANIFEST_PREFIX.length) : '';
 }
 
+function fullManifestUrlFromMeta(value) {
+  const text = String(value || '').trim();
+  return text.startsWith(FULL_PROVIDER_MANIFEST_PREFIX) ? text.slice(FULL_PROVIDER_MANIFEST_PREFIX.length) : '';
+}
+
 async function fetchRemoteMeta() {
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,updated_at&limit=1`, {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,importado_por,updated_at&limit=1`, {
     headers: headers()
   });
   if (!response.ok) throw new Error(await response.text());
@@ -105,7 +111,7 @@ async function fetchRemoteMeta() {
 
 async function fetchExistingManifest() {
   const meta = await fetchRemoteMeta().catch(() => null);
-  const manifestUrl = manifestUrlFromMeta(meta?.archivo_nombre);
+  const manifestUrl = fullManifestUrlFromMeta(meta?.importado_por) || manifestUrlFromMeta(meta?.archivo_nombre);
   if (!manifestUrl) return { meta, manifest: { providers: {} } };
   const response = await fetch(`${manifestUrl}${manifestUrl.includes('?') ? '&' : '?'}t=${Date.now()}`);
   if (!response.ok) throw new Error(await response.text());
@@ -163,26 +169,38 @@ async function publishManifest(manifest) {
     id: 'principal',
     lista_version: manifest.version,
     total_articulos: manifest.total_articulos,
-    reserva_json_1: `${FULL_PROVIDER_MANIFEST_PREFIX}${manifestUrl}`
+    importado_por: `${FULL_PROVIDER_MANIFEST_PREFIX}${manifestUrl}`
   };
-  let response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
     method: 'POST',
     headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
     body: JSON.stringify(payload)
   });
-  if (!response.ok && (await response.clone().text()).includes('reserva_json_1')) {
-    response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
-      method: 'POST',
-      headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-      body: JSON.stringify({
-        id: 'principal',
-        lista_version: manifest.version,
-        total_articulos: manifest.total_articulos
-      })
-    });
-  }
   if (!response.ok) throw new Error(await response.text());
   return manifestUrl;
+}
+
+async function publishJsonProviderTable(manifest) {
+  const rows = Object.values(manifest.providers || {}).map((entry) => ({
+    id_proveedor: cleanId(entry.id_proveedor),
+    proveedor: String(entry.proveedor || '').trim(),
+    json_url: String(entry.json_url || '').trim(),
+    chunks: Array.isArray(entry.chunks) ? entry.chunks : [],
+    chunk_count: Number(entry.chunk_count || entry.chunks?.length || 1) || 1,
+    total_articulos: Number(entry.total_articulos || 0) || 0,
+    version: Number(entry.version || manifest.version || 0) || 0,
+    fecha_actualizacion: entry.updated_at || manifest.updated_at || new Date().toISOString(),
+    manifest_updated_at: manifest.updated_at || new Date().toISOString()
+  })).filter((row) => row.id_proveedor && (row.json_url || row.chunks.length));
+  for (let i = 0; i < rows.length; i += 500) {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${JSON_PROVIDERS_TABLE}?on_conflict=id_proveedor`, {
+      method: 'POST',
+      headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify(rows.slice(i, i + 500))
+    });
+    if (!response.ok) throw new Error(await response.text());
+  }
+  return rows.length;
 }
 
 async function main() {
@@ -280,8 +298,10 @@ async function main() {
 
   console.log('Subiendo manifest...');
   const manifestUrl = await publishManifest(manifest);
+  const tableRows = await publishJsonProviderTable(manifest);
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`Listo. Manifest: ${manifestUrl}`);
+  console.log(`Tabla listas_json_proveedores actualizada: ${tableRows} proveedor(es).`);
   console.log(`Total publicado: ${manifest.total_articulos.toLocaleString('es-AR')} articulos en ${seconds}s.`);
 }
 
