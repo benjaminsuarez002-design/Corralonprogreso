@@ -335,7 +335,7 @@
 <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, onSnapshot, collection, addDoc, serverTimestamp, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, onSnapshot, collection, addDoc, setDoc, serverTimestamp, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -350,6 +350,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
 const GARANTIAS_COLLECTION = 'garantiasHistorial';
+const HISTORIAL_NOTIFS_COLLECTION = 'historialNotificaciones';
 const LOGO_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png';
 
 const els = {
@@ -362,6 +363,28 @@ const els = {
   pegar: document.getElementById('btnPegarAccess'),
   confirmar: document.getElementById('btnConfirmar')
 };
+
+function historialNotifId(tipo, id) {
+  return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
+}
+
+async function guardarNotificacionGarantia(id, payload) {
+  if(!id) return;
+  try {
+    await setDoc(doc(db, HISTORIAL_NOTIFS_COLLECTION, historialNotifId('garantia', id)), {
+      tipo: 'garantia',
+      id: String(id),
+      titulo: `Garantía ${payload.boleta || '-'}`,
+      detalle: `${payload.cliente || '-'} - ${payload.codigo || '-'}`,
+      fecha: payload.fecha || '',
+      resuelta: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch(error) {
+    console.warn('No se pudo crear notificación de garantía', error);
+  }
+}
 
 let todosArticulos = [];
 let articuloSeleccionado = null;
@@ -1028,14 +1051,15 @@ async function guardarGarantiaHistorial(payload) {
     if (!existenteSnap.empty) {
       return { existente: true, id: existenteSnap.docs[0].id };
     }
-    await addDoc(collection(db, GARANTIAS_COLLECTION), {
+    const docRef = await addDoc(collection(db, GARANTIAS_COLLECTION), {
       ...payload,
       fotoUrl: '',
       fotoPath: '',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
-    return { existente: false };
+    await guardarNotificacionGarantia(docRef.id, payload);
+    return { existente: false, id: docRef.id };
   } catch (error) {
     console.error('No se pudo guardar la garantia en historial', error);
     els.estado.className = 'status error';

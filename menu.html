@@ -533,6 +533,7 @@
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
     const REVIEW_DISMISSED_KEY = 'corralon_review_orders_dismissed_v1';
+    const HISTORIAL_NOTIFS_START_MS = new Date('2026-06-04T00:00:00-03:00').getTime();
 
     function usuariosDefault() {
       return [
@@ -766,6 +767,13 @@
       return 'Historial';
     }
 
+    function notifTimestampMs(item) {
+      const stamp = item?.createdAt || item?.updatedAt;
+      if (stamp?.seconds) return stamp.seconds * 1000;
+      const parsed = Date.parse(stamp || '');
+      return Number.isFinite(parsed) ? parsed : Date.now();
+    }
+
     function allVisibleNotifications() {
       const dismissed = dismissedReviewIds();
       const pedidos = reviewOrders
@@ -817,7 +825,7 @@
         historialUnsubscribe = onSnapshot(collection(db, 'historialNotificaciones'), (snap) => {
           const previous = knownHistorialIds;
           historialNotifications = snap.docs.map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
-            .filter((item) => !item.resuelta)
+            .filter((item) => !item.resuelta && notifTimestampMs(item) >= HISTORIAL_NOTIFS_START_MS)
             .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
           const current = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
           const fresh = historialNotifications.find((item) => !previous.has(`${item.tipo}:${item.id}`));

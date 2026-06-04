@@ -623,6 +623,20 @@
     align-items: center;
     justify-content: center;
   }
+  .product-detail-share {
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(47,36,86,.08);
+    color: var(--violeta);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
   .product-detail-budget-btn {
     min-height: 34px;
     border: 1.4px solid rgba(108,79,199,.18);
@@ -2807,6 +2821,7 @@
   <div class="product-detail-modal">
     <div class="product-detail-top-actions">
       <button class="product-detail-budget-btn hidden" id="productDetailBudget" type="button">Presupuestar</button>
+      <button class="product-detail-share" id="productDetailShare" type="button" aria-label="Compartir">↗</button>
       <button class="product-detail-close" id="productDetailClose" type="button" aria-label="Cerrar">×</button>
     </div>
     <div class="product-detail-body">
@@ -2947,7 +2962,7 @@
 <script src="presupuesto-shared.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -3000,8 +3015,32 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const SUPABASE_BUCKET = 'Archivos';
 const NUMERACION_SUCURSAL = '0001';
 const PRESUPUESTOS_TABLE = 'presupuestos_web';
+const HISTORIAL_NOTIFS_COLLECTION = 'historialNotificaciones';
 const LISTA_ARTICULOS_CACHE_KEY = 'corralon_index_lista_articulos_cache_v1';
 let ultimoPedidoGenerado = null;
+
+function historialNotifId(tipo, id) {
+  return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
+}
+
+async function guardarNotificacionPresupuesto(registro) {
+  if(!registro?.numero) return;
+  try {
+    await setDoc(doc(db, HISTORIAL_NOTIFS_COLLECTION, historialNotifId('presupuesto', registro.numero)), {
+      tipo: 'presupuesto',
+      id: String(registro.numero),
+      titulo: `Presupuesto ${registro.numero}`,
+      detalle: registro.fecha || '',
+      fecha: registro.fecha || '',
+      total: Number(registro.total || 0),
+      resuelta: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch(error) {
+    console.warn('No se pudo crear notificación de presupuesto', error);
+  }
+}
 
 async function obtenerSiguienteNumeroPedido() {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_next_presupuesto_numero`, {
@@ -3963,6 +4002,7 @@ function restaurarListaArticulosCache() {
     todosArticulos = prepararArticulosParaVista(cached.data);
     actualizarVistaEtiqueta();
     aplicarBusquedaActual();
+    abrirArticuloCompartidoSiCorresponde();
     const loader = document.getElementById('loadingOverlay');
     if (loader) loader.style.display = 'none';
     return true;
@@ -4398,6 +4438,50 @@ function cerrarDetalleProducto({ restoreResultFocus = true } = {}) {
       setResultadoActivo(resultadoActivoIndex, { focus: true, scroll: false });
     });
   }
+}
+
+async function copiarTextoSeguro(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+    return true;
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = texto;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  }
+}
+
+async function compartirDetalleProducto() {
+  const codigo = productDetailAdminCode || document.getElementById('productDetailCode')?.textContent || '';
+  if(!codigo) return;
+  const url = new URL(location.href);
+  url.searchParams.set('articulo', codigo);
+  const link = url.toString();
+  await copiarTextoSeguro(link);
+  const titulo = document.getElementById('productDetailTitle')?.textContent || 'Artículo';
+  if(navigator.share && matchMedia('(max-width: 768px)').matches) {
+    try { await navigator.share({ title: titulo, text: titulo, url: link }); } catch {}
+  } else {
+    mostrarAvisoCarrito('Link copiado');
+  }
+}
+
+let articuloCompartidoAbierto = false;
+function abrirArticuloCompartidoSiCorresponde() {
+  if(articuloCompartidoAbierto || !todosArticulos.length) return;
+  const codigo = new URLSearchParams(location.search).get('articulo');
+  if(!codigo) return;
+  const articulo = buscarArticuloPorCodigoFlexible(codigo) || buscarArticuloPorCodigo(codigo);
+  if(!articulo) return;
+  articuloCompartidoAbierto = true;
+  requestAnimationFrame(() => abrirDetalleProducto(obtenerIdArticulo(articulo)));
 }
 
 function fmtM2(value) {
@@ -5573,10 +5657,12 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
       ejecutarSinAnimacionesSync(() => {
         actualizarVistaEtiqueta();
         aplicarBusquedaActual();
+        abrirArticuloCompartidoSiCorresponde();
       });
     } else {
       actualizarVistaEtiqueta();
       aplicarBusquedaActual();
+      abrirArticuloCompartidoSiCorresponde();
     }
   } catch (e) {
     console.error(e);
@@ -5661,6 +5747,7 @@ function openQuantityModal(prod) {
 document.querySelector('.close-modal').addEventListener('click', () => { document.getElementById('quantityModal').classList.add('hidden'); document.getElementById('darkOverlay').classList.add('hidden'); });
 document.getElementById('modalCancel').addEventListener('click', () => { document.getElementById('quantityModal').classList.add('hidden'); document.getElementById('darkOverlay').classList.add('hidden'); });
 document.getElementById('productDetailClose').addEventListener('click', cerrarDetalleProducto);
+document.getElementById('productDetailShare')?.addEventListener('click', compartirDetalleProducto);
 document.getElementById('productDetailModal').addEventListener('click', (e) => {
   if (e.target.id === 'productDetailModal') cerrarDetalleProducto();
 });
@@ -5852,7 +5939,7 @@ async function crearPresupuesto() {
     })),
     logoDataUrl: logoCacheData
   });
-  await guardarPresupuestoEnSupabase({
+  const presupuestoRegistro = {
     numero: numeroPedido,
     fecha: fechaStr,
     fecha_iso: fecha.toISOString(),
@@ -5863,7 +5950,9 @@ async function crearPresupuesto() {
       cantidad: Number(it.cantidad) || 0,
       precio: Number(it.precio) || 0
     }))
-  });
+  };
+  await guardarPresupuestoEnSupabase(presupuestoRegistro);
+  await guardarNotificacionPresupuesto(presupuestoRegistro);
   const mensaje = `Hola, me gustaria pedir el presupuesto Nro ${numeroPedido}.`;
   ultimoPedidoGenerado = { mensaje, nombreArchivo, doc };
   carrito = {}; guardarCarrito(); actualizarVistaCarrito(); cerrarPanel();

@@ -8,6 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="presupuesto-shared.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -267,6 +269,17 @@ const SUPABASE_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhY
 const SUPABASE_BUCKET  = 'Archivos';
 const WA_NUM           = '542645533544';
 const ADMIN_PASS       = 'Akashiya2301';
+const HISTORIAL_NOTIFS_COLLECTION = 'historialNotificaciones';
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
+  authDomain: "corralon-progreso.firebaseapp.com",
+  projectId: "corralon-progreso",
+  storageBucket: "corralon-progreso.firebasestorage.app",
+  messagingSenderId: "466583614632",
+  appId: "1:466583614632:web:42cb839f83e97475fabe9d"
+};
+if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+const remitosDb = firebase.firestore();
 
 // ── ESTADO ──────────────────────────────────────────────────────
 let items = [];
@@ -300,6 +313,42 @@ function toast(msg) {
 }
 function loading(show) {
   document.getElementById('loadingOverlay').classList.toggle('show', show);
+}
+
+function historialNotifId(tipo, id) {
+  return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
+}
+
+async function guardarNotificacionRemito(remito) {
+  if(!remito?.id) return;
+  try {
+    await remitosDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(historialNotifId('remito', remito.id)).set({
+      tipo: 'remito',
+      id: String(remito.id),
+      titulo: `Remito ${remitoFull(remito.nro)}`,
+      detalle: `${remito.cliente || 'Cliente'} - ${remito.fecha || ''}`,
+      fecha: remito.fecha || '',
+      total: Number(remito.total || 0),
+      resuelta: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch(error) {
+    console.warn('No se pudo crear notificación de remito', error);
+  }
+}
+
+async function resolverNotificacionRemito(remito) {
+  if(!remito?.id) return;
+  try {
+    await remitosDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(historialNotifId('remito', remito.id)).set({
+      resuelta: true,
+      resueltaAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch(error) {
+    console.warn('No se pudo resolver notificación de remito', error);
+  }
 }
 
 // ── ITEMS ──────────────────────────────────────────────────────
@@ -838,8 +887,9 @@ async function confirmarRemitoFinal() {
   if(!remito) return;
   loading(true);
   try {
-    await guardarRemito(remito.nro, remito.cliente, remito.fecha, remito.total, null, remito.items);
-    remitoConfirmadoActual = remito;
+    const remitoId = await guardarRemito(remito.nro, remito.cliente, remito.fecha, remito.total, null, remito.items);
+    remitoConfirmadoActual = { ...remito, id: remitoId };
+    await guardarNotificacionRemito(remitoConfirmadoActual);
     _hacerLimpiar('Remito guardado');
     abrirRemitoActions(remitoConfirmadoActual);
   } catch(e) {
@@ -857,6 +907,7 @@ function descargarRemitoConfirmado() {
 
 function imprimirRemitoConfirmado() {
   if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
+  resolverNotificacionRemito(remitoConfirmadoActual);
   const doc = generarDocRemitoConfirmado(remitoConfirmadoActual);
   const pdfBlob = doc.output('blob', { type: 'application/pdf' });
   const pdfUrl = URL.createObjectURL(pdfBlob);
