@@ -820,6 +820,7 @@
     const BUFFER = 12;
     const PAGE_SIZE = 1000;
     const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
+    const FULL_PROVIDER_MANIFEST_PREFIX = 'provider_full_manifest:';
     const LISTAS_COL_WIDTHS_KEY = 'listasproveedores_col_widths_v1';
     const listasColumnWidths = [116, 520, 130, 220];
     const state = {
@@ -1961,9 +1962,14 @@
       updateCounts();
     }
     async function remoteMeta() {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,updated_at&limit=1`, {
+      let response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,reserva_json_1,updated_at&limit=1`, {
         headers: supabaseHeaders()
       });
+      if (!response.ok) {
+        response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,updated_at&limit=1`, {
+          headers: supabaseHeaders()
+        });
+      }
       if (!response.ok) throw new Error(await response.text());
       return (await response.json())?.[0] || null;
     }
@@ -1971,8 +1977,12 @@
       const text = String(meta?.archivo_nombre || '').trim();
       return text.startsWith(PROVIDER_MANIFEST_PREFIX) ? text.slice(PROVIDER_MANIFEST_PREFIX.length) : '';
     }
-    async function fetchProviderManifest(meta) {
-      const url = providerManifestUrl(meta);
+    function fullProviderManifestUrl(meta) {
+      const text = String(meta?.reserva_json_1 || '').trim();
+      return text.startsWith(FULL_PROVIDER_MANIFEST_PREFIX) ? text.slice(FULL_PROVIDER_MANIFEST_PREFIX.length) : '';
+    }
+    async function fetchProviderManifest(meta, urlOverride = '') {
+      const url = String(urlOverride || providerManifestUrl(meta)).trim();
       if (!url) return null;
       const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
       if (!response.ok) throw new Error(await response.text());
@@ -2140,6 +2150,16 @@
         if (rows.length < PAGE_SIZE) return out;
       }
     }
+    async function remoteArticleCount() {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=idorden`, {
+        method: 'HEAD',
+        headers: supabaseHeaders({ Prefer: 'count=exact', Range: '0-0' })
+      });
+      if (!response.ok) return 0;
+      const range = response.headers.get('content-range') || '';
+      const total = Number(range.split('/').pop() || 0);
+      return Number.isFinite(total) ? total : 0;
+    }
     function idbDeleteProviderArticles(providerId) {
       return new Promise((resolve, reject) => {
         const id = String(providerId || '');
@@ -2213,7 +2233,7 @@
       });
     }
     async function syncProviderJsonManifest(meta, options = {}) {
-      const manifest = await fetchProviderManifest(meta).catch((error) => {
+      const manifest = await fetchProviderManifest(meta, options.manifestUrl || '').catch((error) => {
         console.warn(error);
         return null;
       });
@@ -2420,11 +2440,11 @@
         setStatus('Sin lista en Supabase. Subí el Excel primero.');
         return;
       }
-      const hasManifest = Boolean(providerManifestUrl(meta));
-      if (hasManifest) {
-        await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true });
+      const fullManifestUrl = fullProviderManifestUrl(meta);
+      if (fullManifestUrl) {
+        await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true, manifestUrl: fullManifestUrl });
         const importedTotal = await idbCountArticles();
-        const remoteTotal = Number(meta.total_articulos || 0);
+        const remoteTotal = Math.max(Number(meta.total_articulos || 0), await remoteArticleCount());
         if (remoteTotal && importedTotal < remoteTotal) {
           setStatus(`JSON incompleto (${importedTotal.toLocaleString('es-AR')} / ${remoteTotal.toLocaleString('es-AR')}). Descargando base completa...`);
           await downloadRemoteArticles(meta);

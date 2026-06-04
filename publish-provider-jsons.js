@@ -6,6 +6,7 @@ const META_TABLE = 'lista_precios_meta';
 const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
 const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
 const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
+const FULL_PROVIDER_MANIFEST_PREFIX = 'provider_full_manifest:';
 const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
 const FORCE_RECHUNK = process.argv.includes('--force-rechunk');
 
@@ -157,18 +158,29 @@ function normalizeArticle(row, index, providerMap) {
 }
 
 async function publishManifest(manifest) {
-  const manifestUrl = await uploadJson(manifest, `listas_proveedores/manifest_${manifest.version}`);
+  const manifestUrl = await uploadJson(manifest, `listas_proveedores/manifest_completo_${manifest.version}`);
   const payload = {
     id: 'principal',
     lista_version: manifest.version,
     total_articulos: manifest.total_articulos,
-    archivo_nombre: `${PROVIDER_MANIFEST_PREFIX}${manifestUrl}`
+    reserva_json_1: `${FULL_PROVIDER_MANIFEST_PREFIX}${manifestUrl}`
   };
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
+  let response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
     method: 'POST',
     headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
     body: JSON.stringify(payload)
   });
+  if (!response.ok && (await response.clone().text()).includes('reserva_json_1')) {
+    response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
+      method: 'POST',
+      headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify({
+        id: 'principal',
+        lista_version: manifest.version,
+        total_articulos: manifest.total_articulos
+      })
+    });
+  }
   if (!response.ok) throw new Error(await response.text());
   return manifestUrl;
 }
