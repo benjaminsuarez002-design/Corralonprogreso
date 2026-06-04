@@ -193,6 +193,21 @@ async function syncProviderArticles(){
     statusEl.textContent=`Sincronizando artículos ${done.toLocaleString('es-AR')} / ${total.toLocaleString('es-AR')}`;
   })
 }
+function isLocalAccessMode(){
+  return location.protocol==='file:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'||/^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(location.hostname);
+}
+function runAccessPriceUpdate(){
+  const link=document.createElement('a');
+  link.href='corralon-access-update://actualizar-precios';
+  link.style.display='none';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(()=>link.remove(),1000);
+}
+async function saveAccessXlsBlob(blob){
+  const response=await fetch('/save-articulos-xls',{method:'POST',body:blob});
+  if(!response.ok)throw new Error(await response.text()||'No pude guardar C:\\Update\\Articulos.xls');
+}
 async function exportAndUpdate(){
   if(!provider)throw new Error('Selecciona proveedor');
   if(!articles.length)throw new Error('No hay articulos');
@@ -202,10 +217,16 @@ async function exportAndUpdate(){
   applyProviderTimestamp(stamp);
   const blob=CorralonSystem.buildArticlesXlsBlob(articles);
   setSyncProgress(22);
-  await CorralonSystem.saveBlobAs(blob,'Articulos.xls');
-  show('Articulos.xls generado');
+  if(isLocalAccessMode()){
+    await saveAccessXlsBlob(blob);
+    runAccessPriceUpdate();
+    show('Articulos.xls generado y actualización de Access enviada');
+  }else{
+    await CorralonSystem.saveBlobAs(blob,'Articulos.xls');
+    show('Articulos.xls generado');
+  }
   setSyncProgress(38);
-  statusEl.textContent='XLS generado. Publicando lista...';
+  statusEl.textContent=isLocalAccessMode()?'XLS generado. Actualizando Access y publicando lista...':'XLS generado. Publicando lista...';
   try{
     setSyncProgress(45);
     await syncProviderArticles();
