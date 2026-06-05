@@ -169,6 +169,37 @@
     background: #fff;
     outline: none;
   }
+  .menu-objectives {
+    display: grid;
+    gap: 8px;
+    padding: 10px 16px 0;
+  }
+  .menu-objective-card {
+    border: 1px solid #ccebd8;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #f7fff9 0%, #effbf3 100%);
+    padding: 9px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 900;
+  }
+  .menu-objective-card strong {
+    color: #227a42;
+  }
+  .menu-objective-card span {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 2px;
+    display: block;
+  }
+  .menu-objective-amount {
+    color: #0f5132;
+    font-size: 15px;
+    white-space: nowrap;
+  }
   .menu-grid {
     padding: 16px;
     display: grid;
@@ -462,6 +493,7 @@
         <span>Usuario activo:</span>
         <strong id="activeUserLabel">-</strong>
       </div>
+      <div class="menu-objectives" id="aliasObjectives"></div>
       <div class="menu-grid">
         <a class="menu-btn" data-menu-id="lista" href="index.html"><strong>Lista de precios</strong><span>Catálogo público</span></a>
         <a class="menu-btn" data-menu-id="remitos" href="remitos.html"><strong>Remitos</strong><span>Carga y emisión</span></a>
@@ -490,7 +522,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, doc, getDocs, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, getDocs, onSnapshot, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -500,6 +532,8 @@
       messagingSenderId: "466583614632",
       appId: "1:466583614632:web:42cb839f83e97475fabe9d"
     };
+    const SUPABASE_URL = "https://tizyjenayrcdkcodsjnc.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI";
 
     const firebaseApp = initializeApp(firebaseConfig);
     const db = getFirestore(firebaseApp);    const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
@@ -520,6 +554,7 @@
     const activeUserLabel = document.getElementById('activeUserLabel');
     const reviewBell = document.getElementById('reviewBell');
     const reviewBellCount = document.getElementById('reviewBellCount');
+    const aliasObjectives = document.getElementById('aliasObjectives');
     const reviewToast = document.getElementById('reviewToast');
     const reviewModal = document.getElementById('reviewModal');
     const reviewList = document.getElementById('reviewList');
@@ -530,9 +565,15 @@
     let historialUnsubscribe = null;
     let reviewOrders = [];
     let historialNotifications = [];
+    let objectiveAliases = [];
+    let objectiveRecords = [];
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
+    let objectiveAliasesUnsubscribe = null;
+    let objectiveRecordsUnsubscribe = null;
     const REVIEW_DISMISSED_KEY = 'corralon_review_orders_dismissed_v1';
+    const MENU_NOTIFS_CACHE_KEY = 'corralon_menu_notifs_cache_v1';
+    const MENU_OBJECTIVES_CACHE_KEY = 'corralon_menu_objectives_cache_v1';
     const HISTORIAL_NOTIFS_START_MS = new Date('2026-06-04T00:00:00-03:00').getTime();
 
     function usuariosDefault() {
@@ -743,6 +784,121 @@
       return String(value || '').replace(/^\s*\d+\s*[-–]\s*/, '').trim();
     }
 
+    function todayIso() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function normalizeText(value) {
+      return String(value || '').trim().toLowerCase();
+    }
+
+    function formatMoney(value) {
+      return '$ ' + Number(value || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+    }
+
+    function recordMatchesAlias(record, alias) {
+      const transferId = String(record.transferId || record.aliasId || '');
+      if (transferId && transferId === String(alias.id || '')) return true;
+      const recordName = normalizeText(record.transferName || record.aliasNombre || record.transferencia);
+      const recordAlias = normalizeText(record.transferAlias || record.alias || record.alias_mp);
+      const recordCuit = normalizeText(record.transferCuit || record.cuit);
+      return Boolean(
+        (recordName && recordName === normalizeText(alias.nombre)) ||
+        (recordAlias && recordAlias === normalizeText(alias.alias)) ||
+        (recordCuit && recordCuit === normalizeText(alias.cuit))
+      );
+    }
+
+    function recordDateIso(record) {
+      return String(record.dateIso || record.fecha_iso || record.fechaIso || '').slice(0, 10);
+    }
+
+    function recordAmount(record) {
+      return Number(record.amountNumber || record.monto || record.monto_total || record.montoTotal || 0) || 0;
+    }
+
+    function readLocalJson(key, fallback) {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+        return parsed ?? fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function writeLocalJson(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
+
+    function renderAliasObjectives() {
+      const today = todayIso();
+      const aliases = objectiveAliases
+        .filter((alias) => alias.prioritario && Number(alias.objetivoDiario || 0) > 0)
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' }));
+      if (!aliases.length) {
+        aliasObjectives.innerHTML = '';
+        writeLocalJson(MENU_OBJECTIVES_CACHE_KEY, []);
+        return;
+      }
+      const cards = aliases.map((alias) => {
+        const total = objectiveRecords
+          .filter((record) => recordDateIso(record) === today && recordMatchesAlias(record, alias))
+          .reduce((sum, record) => sum + recordAmount(record), 0);
+        const missing = Math.max(0, Number(alias.objetivoDiario || 0) - total);
+        return { alias: alias.nombre || 'Alias', missing };
+      });
+      writeLocalJson(MENU_OBJECTIVES_CACHE_KEY, cards);
+      aliasObjectives.innerHTML = cards.map((card) => {
+        return `
+          <div class="menu-objective-card">
+            <div>
+              <strong>Objetivo alias: ${escapeHtml(card.alias)}</strong>
+              <span>Faltante por transferir</span>
+            </div>
+            <div class="menu-objective-amount">${formatMoney(card.missing)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderCachedFastData() {
+      const notifCache = readLocalJson(MENU_NOTIFS_CACHE_KEY, null);
+      if (notifCache) {
+        reviewOrders = Array.isArray(notifCache.reviewOrders) ? notifCache.reviewOrders : [];
+        historialNotifications = Array.isArray(notifCache.historialNotifications) ? notifCache.historialNotifications : [];
+        renderReviewNotifications();
+      }
+      const objectiveCache = readLocalJson(MENU_OBJECTIVES_CACHE_KEY, []);
+      if (Array.isArray(objectiveCache) && objectiveCache.length) {
+        aliasObjectives.innerHTML = objectiveCache.map((card) => `
+          <div class="menu-objective-card">
+            <div>
+              <strong>Objetivo alias: ${escapeHtml(card.alias || 'Alias')}</strong>
+              <span>Faltante por transferir</span>
+            </div>
+            <div class="menu-objective-amount">${formatMoney(card.missing || 0)}</div>
+          </div>
+        `).join('');
+      }
+    }
+
+    function setupAliasObjectives() {
+      if (!objectiveAliasesUnsubscribe) {
+        objectiveAliasesUnsubscribe = onSnapshot(collection(db, 'aliases'), (snap) => {
+          objectiveAliases = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+          renderAliasObjectives();
+        }, (error) => console.warn('No se pudieron escuchar objetivos de alias', error));
+      }
+      if (!objectiveRecordsUnsubscribe) {
+        const comprobantesHoy = query(collection(db, 'comprobantes'), where('dateIso', '==', todayIso()));
+        objectiveRecordsUnsubscribe = onSnapshot(comprobantesHoy, (snap) => {
+          objectiveRecords = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+          renderAliasObjectives();
+        }, (error) => console.warn('No se pudieron escuchar comprobantes para objetivos', error));
+      }
+    }
+
     function dismissedReviewIds() {
       try { return new Set(JSON.parse(localStorage.getItem(REVIEW_DISMISSED_KEY) || '[]').map(String)); }
       catch { return new Set(); }
@@ -808,6 +964,7 @@
       const visible = allVisibleNotifications();
       reviewBell.classList.toggle('visible', visible.length > 0);
       reviewBellCount.textContent = String(visible.length);
+      writeLocalJson(MENU_NOTIFS_CACHE_KEY, { reviewOrders, historialNotifications });
       reviewList.innerHTML = visible.length ? visible.map((item) => `
         <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
           <strong>${escapeHtml(item.title)}</strong>
@@ -815,6 +972,30 @@
           <span>${escapeHtml(item.date || '')}</span>
         </div>
       `).join('') : '<div style="padding:18px;font-weight:800;color:var(--muted)">No hay notificaciones.</div>';
+    }
+
+    async function cleanupOrphanRemitoNotifications() {
+      const remitoNotifs = historialNotifications.filter((item) => item.tipo === 'remito' && !item.resuelta && item.id);
+      if (!remitoNotifs.length) return;
+      try {
+        const ids = [...new Set(remitoNotifs.map((item) => String(item.id)))];
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=id&id=in.(${ids.map(encodeURIComponent).join(',')})`, {
+          headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
+        });
+        if (!response.ok) return;
+        const existing = new Set((await response.json()).map((row) => String(row.id)));
+        const missing = remitoNotifs.filter((item) => !existing.has(String(item.id)));
+        if (!missing.length) return;
+        await Promise.all(missing.map((item) => setDoc(doc(db, 'historialNotificaciones', item.firestoreId || `remito_${item.id}`), {
+          resuelta: true,
+          resueltaAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true })));
+        historialNotifications = historialNotifications.filter((item) => !missing.some((bad) => String(bad.id) === String(item.id) && item.tipo === 'remito'));
+        renderReviewNotifications();
+      } catch (error) {
+        console.warn('No se pudieron limpiar notificaciones de remitos eliminados', error);
+      }
     }
 
     function setupReviewNotifications(usuario) {
@@ -827,11 +1008,12 @@
         return;
       }
       if (!reviewUnsubscribe) {
-        reviewUnsubscribe = onSnapshot(collection(db, 'pedidos'), (snap) => {
+        const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('confirmado', '==', true));
+        reviewUnsubscribe = onSnapshot(pedidosRevisionQuery, (snap) => {
           const dismissed = dismissedReviewIds();
           const previous = knownReviewIds;
           reviewOrders = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-            .filter((order) => order.confirmado && !order.pedido && notifDesdeHoy(order))
+            .filter((order) => !order.pedido && notifDesdeHoy(order))
             .sort((a, b) => Number(b.id) - Number(a.id));
           const current = new Set(reviewOrders.map((order) => String(order.id)));
           const fresh = reviewOrders.find((order) => !previous.has(String(order.id)) && !dismissed.has(String(order.id)));
@@ -841,15 +1023,17 @@
         }, (error) => console.warn('No se pudieron escuchar pedidos en revisión', error));
       }
       if (!historialUnsubscribe) {
-        historialUnsubscribe = onSnapshot(collection(db, 'historialNotificaciones'), (snap) => {
+        const historialPendienteQuery = query(collection(db, 'historialNotificaciones'), where('resuelta', '==', false));
+        historialUnsubscribe = onSnapshot(historialPendienteQuery, (snap) => {
           const previous = knownHistorialIds;
           historialNotifications = snap.docs.map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
-            .filter((item) => !item.resuelta && notifDesdeHoy(item))
+            .filter((item) => notifDesdeHoy(item))
             .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
           const current = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
           const fresh = historialNotifications.find((item) => !previous.has(`${item.tipo}:${item.id}`));
           knownHistorialIds = current;
           renderReviewNotifications();
+          cleanupOrphanRemitoNotifications();
           if (fresh) showReviewToast({ toastText: `${historialTypeLabel(fresh.tipo)} pendiente: ${fresh.titulo || fresh.id}` });
         }, (error) => console.warn('No se pudieron escuchar notificaciones de historial', error));
       }
@@ -930,6 +1114,10 @@
       if (!usuariosMenu.length && !cargarUsuariosMenuDesdeCache()) {
         usuariosMenu = usuariosDefault();
       }
+      renderCachedFastData();
+      const usuarioInicial = tieneSesionMenuRecordada() ? obtenerUsuarioActivo() : null;
+      if (usuarioInicial && isAdminUser(usuarioInicial)) setupReviewNotifications(usuarioInicial);
+      setupAliasObjectives();
       renderLoginUsers();
       rememberLogin.checked = tieneSesionMenuRecordada();
       if (tieneSesionMenuRecordada()) {

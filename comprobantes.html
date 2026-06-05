@@ -260,6 +260,13 @@
       align-items: center;
     }
 
+    .alias-objective {
+      margin-top: 4px;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--ok);
+    }
+
     .alias-edit-btn {
       width: 42px;
       min-width: 42px;
@@ -1695,6 +1702,25 @@
     </div>
   </div>
 
+  <div class="modal-bg" id="alias-objective-modal-bg">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 class="modal-title">Objetivo diario</h3>
+        <button class="danger-btn" id="alias-objective-close" type="button">X</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span class="field-label" id="alias-objective-label">Objetivo</span>
+          <input class="input money" id="alias-objective-amount" inputmode="decimal" autocomplete="off" placeholder="$ 0,00">
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+          <button class="ghost-btn" id="alias-objective-none" type="button">Sin objetivo</button>
+          <button class="action-btn" id="alias-objective-save" type="button">Guardar objetivo</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-bg" id="alias-summary-modal-bg">
     <div class="modal alias-summary-modal">
       <div class="modal-head">
@@ -1845,7 +1871,8 @@
           nombre: String(item.nombre || ""),
           alias: String(item.alias || ""),
           cuit: String(item.cuit || ""),
-          prioritario: item.prioritario === true
+          prioritario: item.prioritario === true,
+          objetivoDiario: Number(item.objetivoDiario || 0)
         };
       }
 
@@ -1933,6 +1960,12 @@
         aliasEditCuit: $("#alias-edit-cuit"),
         aliasEditSave: $("#alias-edit-save"),
         aliasEditClose: $("#alias-edit-close"),
+        aliasObjectiveModalBg: $("#alias-objective-modal-bg"),
+        aliasObjectiveLabel: $("#alias-objective-label"),
+        aliasObjectiveAmount: $("#alias-objective-amount"),
+        aliasObjectiveSave: $("#alias-objective-save"),
+        aliasObjectiveNone: $("#alias-objective-none"),
+        aliasObjectiveClose: $("#alias-objective-close"),
         aliasSummaryModalBg: $("#alias-summary-modal-bg"),
         aliasSummaryTitle: $("#alias-summary-title"),
         aliasSummaryFrom: $("#alias-summary-from"),
@@ -1976,6 +2009,7 @@
         aliasPickerTarget: null,
         aliasSearchText: "",
         editingAliasId: "",
+        objectiveAliasId: "",
         fileTarget: null,
         confirm: null,
         lastErrorAt: 0,
@@ -2179,6 +2213,21 @@
       function formatAmountInput(value) {
         const parsed = parseAmount(value);
         return parsed ? formatAmount(parsed, true) : "";
+      }
+
+      function formatMoneyLive(input) {
+        if (!input) return;
+        const raw = String(input.value || "");
+        const digits = raw.replace(/\D/g, "");
+        if (!digits) {
+          input.value = "";
+          return;
+        }
+        const cursorFromEnd = raw.length - (input.selectionStart ?? raw.length);
+        const formatted = "$ " + Number(digits).toLocaleString("es-AR");
+        input.value = formatted;
+        const next = Math.max(0, formatted.length - cursorFromEnd);
+        input.setSelectionRange(next, next);
       }
 
       function insertTextAtCursor(input, text) {
@@ -2488,6 +2537,7 @@
             <div>
               <div class="alias-name">${esc(item.nombre)}</div>
               <div class="alias-meta">Alias: ${esc(item.alias || "-")} | CUIT: ${esc(item.cuit || "-")}</div>
+              ${isPriorityAlias(item) && Number(item.objetivoDiario || 0) > 0 ? `<div class="alias-objective">Objetivo diario: ${formatAmount(item.objetivoDiario, false)}</div>` : ""}
             </div>
             <div class="alias-actions">
               <button class="ghost-btn alias-edit-btn" type="button" data-action="edit-alias" data-id="${esc(item.id)}" title="Editar alias" aria-label="Editar ${esc(item.nombre)}">✎</button>
@@ -3249,6 +3299,7 @@
           alias,
           cuit,
           prioritario: false,
+          objetivoDiario: 0,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -3265,10 +3316,42 @@
       async function toggleAliasPriority(id) {
         const item = findRecord(id, state.aliases);
         if (!item) return;
+        const nextPriority = !isPriorityAlias(item);
         await aliasRef(id).update({
-          prioritario: !isPriorityAlias(item),
+          prioritario: nextPriority,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        if (nextPriority) openAliasObjectiveModal(id);
+      }
+
+      function openAliasObjectiveModal(id) {
+        const item = findRecord(id, state.aliases);
+        if (!item) return;
+        state.objectiveAliasId = String(id);
+        el.aliasObjectiveLabel.textContent = `Objetivo - ${item.nombre || "Alias"}`;
+        el.aliasObjectiveAmount.value = Number(item.objetivoDiario || 0) > 0 ? formatAmount(item.objetivoDiario, true) : "";
+        el.aliasObjectiveModalBg.classList.add("open");
+        setTimeout(() => {
+          el.aliasObjectiveAmount.focus();
+          el.aliasObjectiveAmount.select();
+        }, 0);
+      }
+
+      function closeAliasObjectiveModal() {
+        state.objectiveAliasId = "";
+        el.aliasObjectiveAmount.value = "";
+        el.aliasObjectiveModalBg.classList.remove("open");
+      }
+
+      async function saveAliasObjective(amount) {
+        const id = String(state.objectiveAliasId || "");
+        if (!id) return;
+        await aliasRef(id).update({
+          objetivoDiario: Math.max(0, Number(amount || 0)),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeAliasObjectiveModal();
+        showToast(Number(amount || 0) > 0 ? "Objetivo guardado" : "Alias sin objetivo");
       }
 
       function openEditAliasModal(id) {
@@ -3720,7 +3803,8 @@
             nombre: String(doc.data().nombre || ""),
             alias: String(doc.data().alias || ""),
             cuit: String(doc.data().cuit || ""),
-            prioritario: doc.data().prioritario === true
+            prioritario: doc.data().prioritario === true,
+            objetivoDiario: Number(doc.data().objetivoDiario || 0)
           }));
           writeJsonCache(ALIASES_CACHE_KEY, state.aliases);
           renderAliases();
@@ -3802,6 +3886,27 @@
         el.aliasEditClose.addEventListener("click", closeEditAliasModal);
         el.aliasEditModalBg.addEventListener("click", (event) => {
           if (event.target === el.aliasEditModalBg) closeEditAliasModal();
+        });
+        el.aliasObjectiveClose.addEventListener("click", closeAliasObjectiveModal);
+        el.aliasObjectiveModalBg.addEventListener("click", (event) => {
+          if (event.target === el.aliasObjectiveModalBg) closeAliasObjectiveModal();
+        });
+        el.aliasObjectiveAmount.addEventListener("keydown", (event) => {
+          normalizeDecimalKey(event);
+          if (event.key === "Enter") {
+            event.preventDefault();
+            saveAliasObjective(parseAmount(el.aliasObjectiveAmount.value)).catch((error) => throttleError("No se pudo guardar objetivo", error));
+          }
+        });
+        el.aliasObjectiveAmount.addEventListener("input", () => formatMoneyLive(el.aliasObjectiveAmount));
+        el.aliasObjectiveAmount.addEventListener("blur", () => {
+          el.aliasObjectiveAmount.value = formatAmountInput(el.aliasObjectiveAmount.value);
+        });
+        el.aliasObjectiveSave.addEventListener("click", () => {
+          saveAliasObjective(parseAmount(el.aliasObjectiveAmount.value)).catch((error) => throttleError("No se pudo guardar objetivo", error));
+        });
+        el.aliasObjectiveNone.addEventListener("click", () => {
+          saveAliasObjective(0).catch((error) => throttleError("No se pudo quitar objetivo", error));
         });
         el.aliasSummaryClose.addEventListener("click", closeAliasSummaryModal);
         [el.aliasSummaryFrom, el.aliasSummaryTo].forEach((input) => {
