@@ -286,6 +286,8 @@ let items = [];
 let logoCacheData = null;
 let remitoConfirmadoActual = null;
 let remitoNumberRefreshTimer = null;
+const REMITO_DRAFT_KEY = 'corralon_remito_borrador_v1';
+let remitoDraftReady = false;
 
 // ── UTILS ──────────────────────────────────────────────────────
 function fmt(n) {
@@ -374,6 +376,57 @@ function toast(msg) {
 function loading(show) {
   document.getElementById('loadingOverlay').classList.toggle('show', show);
 }
+function getRemitoDraft() {
+  return {
+    cliente: document.getElementById('cliente')?.value || '',
+    fecha: document.getElementById('fechaInput')?.value || '',
+    items,
+    pendiente: {
+      cant: document.getElementById('nCant')?.value || '',
+      desc: document.getElementById('nDesc')?.value || '',
+      precio: document.getElementById('nPrecio')?.value || '',
+      sub: document.getElementById('nSub')?.value || ''
+    },
+    updated_at: new Date().toISOString()
+  };
+}
+function saveRemitoDraft() {
+  if(!remitoDraftReady) return;
+  try {
+    const draft = getRemitoDraft();
+    const hasDraft = draft.cliente.trim() || draft.fecha.trim() || draft.items.length ||
+      draft.pendiente.cant.trim() || draft.pendiente.desc.trim() || draft.pendiente.precio.trim() || draft.pendiente.sub.trim();
+    if(hasDraft) localStorage.setItem(REMITO_DRAFT_KEY, JSON.stringify(draft));
+    else localStorage.removeItem(REMITO_DRAFT_KEY);
+  } catch(_) {}
+}
+function clearRemitoDraft() {
+  try { localStorage.removeItem(REMITO_DRAFT_KEY); } catch(_) {}
+}
+function restoreRemitoDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(REMITO_DRAFT_KEY) || 'null');
+    if(!draft) return false;
+    items = Array.isArray(draft.items) ? draft.items.map(it => ({
+      cant: Number(it.cant) || 0,
+      desc: it.desc || it.descripcion || '',
+      precio: Number(it.precio) || 0
+    })).filter(it => it.desc || it.precio || it.cant) : [];
+    document.getElementById('cliente').value = draft.cliente || '';
+    if(draft.fecha) document.getElementById('fechaInput').value = draft.fecha;
+    document.getElementById('nCant').value = draft.pendiente?.cant || '';
+    document.getElementById('nDesc').value = draft.pendiente?.desc || '';
+    document.getElementById('nPrecio').value = draft.pendiente?.precio || '';
+    document.getElementById('nSub').value = draft.pendiente?.sub || '';
+    renderItems();
+    updatePreview('precio');
+    toast('Borrador recuperado');
+    return true;
+  } catch(_) {
+    clearRemitoDraft();
+    return false;
+  }
+}
 
 function historialNotifId(tipo, id) {
   return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
@@ -432,6 +485,7 @@ function renderItems() {
     lista.insertBefore(row, fila);
   });
   recalc();
+  saveRemitoDraft();
 }
 
 // ── NAVEGACIÓN CON ENTER Y FLECHAS ──────────────────────────────
@@ -592,6 +646,7 @@ function recalc() {
     const sub = row.querySelectorAll('.item-input')[3];
     if(sub && items[i] && document.activeElement !== sub) sub.value = fmt(items[i].precio * items[i].cant);
   });
+  saveRemitoDraft();
 }
 
 function actualizarItemDesdeCampo(i, campo, input) {
@@ -892,10 +947,18 @@ function ejecutarConfirm() {
 
 // ── ACCIONES ──────────────────────────────────────────────────
 function _hacerLimpiar(msg) {
+  const wasDraftReady = remitoDraftReady;
+  remitoDraftReady = false;
   items = [];
   document.getElementById('cliente').value = '';
+  document.getElementById('nCant').value = '';
+  document.getElementById('nDesc').value = '';
+  document.getElementById('nPrecio').value= '';
+  document.getElementById('nSub').value = '';
+  clearRemitoDraft();
   initDp();
   renderItems();
+  remitoDraftReady = wasDraftReady;
   cargarNroRemito();
   refrescarNroRemitoSiCorresponde(true).catch(() => {});
   toast(msg || '🗑 Remito eliminado');
@@ -964,6 +1027,7 @@ async function confirmarRemitoFinal() {
     const remitoId = await guardarRemito(remito.nro, remito.cliente, remito.fecha, remito.total, null, remito.items);
     remitoConfirmadoActual = { ...remito, id: remitoId };
     await guardarNotificacionRemito(remitoConfirmadoActual);
+    clearRemitoDraft();
     _hacerLimpiar('Remito guardado');
     abrirRemitoActions(remitoConfirmadoActual);
   } catch(e) {
@@ -1053,6 +1117,9 @@ async function enviarWhatsapp() {
 // ── INIT ──────────────────────────────────────────────────────
 initDp();
 renderItems();
+restoreRemitoDraft();
+remitoDraftReady = true;
+saveRemitoDraft();
 cargarNroRemito();
 iniciarAutoRefreshNroRemito();
 
@@ -1065,6 +1132,9 @@ document.addEventListener('focusin', e => {
   const filaAgregar = document.getElementById('filaAgregar');
   if(!filaAgregar || filaAgregar.contains(e.target)) return;
   confirmarArticuloPendiente();
+});
+document.addEventListener('input', e => {
+  if(e.target.matches?.('#cliente,#fechaInput,#nCant,#nDesc,#nPrecio,#nSub,.item-input')) saveRemitoDraft();
 });
 
 document.addEventListener('pointerdown', e => {
