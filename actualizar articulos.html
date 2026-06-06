@@ -24,7 +24,7 @@
     .left{display:grid;grid-template-rows:auto auto 1fr auto;gap:12px;min-height:0}.right{display:grid;grid-template-rows:auto 1fr;gap:12px;min-height:0}
     .bar,.provider,.filter-card,.note{border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 8px 22px #1e304c17}
     .provider,.filter-card,.note{overflow:hidden}
-    .bar{display:grid;grid-template-columns:170px 1fr auto auto;align-items:center;gap:10px;padding:8px 10px}
+    .bar{display:grid;grid-template-columns:140px minmax(260px,1fr) auto auto auto;align-items:center;gap:8px;padding:8px 10px}
     .bar label{font:800 18px 'Barlow Condensed';color:var(--red2)} select,input,textarea{font:17px 'Barlow Condensed';color:var(--text);outline:0}
     select,.bar input{height:32px;border:1px solid #cce8ff;border-radius:5px;padding:3px 7px;background:#fff}
     .combo{position:relative;display:grid;grid-template-columns:1fr 34px;min-width:0}
@@ -53,6 +53,8 @@
     .foot{display:flex;align-items:center;gap:8px;background:#fff;padding:2px 7px;border-top:1px solid #d9edff;font-size:12px;color:var(--muted)}
     .note{display:grid;grid-template-columns:80px 1fr;height:72px}.note div{padding:6px;background:var(--soft);border-right:1px solid #d9edff;color:var(--muted)}.note textarea{border:0;padding:6px;resize:none}
     .filter-card{display:grid;grid-template-rows:28px 32px}.filter-card div{background:var(--soft);padding:4px 7px;color:var(--muted);font:700 18px 'Barlow Condensed'}.filter-card input{border:0;border-top:1px solid #d9edff;padding:4px 7px}
+    .merge-check{height:36px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;background:#f4fbff;padding:0 10px;color:var(--muted);font:800 16px 'Barlow Condensed';white-space:nowrap}
+    .merge-check input{width:16px;height:16px;accent-color:var(--purple)}
     .hidden{display:none}.toast{position:fixed;left:50%;bottom:26px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none}.toast.visible{opacity:1}
   </style>
   <script src="nav-helper.js"></script>
@@ -74,8 +76,12 @@
           <button id="providerComboBtn" type="button" tabindex="-1">▼</button>
           <div class="combo-list" id="providerDropdown"></div>
         </div>
-        <button id="clearBtn">Borrar</button>
         <button class="primary" id="exportBtn">Exportar</button>
+        <button id="clearBtn">Borrar</button>
+        <label class="merge-check" title="Publica el JSON sumando/reemplazando articulos sobre la lista existente del proveedor">
+          <input type="checkbox" id="mergeExistingList">
+          Aplicar a lista existente
+        </label>
       </div>
       <div class="provider">
         <div class="p-label">IDProveedor</div><div class="p-label">Proveedor</div><div class="p-label">Descuento</div><div class="p-label">Ultima Actualizacion</div>
@@ -110,6 +116,7 @@ let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, se
 const statusEl = document.getElementById('status');
 const syncProgress = document.getElementById('syncProgress');
 const syncProgressFill = document.getElementById('syncProgressFill');
+const mergeExistingList = document.getElementById('mergeExistingList');
 function h(extra={}){return CorralonSystem.headers(extra)}
 function norm(v){return CorralonSystem.norm(v)}
 function money(v){return `$ ${Number(v||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`}
@@ -191,7 +198,7 @@ async function syncProviderArticles(){
     const pct=total?done/total:1;
     setSyncProgress(45+pct*40);
     statusEl.textContent=`Sincronizando artículos ${done.toLocaleString('es-AR')} / ${total.toLocaleString('es-AR')}`;
-  })
+  },{mergeExisting:Boolean(mergeExistingList?.checked)})
 }
 function isLocalAccessMode(){
   return location.protocol==='file:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'||/^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(location.hostname);

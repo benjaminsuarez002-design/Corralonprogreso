@@ -451,15 +451,73 @@
     }));
   }
 
-  async function publishProviderArticlesJson(providerId, articles = []) {
+  function providerJsonUrlsFromEntry(entry) {
+    const chunks = Array.isArray(entry?.chunks) ? entry.chunks.map((chunk) => String(chunk?.json_url || '').trim()).filter(Boolean) : [];
+    return chunks.length ? chunks : [String(entry?.json_url || '').trim()].filter(Boolean);
+  }
+
+  async function fetchProviderJsonRowsForEntry(entry) {
+    const urls = providerJsonUrlsFromEntry(entry);
+    const out = [];
+    for (const url of urls) {
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(entry?.version || '')}`);
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      if (Array.isArray(rows)) out.push(...rows);
+    }
+    return out;
+  }
+
+  function providerJsonMergeKey(row) {
+    const byCode = norm(row?.cod_proveedor || row?.codProv || row?.codprov || '');
+    if (byCode) return `cod:${byCode}`;
+    const byArticle = norm(row?.articulo || row?.descripcion || row?.nombre || '');
+    return byArticle ? `art:${byArticle}` : '';
+  }
+
+  function mergeProviderJsonRows(existingRows, incomingRows) {
+    const map = new Map();
+    const order = [];
+    (existingRows || []).forEach((row) => {
+      const normalized = providerArticleJsonRows(row?.id_proveedor, [row])[0];
+      const key = providerJsonMergeKey(normalized);
+      if (!key) return;
+      if (!map.has(key)) order.push(key);
+      map.set(key, normalized);
+    });
+    (incomingRows || []).forEach((row) => {
+      const key = providerJsonMergeKey(row);
+      if (!key) return;
+      const previous = map.get(key);
+      if (!previous) order.push(key);
+      map.set(key, {
+        ...row,
+        idorden: Number(previous?.idorden || row.idorden || 0) || Date.now() * 1000 + order.length
+      });
+    });
+    return order.map((key) => map.get(key)).filter(Boolean);
+  }
+
+  async function publishProviderArticlesJson(providerId, articles = [], options = {}) {
     const id = cleanId(providerId);
     if (!id) throw new Error('Proveedor sin ID para publicar JSON');
-    const rows = providerArticleJsonRows(id, articles);
+    let rows = providerArticleJsonRows(id, articles);
     const version = Date.now();
+    const loaded = await loadProviderJsonManifest();
+    if (options?.mergeExisting) {
+      const tableManifest = await fetchProviderJsonTableManifest().catch(() => null);
+      const existingEntry = tableManifest?.providers?.[id] || loaded.manifest?.providers?.[id] || null;
+      if (existingEntry) {
+        const existingRows = await fetchProviderJsonRowsForEntry(existingEntry).catch((error) => {
+          console.warn(error);
+          return [];
+        });
+        rows = mergeProviderJsonRows(existingRows, rows);
+      }
+    }
     const providerName = String(rows.find((row) => row.proveedor)?.proveedor || articles.find((row) => row?.proveedor)?.proveedor || '').trim();
     const chunks = await uploadProviderRowsJsonChunks(rows, `listas_proveedores/proveedor_${id}_${version}`);
     const jsonUrl = chunks[0]?.json_url || '';
-    const loaded = await loadProviderJsonManifest();
     const manifest = loaded.manifest || { id: 'provider-json-manifest-v1', providers: {} };
     const providers = { ...(manifest.providers || {}) };
     providers[id] = {
@@ -515,12 +573,12 @@
     }
   }
 
-  async function replaceProviderArticles(providerId, articles, onProgress = null) {
+  async function replaceProviderArticles(providerId, articles, onProgress = null, options = {}) {
     const id = cleanId(providerId);
     const rows = providerArticleJsonRows(id, articles).map((row) => ({ ...row, articulo_source: 'actualizar_articulos' }));
     if (typeof onProgress === 'function') onProgress(0, rows.length);
     try {
-      const published = await publishProviderArticlesJson(id, rows);
+      const published = await publishProviderArticlesJson(id, rows, options);
       if (typeof onProgress === 'function') onProgress(rows.length, rows.length);
       await touchPriceListMeta({
         lista_version: published.manifest.version,
@@ -530,6 +588,7 @@
       return published;
     } catch (error) {
       console.warn(error);
+      if (options?.mergeExisting) throw error;
       await replaceProviderArticlesSupabase(id, rows, onProgress);
       await touchPriceListMeta();
       return null;

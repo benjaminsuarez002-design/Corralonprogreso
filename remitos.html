@@ -188,7 +188,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     <input type="text" class="inp num" id="nCant" placeholder="1" inputmode="decimal" autocomplete="off"
       oninput="updatePreview('cant')">
     <input type="text" class="inp" id="nDesc" placeholder="Descripción..." autocomplete="off">
-    <input type="text" class="inp num" id="nPrecio" placeholder="0" inputmode="numeric" autocomplete="off"
+    <input type="text" class="inp num money-live" id="nPrecio" placeholder="0" inputmode="decimal" autocomplete="off"
       oninput="updatePreview('precio')">
     <input type="text" class="inp num" id="nSub" placeholder="0" inputmode="decimal" autocomplete="off"
       oninput="updatePreview('subtotal')">
@@ -305,6 +305,66 @@ function parseMonto(valor) {
   }
   return Number.parseFloat(texto.replace(/[^0-9.-]/g, '')) || 0;
 }
+function rawMoneyTextFromValue(value) {
+  const n = parseMonto(value);
+  if(!n) return '';
+  return String(n).replace('.', ',').replace(/,00$/, '');
+}
+function formatMoneyLiveRaw(raw, final = false) {
+  raw = String(raw || '').replace(/\./g, ',').replace(/[^0-9,]/g, '');
+  const parts = raw.split(',');
+  const intDigits = (parts[0] || '').replace(/^0+(?=\d)/, '') || '0';
+  const decimals = parts.length > 1 ? parts.slice(1).join('').replace(/\D/g, '').slice(0, 2) : '';
+  if(final) return fmt(parseMonto(`${intDigits}${decimals ? ',' + decimals : ''}`));
+  return `$ ${Number(intDigits || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}${parts.length > 1 ? ',' + decimals : ''}`;
+}
+function setMoneyLiveValue(input, raw, final = false) {
+  input.dataset.moneyRaw = raw;
+  input.value = raw ? formatMoneyLiveRaw(raw, final) : '';
+}
+function handleMoneyLiveKey(event) {
+  const input = event.target.closest?.('.money-live');
+  if(!input || event.ctrlKey || event.altKey || event.metaKey) return false;
+  if(['Tab','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','F2','Escape'].includes(event.key)) return false;
+  let raw = input.dataset.moneyRaw ?? rawMoneyTextFromValue(input.value);
+  const selected = input.selectionStart === 0 && input.selectionEnd === String(input.value || '').length;
+  if(/^\d$/.test(event.key)) {
+    event.preventDefault();
+    if(selected) raw = '';
+    if(raw.includes(',')) {
+      const [intPart, decPart = ''] = raw.split(',');
+      raw = `${intPart},${(decPart + event.key).slice(0, 2)}`;
+    } else {
+      raw += event.key;
+    }
+    setMoneyLiveValue(input, raw);
+    return true;
+  }
+  if(event.key === ',' || event.key === '.') {
+    event.preventDefault();
+    if(selected) raw = '';
+    if(!raw.includes(',')) raw = `${raw || '0'},`;
+    setMoneyLiveValue(input, raw);
+    return true;
+  }
+  if(event.key === 'Backspace') {
+    event.preventDefault();
+    raw = selected ? '' : raw.slice(0, -1);
+    setMoneyLiveValue(input, raw);
+    return true;
+  }
+  if(event.key === 'Delete') {
+    event.preventDefault();
+    setMoneyLiveValue(input, '');
+    return true;
+  }
+  return false;
+}
+function finalizeMoneyLive(input) {
+  if(!input?.classList?.contains('money-live')) return;
+  const raw = input.dataset.moneyRaw ?? rawMoneyTextFromValue(input.value);
+  setMoneyLiveValue(input, raw, true);
+}
 function toast(msg) {
   const el = document.getElementById('toastEl');
   el.textContent = msg;
@@ -364,7 +424,7 @@ function renderItems() {
         onchange="actualizarItemDesdeCampo(${i}, 'cant', this)">
       <input type="text" class="item-input" value="${it.desc}" autocomplete="off"
         onchange="items[${i}].desc=this.value">
-      <input type="text" class="item-input num" value="${it.precio}" inputmode="numeric" autocomplete="off"
+      <input type="text" class="item-input num money-live" value="${fmt(it.precio)}" inputmode="decimal" autocomplete="off"
         onchange="actualizarItemDesdeCampo(${i}, 'precio', this)">
       <input type="text" class="item-input num" value="${fmt(it.precio*it.cant)}" inputmode="decimal" autocomplete="off" ${it.cant && it.precio ? 'readonly tabindex="-1"' : ''}
         onchange="actualizarItemDesdeCampo(${i}, 'subtotal', this)">
@@ -500,6 +560,10 @@ function manejarFlechasRemito(event, target) {
 document.addEventListener('keydown', e => {
   const target = document.activeElement;
   if(!target) return;
+  if(handleMoneyLiveKey(e)) {
+    if(target.id === 'nPrecio') updatePreview('precio');
+    return;
+  }
   if(e.key === 'F2' && esCampoNavegable(target)) {
     e.preventDefault();
     if(campoTodoSeleccionado(target)) {
@@ -512,6 +576,12 @@ document.addEventListener('keydown', e => {
   }
   if(manejarEnterRemito(e, target)) return;
   manejarFlechasRemito(e, target);
+});
+document.addEventListener('focusin', e => {
+  if(e.target.matches?.('.money-live')) e.target.dataset.moneyRaw = rawMoneyTextFromValue(e.target.value);
+});
+document.addEventListener('focusout', e => {
+  if(e.target.matches?.('.money-live')) finalizeMoneyLive(e.target);
 });
 
 function recalc() {
@@ -540,6 +610,7 @@ function actualizarItemDesdeCampo(i, campo, input) {
     if(subtotalInput && it.cant && it.precio) subtotalInput.value = fmt(it.cant * it.precio);
   }
   input.value = campo === 'cant' ? (it.cant || '') : fmt(campo === 'subtotal' ? ((it.cant || 0) * (it.precio || 0)) : it.precio);
+  if(campo === 'precio') input.dataset.moneyRaw = rawMoneyTextFromValue(input.value);
   renderItems();
 }
 
@@ -558,7 +629,10 @@ function updatePreview(campo = 'precio') {
     s = c * p;
   }
   if(campo !== 'cant' && c) cantEl.value = c;
-  if(campo !== 'precio' && p) precioEl.value = fmt(p);
+  if(campo !== 'precio' && p) {
+    precioEl.value = fmt(p);
+    precioEl.dataset.moneyRaw = rawMoneyTextFromValue(precioEl.value);
+  }
   if(campo !== 'subtotal') {
     subEl.value = c && p ? fmt(s) : '';
   }
