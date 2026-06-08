@@ -5712,6 +5712,7 @@ const PRODE_REF_LOOKUP_COLLECTION = 'prode_mundial_refs';
 let prodeFaseActiva = 'grupos';
 let prodeRankingUnsub = null;
 let prodeNavigationBound = false;
+let prodeRemoteLoadedFor = '';
 let prodeConfig = {
   fases: {
     grupos: { arranque: '', cierre: '' },
@@ -5883,6 +5884,7 @@ function abrirProde() {
   initProdeNavigation();
   renderProde();
   document.getElementById('prodeModal')?.classList.remove('hidden');
+  cargarProdeRemotoSiCorresponde();
   handleProdeReferral();
   if(!prodeUser().doc) abrirProdeRegistro();
 }
@@ -5946,7 +5948,27 @@ async function entrarProdeRegistrado() {
   const name = document.getElementById('prodePlayerName');
   if(name) name.value = data.nombre || '';
   cerrarProdeRegistro();
+  renderProde();
   handleProdeReferral();
+}
+async function cargarProdeRemotoSiCorresponde() {
+  const user = prodeUser();
+  if(!user.doc || prodeRemoteLoadedFor === user.doc) return;
+  prodeRemoteLoadedFor = user.doc;
+  const snap = await getDoc(doc(db, PRODE_PLAYERS_COLLECTION, user.doc)).catch(() => null);
+  if(!snap?.exists()) return;
+  const data = snap.data() || {};
+  const local = prodeDraft();
+  const localTime = new Date(local.updated_at || 0).getTime();
+  const remoteTime = data.updated_at?.toDate ? data.updated_at.toDate().getTime() : new Date(data.updated_at || 0).getTime();
+  if(!local.resultados || !Object.keys(local.resultados || {}).length || Number.isNaN(localTime) || remoteTime >= localTime) {
+    localStorage.setItem(PRODE_STORAGE_KEY, JSON.stringify({
+      nombre: data.nombre || user.nombre || '',
+      resultados: data.resultados || {},
+      updated_at: new Date().toISOString()
+    }));
+    renderProde();
+  }
 }
 function prodeShareUrl() {
   const user = prodeUser();
