@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="corralon-system.js"></script>
+  <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
     :root{--red:#8b7cff;--red2:#5d55c8;--line:#8bc7ff;--soft:#eef8ff;--bg:#f6fcff;--row:#f7fbff;--text:#20223a;--muted:#6d7190}
@@ -57,6 +58,12 @@
     .filter-card{display:grid;grid-template-rows:28px 32px}.filter-card div{background:var(--soft);padding:4px 7px;color:var(--muted);font:700 18px 'Barlow Condensed'}.filter-card input{border:0;border-top:1px solid #d9edff;padding:4px 7px}
     .merge-check{height:36px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;background:#f4fbff;padding:0 10px;color:var(--muted);font:800 16px 'Barlow Condensed';white-space:nowrap}
     .merge-check input{width:16px;height:16px;accent-color:var(--purple)}
+    .context-menu{position:fixed;z-index:3000;display:none;min-width:190px;border:1px solid #9bcfff;border-radius:8px;background:#fff;box-shadow:0 16px 38px #10203b2b;overflow:hidden}
+    .context-menu.visible{display:block}.context-menu button{width:100%;height:34px;border:0;border-radius:0;box-shadow:none;background:#fff;color:#172033;text-align:left;padding:6px 12px}.context-menu button:hover{background:#e8f6ff;color:var(--red2)}
+    .modal-backdrop{position:fixed;inset:0;z-index:3100;display:none;align-items:center;justify-content:center;background:rgba(23,32,51,.45)}.modal-backdrop.visible{display:flex}
+    .calc-modal{width:min(94vw,540px);background:#fff;border:2px solid #9bcfff;border-radius:14px;padding:22px;box-shadow:0 20px 50px #10203b45}.calc-title{margin:0 0 14px;font:900 34px 'Barlow Condensed';color:var(--red2)}
+    .calc-grid{display:grid;grid-template-columns:190px 1fr;border:1px solid #9bcfff}.calc-label,.calc-field{min-height:38px;border-bottom:1px solid #d9edff;padding:6px 10px;font:700 21px 'Barlow Condensed'}.calc-label{background:#eef8ff;color:var(--muted)}.calc-field{padding:0}.calc-field input{width:100%;height:100%;border:0;padding:0 10px;text-align:right}.calc-label.last,.calc-field.last{border-bottom:0}.calc-result{height:38px;display:flex;align-items:center;justify-content:flex-end;padding:0 10px;font:800 21px 'Barlow Condensed';color:#172033}
+    .calc-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}.calc-actions button{height:38px}
     .hidden{display:none}.toast{position:fixed;left:50%;bottom:26px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none}.toast.visible{opacity:1}
   </style>
   <script src="nav-helper.js"></script>
@@ -110,11 +117,28 @@
   </main>
 </div>
 <div class="toast" id="toast"></div>
+<div class="context-menu" id="rowContextMenu"><button type="button" id="calcContextBtn">Dividir / multiplicar</button></div>
+<div class="modal-backdrop" id="calcBackdrop">
+  <div class="calc-modal" role="dialog" aria-modal="true" aria-labelledby="calcTitle">
+    <h2 class="calc-title" id="calcTitle">Dividir / multiplicar</h2>
+    <div class="calc-grid">
+      <div class="calc-label">Precio inicial</div><div class="calc-field"><input id="calcOriginalPrice" readonly></div>
+      <div class="calc-label">Dividir por</div><div class="calc-field"><input id="calcDivide" inputmode="decimal" autocomplete="off"></div>
+      <div class="calc-label">Multiplicar por</div><div class="calc-field"><input id="calcMultiply" inputmode="decimal" autocomplete="off"></div>
+      <div class="calc-label last">Precio calculado</div><div class="calc-field last"><div class="calc-result" id="calcResult">$ 0,00</div></div>
+    </div>
+    <div class="calc-actions">
+      <button type="button" id="calcCancelBtn">Cancelar</button>
+      <button type="button" id="calcUndoBtn">Volver a original</button>
+      <button class="primary" type="button" id="calcApplyBtn">Guardar</button>
+    </div>
+  </div>
+</div>
 <script>
 const SUPABASE_URL='https://tizyjenayrcdkcodsjnc.supabase.co';
 const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const P_TABLE='proveedores', A_TABLE='lista_precios', DB='actualizar_articulos_v1', PROVIDERS_DB='proveedores_cache_v1';
-let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, selectionMode={type:null,cols:[]}, comboMatches=[], comboActive=0, tablePasteReady=false;
+let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, selectionMode={type:null,cols:[]}, comboMatches=[], comboActive=0, tablePasteReady=false, contextArticle=null, calcArticle=null;
 const statusEl = document.getElementById('status');
 const syncProgress = document.getElementById('syncProgress');
 const syncProgressFill = document.getElementById('syncProgressFill');
@@ -266,6 +290,19 @@ function makeBlankArticle(i){return{cod_proveedor:'',articulo:'',precio_lista:0,
 function applyColumnValue(article,col,value){if(col==='cod'){article.cod_proveedor=String(value??'').trim();article.cod_proveedor_norm=norm(article.cod_proveedor)}else if(col==='art'){article.articulo=String(value??'').trim();article.articulo_norm=norm(article.articulo)}else if(col==='lista'){const list=parseMoney(value);article.precio_lista=list;const desc=Number(provider?.descuento_lista||article.descuento_lista||0);article.precio_costo=Number((list*(1-desc)).toFixed(2))}if(provider){article.id_proveedor=provider.id_proveedor;article.proveedor=provider.proveedor;article.descuento_lista=Number(provider.descuento_lista||0);article.ultima_actualizacion=provider.ultima_actualizacion||'';article.proveedor_norm=norm(provider.proveedor)}}
 async function pasteSelectedColumnsFromClipboard(){const cols=orderedSelectedCols();if(!cols.length){await pasteArticlesFromClipboard();return}const text=await navigator.clipboard.readText();const lines=String(text||'').split(/\r?\n/).filter(line=>line.trim().length);const target=view.length?view:articles;lines.forEach((line,i)=>{const values=line.split('\t');let article=target[i];if(!article){article=makeBlankArticle(articles.length+i);articles.push(article);if(target!==articles)target.push(article)}cols.forEach((col,n)=>applyColumnValue(article,col,values[n]??''))});await saveArticlesCache();render();show('Columnas pegadas')}
 async function pasteClipboardToFilter(){const text=await navigator.clipboard.readText();filterInput.value=String(text||'').split(/\r?\n/)[0]||'';render();focusTableCell(0,3)}
+function parseFactor(v,fallback=1){const n=parseMoney(v);return Number.isFinite(n)&&n!==0?n:fallback}
+function calcBasePrice(a){return Number(a?.precio_costo_original||a?.precio_costo||0)}
+function calcCurrentPrice(){return calcBasePrice(calcArticle)/parseFactor(calcDivide.value,1)*parseFactor(calcMultiply.value,1)}
+function updateCalcResult(){calcResult.textContent=money(calcCurrentPrice())}
+function openCalcModal(article){if(!article)return;calcArticle=article;calcOriginalPrice.value=money(calcBasePrice(article));calcDivide.value=article.precio_costo_divisor||'';calcMultiply.value=article.precio_costo_multiplicador||'';updateCalcResult();calcBackdrop.classList.add('visible');setTimeout(()=>{calcDivide.focus();calcDivide.select()},0)}
+function closeCalcModal(){calcArticle=null;calcBackdrop.classList.remove('visible')}
+async function applyCalculatedPrice(){if(!calcArticle)return;const original=calcBasePrice(calcArticle);const calculated=Number(calcCurrentPrice().toFixed(2));calcArticle.precio_costo=calculated;calcArticle.precio_costo_original=original;calcArticle.precio_costo_divisor=calcDivide.value.trim();calcArticle.precio_costo_multiplicador=calcMultiply.value.trim();if(Math.abs(calculated-original)<=0.009){delete calcArticle.precio_costo_original;delete calcArticle.precio_costo_divisor;delete calcArticle.precio_costo_multiplicador}await saveArticlesCache();render();closeCalcModal();show('Precio guardado')}
+async function undoCalculatedPrice(){if(!calcArticle)return;calcArticle.precio_costo=calcBasePrice(calcArticle);delete calcArticle.precio_costo_original;delete calcArticle.precio_costo_divisor;delete calcArticle.precio_costo_multiplicador;await saveArticlesCache();render();closeCalcModal();show('Precio original restaurado')}
+function calcItems(){return [calcDivide,calcMultiply,calcCancelBtn,calcUndoBtn,calcApplyBtn]}
+function moveCalc(delta){const items=calcItems();const i=Math.max(0,items.indexOf(document.activeElement));const next=items[Math.max(0,Math.min(items.length-1,i+delta))];next?.focus();if(next?.tagName==='INPUT')next.select()}
+function calcKey(event){if(!calcBackdrop.classList.contains('visible'))return;if(event.key==='Escape'){event.preventDefault();closeCalcModal();return}if((event.key==='Enter'||event.key==='Tab')&&document.activeElement.tagName!=='BUTTON'){event.preventDefault();if(document.activeElement===calcMultiply&&!event.shiftKey)calcApplyBtn.focus();else moveCalc(event.shiftKey?-1:1)}else if(event.key==='ArrowDown'){event.preventDefault();moveCalc(1)}else if(event.key==='ArrowUp'){event.preventDefault();moveCalc(-1)}else if((event.key==='ArrowLeft'||event.key==='ArrowRight')&&document.activeElement.tagName==='BUTTON'){event.preventDefault();moveCalc(event.key==='ArrowRight'?1:-1)}}
+function showRowContext(event,article){contextArticle=article;rowContextMenu.style.left=`${event.clientX}px`;rowContextMenu.style.top=`${event.clientY}px`;rowContextMenu.classList.add('visible')}
+function hideRowContext(){rowContextMenu.classList.remove('visible');contextArticle=null}
 providerSearch.addEventListener('focus',()=>{providerSearch.select();openProviderCombo()});
 providerSearch.addEventListener('input',()=>{comboActive=0;openProviderCombo()});
 providerSearch.addEventListener('dblclick',(event)=>{if(openCurrentProviderPage())event.preventDefault()});
@@ -274,17 +311,27 @@ providerSearch.addEventListener('change',()=>selectProviderByText(providerSearch
 providerSearch.addEventListener('keydown',(event)=>{if(event.key==='ArrowDown'){event.preventDefault();moveProviderCombo(1)}else if(event.key==='ArrowUp'){event.preventDefault();moveProviderCombo(-1)}else if(event.key==='Enter'){event.preventDefault();chooseProviderCombo()}else if(event.key==='Escape'){event.preventDefault();closeProviderCombo()}});
 providerComboBtn.addEventListener('mousedown',(event)=>{event.preventDefault();providerCombo.classList.contains('open')?closeProviderCombo():openProviderCombo();providerSearch.focus()});
 providerDropdown.addEventListener('mousedown',(event)=>{event.preventDefault();const option=event.target.closest('.combo-option');if(!option)return;comboActive=Number(option.dataset.index)||0;chooseProviderCombo()});
-document.addEventListener('mousedown',(event)=>{if(!providerCombo.contains(event.target))closeProviderCombo();if(!event.target.closest('.table'))clearTableSelection()});
+document.addEventListener('mousedown',(event)=>{if(!providerCombo.contains(event.target))closeProviderCombo();if(!event.target.closest('.table'))clearTableSelection();if(!event.target.closest('#rowContextMenu'))hideRowContext()});
 document.querySelector('.body').addEventListener('scroll',(event)=>{const box=event.currentTarget;if(box.scrollTop+box.clientHeight>=box.scrollHeight-80)loadMoreRows()});
 rows.addEventListener('focusin',(event)=>{const cell=event.target.closest('.nav-cell');if(cell)selectCellText(cell)});
 rows.addEventListener('keydown',(event)=>{const cell=event.target.closest('.nav-cell');if(!cell)return;let moved=false;if(event.key==='Enter')moved=moveTableCell(cell,event.shiftKey?-1:1,0);else if(event.key==='Tab')moved=moveTableCell(cell,0,event.shiftKey?-1:1);else if(event.key==='ArrowDown')moved=moveTableCell(cell,1,0);else if(event.key==='ArrowUp')moved=moveTableCell(cell,-1,0);else if(event.key==='ArrowRight')moved=moveTableCell(cell,0,1);else if(event.key==='ArrowLeft')moved=moveTableCell(cell,0,-1);if(moved){event.preventDefault();event.stopPropagation()}});
+rows.addEventListener('contextmenu',(event)=>{const row=event.target.closest('.row');if(!row)return;event.preventDefault();const article=view[Number(row.dataset.i)];if(!article)return;showRowContext(event,article)});
 tableSelector.addEventListener('click',()=>focusTablePasteCorner());
 tableSelector.addEventListener('dblclick',(event)=>{event.preventDefault();if(!articles.length)pasteArticlesFromClipboard().catch(e=>{console.error(e);show('No pude pegar')})});
 document.querySelectorAll('.selectable-head').forEach(head=>head.addEventListener('click',(event)=>setSelection('column',head.dataset.selectCol,event)));
 window.addEventListener('keydown',(event)=>{if(event.key==='F1'){event.preventDefault();event.stopPropagation();filterInput.focus();filterInput.select()}},{capture:true});
-document.addEventListener('keydown',(event)=>{if(event.key==='F1')return;const key=event.key.toLowerCase();const editable=event.target?.matches?.('input,textarea,[contenteditable="true"]');if(event.ctrlKey&&key==='v'&&selectionMode.type==='column'&&!editable){event.preventDefault();pasteSelectedColumnsFromClipboard().catch(e=>{console.error(e);show('No pude pegar')})}else if(event.ctrlKey&&key==='v'&&!selectionMode.type){event.preventDefault();pasteClipboardToFilter().catch(e=>{console.error(e);show('No pude pegar en filtro')})}else if(event.ctrlKey&&key==='c'&&selectionMode.type&&!editable){event.preventDefault();copySelection().catch(e=>{console.error(e);show('No pude copiar')})}});
+document.addEventListener('keydown',(event)=>{if(event.key==='Escape'){hideRowContext();closeCalcModal()}if(event.key==='F1')return;const key=event.key.toLowerCase();const editable=event.target?.matches?.('input,textarea,[contenteditable="true"]');if(event.ctrlKey&&key==='v'&&selectionMode.type==='column'&&!editable){event.preventDefault();pasteSelectedColumnsFromClipboard().catch(e=>{console.error(e);show('No pude pegar')})}else if(event.ctrlKey&&key==='v'&&!selectionMode.type){event.preventDefault();pasteClipboardToFilter().catch(e=>{console.error(e);show('No pude pegar en filtro')})}else if(event.ctrlKey&&key==='c'&&selectionMode.type&&!editable){event.preventDefault();copySelection().catch(e=>{console.error(e);show('No pude copiar')})}});
 filterInput.addEventListener('keydown',(event)=>{if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();render();focusTableCell(0,3)}});
-filterInput.oninput=render;clearBtn.onclick=()=>{if(confirm('Eliminar todos los articulos cargados?')){articles=[];saveArticlesCache().catch(console.error);render()}};exportBtn.onclick=()=>exportAndUpdate().catch(e=>{console.error(e);hideSyncProgress(1200);show(e.message||'Error')});
+window.CorralonFunciones?.bindLinearNavigation?.({root:document,selector:'#filterInput',selectOnFocus:false});
+rowContextMenu.addEventListener('mousedown',(event)=>event.stopPropagation());
+calcContextBtn.addEventListener('click',(event)=>{event.preventDefault();const article=contextArticle;hideRowContext();openCalcModal(article)});
+[calcDivide,calcMultiply].forEach(input=>{input.addEventListener('input',updateCalcResult);input.addEventListener('focus',()=>input.select());input.addEventListener('keydown',calcKey)});
+[calcCancelBtn,calcUndoBtn,calcApplyBtn].forEach(btn=>btn.addEventListener('keydown',calcKey));
+calcCancelBtn.addEventListener('click',closeCalcModal);
+calcUndoBtn.addEventListener('click',()=>undoCalculatedPrice().catch(e=>{console.error(e);show('No pude restaurar')}));
+calcApplyBtn.addEventListener('click',()=>applyCalculatedPrice().catch(e=>{console.error(e);show('No pude guardar')}));
+calcBackdrop.addEventListener('mousedown',(event)=>{if(event.target===calcBackdrop)closeCalcModal()});
+filterInput.oninput=render;clearBtn.onclick=()=>{if(confirm('Eliminar todos los articulos cargados?')){articles=[];filterInput.value='';saveArticlesCache().catch(console.error);render()}};exportBtn.onclick=()=>exportAndUpdate().catch(e=>{console.error(e);hideSyncProgress(1200);show(e.message||'Error')});
 (async()=>{db=await openDb();await Promise.all([loadProviders(),loadArticlesCache()]);render()})();
 </script>
 </body>
