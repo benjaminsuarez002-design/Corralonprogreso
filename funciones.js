@@ -422,6 +422,92 @@
     };
   }
 
+  function bindLinearNavigation(options = {}) {
+    const root = options.root || document;
+    const selector = options.selector || 'input, textarea, select, button, [tabindex]';
+    const selectOnFocus = options.selectOnFocus !== false;
+    const navigateLeftRight = options.navigateLeftRight === true;
+    const wrap = options.wrap === true;
+
+    function visible(el) {
+      if (!el || el.disabled || el.hidden) return false;
+      if (el.closest?.('.hidden,[hidden]')) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
+    function controls() {
+      return Array.from(root.querySelectorAll(selector)).filter(visible);
+    }
+
+    function focusControl(el) {
+      if (!el) return false;
+      el.focus?.();
+      if (selectOnFocus && typeof el.select === 'function') el.select();
+      el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      return true;
+    }
+
+    function isTextCaretKey(event) {
+      if (navigateLeftRight) return false;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return false;
+      const tag = event.target?.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA';
+    }
+
+    function moveFrom(el, step, event) {
+      const list = controls();
+      const index = list.indexOf(el);
+      if (index < 0) return false;
+      let next = index + step;
+      if (wrap) next = (next + list.length) % list.length;
+      const target = list[next];
+      if (!target) return false;
+      if (focusControl(target)) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        return true;
+      }
+      return false;
+    }
+
+    function handleKeyDown(event) {
+      if (event.defaultPrevented) return;
+      const el = event.target?.closest?.(selector);
+      if (!el || !root.contains(el)) return;
+      if (event.key === 'F2' && typeof el.select === 'function') {
+        event.preventDefault();
+        const allSelected = el.selectionStart === 0 && el.selectionEnd === String(el.value || '').length;
+        if (allSelected) {
+          const end = String(el.value || '').length;
+          el.setSelectionRange(end, end);
+        } else {
+          el.select();
+        }
+        return;
+      }
+      if (isTextCaretKey(event)) return;
+      if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+        moveFrom(el, event.shiftKey ? -1 : 1, event);
+        return;
+      }
+      if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+        moveFrom(el, -1, event);
+      }
+    }
+
+    root.addEventListener('keydown', handleKeyDown);
+
+    return {
+      destroy() {
+        root.removeEventListener('keydown', handleKeyDown);
+      },
+      focusFirst() {
+        return focusControl(controls()[0]);
+      }
+    };
+  }
+
   function bindTableSelectPaste(options = {}) {
     const root = options.root || document;
     const cellSelector = options.cellSelector || '[data-row][data-col]';
@@ -772,6 +858,7 @@
     bindGridNavigation,
     bindTableSelectPaste,
     bindTableSort,
-    bindResizableColumns
+    bindResizableColumns,
+    bindLinearNavigation
   };
 })();
