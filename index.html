@@ -921,14 +921,24 @@
   .prode-qr-card img { width:100%; max-width:270px; border-radius:14px; display:block; margin:0 auto 10px; }
   .prode-qr-card a { display:inline-flex; justify-content:center; align-items:center; min-height:34px; padding:0 14px; border-radius:999px; background:#e50000; color:#fff; text-decoration:none; font-weight:900; }
   .prode-toast { min-height:20px; color:#008a3d; font-weight:800; font-size:13px; margin-top:8px; }
-  @media (max-width: 700px) {
+@media (max-width: 700px) {
+    .prode-overlay { padding: max(8px,var(--popup-top-safe)) 8px var(--popup-bottom-safe); justify-content:center; }
+    .prode-modal { width: calc(100vw - 16px); max-width: calc(100vw - 16px); border-radius:18px; }
+    .prode-head { padding:14px 12px; align-items:flex-start; }
+    .prode-head > div:first-child { min-width:0; flex:1 1 auto; }
+    .prode-head-actions { flex:0 0 auto; gap:6px; }
+    .prode-icon-btn { height:36px; min-width:36px; padding:0 10px; font-size:13px; }
+    .prode-close { width:36px; min-width:36px; height:36px; }
     .prode-stats { grid-template-columns:1fr; padding:12px 14px 0; }
     .prode-body { grid-template-columns:1fr; padding:14px; }
-    .prode-title { font-size:26px; }
-    .prode-match { grid-template-columns:1fr 118px 1fr; gap:6px; padding:10px; }
-    .prode-team { font-size:13px; gap:5px; }
+    .prode-title { font-size:24px; overflow-wrap:anywhere; }
+    .prode-sub { font-size:12px; overflow-wrap:anywhere; }
+    .prode-match { grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr); gap:6px; padding:10px; }
+    .prode-team { min-width:0; font-size:12px; gap:5px; overflow:hidden; }
+    .prode-team span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
     .prode-flag { width:24px; height:24px; font-size:12px; }
-    .prode-scorebox { grid-template-columns:38px 12px 38px; }
+    .prode-scorebox { grid-template-columns:34px 10px 34px; gap:4px; }
+    .prode-match input { height:32px; font-size:16px; }
     .prode-player { grid-template-columns:1fr; }
   }
   .wa-btn-enviar, .wa-btn-cancelar {
@@ -2915,7 +2925,7 @@
     </div>
     <div class="prode-stats">
       <div class="prode-stat"><span>Premio</span><strong>Orden de compra</strong></div>
-      <div class="prode-stat"><span>Puntos</span><strong>3 exacto / 1 ganador</strong></div>
+      <div class="prode-stat"><span>Puntos</span><strong>10 exacto / 5 ganador</strong></div>
       <div class="prode-stat"><span>Estado</span><strong>Fixture abierto</strong></div>
     </div>
     <div class="prode-body">
@@ -2931,8 +2941,8 @@
       <aside class="prode-side">
         <div class="prode-rules">
           <h3>Reglas rápidas</h3>
-          <div><span>Resultado exacto</span><strong>3 pts</strong></div>
-          <div><span>Ganador o empate</span><strong>1 pt</strong></div>
+          <div><span>Resultado exacto</span><strong>10 pts</strong></div>
+          <div><span>Ganador o empate</span><strong>5 pts</strong></div>
           <div><span>Compartir el prode</span><strong>1 pt</strong></div>
           <div><span>Ranking</span><strong>General</strong></div>
         </div>
@@ -2943,7 +2953,7 @@
 <div id="prodeRegisterModal" class="prode-mini-modal hidden">
   <div class="prode-mini-card">
     <div class="prode-mini-head">
-      <div class="prode-mini-title">Registrate</div>
+      <div class="prode-mini-title">Registrate para participar en el prode</div>
       <button class="prode-close" id="prodeRegisterClose" type="button">×</button>
     </div>
     <div class="prode-register-form">
@@ -3138,6 +3148,8 @@ const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que uste
 
 // POPUP AL ABRIR
 onSnapshot(doc(db, 'config', 'popup'), snap => {
+  const params = new URLSearchParams(location.search);
+  if (params.has('articulo') || params.has('prodeRef') || location.hash === '#prode') return;
   const url = snap.exists() ? snap.data().url : null;
   if(url) {
     document.getElementById('popupImg').src = url;
@@ -5852,10 +5864,17 @@ function prodeSyncDraftRemoto() {
 }
 function renderProde() {
   const draft = prodeDraft();
+  const registrado = !!prodeUser().doc;
   const name = document.getElementById('prodePlayerName');
+  const saveBtn = document.getElementById('prodeSaveBtn');
   const tabs = document.getElementById('prodeTabs');
   const list = document.getElementById('prodeMatches');
-  if(name) name.value = draft.nombre || prodeUser().nombre || '';
+  if(name) {
+    name.value = registrado ? (draft.nombre || prodeUser().nombre || '') : '';
+    name.disabled = !registrado;
+    name.placeholder = registrado ? 'Tu nombre' : 'Registrate primero';
+  }
+  if(saveBtn) saveBtn.textContent = registrado ? 'Guardar' : 'Registrarme';
   if(tabs) tabs.innerHTML = prodeFases.map(f => `<button class="prode-tab ${f.id===prodeFaseActiva?'active':''}" type="button" data-prode-tab="${f.id}">${f.label}</button>`).join('');
   if(!list) return;
   const resultados = draft.resultados || {};
@@ -5872,9 +5891,9 @@ function renderProde() {
     return `<div class="prode-match" data-prode-match="${p.id}">
       <div class="prode-team"><span class="prode-flag">${p.flagLocal}</span><span>${p.local}${cierreTxt}</span></div>
       <div class="prode-scorebox">
-        <input type="text" inputmode="numeric" maxlength="2" data-prode-score="local" value="${r.local ?? ''}" ${cerrado ? 'disabled' : ''}>
+        <input type="text" inputmode="numeric" maxlength="2" data-prode-score="local" value="${registrado ? (r.local ?? '') : ''}" ${cerrado || !registrado ? 'disabled' : ''}>
         <span>-</span>
-        <input type="text" inputmode="numeric" maxlength="2" data-prode-score="visitante" value="${r.visitante ?? ''}" ${cerrado ? 'disabled' : ''}>
+        <input type="text" inputmode="numeric" maxlength="2" data-prode-score="visitante" value="${registrado ? (r.visitante ?? '') : ''}" ${cerrado || !registrado ? 'disabled' : ''}>
       </div>
       <div class="prode-team"><span class="prode-flag">${p.flagVisitante}</span><span>${p.visitante}</span></div>
     </div>`;
@@ -6052,6 +6071,11 @@ document.getElementById('prodeTabs')?.addEventListener('click', (e) => {
   renderProde();
 });
 document.getElementById('prodeModal')?.addEventListener('input', (e) => {
+  if(!prodeUser().doc && e.target.matches('[data-prode-score], #prodePlayerName')) {
+    prodeToastMsg('Registrate primero');
+    abrirProdeRegistro();
+    return;
+  }
   if(e.target.matches('[data-prode-score], #prodePlayerName')) {
     prodeGuardarDraftLocal();
     clearTimeout(prodeSyncDraftRemoto._timer);
@@ -6059,9 +6083,20 @@ document.getElementById('prodeModal')?.addEventListener('input', (e) => {
   }
 });
 document.getElementById('prodeModal')?.addEventListener('change', (e) => {
+  if(!prodeUser().doc && e.target.matches('[data-prode-score], #prodePlayerName')) {
+    prodeToastMsg('Registrate primero');
+    abrirProdeRegistro();
+    return;
+  }
   if(e.target.matches('[data-prode-score], #prodePlayerName')) {
     prodeGuardarDraftLocal();
     prodeSyncDraftRemoto();
+  }
+});
+document.getElementById('prodeModal')?.addEventListener('pointerdown', (e) => {
+  if(!prodeUser().doc && e.target.matches('[data-prode-score], #prodePlayerName')) {
+    prodeToastMsg('Registrate primero');
+    abrirProdeRegistro();
   }
 });
 document.getElementById('prodeModal')?.addEventListener('click', (e) => { if(e.target.id === 'prodeModal') cerrarProde(); });
