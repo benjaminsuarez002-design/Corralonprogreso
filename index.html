@@ -922,24 +922,49 @@
   .prode-qr-card a { display:inline-flex; justify-content:center; align-items:center; min-height:34px; padding:0 14px; border-radius:999px; background:#e50000; color:#fff; text-decoration:none; font-weight:900; }
   .prode-toast { min-height:20px; color:#008a3d; font-weight:800; font-size:13px; margin-top:8px; }
 @media (max-width: 700px) {
-    .prode-overlay { padding: max(8px,var(--popup-top-safe)) 8px var(--popup-bottom-safe); justify-content:center; }
-    .prode-modal { width: calc(100vw - 16px); max-width: calc(100vw - 16px); border-radius:18px; }
+    .prode-overlay { padding: max(8px,var(--popup-top-safe)) 8px var(--popup-bottom-safe); justify-content:center; overflow-x:hidden; }
+    .prode-modal { width: calc(100vw - 16px); max-width: calc(100vw - 16px); border-radius:18px; overflow-x:hidden; }
+    .prode-modal * { min-width:0; }
     .prode-head { padding:14px 12px; align-items:flex-start; }
     .prode-head > div:first-child { min-width:0; flex:1 1 auto; }
     .prode-head-actions { flex:0 0 auto; gap:6px; }
     .prode-icon-btn { height:36px; min-width:36px; padding:0 10px; font-size:13px; }
     .prode-close { width:36px; min-width:36px; height:36px; }
-    .prode-stats { grid-template-columns:1fr; padding:12px 14px 0; }
-    .prode-body { grid-template-columns:1fr; padding:14px; }
+    .prode-stats { grid-template-columns:1fr; padding:12px 10px 0; }
+    .prode-stat { padding:9px 10px; }
+    .prode-body { grid-template-columns:minmax(0,1fr); padding:12px 10px; gap:12px; }
+    .prode-side { order:-1; }
     .prode-title { font-size:24px; overflow-wrap:anywhere; }
     .prode-sub { font-size:12px; overflow-wrap:anywhere; }
-    .prode-match { grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr); gap:6px; padding:10px; }
+    .prode-tabs { gap:6px; max-width:100%; }
+    .prode-tab { padding:8px 11px; font-size:13px; flex:0 0 auto; }
+    .prode-match { grid-template-columns:minmax(0,1fr) 82px minmax(0,1fr); gap:5px; padding:9px 7px; max-width:100%; }
     .prode-team { min-width:0; font-size:12px; gap:5px; overflow:hidden; }
     .prode-team span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
     .prode-flag { width:24px; height:24px; font-size:12px; }
-    .prode-scorebox { grid-template-columns:34px 10px 34px; gap:4px; }
-    .prode-match input { height:32px; font-size:16px; }
+    .prode-scorebox { grid-template-columns:30px 8px 30px; gap:3px; }
+    .prode-match input { height:31px; font-size:15px; padding:0; }
     .prode-player { grid-template-columns:1fr; }
+    .prode-player input,.prode-save { width:100%; }
+    .prode-rules { padding:10px; }
+    .prode-rules div { font-size:12px; }
+    .prode-mini-modal { align-items:flex-start; padding: max(8px,var(--popup-top-safe)) 8px var(--popup-bottom-safe); overflow:auto; }
+    .prode-mini-card { width:calc(100vw - 16px); max-width:440px; max-height:var(--popup-max-height); padding:14px; box-sizing:border-box; }
+    .prode-mini-head { align-items:flex-start; }
+    .prode-mini-title { font-size:24px; line-height:1.02; overflow-wrap:anywhere; }
+    .prode-register-form input,.prode-register-form button { width:100%; box-sizing:border-box; }
+    .prode-ranking-row { grid-template-columns:28px minmax(0,1fr) auto; }
+  }
+  @media (max-width: 390px) {
+    .prode-head { display:grid; grid-template-columns:1fr auto; }
+    .prode-head-actions { grid-column:2; }
+    .prode-title { font-size:22px; }
+    .prode-icon-btn { padding:0 8px; }
+    .prode-match { grid-template-columns:minmax(0,1fr) 70px minmax(0,1fr); }
+    .prode-scorebox { grid-template-columns:26px 8px 26px; }
+    .prode-flag { width:22px; height:22px; font-size:11px; flex:0 0 auto; }
+    .prode-team { font-size:11px; }
+    .prode-mini-title { font-size:22px; }
   }
   .wa-btn-enviar, .wa-btn-cancelar {
     flex:1 1 0;
@@ -2915,7 +2940,7 @@
     <div class="prode-head">
       <div>
         <div class="prode-title">Prode Mundial</div>
-        <div class="prode-sub">Fixture, pronosticos y puntos para el Mundial 2026.</div>
+        <div class="prode-sub">Fixture, pronósticos y puntos para el Mundial 2026.</div>
       </div>
       <div class="prode-head-actions">
         <button class="prode-icon-btn" id="prodeRankingBtn" type="button" title="Tabla de posiciones">Posiciones</button>
@@ -5933,6 +5958,16 @@ async function registrarProde() {
   if(!nombre || !docNum || !telefono) { prodeRegisterMsg('Completá nombre, documento y teléfono.'); return; }
   const ref = doc(db, PRODE_PLAYERS_COLLECTION, docNum);
   const snap = await getDoc(ref).catch(() => null);
+  if(snap?.exists()) {
+    const docInput = document.getElementById('prodeRegDoc');
+    if(docInput) {
+      docInput.value = '';
+      docInput.focus();
+    }
+    prodeRegisterMsg('Ese documento ya está registrado. Usá "Ya me registré".');
+    alert('Ese documento ya está registrado. Usá "Ya me registré".');
+    return;
+  }
   const previo = snap?.exists() ? snap.data() : {};
   await setDoc(ref, {
     nombre,
@@ -5948,13 +5983,24 @@ async function registrarProde() {
   const name = document.getElementById('prodePlayerName');
   if(name) name.value = nombre;
   cerrarProdeRegistro();
+  prodeRemoteLoadedFor = '';
+  renderProde();
   handleProdeReferral();
 }
 async function entrarProdeRegistrado() {
   const docNum = prodeDocId(document.getElementById('prodeLoginDoc')?.value || '');
   if(!docNum) { prodeRegisterMsg('Poné tu documento.'); return; }
   const snap = await getDoc(doc(db, PRODE_PLAYERS_COLLECTION, docNum)).catch(() => null);
-  if(!snap?.exists()) { prodeRegisterMsg('No encontré ese documento registrado.'); return; }
+  if(!snap?.exists()) {
+    const input = document.getElementById('prodeLoginDoc');
+    if(input) {
+      input.value = '';
+      input.focus();
+    }
+    prodeRegisterMsg('El usuario no existe o el DNI está mal escrito.');
+    alert('El usuario no existe o el DNI está mal escrito.');
+    return;
+  }
   const data = snap.data() || {};
   const refSlug = data.refSlug || prodeRefSlug(data.nombre || docNum);
   await setDoc(doc(db, PRODE_REF_LOOKUP_COLLECTION, refSlug), { doc: docNum, nombre: data.nombre || '', updated_at: serverTimestamp() }, { merge:true }).catch(() => {});
@@ -5967,6 +6013,7 @@ async function entrarProdeRegistrado() {
   const name = document.getElementById('prodePlayerName');
   if(name) name.value = data.nombre || '';
   cerrarProdeRegistro();
+  prodeRemoteLoadedFor = '';
   renderProde();
   handleProdeReferral();
 }
@@ -6563,9 +6610,6 @@ cargarCarrito();
   <div style="color:#0056b3;font-size:16px;letter-spacing:1px;text-transform:uppercase;">Cargando articulos...</div>
 </div>
 
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"57a2e842481341dc931980f9468b270c","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"57a2e842481341dc931980f9468b270c","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"57a2e842481341dc931980f9468b270c","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body></html>
 
 
