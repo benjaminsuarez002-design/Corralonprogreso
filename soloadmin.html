@@ -149,6 +149,8 @@
   .prode-config-grid { display:grid; gap:12px; }
   .prode-config-row { display:grid; grid-template-columns:120px 1fr 1fr; gap:10px; align-items:end; padding:12px; border:1px solid var(--border); border-radius:14px; background:var(--card2); }
   .prode-result-row { display:grid; grid-template-columns:1.5fr 68px 18px 68px; gap:8px; align-items:center; padding:12px; border:1px solid var(--border); border-radius:14px; background:var(--card2); }
+  .prode-result-group-title { margin:10px 0 0; padding:8px 2px 0; color:var(--amarillo); font-family:'Barlow Condensed',sans-serif; font-size:20px; font-weight:900; text-transform:uppercase; letter-spacing:.5px; }
+  .prode-result-meta { display:block; margin-top:2px; color:var(--muted); font-size:12px; font-weight:700; }
   .prode-result-row input { width:100%; text-align:center; }
   .prode-config-fase { font-family:'Barlow Condensed',sans-serif; font-size:18px; font-weight:800; color:var(--amarillo); }
   .btn-cancelar { flex: 1; padding: 12px; background: var(--card2); border: 1px solid var(--border); color: var(--muted); border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; transition: opacity .2s; }
@@ -849,7 +851,7 @@
   <div class="main">
     <div class="card span-full">
       <div class="card-title">Configurar Prode Mundial</div>
-      <div class="field-help" style="margin-bottom:14px;">Arranque y cierre de fases eliminatorias. Los partidos de grupo de Argentina ya tienen su cierre individual cargado.</div>
+      <div class="field-help" style="margin-bottom:14px;">Los partidos de grupos cierran automaticamente 5 minutos antes del horario de inicio. Esta configuracion queda para ajustes generales si hicieran falta.</div>
       <div class="prode-config-grid" id="prodeConfigGrid"></div>
       <button class="btn-guardar" id="btnGuardarProdeConfig" type="button" onclick="guardarProdeConfig()" style="max-width:260px;margin-top:14px;">Guardar prode</button>
     </div>
@@ -1078,21 +1080,92 @@ const STOCK_NOTICE_DOC_ID = 'stockNotice';
 const PRODE_CONFIG_DOC_ID = 'prodeMundial';
 const PRODE_PLAYERS_COLLECTION = 'prode_mundial_participantes';
 const PRODE_PARTIDOS = [
-  { id:'p1', label:'Argentina vs Argelia' },
-  { id:'p2', label:'Argentina vs Austria' },
-  { id:'p3', label:'Argentina vs Jordania' },
-  { id:'p4', label:'16vos - Argentina' },
-  { id:'p5', label:'8vos - Argentina' },
-  { id:'p6', label:'4tos - Argentina' },
-  { id:'p7', label:'Semi - Argentina' },
-  { id:'p8', label:'Final - Argentina' }
+  { id:'gA1', grupo:'Grupo A', fecha:'11/06 16:00', label:'Mexico vs Sudafrica' },
+  { id:'gA2', grupo:'Grupo A', fecha:'11/06 23:00', label:'Corea del Sur vs Republica Checa' },
+  { id:'gA3', grupo:'Grupo A', fecha:'18/06 13:00', label:'Republica Checa vs Sudafrica' },
+  { id:'gA4', grupo:'Grupo A', fecha:'18/06 22:00', label:'Mexico vs Corea del Sur' },
+  { id:'gA5', grupo:'Grupo A', fecha:'24/06 22:00', label:'Republica Checa vs Mexico' },
+  { id:'gA6', grupo:'Grupo A', fecha:'24/06 22:00', label:'Sudafrica vs Corea del Sur' },
+  { id:'gB1', grupo:'Grupo B', fecha:'12/06 16:00', label:'Canada vs Bosnia y Herzegovina' },
+  { id:'gB2', grupo:'Grupo B', fecha:'13/06 16:00', label:'Qatar vs Suiza' },
+  { id:'gB3', grupo:'Grupo B', fecha:'18/06 16:00', label:'Suiza vs Bosnia y Herzegovina' },
+  { id:'gB4', grupo:'Grupo B', fecha:'18/06 19:00', label:'Canada vs Qatar' },
+  { id:'gB5', grupo:'Grupo B', fecha:'24/06 16:00', label:'Suiza vs Canada' },
+  { id:'gB6', grupo:'Grupo B', fecha:'24/06 16:00', label:'Bosnia y Herzegovina vs Qatar' },
+  { id:'gC1', grupo:'Grupo C', fecha:'13/06 19:00', label:'Brasil vs Marruecos' },
+  { id:'gC2', grupo:'Grupo C', fecha:'13/06 22:00', label:'Haiti vs Escocia' },
+  { id:'gC3', grupo:'Grupo C', fecha:'19/06 19:00', label:'Escocia vs Marruecos' },
+  { id:'gC4', grupo:'Grupo C', fecha:'19/06 22:00', label:'Brasil vs Haiti' },
+  { id:'gC5', grupo:'Grupo C', fecha:'24/06 19:00', label:'Escocia vs Brasil' },
+  { id:'gC6', grupo:'Grupo C', fecha:'24/06 19:00', label:'Marruecos vs Haiti' },
+  { id:'gD1', grupo:'Grupo D', fecha:'12/06 22:00', label:'Estados Unidos vs Paraguay' },
+  { id:'gD2', grupo:'Grupo D', fecha:'14/06 01:00', label:'Australia vs Turquia' },
+  { id:'gD3', grupo:'Grupo D', fecha:'19/06 16:00', label:'Estados Unidos vs Australia' },
+  { id:'gD4', grupo:'Grupo D', fecha:'20/06 01:00', label:'Turquia vs Paraguay' },
+  { id:'gD5', grupo:'Grupo D', fecha:'25/06 23:00', label:'Turquia vs Estados Unidos' },
+  { id:'gD6', grupo:'Grupo D', fecha:'25/06 23:00', label:'Paraguay vs Australia' },
+  { id:'gE1', grupo:'Grupo E', fecha:'14/06 14:00', label:'Alemania vs Curazao' },
+  { id:'gE2', grupo:'Grupo E', fecha:'14/06 20:00', label:'Costa de Marfil vs Ecuador' },
+  { id:'gE3', grupo:'Grupo E', fecha:'20/06 17:00', label:'Alemania vs Costa de Marfil' },
+  { id:'gE4', grupo:'Grupo E', fecha:'20/06 21:00', label:'Ecuador vs Curazao' },
+  { id:'gE5', grupo:'Grupo E', fecha:'25/06 17:00', label:'Ecuador vs Alemania' },
+  { id:'gE6', grupo:'Grupo E', fecha:'25/06 17:00', label:'Curazao vs Costa de Marfil' },
+  { id:'gF1', grupo:'Grupo F', fecha:'14/06 17:00', label:'Paises Bajos vs Japon' },
+  { id:'gF2', grupo:'Grupo F', fecha:'14/06 23:00', label:'Suecia vs Tunez' },
+  { id:'gF3', grupo:'Grupo F', fecha:'20/06 14:00', label:'Paises Bajos vs Suecia' },
+  { id:'gF4', grupo:'Grupo F', fecha:'21/06 01:00', label:'Tunez vs Japon' },
+  { id:'gF5', grupo:'Grupo F', fecha:'25/06 20:00', label:'Tunez vs Paises Bajos' },
+  { id:'gF6', grupo:'Grupo F', fecha:'25/06 20:00', label:'Japon vs Suecia' },
+  { id:'gG1', grupo:'Grupo G', fecha:'15/06 16:00', label:'Belgica vs Egipto' },
+  { id:'gG2', grupo:'Grupo G', fecha:'15/06 22:00', label:'Iran vs Nueva Zelanda' },
+  { id:'gG3', grupo:'Grupo G', fecha:'21/06 16:00', label:'Belgica vs Iran' },
+  { id:'gG4', grupo:'Grupo G', fecha:'21/06 22:00', label:'Nueva Zelanda vs Egipto' },
+  { id:'gG5', grupo:'Grupo G', fecha:'27/06 00:00', label:'Nueva Zelanda vs Belgica' },
+  { id:'gG6', grupo:'Grupo G', fecha:'27/06 00:00', label:'Egipto vs Iran' },
+  { id:'gH1', grupo:'Grupo H', fecha:'15/06 13:00', label:'Espana vs Cabo Verde' },
+  { id:'gH2', grupo:'Grupo H', fecha:'15/06 19:00', label:'Arabia Saudita vs Uruguay' },
+  { id:'gH3', grupo:'Grupo H', fecha:'21/06 13:00', label:'Espana vs Arabia Saudita' },
+  { id:'gH4', grupo:'Grupo H', fecha:'21/06 19:00', label:'Uruguay vs Cabo Verde' },
+  { id:'gH5', grupo:'Grupo H', fecha:'26/06 21:00', label:'Uruguay vs Espana' },
+  { id:'gH6', grupo:'Grupo H', fecha:'26/06 21:00', label:'Cabo Verde vs Arabia Saudita' },
+  { id:'gI1', grupo:'Grupo I', fecha:'16/06 16:00', label:'Francia vs Senegal' },
+  { id:'gI2', grupo:'Grupo I', fecha:'16/06 19:00', label:'Irak vs Noruega' },
+  { id:'gI3', grupo:'Grupo I', fecha:'22/06 18:00', label:'Francia vs Irak' },
+  { id:'gI4', grupo:'Grupo I', fecha:'22/06 21:00', label:'Noruega vs Senegal' },
+  { id:'gI5', grupo:'Grupo I', fecha:'26/06 16:00', label:'Noruega vs Francia' },
+  { id:'gI6', grupo:'Grupo I', fecha:'26/06 16:00', label:'Senegal vs Irak' },
+  { id:'gJ1', grupo:'Grupo J', fecha:'16/06 22:00', label:'Argentina vs Argelia' },
+  { id:'gJ2', grupo:'Grupo J', fecha:'17/06 01:00', label:'Austria vs Jordania' },
+  { id:'gJ3', grupo:'Grupo J', fecha:'22/06 14:00', label:'Argentina vs Austria' },
+  { id:'gJ4', grupo:'Grupo J', fecha:'23/06 00:00', label:'Jordania vs Argelia' },
+  { id:'gJ5', grupo:'Grupo J', fecha:'27/06 23:00', label:'Jordania vs Argentina' },
+  { id:'gJ6', grupo:'Grupo J', fecha:'27/06 23:00', label:'Argelia vs Austria' },
+  { id:'gK1', grupo:'Grupo K', fecha:'17/06 14:00', label:'Portugal vs RD Congo' },
+  { id:'gK2', grupo:'Grupo K', fecha:'17/06 23:00', label:'Uzbekistan vs Colombia' },
+  { id:'gK3', grupo:'Grupo K', fecha:'23/06 14:00', label:'Portugal vs Uzbekistan' },
+  { id:'gK4', grupo:'Grupo K', fecha:'23/06 23:00', label:'Colombia vs RD Congo' },
+  { id:'gK5', grupo:'Grupo K', fecha:'27/06 20:30', label:'Colombia vs Portugal' },
+  { id:'gK6', grupo:'Grupo K', fecha:'27/06 20:30', label:'RD Congo vs Uzbekistan' },
+  { id:'gL1', grupo:'Grupo L', fecha:'17/06 17:00', label:'Inglaterra vs Croacia' },
+  { id:'gL2', grupo:'Grupo L', fecha:'17/06 20:00', label:'Ghana vs Panama' },
+  { id:'gL3', grupo:'Grupo L', fecha:'23/06 17:00', label:'Inglaterra vs Ghana' },
+  { id:'gL4', grupo:'Grupo L', fecha:'23/06 20:00', label:'Panama vs Croacia' },
+  { id:'gL5', grupo:'Grupo L', fecha:'27/06 18:00', label:'Panama vs Inglaterra' },
+  { id:'gL6', grupo:'Grupo L', fecha:'27/06 18:00', label:'Croacia vs Ghana' }
 ];
 const PRODE_FASES_CONFIG = [
-  ['dieciseisavos', '16vos'],
-  ['octavos', '8vos'],
-  ['cuartos', '4tos'],
-  ['semi', 'Semi'],
-  ['final', 'Final']
+  ['grupoA', 'Grupo A'],
+  ['grupoB', 'Grupo B'],
+  ['grupoC', 'Grupo C'],
+  ['grupoD', 'Grupo D'],
+  ['grupoE', 'Grupo E'],
+  ['grupoF', 'Grupo F'],
+  ['grupoG', 'Grupo G'],
+  ['grupoH', 'Grupo H'],
+  ['grupoI', 'Grupo I'],
+  ['grupoJ', 'Grupo J'],
+  ['grupoK', 'Grupo K'],
+  ['grupoL', 'Grupo L']
 ];
 const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo.';
 const PORTADA_BATCH_SIZE = 50;
@@ -1174,15 +1247,19 @@ function renderProdeConfig(data = {}) {
     </div>`;
   }).join('');
   const reales = data.resultadosReales || {};
-  if(resultadosGrid) resultadosGrid.innerHTML = PRODE_PARTIDOS.map((p) => {
+  if(resultadosGrid) {
+    let grupoActual = '';
+    resultadosGrid.innerHTML = PRODE_PARTIDOS.map((p) => {
+    const groupTitle = p.grupo !== grupoActual ? (grupoActual = p.grupo, `<div class="prode-result-group-title">${p.grupo}</div>`) : '';
     const r = reales[p.id] || {};
-    return `<div class="prode-result-row">
-      <div class="prode-config-fase">${p.label}</div>
-      <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="local" value="${r.local ?? ''}" placeholder="Arg">
+    return `${groupTitle}<div class="prode-result-row">
+      <div class="prode-config-fase">${p.label}<span class="prode-result-meta">${p.fecha} hs Argentina</span></div>
+      <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="local" value="${r.local ?? ''}" placeholder="L">
       <span style="text-align:center;color:var(--muted);font-weight:900;">-</span>
-      <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="visitante" value="${r.visitante ?? ''}" placeholder="Rival">
+      <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="visitante" value="${r.visitante ?? ''}" placeholder="V">
     </div>`;
-  }).join('');
+    }).join('');
+  }
 }
 
 async function cargarProdeConfig() {
