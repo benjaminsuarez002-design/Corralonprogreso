@@ -941,7 +941,7 @@
     .prode-title { font-size:23px; overflow-wrap:anywhere; }
     .prode-sub { font-size:11px; overflow-wrap:anywhere; }
     .prode-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; max-width:100%; overflow:visible; padding-bottom:4px; margin-bottom:8px; }
-    .prode-tab { min-height:34px; padding:0 6px; font-size:12px; flex:0 0 auto; text-align:center; }
+    .prode-tab { min-height:38px; padding:0 6px; font-size:12px; flex:0 0 auto; text-align:center; white-space:normal; line-height:1.05; }
     .prode-fixture-title { margin:10px 2px 7px; font-size:11px; line-height:1.2; }
     .prode-match { position:relative; grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:34px; row-gap:9px; padding:11px 10px; max-width:100%; border-radius:14px; }
     .prode-match::before { content:'vs'; position:absolute; left:50%; top:26px; transform:translate(-50%,-50%); color:#6b7890; font-size:11px; font-weight:900; text-transform:uppercase; pointer-events:none; }
@@ -970,7 +970,7 @@
     .prode-title { font-size:21px; }
     .prode-icon-btn { padding:0 8px; }
     .prode-stats { grid-template-columns:1fr; }
-    .prode-tabs { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .prode-tabs { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .prode-scorebox { grid-template-columns:40px 10px 40px; }
     .prode-flag { width:28px; height:28px; font-size:11px; flex:0 0 auto; }
     .prode-match .prode-team { font-size:11px; gap:5px; }
@@ -5757,7 +5757,8 @@ const PRODE_CONFIG_DOC_ID = 'prodeMundial';
 const PRODE_PLAYERS_COLLECTION = 'prode_mundial_participantes';
 const PRODE_SHARES_COLLECTION = 'prode_mundial_compartidos';
 const PRODE_REF_LOOKUP_COLLECTION = 'prode_mundial_refs';
-let prodeFaseActiva = 'grupoA';
+const PRODE_FIXTURE_VERSION = 'grupos-2026-v1';
+let prodeFaseActiva = 'fecha1';
 let prodeRankingUnsub = null;
 let prodeNavigationBound = false;
 let prodeRemoteLoadedFor = '';
@@ -5851,20 +5852,51 @@ const prodePartidos = [
   { id:'gL5', fase:'grupoL', fecha:'27/06 18:00', cierre:'2026-06-27T17:55', local:'Panama', visitante:'Inglaterra', flagLocal:'PA', flagVisitante:'GB' },
   { id:'gL6', fase:'grupoL', fecha:'27/06 18:00', cierre:'2026-06-27T17:55', local:'Croacia', visitante:'Ghana', flagLocal:'HR', flagVisitante:'GH' }
 ];
-const prodeFases = [
-  { id:'grupoA', label:'Grupo A' },
-  { id:'grupoB', label:'Grupo B' },
-  { id:'grupoC', label:'Grupo C' },
-  { id:'grupoD', label:'Grupo D' },
-  { id:'grupoE', label:'Grupo E' },
-  { id:'grupoF', label:'Grupo F' },
-  { id:'grupoG', label:'Grupo G' },
-  { id:'grupoH', label:'Grupo H' },
-  { id:'grupoI', label:'Grupo I' },
-  { id:'grupoJ', label:'Grupo J' },
-  { id:'grupoK', label:'Grupo K' },
-  { id:'grupoL', label:'Grupo L' }
-];
+function prodePartidoTime(partido) {
+  const d = new Date(partido.cierre || '');
+  if(Number.isNaN(d.getTime())) return 0;
+  return d.getTime() + 5 * 60 * 1000;
+}
+function prodeFechaKey(partido) {
+  const d = new Date(prodePartidoTime(partido));
+  if(Number.isNaN(d.getTime())) return String(partido.fecha || '').split(' ')[0] || '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}`;
+}
+function prodeFechaLabel(key) {
+  const [day, month] = String(key || '').split('/');
+  return { day: day || key, month: month || '' };
+}
+function prodeBuildDateFases() {
+  const partidosOrdenados = [...prodePartidos].sort((a, b) => prodePartidoTime(a) - prodePartidoTime(b));
+  const fases = [];
+  for(let i = 0; i < partidosOrdenados.length; i += 10) {
+    const partidosChunk = partidosOrdenados.slice(i, i + 10);
+    const chunk = [];
+    partidosChunk.forEach((partido) => {
+      const key = prodeFechaKey(partido);
+      if(key && !chunk.includes(key)) chunk.push(key);
+    });
+    const first = chunk[0] || '';
+    const last = chunk[chunk.length - 1] || first;
+    const months = [...new Set([first, last].map((key) => prodeFechaLabel(key).month).filter(Boolean))];
+    const sameMonth = months.length === 1;
+    const label = first === last
+      ? first
+      : sameMonth
+        ? `${prodeFechaLabel(first).day}-${prodeFechaLabel(last).day}/${months[0]}`
+        : `${first}-${last}`;
+    fases.push({
+      id: `fecha${fases.length + 1}`,
+      label,
+      fechas: chunk,
+      partidos: partidosChunk.map((partido) => partido.id)
+    });
+  }
+  return fases;
+}
+const prodeFases = prodeBuildDateFases();
 function prodeDraft() {
   try { return JSON.parse(localStorage.getItem(PRODE_STORAGE_KEY) || '{}') || {}; } catch(_) { return {}; }
 }
@@ -5954,14 +5986,31 @@ function prodePartidoCerrado(partido) {
   if(!cierre) return false;
   return new Date() >= new Date(cierre);
 }
+function prodeScoreValue(value) {
+  const raw = String(value ?? '').replace(/\D/g, '').slice(0, 2);
+  if(raw === '') return '';
+  return String(Math.max(0, Number(raw)));
+}
+function prodeNormalizarResultados(resultados = {}) {
+  const limpio = {};
+  prodePartidos.forEach((partido) => {
+    const r = resultados?.[partido.id] || {};
+    const local = prodeScoreValue(r.local);
+    const visitante = prodeScoreValue(r.visitante);
+    if(local === '' && visitante === '') return;
+    limpio[partido.id] = { local, visitante };
+  });
+  return limpio;
+}
 function prodeLeerResultadosVisibles() {
-  const resultados = prodeDraft().resultados || {};
+  const resultados = prodeNormalizarResultados(prodeDraft().resultados || {});
   document.querySelectorAll('[data-prode-match]').forEach((row) => {
     const id = row.dataset.prodeMatch;
     resultados[id] = {
-      local: row.querySelector('[data-prode-score="local"]')?.value || '',
-      visitante: row.querySelector('[data-prode-score="visitante"]')?.value || ''
+      local: prodeScoreValue(row.querySelector('[data-prode-score="local"]')?.value || ''),
+      visitante: prodeScoreValue(row.querySelector('[data-prode-score="visitante"]')?.value || '')
     };
+    if(resultados[id].local === '' && resultados[id].visitante === '') delete resultados[id];
   });
   return resultados;
 }
@@ -5973,16 +6022,18 @@ function prodeGuardarDraftLocal() {
     updated_at: new Date().toISOString()
   }));
 }
-function prodeSyncDraftRemoto() {
+async function prodeSyncDraftRemoto() {
   const user = prodeUser();
   if(!user.doc) return;
   const draft = prodeDraft();
-  setDoc(doc(db, PRODE_PLAYERS_COLLECTION, user.doc), {
+  return setDoc(doc(db, PRODE_PLAYERS_COLLECTION, user.doc), {
     nombre: draft.nombre || user.nombre || '',
     telefono: user.telefono || '',
-    resultados: draft.resultados || {},
+    resultados: prodeNormalizarResultados(draft.resultados || {}),
+    fixtureVersion: PRODE_FIXTURE_VERSION,
+    partidosFixture: prodePartidos.length,
     updated_at: serverTimestamp()
-  }, { merge:true }).catch(() => {});
+  }, { merge:true });
 }
 function renderProde() {
   const draft = prodeDraft();
@@ -6000,9 +6051,13 @@ function renderProde() {
   if(tabs) tabs.innerHTML = prodeFases.map(f => `<button class="prode-tab ${f.id===prodeFaseActiva?'active':''}" type="button" data-prode-tab="${f.id}">${f.label}</button>`).join('');
   if(!list) return;
   const resultados = draft.resultados || {};
-  const visibles = prodePartidos.filter(p => p.fase === prodeFaseActiva);
-  const faseActual = prodeFases.find(f => f.id === prodeFaseActiva);
-  list.innerHTML = `<div class="prode-fixture-title">${faseActual?.label || 'Fixture'} · horario Argentina</div>` + visibles.map((p) => {
+  let faseActual = prodeFases.find(f => f.id === prodeFaseActiva) || prodeFases[0];
+  if(faseActual && faseActual.id !== prodeFaseActiva) prodeFaseActiva = faseActual.id;
+  if(tabs) tabs.innerHTML = prodeFases.map(f => `<button class="prode-tab ${f.id===prodeFaseActiva?'active':''}" type="button" data-prode-tab="${f.id}">${f.label}</button>`).join('');
+  const visibles = prodePartidos
+    .filter(p => faseActual?.partidos?.includes(p.id))
+    .sort((a, b) => prodePartidoTime(a) - prodePartidoTime(b));
+  list.innerHTML = `<div class="prode-fixture-title">Fechas ${faseActual?.label || 'Fixture'} · horario Argentina</div>` + visibles.map((p) => {
     const r = resultados[p.id] || {};
     const cerrado = prodePartidoCerrado(p);
     const cierreTxt = p.cierre ? `<div class="prode-match-close">${p.fecha} · cierra ${fmtProdeDate(p.cierre)}</div>` : '';
@@ -6030,12 +6085,18 @@ function cerrarProde() {
   document.getElementById('prodeModal')?.classList.add('hidden');
   if(location.hash === '#prode') history.replaceState(null, '', location.pathname + location.search);
 }
-function guardarProde() {
+async function guardarProde() {
   const user = prodeUser();
   if(!user.doc) { abrirProdeRegistro(); return; }
   prodeGuardarDraftLocal();
-  prodeSyncDraftRemoto();
-  prodeToastMsg('Prode guardado');
+  clearTimeout(prodeSyncDraftRemoto._timer);
+  try {
+    await prodeSyncDraftRemoto();
+    prodeToastMsg('Prode guardado');
+  } catch(e) {
+    console.error(e);
+    prodeToastMsg('No se pudo guardar. Revisá la conexión.');
+  }
 }
 function abrirProdeRegistro() {
   initProdeNavigation();
@@ -6068,6 +6129,8 @@ async function registrarProde() {
     telefono,
     doc3: docNum.slice(-3),
     refSlug: prodeRefSlug(nombre),
+    fixtureVersion: PRODE_FIXTURE_VERSION,
+    partidosFixture: prodePartidos.length,
     puntos: Number(previo.puntos || 0),
     created_at: previo.created_at || serverTimestamp(),
     updated_at: serverTimestamp()
@@ -6101,7 +6164,7 @@ async function entrarProdeRegistrado() {
   setProdeUser({ doc: docNum, nombre: data.nombre || '', telefono: data.telefono || '', refSlug });
   localStorage.setItem(PRODE_STORAGE_KEY, JSON.stringify({
     nombre: data.nombre || '',
-    resultados: data.resultados || {},
+    resultados: prodeNormalizarResultados(data.resultados || {}),
     updated_at: new Date().toISOString()
   }));
   const name = document.getElementById('prodePlayerName');
@@ -6124,7 +6187,7 @@ async function cargarProdeRemotoSiCorresponde() {
   if(!local.resultados || !Object.keys(local.resultados || {}).length || Number.isNaN(localTime) || remoteTime >= localTime) {
     localStorage.setItem(PRODE_STORAGE_KEY, JSON.stringify({
       nombre: data.nombre || user.nombre || '',
-      resultados: data.resultados || {},
+      resultados: prodeNormalizarResultados(data.resultados || {}),
       updated_at: new Date().toISOString()
     }));
     renderProde();
@@ -6220,7 +6283,7 @@ document.getElementById('prodeModal')?.addEventListener('input', (e) => {
   if(e.target.matches('[data-prode-score], #prodePlayerName')) {
     prodeGuardarDraftLocal();
     clearTimeout(prodeSyncDraftRemoto._timer);
-    prodeSyncDraftRemoto._timer = setTimeout(prodeSyncDraftRemoto, 450);
+    prodeSyncDraftRemoto._timer = setTimeout(() => prodeSyncDraftRemoto().catch(() => {}), 450);
   }
 });
 document.getElementById('prodeModal')?.addEventListener('change', (e) => {
@@ -6231,7 +6294,7 @@ document.getElementById('prodeModal')?.addEventListener('change', (e) => {
   }
   if(e.target.matches('[data-prode-score], #prodePlayerName')) {
     prodeGuardarDraftLocal();
-    prodeSyncDraftRemoto();
+    prodeSyncDraftRemoto().catch(() => {});
   }
 });
 document.getElementById('prodeModal')?.addEventListener('pointerdown', (e) => {
