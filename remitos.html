@@ -191,7 +191,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     <input type="text" class="inp num money-live" id="nPrecio" placeholder="0" inputmode="decimal" autocomplete="off"
       oninput="updatePreview('precio')">
     <input type="text" class="inp num" id="nSub" placeholder="0" inputmode="decimal" autocomplete="off"
-      oninput="updatePreview('subtotal')">
+      onchange="updatePreview('subtotal')">
     <button class="btn-add" onclick="agregarItem()">+</button>
   </div>
 </div>
@@ -364,6 +364,10 @@ function handleMoneyLiveKey(event) {
 }
 function finalizeMoneyLive(input) {
   if(!input?.classList?.contains('money-live')) return;
+  if(!String(input.value || '').trim()) {
+    setMoneyLiveValue(input, '');
+    return;
+  }
   const raw = input.dataset.moneyRaw ?? rawMoneyTextFromValue(input.value);
   setMoneyLiveValue(input, raw, true);
 }
@@ -706,11 +710,28 @@ function hayArticuloPendiente() {
 
 function confirmarArticuloPendiente() {
   if (!hayArticuloPendiente()) return false;
+  if(document.getElementById('nSub')?.value.trim()) updatePreview('subtotal');
   agregarItem();
   return true;
 }
 
+function limpiarFilaAgregar() {
+  const cantEl = document.getElementById('nCant');
+  const descEl = document.getElementById('nDesc');
+  const precioEl = document.getElementById('nPrecio');
+  const subEl = document.getElementById('nSub');
+  cantEl.value = '';
+  descEl.value = '';
+  precioEl.value = '';
+  subEl.value = '';
+  delete precioEl.dataset.moneyRaw;
+  subEl.readOnly = false;
+  subEl.tabIndex = 0;
+}
+
 function agregarItem() {
+  const subEl = document.getElementById('nSub');
+  if(subEl.value.trim() && !subEl.readOnly) updatePreview('subtotal');
   const cant  = parseMonto(document.getElementById('nCant').value)  || 1;
   const desc  = document.getElementById('nDesc').value.trim();
   let precio= parseMonto(document.getElementById('nPrecio').value);
@@ -718,10 +739,7 @@ function agregarItem() {
   if(!precio && subtotal) precio = subtotal / cant;
   if(!desc && !precio) return;
   items.push({cant, desc, precio});
-  document.getElementById('nCant').value  = '';
-  document.getElementById('nDesc').value  = '';
-  document.getElementById('nPrecio').value= '';
-  document.getElementById('nSub').value = '';
+  limpiarFilaAgregar();
   renderItems();
   setTimeout(() => document.getElementById('nCant').focus(), 30);
 }
@@ -951,10 +969,7 @@ function _hacerLimpiar(msg) {
   remitoDraftReady = false;
   items = [];
   document.getElementById('cliente').value = '';
-  document.getElementById('nCant').value = '';
-  document.getElementById('nDesc').value = '';
-  document.getElementById('nPrecio').value= '';
-  document.getElementById('nSub').value = '';
+  limpiarFilaAgregar();
   clearRemitoDraft();
   initDp();
   renderItems();
