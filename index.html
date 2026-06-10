@@ -58,7 +58,7 @@
   })();
 </script>
 <script defer src="https://cdn.jsdelivr.net/npm/@splidejs/splide@4.1.4/dist/js/splide.min.js"></script>
-<script defer src="funciones.js"></script>
+<script defer src="funciones.js?v=20260610-menu-session"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -3248,6 +3248,10 @@ const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que uste
 onSnapshot(doc(db, 'config', 'popup'), snap => {
   const params = new URLSearchParams(location.search);
   if (params.has('articulo') || params.has('prodeRef') || location.hash === '#prode') return;
+  if (window.CorralonFunciones?.isMenuSessionActive?.()) {
+    document.getElementById('popupBg')?.classList.add('hidden');
+    return;
+  }
   const url = snap.exists() ? snap.data().url : null;
   if(url) {
     document.getElementById('popupImg').src = url;
@@ -4662,9 +4666,12 @@ function setupPublicListObserver() {
   publicListObserver.observe(sentinel);
 }
 
-function finalizePublicWindowRender() {
+function finalizePublicWindowRender({ restoreActiveIndex = -1 } = {}) {
   disconnectPublicListObserver();
   requestAnimationFrame(() => {
+    if (restoreActiveIndex >= 0) {
+      setResultadoActivo(restoreActiveIndex, { focus: true, scroll: false });
+    }
     publicWindowAdvancing = false;
     setupPublicListObserver();
   });
@@ -4727,16 +4734,84 @@ async function copiarTextoSeguro(texto) {
   }
 }
 
+function linkArticuloDirecto(codigo, articulo = null, titulo = '') {
+  const url = new URL(location.href);
+  url.hash = '';
+  url.searchParams.set('articulo', codigo);
+  const foto = String(articulo?.fotoUrl || '').trim();
+  if (foto) {
+    const precio = Number(articulo?.precioVigente ?? articulo?.precio ?? 0);
+    url.searchParams.set('previewImg', foto);
+    url.searchParams.set('previewTitulo', titulo || 'Articulo Corralon Progreso');
+    if (precio > 0) url.searchParams.set('previewPrecio', fmtPrecio(precio));
+  }
+  return url.toString();
+}
+
+function extensionImagenCompartir(type, fotoUrl) {
+  const mime = String(type || '').toLowerCase();
+  if (mime.includes('png')) return 'png';
+  if (mime.includes('webp')) return 'webp';
+  if (mime.includes('gif')) return 'gif';
+  const match = String(fotoUrl || '').split('?')[0].match(/\.([a-z0-9]{2,5})$/i);
+  return match ? match[1].toLowerCase() : 'jpg';
+}
+
+function nombreArchivoImagenCompartir(titulo, extension) {
+  const base = String(titulo || 'articulo-corralon')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'articulo-corralon';
+  return `${base}.${extension || 'jpg'}`;
+}
+
+async function obtenerArchivoImagenCompartir(fotoUrl, titulo) {
+  const url = String(fotoUrl || '').trim();
+  if (!url || !navigator.canShare) return null;
+  try {
+    const response = await fetch(url, { mode: 'cors' });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) return null;
+    const extension = extensionImagenCompartir(blob.type, url);
+    const file = new File([blob], nombreArchivoImagenCompartir(titulo, extension), { type: blob.type || `image/${extension}` });
+    return navigator.canShare({ files: [file] }) ? file : null;
+  } catch (error) {
+    console.warn('No se pudo preparar la imagen para compartir', error);
+    return null;
+  }
+}
+
+async function compartirConImagenSiSePuede(articulo, titulo, linkDirecto) {
+  const foto = String(articulo?.fotoUrl || '').trim();
+  if (!foto || !navigator.share || !matchMedia('(max-width: 768px)').matches) return false;
+  const file = await obtenerArchivoImagenCompartir(foto, titulo);
+  if (!file) return false;
+  try {
+    await navigator.share({
+      title: titulo,
+      text: `${titulo}\n${linkDirecto}`,
+      files: [file]
+    });
+    return true;
+  } catch (error) {
+    if (error?.name === 'AbortError') return true;
+    return false;
+  }
+}
+
 async function compartirDetalleProducto() {
   const codigo = productDetailAdminCode || document.getElementById('productDetailCode')?.textContent || '';
   if(!codigo) return;
-  const url = new URL(location.href);
-  url.searchParams.set('articulo', codigo);
-  const link = url.toString();
-  await copiarTextoSeguro(link);
-  const titulo = document.getElementById('productDetailTitle')?.textContent || 'Artículo';
+  const articulo = buscarArticuloPorCodigoFlexible(codigo) || buscarArticuloPorCodigo(codigo);
+  const titulo = document.getElementById('productDetailTitle')?.textContent || obtenerDescripcionArticulo(articulo).principal || 'Articulo';
+  const linkDirecto = linkArticuloDirecto(codigo, articulo, titulo);
+  if (articulo && await compartirConImagenSiSePuede(articulo, titulo, linkDirecto)) return;
+  await copiarTextoSeguro(linkDirecto);
   if(navigator.share && matchMedia('(max-width: 768px)').matches) {
-    try { await navigator.share({ title: titulo, text: titulo, url: link }); } catch {}
+    try { await navigator.share({ title: titulo, text: titulo, url: linkDirecto }); } catch {}
   } else {
     mostrarAvisoCarrito('Link copiado');
   }
@@ -5027,8 +5102,12 @@ function obtenerElementosResultado() {
   return [...document.querySelectorAll('#scrollBody [data-result-item]')];
 }
 
-function limpiarResultadoActivo() {
+function quitarClaseResultadoActivo() {
   obtenerElementosResultado().forEach((item) => item.classList.remove('resultado-activo'));
+}
+
+function limpiarResultadoActivo() {
+  quitarClaseResultadoActivo();
   resultadoActivoIndex = -1;
 }
 
@@ -5071,15 +5150,35 @@ function obtenerPasoResultadoPorDireccion(direccion) {
   return 0;
 }
 
+function totalResultadosNavegables() {
+  return (listaFiltradaActual && listaFiltradaActual.length)
+    ? listaFiltradaActual.length
+    : obtenerElementosResultado().length;
+}
+
+function asegurarResultadoRenderizado(index) {
+  const total = totalResultadosNavegables();
+  if (index < 0 || index >= total) return true;
+  if (index < obtenerElementosResultado().length) return true;
+  if (publicWindowAdvancing) return false;
+  publicWindowCount = Math.min(total, Math.max(index + 1, publicWindowCount + ITEMS_POR_PAGINA));
+  publicWindowAdvancing = true;
+  renderProductos(listaFiltradaActual, { preserveWindow: true, restoreActiveIndex: index });
+  return false;
+}
+
 function moverResultadoActivo(direccion) {
   const items = obtenerElementosResultado();
   if (!items.length) return false;
   const paso = obtenerPasoResultadoPorDireccion(direccion);
   if (!paso) return false;
-  const base = resultadoActivoIndex >= 0
-    ? resultadoActivoIndex
-    : (paso > 0 ? 0 : items.length - 1);
-  return setResultadoActivo(base + paso, { focus: true, scroll: true });
+  const total = totalResultadosNavegables();
+  if (!total) return false;
+  const destino = resultadoActivoIndex >= 0
+    ? Math.max(0, Math.min(resultadoActivoIndex + paso, total - 1))
+    : (paso > 0 ? 0 : total - 1);
+  if (!asegurarResultadoRenderizado(destino)) return true;
+  return setResultadoActivo(destino, { focus: true, scroll: true });
 }
 
 function devolverFocoBusqueda({ seleccionar = true } = {}) {
@@ -5155,14 +5254,21 @@ function abrirDetalleProducto(codigo) {
   });
 }
 
-function renderProductos(lista, { preserveWindow = false } = {}) {
+function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = null } = {}) {
   const body   = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
+  const resultadoActivoPrevio = preserveWindow
+    ? (Number.isInteger(restoreActiveIndex) ? restoreActiveIndex : resultadoActivoIndex)
+    : -1;
   destroyHomeCarouselInstances();
   body.classList.remove('home-mode');
   estado.classList.remove('home-state');
   listaFiltradaActual = lista;
-  limpiarResultadoActivo();
+  if (preserveWindow) {
+    quitarClaseResultadoActivo();
+  } else {
+    limpiarResultadoActivo();
+  }
   if (!preserveWindow) resetPublicWindow();
   if (!lista.length) {
     disconnectPublicListObserver();
@@ -5229,7 +5335,7 @@ function renderProductos(lista, { preserveWindow = false } = {}) {
         ${filasHtml}
       </div>
     </div>${sentinelHtml}`;
-    finalizePublicWindowRender();
+    finalizePublicWindowRender({ restoreActiveIndex: resultadoActivoPrevio });
     return;
   }
   const cardsHtml = paginaItems.map(a => {
@@ -5273,7 +5379,7 @@ function renderProductos(lista, { preserveWindow = false } = {}) {
     </div>`;
   }).join('');
   body.innerHTML = `<div class="productos-grid">${cardsHtml}</div>${sentinelHtml}`;
-  finalizePublicWindowRender();
+  finalizePublicWindowRender({ restoreActiveIndex: resultadoActivoPrevio });
 }
 
 function renderContenidoActual() {
