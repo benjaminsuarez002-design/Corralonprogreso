@@ -2,6 +2,7 @@
   const KEEP_LOGIN_KEY = 'historial_keep_logged_v1';
   const ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
   const ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
+  const ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
   const USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
   const USERS_COLLECTION = 'menuUsuarios';
   const ALL_MENU_IDS = ['lista', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'proveedores', 'listas_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
@@ -55,6 +56,7 @@
     localStorage.removeItem(KEEP_LOGIN_KEY);
     localStorage.removeItem(ACTIVE_USER_KEY);
     localStorage.removeItem(ACTIVE_USER_SNAPSHOT_KEY);
+    try { sessionStorage.removeItem(ACTIVE_USER_SESSION_KEY); } catch (_) {}
   }
 
   function normalizeUser(raw = {}) {
@@ -90,6 +92,7 @@
     if (!user?.id) return;
     localStorage.setItem(ACTIVE_USER_KEY, user.id);
     localStorage.setItem(ACTIVE_USER_SNAPSHOT_KEY, JSON.stringify(user));
+    try { sessionStorage.setItem(ACTIVE_USER_SESSION_KEY, JSON.stringify(user)); } catch (_) {}
   }
 
   function loadScript(src) {

@@ -672,7 +672,7 @@
     body.popup-mode .app { grid-template-rows: 1fr auto; }
   </style>
   <script src="nav-helper.js"></script>
-  <script src="funciones.js"></script>
+  <script src="funciones.js?v=20260610-menu-session"></script>
   <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="listas_proveedores"></script>
 </head>
 <body>
@@ -894,6 +894,7 @@
     const LISTAS_PROVEEDORES_SYNC_KEY = 'corralon_listasproveedores_tab_sync';
     let listasProveedoresSyncReady = false;
     let listasProveedoresChannel = null;
+    let listasTableNavigator = null;
 
     function applyListasColumnWidths() {
       document.documentElement.style.setProperty('--listas-grid-columns', listasColumnWidths.map((width) => `${Math.max(70, Number(width) || 100)}px`).join(' '));
@@ -911,6 +912,30 @@
         headerSelector: '[data-resize-col]',
         minWidth: 70,
         apply: applyListasColumnWidths
+      });
+    }
+
+    function initListasTableNavigation() {
+      if (!window.CorralonFunciones?.createVirtualTableNavigator) return;
+      listasTableNavigator = CorralonFunciones.createVirtualTableNavigator({
+        viewport: el.viewport,
+        rowsRoot: el.rows,
+        rowHeight: ROW_HEIGHT,
+        colCount: 4,
+        cellSelector: '.row [data-col]',
+        getTotal: () => state.matchCount,
+        getCell: (matchIndex, col) => el.rows.querySelector(`.row[data-match-index="${matchIndex}"] [data-col="${col}"]`),
+        getRowIndex: (cell) => Number(cell?.closest?.('.row')?.dataset.matchIndex ?? state.tableNav.matchIndex),
+        getCol: (cell) => Number(cell?.dataset.col ?? state.tableNav.col),
+        onPositionChange: (matchIndex, col) => {
+          state.tableNav.matchIndex = matchIndex;
+          state.tableNav.col = col;
+        },
+        onPendingChange: (pending) => {
+          state.tableNav.pending = pending ? { matchIndex: pending.row, col: pending.col } : null;
+        },
+        focusRendered: focusRenderedTableCell,
+        requestSlice
       });
     }
 
@@ -1573,6 +1598,7 @@
       return false;
     }
     function focusPendingTableCell() {
+      if (listasTableNavigator?.focusPending()) return;
       const pending = state.tableNav.pending;
       if (!pending) return;
       if (focusRenderedTableCell(pending.matchIndex, pending.col)) state.tableNav.pending = null;
@@ -1619,6 +1645,10 @@
       return true;
     }
     function focusTableCell(matchIndex = 0, col = 0, fromIndex = null) {
+      if (listasTableNavigator) {
+        listasTableNavigator.focusCell(matchIndex, col, fromIndex);
+        return;
+      }
       if (!state.matchCount) return;
       const nextIndex = Math.max(0, Math.min(state.matchCount - 1, matchIndex));
       const nextCol = Math.max(0, Math.min(3, col));
@@ -2737,6 +2767,7 @@
       }
       const activeCell = document.activeElement?.closest?.('.row [data-col]');
       if (activeCell && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+        if (listasTableNavigator?.moveFromActive(event)) return;
         event.preventDefault();
         const rowEl = activeCell.closest('.row');
         const currentIndex = Number(rowEl?.dataset.matchIndex ?? state.tableNav.matchIndex);
@@ -2758,6 +2789,7 @@
     async function init() {
       state.db = await openDb();
       initListasColumnResize();
+      initListasTableNavigation();
       syncResponsiveScale();
       renderSlots();
       loadProviderDates();

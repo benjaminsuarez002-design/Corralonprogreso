@@ -1079,6 +1079,7 @@ const HOME_LANDING_DOC_ID = 'homeLanding';
 const STOCK_NOTICE_DOC_ID = 'stockNotice';
 const PRODE_CONFIG_DOC_ID = 'prodeMundial';
 const PRODE_PLAYERS_COLLECTION = 'prode_mundial_participantes';
+const PRODE_FIXTURE_VERSION = 'grupos-2026-v1';
 const PRODE_PARTIDOS = [
   { id:'gA1', grupo:'Grupo A', fecha:'11/06 16:00', label:'Mexico vs Sudafrica' },
   { id:'gA2', grupo:'Grupo A', fecha:'11/06 23:00', label:'Corea del Sur vs Republica Checa' },
@@ -1318,18 +1319,31 @@ window.guardarProdeResultados = async function() {
     resultadosReales[id][field] = input.value === '' ? '' : Number(input.value);
   });
   try {
-    await setDoc(doc(db, 'config', PRODE_CONFIG_DOC_ID), { resultadosReales, updated_at: new Date().toISOString() }, { merge:true });
+    await setDoc(doc(db, 'config', PRODE_CONFIG_DOC_ID), {
+      resultadosReales,
+      fixtureVersion: PRODE_FIXTURE_VERSION,
+      partidosFixture: PRODE_PARTIDOS.length,
+      updated_at: new Date().toISOString()
+    }, { merge:true });
     const snap = await getDocs(collection(db, PRODE_PLAYERS_COLLECTION));
     let batch = writeBatch(db);
     let count = 0;
+    const commits = [];
     snap.forEach((jugador) => {
       const data = jugador.data() || {};
       const puntos = calcularPuntosProdeJugador(data.resultados || {}, resultadosReales, data.puntosCompartidos || data.compartidos || 0);
-      batch.set(jugador.ref, { puntos, puntosProde: puntos, updated_at: new Date().toISOString() }, { merge:true });
+      batch.set(jugador.ref, {
+        puntos,
+        puntosProde: puntos,
+        fixtureVersion: PRODE_FIXTURE_VERSION,
+        partidosFixture: PRODE_PARTIDOS.length,
+        updated_at: new Date().toISOString()
+      }, { merge:true });
       count++;
-      if(count % 450 === 0) { batch.commit(); batch = writeBatch(db); }
+      if(count % 450 === 0) { commits.push(batch.commit()); batch = writeBatch(db); }
     });
-    await batch.commit();
+    commits.push(batch.commit());
+    await Promise.all(commits);
     toast('Resultados guardados y puntos recalculados', 'ok');
   } catch(e) {
     console.error(e);

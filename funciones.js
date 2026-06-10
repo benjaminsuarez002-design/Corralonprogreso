@@ -508,6 +508,150 @@
     };
   }
 
+  function createVirtualTableNavigator(options = {}) {
+    const viewport = options.viewport;
+    const rowsRoot = options.rowsRoot || options.root || document;
+    const rowHeight = Math.max(1, Number(options.rowHeight || 24));
+    const cellSelector = options.cellSelector || '[data-col]';
+    const colCount = Math.max(1, Number(options.colCount || 1));
+    const requestSlice = typeof options.requestSlice === 'function' ? options.requestSlice : null;
+    const onPositionChange = typeof options.onPositionChange === 'function' ? options.onPositionChange : null;
+    const onPendingChange = typeof options.onPendingChange === 'function' ? options.onPendingChange : null;
+    const focusRendered = typeof options.focusRendered === 'function' ? options.focusRendered : null;
+    const getTotal = typeof options.getTotal === 'function' ? options.getTotal : () => Number(options.total || 0);
+    const getCell = typeof options.getCell === 'function'
+      ? options.getCell
+      : (row, col) => rowsRoot?.querySelector?.(`[data-match-index="${row}"] [data-col="${col}"]`);
+    const getRowIndex = typeof options.getRowIndex === 'function'
+      ? options.getRowIndex
+      : (cell) => Number(cell?.closest?.('[data-match-index]')?.dataset?.matchIndex);
+    const getCol = typeof options.getCol === 'function'
+      ? options.getCol
+      : (cell) => Number(cell?.dataset?.col);
+    let pending = null;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function activeCell() {
+      return document.activeElement?.closest?.(cellSelector) || null;
+    }
+
+    function setPending(value) {
+      pending = value;
+      if (onPendingChange) onPendingChange(pending);
+    }
+
+    function scrollIndexIntoView(row, fromRow = null) {
+      if (!viewport) return false;
+      const viewTop = viewport.scrollTop;
+      const direction = Number.isFinite(fromRow) ? Math.sign(row - fromRow) : 0;
+      const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      const current = activeCell();
+
+      if (current && direction) {
+        const currentRow = current.closest?.('[data-match-index], .row');
+        const rowRect = currentRow?.getBoundingClientRect?.();
+        const viewportRect = viewport.getBoundingClientRect?.();
+        if (rowRect && viewportRect) {
+          const topWall = viewportRect.top + 1;
+          const bottomWall = viewportRect.top + viewport.clientHeight - 1;
+          let nextTop = null;
+          if (direction > 0 && rowRect.bottom >= bottomWall) nextTop = viewTop + rowHeight;
+          else if (direction < 0 && rowRect.top <= topWall) nextTop = viewTop - rowHeight;
+          if (nextTop !== null) {
+            viewport.scrollTop = clamp(nextTop, 0, maxTop);
+            return Math.abs(viewport.scrollTop - viewTop) >= 1;
+          }
+        }
+      }
+
+      const viewBottom = viewTop + viewport.clientHeight;
+      const targetTop = row * rowHeight;
+      const targetBottom = targetTop + rowHeight;
+      const fromTop = Number.isFinite(fromRow) ? fromRow * rowHeight : targetTop;
+      const fromBottom = fromTop + rowHeight;
+      let nextTop = viewTop;
+      if (direction > 0 && fromBottom >= viewBottom - 1) nextTop = viewTop + rowHeight;
+      else if (direction < 0 && fromTop <= viewTop + 1) nextTop = viewTop - rowHeight;
+      else if (targetTop < viewTop) nextTop = targetTop;
+      else if (targetBottom > viewBottom) nextTop = targetBottom - viewport.clientHeight;
+      if (Math.abs(nextTop - viewTop) < 1) return false;
+      viewport.scrollTop = clamp(nextTop, 0, maxTop);
+      return true;
+    }
+
+    function focusCell(row = 0, col = 0, fromRow = null) {
+      const total = Math.max(0, Number(getTotal()) || 0);
+      if (!total) return false;
+      const nextRow = clamp(Number(row) || 0, 0, total - 1);
+      const nextCol = clamp(Number(col) || 0, 0, colCount - 1);
+      if (onPositionChange) onPositionChange(nextRow, nextCol);
+      const didScroll = scrollIndexIntoView(nextRow, fromRow);
+      setPending({ row: nextRow, col: nextCol });
+      if (didScroll) {
+        if (requestSlice) requestSlice();
+        return true;
+      }
+      const rendered = focusRendered
+        ? focusRendered(nextRow, nextCol)
+        : (getCell(nextRow, nextCol)?.focus?.(), Boolean(getCell(nextRow, nextCol)));
+      if (rendered) {
+        setPending(null);
+        return true;
+      }
+      if (viewport) viewport.scrollTop = nextRow * rowHeight;
+      if (requestSlice) requestSlice();
+      return true;
+    }
+
+    function focusPending() {
+      if (!pending) return false;
+      const rendered = focusRendered
+        ? focusRendered(pending.row, pending.col)
+        : (getCell(pending.row, pending.col)?.focus?.(), Boolean(getCell(pending.row, pending.col)));
+      if (rendered) {
+        setPending(null);
+        return true;
+      }
+      return false;
+    }
+
+    function moveFromCell(cell, rowDelta, colDelta, event) {
+      if (!cell) return false;
+      const row = getRowIndex(cell);
+      const col = getCol(cell);
+      if (!Number.isFinite(row) || !Number.isFinite(col)) return false;
+      const moved = focusCell(row + rowDelta, col + colDelta, row);
+      if (moved) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+      }
+      return moved;
+    }
+
+    function moveFromActive(event) {
+      const delta = {
+        ArrowLeft: [0, -1],
+        ArrowRight: [0, 1],
+        ArrowUp: [-1, 0],
+        ArrowDown: [1, 0]
+      }[event?.key];
+      if (!delta) return false;
+      return moveFromCell(activeCell(), delta[0], delta[1], event);
+    }
+
+    return {
+      focusCell,
+      focusPending,
+      moveFromActive,
+      moveFromCell,
+      scrollIndexIntoView,
+      getPending: () => pending
+    };
+  }
+
   function bindTableSelectPaste(options = {}) {
     const root = options.root || document;
     const cellSelector = options.cellSelector || '[data-row][data-col]';
@@ -843,6 +987,38 @@
     };
   }
 
+  const MENU_KEEP_LOGIN_KEY = 'historial_keep_logged_v1';
+  const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
+  const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
+  const MENU_ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
+
+  function storageValue(storage, key) {
+    try { return storage?.getItem?.(key) || ''; } catch { return ''; }
+  }
+
+  function storageJson(storage, key) {
+    try {
+      const raw = storageValue(storage, key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function menuSessionUser() {
+    const sessionUser = storageJson(sessionStorage, MENU_ACTIVE_USER_SESSION_KEY);
+    if (sessionUser?.id) return sessionUser;
+    const keepLogged = storageValue(localStorage, MENU_KEEP_LOGIN_KEY) === '1';
+    const activeId = storageValue(localStorage, MENU_ACTIVE_USER_KEY).trim();
+    if (!keepLogged || !activeId) return null;
+    const snapshot = storageJson(localStorage, MENU_ACTIVE_USER_SNAPSHOT_KEY);
+    return snapshot?.id === activeId ? snapshot : { id: activeId };
+  }
+
+  function isMenuSessionActive() {
+    return Boolean(menuSessionUser());
+  }
+
   window.CorralonFunciones = {
     deepClone,
     statesEqual,
@@ -856,9 +1032,12 @@
     bindDropdownOnlyWhenTyping,
     bindDropdownF4,
     bindGridNavigation,
+    createVirtualTableNavigator,
     bindTableSelectPaste,
     bindTableSort,
     bindResizableColumns,
-    bindLinearNavigation
+    bindLinearNavigation,
+    menuSessionUser,
+    isMenuSessionActive
   };
 })();
