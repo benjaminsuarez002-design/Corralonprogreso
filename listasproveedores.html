@@ -109,6 +109,41 @@
       background: linear-gradient(90deg, var(--acento), #17c7ff);
       transition: width .18s ease;
     }
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+      background: #eaf8ff;
+      color: #0056b3;
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+    }
+    .loading-overlay.hidden { display: none; }
+    .loading-spinner {
+      width: 42px;
+      height: 42px;
+      border: 4px solid #b7e4ff;
+      border-top-color: #006fc9;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    .loading-title {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .loading-detail {
+      color: #53718d;
+      font-family: Barlow, Arial, sans-serif;
+      font-size: 14px;
+      font-weight: 800;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .btn {
       height: 36px;
       border: 1px solid #8490a0;
@@ -676,6 +711,11 @@
   <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="listas_proveedores"></script>
 </head>
 <body>
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-title">Cargando lista...</div>
+    <div class="loading-detail" id="loadingDetail">Preparando comparador</div>
+  </div>
   <div class="app">
     <header class="topbar">
       <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Corralon Progreso">
@@ -845,7 +885,8 @@
       tableNav: { matchIndex: 0, col: 0, pending: null },
       currentRows: [],
       lastSyncAt: '',
-      latestUpdates: []
+      latestUpdates: [],
+      loadResolver: null
     };
     const el = {
       status: document.getElementById('statusText'),
@@ -889,6 +930,13 @@
       updatesCloseBtn: document.getElementById('updatesCloseBtn'),
       fileInput: document.getElementById('fileInput')
     };
+    function setLoadingDetail(text) {
+      const loadingDetail = document.getElementById('loadingDetail');
+      if (loadingDetail) loadingDetail.textContent = text;
+    }
+    function hideLoadingOverlay() {
+      document.getElementById('loadingOverlay')?.classList.add('hidden');
+    }
 
     const LISTAS_PROVEEDORES_TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const LISTAS_PROVEEDORES_SYNC_KEY = 'corralon_listasproveedores_tab_sync';
@@ -1418,6 +1466,10 @@
         requestFilter();
         syncComparisonHeight();
         setStatus(`${msg.total.toLocaleString('es-AR')} artículos cargados · ${syncLabel()}`);
+        if (state.loadResolver) {
+          state.loadResolver(true);
+          state.loadResolver = null;
+        }
       }
       if (msg.type === 'filtered') {
         state.matchCount = msg.count;
@@ -2442,7 +2494,10 @@
       const local = await idbGet('meta', 'principal').catch(() => null);
       state.lastSyncAt = local?.last_provider_sync_at || local?.updated_at || state.lastSyncAt;
       state.worker = state.worker || createWorker();
-      workerPost({ type: 'load', rows });
+      await new Promise((resolve) => {
+        state.loadResolver = resolve;
+        workerPost({ type: 'load', rows });
+      });
       return true;
     }
     async function checkCloudUpdates(options = {}) {
@@ -2787,21 +2842,24 @@
       }
     });
     async function init() {
-      state.db = await openDb();
-      initListasColumnResize();
-      initListasTableNavigation();
-      syncResponsiveScale();
-      renderSlots();
-      loadProviderDates();
-      renderExcludeRows();
-      syncComparisonHeight();
-      applyBaseFromUrl();
-      aplicarCodigoDesdeAccessYCerrarDuplicadas();
-      window.addEventListener('resize', syncResponsiveScale);
       try {
+        setLoadingDetail('Abriendo base local');
+        state.db = await openDb();
+        initListasColumnResize();
+        initListasTableNavigation();
+        syncResponsiveScale();
+        renderSlots();
+        loadProviderDates();
+        renderExcludeRows();
+        syncComparisonHeight();
+        applyBaseFromUrl();
+        aplicarCodigoDesdeAccessYCerrarDuplicadas();
+        window.addEventListener('resize', syncResponsiveScale);
+        setLoadingDetail('Cargando lista completa');
         setStatus('Cargando lista local...');
         const hadCache = await loadCacheIntoWorker();
         if (hadCache) {
+          setLoadingDetail('Lista preparada');
           setStatus(localListStatus(state.total));
           setTimeout(() => {
             checkCloudUpdates().catch((error) => {
@@ -2811,17 +2869,24 @@
           }, 0);
           return;
         }
+        setLoadingDetail('Importando desde Supabase');
         setStatus('Sin cache local. Importando desde Supabase...');
         await importFromCloud();
       } catch (error) {
+        setLoadingDetail('Reintentando con cache local');
         const rows = await idbAllArticles();
         if (rows.length) {
           state.worker = createWorker();
-          workerPost({ type: 'load', rows });
+          await new Promise((resolve) => {
+            state.loadResolver = resolve;
+            workerPost({ type: 'load', rows });
+          });
           setStatus('Lista local cargada. No pude sincronizar Supabase.');
         } else {
           setStatus('Subí el Excel o importá la lista desde Supabase.');
         }
+      } finally {
+        hideLoadingOverlay();
       }
     }
     init();
