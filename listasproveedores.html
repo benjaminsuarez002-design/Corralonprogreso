@@ -143,6 +143,29 @@
       font-size: 14px;
       font-weight: 800;
     }
+    .loading-progress {
+      width: min(380px, 82vw);
+      height: 9px;
+      border: 1px solid #b7e4ff;
+      border-radius: 999px;
+      background: #f5fcff;
+      overflow: hidden;
+      box-shadow: inset 0 1px 3px rgba(0,86,179,.12);
+    }
+    .loading-progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #006fc9, #17c7ff, #f6c84c);
+      transition: width .18s ease;
+    }
+    .loading-progress-text {
+      min-height: 16px;
+      color: #006fc9;
+      font-family: Barlow, Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 900;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
     .btn {
       height: 36px;
@@ -714,6 +737,8 @@
   <div class="loading-overlay" id="loadingOverlay">
     <div class="loading-spinner"></div>
     <div class="loading-title">Cargando lista...</div>
+    <div class="loading-progress"><div class="loading-progress-fill" id="loadingProgressFill"></div></div>
+    <div class="loading-progress-text" id="loadingProgressText">0%</div>
     <div class="loading-detail" id="loadingDetail">Preparando comparador</div>
   </div>
   <div class="app">
@@ -934,6 +959,13 @@
       const loadingDetail = document.getElementById('loadingDetail');
       if (loadingDetail) loadingDetail.textContent = text;
     }
+    function setLoadingProgress(value = 0) {
+      const pct = Math.max(0, Math.min(100, Number(value) || 0));
+      const fill = document.getElementById('loadingProgressFill');
+      const text = document.getElementById('loadingProgressText');
+      if (fill) fill.style.width = `${pct}%`;
+      if (text) text.textContent = `${Math.round(pct)}%`;
+    }
     function hideLoadingOverlay() {
       document.getElementById('loadingOverlay')?.classList.add('hidden');
     }
@@ -1121,9 +1153,11 @@
     }
     function setStatus(message) {
       el.status.textContent = message;
+      if (!document.getElementById('loadingOverlay')?.classList.contains('hidden')) setLoadingDetail(message);
     }
     function setSyncProgress(value = 0, visible = true) {
       const pct = Math.max(0, Math.min(100, Number(value) || 0));
+      if (!document.getElementById('loadingOverlay')?.classList.contains('hidden')) setLoadingProgress(pct);
       if (!el.syncProgress || !el.syncProgressFill) return;
       el.syncProgress.classList.toggle('active', Boolean(visible));
       el.syncProgressFill.style.width = `${pct}%`;
@@ -2194,9 +2228,11 @@
       return out;
     }
     async function downloadRemoteArticles(meta) {
+      setSyncProgress(8);
       await idbClear('articulos');
       let from = 0;
       let total = 0;
+      const expectedTotal = Number(meta?.total_articulos || 0) || 0;
       while (true) {
         const to = from + PAGE_SIZE - 1;
         const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&order=idorden.asc`, {
@@ -2208,9 +2244,12 @@
         await idbBulkPut(rows);
         total += rows.length;
         setStatus(`Descargando lista ${total.toLocaleString('es-AR')} artículos`);
+        if (expectedTotal) setSyncProgress(8 + Math.min(82, (total / expectedTotal) * 82));
+        else setSyncProgress(Math.min(90, 8 + total / 2500));
         from += PAGE_SIZE;
         if (rows.length < PAGE_SIZE) break;
       }
+      setSyncProgress(94);
       const syncMeta = { id: 'principal', ...meta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() };
       state.lastSyncAt = syncMeta.last_provider_sync_at;
       await idbSet('meta', syncMeta);
@@ -2489,8 +2528,12 @@
       return true;
     }
     async function loadCacheIntoWorker() {
+      setLoadingProgress(18);
+      setLoadingDetail('Leyendo base local');
       const rows = await idbAllArticles();
       if (!rows.length) return false;
+      setLoadingProgress(72);
+      setLoadingDetail(`Preparando ${rows.length.toLocaleString('es-AR')} articulos`);
       const local = await idbGet('meta', 'principal').catch(() => null);
       state.lastSyncAt = local?.last_provider_sync_at || local?.updated_at || state.lastSyncAt;
       state.worker = state.worker || createWorker();
@@ -2498,6 +2541,7 @@
         state.loadResolver = resolve;
         workerPost({ type: 'load', rows });
       });
+      setLoadingProgress(96);
       return true;
     }
     async function checkCloudUpdates(options = {}) {
@@ -2843,6 +2887,7 @@
     });
     async function init() {
       try {
+        setLoadingProgress(3);
         setLoadingDetail('Abriendo base local');
         state.db = await openDb();
         initListasColumnResize();
@@ -2855,10 +2900,12 @@
         applyBaseFromUrl();
         aplicarCodigoDesdeAccessYCerrarDuplicadas();
         window.addEventListener('resize', syncResponsiveScale);
+        setLoadingProgress(10);
         setLoadingDetail('Cargando lista completa');
         setStatus('Cargando lista local...');
         const hadCache = await loadCacheIntoWorker();
         if (hadCache) {
+          setLoadingProgress(100);
           setLoadingDetail('Lista preparada');
           setStatus(localListStatus(state.total));
           setTimeout(() => {
@@ -2870,10 +2917,13 @@
           return;
         }
         setLoadingDetail('Importando desde Supabase');
+        setLoadingProgress(6);
         setStatus('Sin cache local. Importando desde Supabase...');
         await importFromCloud();
+        setLoadingProgress(100);
       } catch (error) {
         setLoadingDetail('Reintentando con cache local');
+        setLoadingProgress(12);
         const rows = await idbAllArticles();
         if (rows.length) {
           state.worker = createWorker();
@@ -2881,12 +2931,13 @@
             state.loadResolver = resolve;
             workerPost({ type: 'load', rows });
           });
+          setLoadingProgress(100);
           setStatus('Lista local cargada. No pude sincronizar Supabase.');
         } else {
           setStatus('Subí el Excel o importá la lista desde Supabase.');
         }
       } finally {
-        hideLoadingOverlay();
+        setTimeout(hideLoadingOverlay, 160);
       }
     }
     init();
