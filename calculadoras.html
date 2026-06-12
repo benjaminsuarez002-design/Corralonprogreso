@@ -595,6 +595,7 @@
           .filter((provider) => provider?.id_proveedor && provider?.proveedor)
           .sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
         renderProviderDropdown(false);
+        aplicarProveedorPendiente();
         if (providerInput?.value) applyProvider(providerInput.value);
       };
       try {
@@ -1267,6 +1268,7 @@
     const calculadorasInstanceId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let calculadorasChannel = null;
     let calculadorasHeartbeat = null;
+    let proveedorPendienteUrl = '';
 
     function extraerPrecioLista(texto) {
       const match = String(texto || '').match(/PRECIO\s*LISTA\s*=\s*([^\r\n]+)/i);
@@ -1283,6 +1285,35 @@
       prelista.focus();
       try { prelista.select(); } catch (_) {}
       return true;
+    }
+
+    function leerProveedorDesdeUrl() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('proveedor') || params.get('id_proveedor') || params.get('idProveedor') || '';
+    }
+
+    function aplicarProveedorExterno(valor) {
+      const raw = String(valor || '').trim();
+      if (!providerInput || !raw) return false;
+      const provider = providerMatchesText(raw) || providerState.rows.find((item) => String(item.id_proveedor || '').trim() === raw);
+      if (provider) {
+        providerInput.value = providerDisplay(provider);
+        renderProviderDropdown(false);
+        applyProvider(providerInput.value);
+        return true;
+      }
+      providerInput.value = raw;
+      proveedorPendienteUrl = raw;
+      renderProviderDropdown(false);
+      applyProvider(raw);
+      return false;
+    }
+
+    function aplicarProveedorPendiente() {
+      if (!proveedorPendienteUrl) return false;
+      const ok = aplicarProveedorExterno(proveedorPendienteUrl);
+      if (ok) proveedorPendienteUrl = '';
+      return ok;
     }
 
     function leerPrecioListaDesdeUrl() {
@@ -1330,6 +1361,8 @@
     }
 
     async function iniciarCapturaPrecioLista() {
+      const proveedor = leerProveedorDesdeUrl();
+      if (proveedor) aplicarProveedorExterno(proveedor);
       const precio = await obtenerPrecioListaEntrante();
       if (precio) aplicarPrecioListaExterno(precio);
     }
@@ -1343,8 +1376,9 @@
           const data = event.data || {};
           if (data.id === calculadorasInstanceId) return;
 
-          if (data.type === 'precio-lista' && data.valor) {
-            aplicarPrecioListaExterno(data.valor);
+          if (data.type === 'precio-lista' && (data.valor || data.proveedor)) {
+            if (data.proveedor) aplicarProveedorExterno(data.proveedor);
+            if (data.valor) aplicarPrecioListaExterno(data.valor);
             marcarEstaPestanaActiva();
             window.focus();
           }
@@ -1360,8 +1394,9 @@
         try {
           const data = JSON.parse(event.newValue);
           if (data.id === calculadorasInstanceId) return;
-          if (data.valor) {
-            aplicarPrecioListaExterno(data.valor);
+          if (data.valor || data.proveedor) {
+            if (data.proveedor) aplicarProveedorExterno(data.proveedor);
+            if (data.valor) aplicarPrecioListaExterno(data.valor);
             marcarEstaPestanaActiva();
             window.focus();
           }
@@ -1370,17 +1405,19 @@
 
       if (yaAbierta) {
         const precio = await obtenerPrecioListaEntrante();
-        if (precio) {
+        const proveedor = leerProveedorDesdeUrl();
+        if (precio || proveedor) {
           try {
             localStorage.setItem('corralon_calculadoras_precio_lista', JSON.stringify({
               valor: precio,
+              proveedor,
               id: calculadorasInstanceId,
               ts: Date.now()
             }));
           } catch (_) {}
         }
         if (calculadorasChannel) {
-          if (precio) calculadorasChannel.postMessage({ type: 'precio-lista', valor: precio, id: calculadorasInstanceId });
+          if (precio || proveedor) calculadorasChannel.postMessage({ type: 'precio-lista', valor: precio, proveedor, id: calculadorasInstanceId });
           calculadorasChannel.postMessage({ type: 'pedir-foco', id: calculadorasInstanceId });
         }
         window.open('', '_self');
