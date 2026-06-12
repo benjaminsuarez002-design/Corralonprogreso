@@ -1,0 +1,2155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generador de imagenes de producto</title>
+<link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --bg: #eef5f9;
+    --panel: #ffffff;
+    --line: #c8e1f0;
+    --text: #0d1b2a;
+    --muted: #617083;
+    --accent: #d71010;
+    --blue: #0077d9;
+    --shadow: 0 12px 32px rgba(0, 77, 139, .12);
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: Barlow, Arial, sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(circle at 12% 10%, rgba(255,255,255,.95) 0%, transparent 28%),
+      linear-gradient(180deg, #f8fcff 0%, var(--bg) 100%);
+  }
+  .app {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
+    gap: 14px;
+    padding: 14px;
+  }
+  .panel, .stage {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+  .panel {
+    max-height: calc(100vh - 28px);
+    overflow: auto;
+  }
+  .panel-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+    padding: 12px;
+  }
+  h1 {
+    margin: 0;
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 24px;
+    line-height: 1;
+    color: var(--blue);
+    text-transform: uppercase;
+  }
+  .head-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  button, .file-btn {
+    border: 0;
+    border-radius: 8px;
+    background: var(--blue);
+    color: #fff;
+    font-weight: 900;
+    font-family: Barlow, Arial, sans-serif;
+    min-height: 38px;
+    padding: 9px 12px;
+    cursor: pointer;
+    text-align: center;
+  }
+  button.secondary, .file-btn.secondary { background: #13263c; }
+  button.ghost { background: #edf8ff; color: var(--blue); border: 1px solid var(--line); }
+  input[type=file] { display: none; }
+  details {
+    border-bottom: 1px solid #e3eef6;
+    padding: 0;
+  }
+  details.hidden-config {
+    display: none;
+  }
+  details[open] summary { border-bottom: 1px solid #e3eef6; }
+  summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 11px 12px;
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 17px;
+    font-weight: 900;
+    text-transform: uppercase;
+    color: #183653;
+  }
+  summary::-webkit-details-marker { display: none; }
+  .section-body {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    background: #fbfdff;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  label {
+    display: grid;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 900;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  input, textarea, select {
+    width: 100%;
+    min-height: 36px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text);
+    padding: 8px 9px;
+    font: 700 14px Barlow, Arial, sans-serif;
+    outline: none;
+  }
+  textarea {
+    min-height: 82px;
+    resize: vertical;
+    line-height: 1.35;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  input[type=color] {
+    padding: 4px;
+    min-height: 36px;
+  }
+  input[type=range] { padding: 0; }
+  .row-card {
+    display: grid;
+    gap: 8px;
+    padding: 9px;
+    border: 1px solid #dcebF6;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .row-title {
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-weight: 900;
+    color: #274763;
+    text-transform: uppercase;
+  }
+  .stage {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+  .stage-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+  }
+  .stage-toolbar strong {
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 20px;
+    text-transform: uppercase;
+    color: #183653;
+  }
+  .canvas-wrap {
+    min-height: 0;
+    overflow: auto;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background:
+      linear-gradient(45deg, rgba(0,0,0,.035) 25%, transparent 25%),
+      linear-gradient(-45deg, rgba(0,0,0,.035) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, rgba(0,0,0,.035) 75%),
+      linear-gradient(-45deg, transparent 75%, rgba(0,0,0,.035) 75%);
+    background-size: 28px 28px;
+    background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+  }
+  canvas {
+    width: min(100%, 780px);
+    height: auto;
+    background: #fff;
+    box-shadow: 0 16px 42px rgba(0, 30, 70, .18);
+    cursor: pointer;
+  }
+  .hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .edit-modal-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(7, 20, 36, .52);
+    backdrop-filter: blur(4px);
+  }
+  .edit-modal-bg.open { display: flex; }
+  .edit-modal {
+    width: min(520px, 96vw);
+    max-height: min(760px, 90vh);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 24px 70px rgba(0, 20, 50, .34);
+  }
+  .edit-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    background: #f8fcff;
+  }
+  .edit-modal-title {
+    margin: 0;
+    flex: 1;
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 24px;
+    font-weight: 900;
+    color: #183653;
+    text-transform: uppercase;
+  }
+  .edit-modal-close {
+    width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    background: #edf8ff;
+    color: var(--blue);
+    border: 1px solid var(--line);
+    font-size: 22px;
+    line-height: 1;
+  }
+  .edit-modal-body {
+    overflow: auto;
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+  }
+  .edit-modal-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+    background: #fbfdff;
+  }
+  .modal-note {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .modal-divider {
+    height: 1px;
+    background: #e3eef6;
+    margin: 2px 0;
+  }
+  .import-modal { width: min(700px, 96vw); }
+  .import-search {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: grid;
+    gap: 6px;
+    padding-bottom: 10px;
+    background: #fff;
+  }
+  .import-list {
+    display: grid;
+    gap: 8px;
+    max-height: min(58vh, 520px);
+    overflow: auto;
+  }
+  .import-item {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 66px;
+    padding: 9px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fbfdff;
+    color: var(--text);
+    text-align: left;
+  }
+  .import-item:hover {
+    border-color: #60bff2;
+    box-shadow: 0 8px 18px rgba(0, 118, 190, .11);
+  }
+  .import-thumb {
+    width: 54px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 7px;
+    background: #edf8ff;
+    color: var(--muted);
+    font-size: 20px;
+  }
+  .import-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .import-name {
+    overflow: hidden;
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1.05;
+    text-transform: uppercase;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: #183653;
+  }
+  .import-meta {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .import-price {
+    color: var(--blue);
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 20px;
+    font-weight: 900;
+    white-space: nowrap;
+  }
+  .import-empty {
+    padding: 28px 12px;
+    border: 1px dashed var(--line);
+    border-radius: 9px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+  @media (max-width: 980px) {
+    .app { grid-template-columns: 1fr; }
+    .panel { max-height: none; }
+    .stage { min-height: 70vh; }
+  }
+  @media (max-width: 560px) {
+    .head-actions { grid-template-columns: 1fr; }
+    .import-item { grid-template-columns: 48px minmax(0, 1fr); }
+    .import-price { grid-column: 2; font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <aside class="panel">
+    <div class="panel-head">
+      <h1>Generador de ficha</h1>
+      <div class="head-actions">
+        <label class="file-btn" for="imageInput">Cargar imagen</label>
+        <button id="importBtn" type="button" class="ghost">Importar</button>
+        <button id="downloadBtn" type="button" class="secondary">Exportar PNG</button>
+      </div>
+      <input id="imageInput" type="file" accept="image/*">
+    </div>
+
+    <details class="hidden-config" open>
+      <summary>Texto principal</summary>
+      <div class="section-body">
+        <div class="grid-2">
+          <label>Marca
+            <input data-field="brand" value="MIYAWA">
+          </label>
+          <label>Modelo
+            <input data-field="model" value="M2000B">
+          </label>
+        </div>
+        <label>Titulo linea 1
+          <input data-field="title1" value="GENERADOR">
+        </label>
+        <label>Titulo linea 2
+          <input data-field="title2" value="A NAFTA">
+        </label>
+        <label>Descripcion
+          <textarea data-field="description">Energia confiable, portatil y eficiente para el hogar, el trabajo y tus proyectos.</textarea>
+        </label>
+        <div class="grid-2">
+          <label>Etiqueta superior
+            <input data-field="badgeTitle" value="ALIMENTACION">
+          </label>
+          <label>Valor etiqueta
+            <input data-field="badgeValue" value="NAFTA">
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <details class="hidden-config" open>
+      <summary>Autocompletar</summary>
+      <div class="section-body">
+        <textarea id="quickText" placeholder="Pegá datos tipo:
+Marca: MIYAWA
+Producto: GENERADOR A NAFTA
+Modelo: M2000B
+Potencia: 2000 W
+Consumo: 1.8 L / H
+Tecnologia: AVR
+Voltaje: 220V"></textarea>
+        <div class="grid-2">
+          <button type="button" id="parseBtn">Autocompletar</button>
+          <button type="button" id="clearBtn" class="ghost">Limpiar datos</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="hidden-config" open>
+      <summary>Destacados laterales</summary>
+      <div class="section-body" id="highlights"></div>
+    </details>
+
+    <details class="hidden-config" open>
+      <summary>Caracteristicas</summary>
+      <div class="section-body" id="specs"></div>
+    </details>
+
+    <details class="hidden-config">
+      <summary>Beneficios inferiores</summary>
+      <div class="section-body" id="benefits"></div>
+    </details>
+
+    <details class="hidden-config" open>
+      <summary>Colores</summary>
+      <div class="section-body">
+        <div class="grid-2">
+          <label>Fondo
+            <input type="color" data-field="bgColor" value="#f7f8f9">
+          </label>
+          <label>Color marca
+            <input type="color" data-field="brandColor" value="#d71010">
+          </label>
+          <label>Titulo 1
+            <input type="color" data-field="title1Color" value="#050505">
+          </label>
+          <label>Titulo 2
+            <input type="color" data-field="title2Color" value="#d71010">
+          </label>
+          <label>Acento
+            <input type="color" data-field="accentColor" value="#d71010">
+          </label>
+          <label>Texto
+            <input type="color" data-field="bodyColor" value="#111111">
+          </label>
+          <label>Barra caracteristicas
+            <input type="color" data-field="darkBarColor" value="#101010">
+          </label>
+          <label>Barra inferior
+            <input type="color" data-field="bottomBarColor" value="#d71010">
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Estilo procedural</summary>
+      <div class="section-body">
+        <label>Preset
+          <select data-field="proceduralPreset">
+            <option value="clean" selected>Catalogo limpio</option>
+            <option value="offer">Oferta fuerte</option>
+            <option value="premium">Premium</option>
+            <option value="industrial">Industrial</option>
+          </select>
+        </label>
+        <label>Plantilla visual
+          <select data-field="layoutTemplate">
+            <option value="brush">Infografia azul</option>
+            <option value="measure">Medidas tecnicas</option>
+            <option value="sidepanel">Panel lateral</option>
+            <option value="dark">Premium oscuro</option>
+            <option value="catalog">Catalogo clasico</option>
+          </select>
+        </label>
+        <div class="grid-2">
+          <label>Fondo
+            <input type="color" data-field="proceduralBackdrop" value="#ffffff">
+          </label>
+          <label>Sombra
+            <input type="range" data-field="proceduralShadow" min="0" max="100" value="58">
+          </label>
+          <label>Brillo
+            <input type="range" data-field="proceduralGlow" min="0" max="100" value="42">
+          </label>
+          <label>Marco
+            <input type="range" data-field="proceduralFrame" min="0" max="100" value="54">
+          </label>
+          <label>Textura suave
+            <input type="range" data-field="proceduralTexture" min="0" max="100" value="20">
+          </label>
+        </div>
+        <button id="enhanceBtn" type="button">Mejorar ficha</button>
+      </div>
+    </details>
+
+    <details class="hidden-config" open>
+      <summary>Imagen</summary>
+      <div class="section-body">
+        <label>
+          <span><input type="checkbox" data-field="trimWhite" checked style="width:auto;min-height:auto;margin-right:6px"> Recortar bordes blancos</span>
+        </label>
+        <div class="grid-2">
+          <label>Escala
+            <input type="range" data-field="imageScale" min="60" max="150" value="100">
+          </label>
+          <label>Umbral blanco
+            <input type="range" data-field="whiteThreshold" min="220" max="255" value="246">
+          </label>
+          <label>Mover X
+            <input type="range" data-field="imageX" min="-180" max="180" value="20">
+          </label>
+          <label>Mover Y
+            <input type="range" data-field="imageY" min="-180" max="180" value="5">
+          </label>
+        </div>
+      </div>
+    </details>
+  </aside>
+
+  <section class="stage">
+    <div class="stage-toolbar">
+      <strong>Vista previa</strong>
+      <p class="hint">1080 x 1080 px. Las filas vacias no se dibujan.</p>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="poster" width="1080" height="1080"></canvas>
+    </div>
+  </section>
+</main>
+
+<div class="edit-modal-bg" id="editModal" aria-hidden="true">
+  <div class="edit-modal" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+    <div class="edit-modal-head">
+      <h2 class="edit-modal-title" id="editModalTitle">Editar</h2>
+      <button class="edit-modal-close" id="editModalClose" type="button" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="edit-modal-body" id="editModalBody"></div>
+    <div class="edit-modal-foot">
+      <button class="ghost" id="editModalClear" type="button">Vaciar seccion</button>
+      <button id="editModalDone" type="button">Listo</button>
+    </div>
+  </div>
+</div>
+
+<div class="edit-modal-bg" id="importModal" aria-hidden="true">
+  <div class="edit-modal import-modal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+    <div class="edit-modal-head">
+      <h2 class="edit-modal-title" id="importModalTitle">Importar articulo</h2>
+      <button class="edit-modal-close" id="importModalClose" type="button" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="edit-modal-body">
+      <div class="import-search">
+        <label>Buscar en soloadmin
+          <input id="importSearch" type="text" placeholder="Nombre, codigo o rubro">
+        </label>
+        <p class="modal-note">Elegis un articulo y se cargan texto, caracteristicas e imagen. Despues tocá la ficha para editar cada zona.</p>
+      </div>
+      <div class="import-list" id="importList"></div>
+    </div>
+    <div class="edit-modal-foot">
+      <button class="ghost" id="importModalCancel" type="button">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script src="corralon-system.js"></script>
+<script>
+const canvas = document.getElementById('poster');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+let productImage = null;
+let productFileName = 'ficha-producto';
+let hitZones = [];
+let activeEditorZone = null;
+let importCatalog = [];
+let imageLoadToken = 0;
+
+function getSystemBridge() {
+  try {
+    if (window.CorralonSystem) return window.CorralonSystem;
+  } catch (e) {}
+  try {
+    if (window.parent && window.parent !== window && window.parent.CorralonSystem) return window.parent.CorralonSystem;
+  } catch (e) {}
+  try {
+    if (window.opener && window.opener.CorralonSystem) return window.opener.CorralonSystem;
+  } catch (e) {}
+  return null;
+}
+
+const iconOptions = [
+  ['bolt', 'Rayo'],
+  ['fuel', 'Combustible'],
+  ['wave', 'Onda'],
+  ['plug', 'Voltaje'],
+  ['leaf', 'Hoja'],
+  ['gear', 'Motor'],
+  ['hand', 'Portatil'],
+  ['shield', 'Proteccion'],
+  ['check', 'Check']
+];
+
+const demoHighlights = [
+  { icon: 'bolt', label: 'POTENCIA', value: '2000 W', detail: 'MAXIMA' },
+  { icon: 'fuel', label: 'CONSUMO', value: '1.8 L / H', detail: 'POR HORA' },
+  { icon: 'wave', label: 'TECNOLOGIA', value: 'AVR', detail: 'MAYOR ESTABILIDAD DE VOLTAJE' }
+];
+const demoSpecs = [
+  { icon: 'plug', label: 'VOLTAJE', value: '220V', detail: 'CORRIENTE ALTERNA' },
+  { icon: 'bolt', label: 'POTENCIA NOMINAL', value: '2000 W', detail: '' },
+  { icon: 'bolt', label: 'POTENCIA DE ARRANQUE', value: '2000 W', detail: '' },
+  { icon: 'wave', label: 'FASE', value: 'MONOFASICO', detail: '' },
+  { icon: 'fuel', label: 'CONSUMO', value: '1.8 L / H', detail: 'POR HORA' },
+  { icon: 'leaf', label: 'EFICIENCIA ENERGETICA', value: 'A', detail: '' }
+];
+const demoBenefits = [
+  { icon: 'shield', label: 'TECNOLOGIA AVR', value: 'ESTABILIDAD Y PROTECCION' },
+  { icon: 'gear', label: 'MOTOR CONFIABLE', value: 'RENDIMIENTO DURADERO' },
+  { icon: 'hand', label: 'DISENO PORTATIL', value: 'FACIL DE TRANSPORTAR' },
+  { icon: 'check', label: 'USO IDEAL PARA', value: 'HOGAR, TRABAJO Y MAS' }
+];
+
+function byField(name) {
+  return document.querySelector(`[data-field="${name}"]`);
+}
+
+function fieldValue(name) {
+  const el = byField(name);
+  if (!el) return '';
+  if (el.type === 'checkbox') return el.checked;
+  return el.value;
+}
+
+function setField(name, value) {
+  const el = byField(name);
+  if (!el) return;
+  if (el.type === 'checkbox') el.checked = Boolean(value);
+  else el.value = value ?? '';
+}
+
+function optionHtml(selected) {
+  return iconOptions.map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`).join('');
+}
+
+function addHitZone(id, label, x, y, w, h, data = {}) {
+  hitZones.push({ id, label, x, y, w, h, ...data });
+}
+
+function findHitZone(x, y) {
+  for (let i = hitZones.length - 1; i >= 0; i--) {
+    const zone = hitZones[i];
+    if (x >= zone.x && x <= zone.x + zone.w && y >= zone.y && y <= zone.y + zone.h) return zone;
+  }
+  return null;
+}
+
+function sourceRowInput(prefix, index, key) {
+  return document.querySelector(`[data-row="${prefix}"][data-index="${index}"][data-key="${key}"]`);
+}
+
+function sourceRowValue(prefix, index, key) {
+  return sourceRowInput(prefix, index, key)?.value || '';
+}
+
+function setSourceRowValue(prefix, index, key, value) {
+  const el = sourceRowInput(prefix, index, key);
+  if (el) el.value = value ?? '';
+}
+
+function modalField(name, label, opts = {}) {
+  const source = byField(name);
+  const type = opts.type || source?.type || 'text';
+  const value = fieldValue(name);
+  const attrs = [
+    opts.min ? `min="${opts.min}"` : '',
+    opts.max ? `max="${opts.max}"` : '',
+    opts.step ? `step="${opts.step}"` : ''
+  ].filter(Boolean).join(' ');
+  if (type === 'textarea') {
+    return `<label>${label}<textarea data-edit-field="${name}">${escapeAttr(value)}</textarea></label>`;
+  }
+  if (type === 'checkbox') {
+    return `<label><span><input type="checkbox" data-edit-field="${name}" ${value ? 'checked' : ''} style="width:auto;min-height:auto;margin-right:6px"> ${label}</span></label>`;
+  }
+  return `<label>${label}<input type="${type}" data-edit-field="${name}" value="${escapeAttr(value)}" ${attrs}></label>`;
+}
+
+function modalRowControl(prefix, index, key, label, opts = {}) {
+  const value = sourceRowValue(prefix, index, key);
+  if (opts.type === 'select') {
+    return `<label>${label}<select data-edit-row="${prefix}" data-edit-index="${index}" data-edit-key="${key}">${optionHtml(value)}</select></label>`;
+  }
+  return `<label>${label}<input data-edit-row="${prefix}" data-edit-index="${index}" data-edit-key="${key}" value="${escapeAttr(value)}"></label>`;
+}
+
+function modalColorBlock(fields) {
+  return `<div class="modal-divider"></div><div class="grid-2">${fields.map(([name, label]) => modalField(name, label, { type: 'color' })).join('')}</div>`;
+}
+
+function renderEditorContent(zone) {
+  const title = document.getElementById('editModalTitle');
+  const body = document.getElementById('editModalBody');
+  const clearBtn = document.getElementById('editModalClear');
+  title.textContent = zone?.label || 'Editar';
+  clearBtn.style.display = 'inline-flex';
+
+  if (zone.id === 'brand') {
+    body.innerHTML = `${modalField('brand', 'Marca')}${modalColorBlock([['brandColor', 'Color marca']])}`;
+  } else if (zone.id === 'title') {
+    body.innerHTML = `
+      ${modalField('title1', 'Titulo linea 1')}
+      ${modalField('title2', 'Titulo linea 2')}
+      ${modalColorBlock([['title1Color', 'Color titulo 1'], ['title2Color', 'Color titulo 2']])}
+    `;
+  } else if (zone.id === 'model') {
+    body.innerHTML = `${modalField('model', 'Modelo')}${modalColorBlock([['accentColor', 'Color placa']])}`;
+  } else if (zone.id === 'description') {
+    body.innerHTML = `${modalField('description', 'Descripcion', { type: 'textarea' })}${modalColorBlock([['bodyColor', 'Color texto']])}`;
+  } else if (zone.id === 'badge') {
+    body.innerHTML = `
+      ${modalField('badgeTitle', 'Etiqueta')}
+      ${modalField('badgeValue', 'Valor')}
+      ${modalColorBlock([['accentColor', 'Color etiqueta']])}
+    `;
+  } else if (zone.id === 'image') {
+    body.innerHTML = `
+      <label class="file-btn" for="imageInput">Cambiar imagen</label>
+      ${modalField('trimWhite', 'Recortar bordes blancos', { type: 'checkbox' })}
+      <div class="grid-2">
+        ${modalField('imageScale', 'Escala', { type: 'range', min: '60', max: '150' })}
+        ${modalField('whiteThreshold', 'Umbral blanco', { type: 'range', min: '220', max: '255' })}
+        ${modalField('imageX', 'Mover X', { type: 'range', min: '-180', max: '180' })}
+        ${modalField('imageY', 'Mover Y', { type: 'range', min: '-180', max: '180' })}
+      </div>
+    `;
+  } else if (zone.kind === 'highlight') {
+    body.innerHTML = `
+      <div class="grid-2">
+        ${modalRowControl('highlight', zone.index, 'icon', 'Icono', { type: 'select' })}
+        ${modalRowControl('highlight', zone.index, 'label', 'Titulo')}
+      </div>
+      ${modalRowControl('highlight', zone.index, 'value', 'Valor')}
+      ${modalRowControl('highlight', zone.index, 'detail', 'Detalle')}
+      ${modalColorBlock([['accentColor', 'Color titulo'], ['bodyColor', 'Color valor']])}
+    `;
+  } else if (zone.kind === 'spec') {
+    body.innerHTML = `
+      <div class="grid-2">
+        ${modalRowControl('spec', zone.index, 'icon', 'Icono', { type: 'select' })}
+        ${modalRowControl('spec', zone.index, 'label', 'Titulo')}
+      </div>
+      ${modalRowControl('spec', zone.index, 'value', 'Valor')}
+      ${modalRowControl('spec', zone.index, 'detail', 'Detalle')}
+      ${modalColorBlock([['darkBarColor', 'Color barra']])}
+    `;
+  } else if (zone.kind === 'benefit') {
+    body.innerHTML = `
+      <div class="grid-2">
+        ${modalRowControl('benefit', zone.index, 'icon', 'Icono', { type: 'select' })}
+        ${modalRowControl('benefit', zone.index, 'label', 'Titulo')}
+      </div>
+      ${modalRowControl('benefit', zone.index, 'value', 'Texto')}
+      ${modalColorBlock([['bottomBarColor', 'Color barra']])}
+    `;
+  } else {
+    clearBtn.style.display = 'none';
+    body.innerHTML = `
+      <p class="modal-note">Edita la plantilla y los colores generales de la imagen.</p>
+      <label>Plantilla visual
+        <select data-edit-field="layoutTemplate">
+          <option value="brush"${fieldValue('layoutTemplate') === 'brush' ? ' selected' : ''}>Infografia azul</option>
+          <option value="measure"${fieldValue('layoutTemplate') === 'measure' ? ' selected' : ''}>Medidas tecnicas</option>
+          <option value="sidepanel"${fieldValue('layoutTemplate') === 'sidepanel' ? ' selected' : ''}>Panel lateral</option>
+          <option value="dark"${fieldValue('layoutTemplate') === 'dark' ? ' selected' : ''}>Premium oscuro</option>
+          <option value="catalog"${fieldValue('layoutTemplate') === 'catalog' ? ' selected' : ''}>Catalogo clasico</option>
+        </select>
+      </label>
+      <div class="grid-2">
+        ${modalField('bgColor', 'Fondo', { type: 'color' })}
+        ${modalField('accentColor', 'Acento', { type: 'color' })}
+        ${modalField('bodyColor', 'Texto', { type: 'color' })}
+        ${modalField('darkBarColor', 'Barra caracteristicas', { type: 'color' })}
+      </div>
+    `;
+  }
+}
+
+function openEditor(zone) {
+  activeEditorZone = zone || { id: 'background', label: 'Fondo' };
+  renderEditorContent(activeEditorZone);
+  const modal = document.getElementById('editModal');
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeEditor() {
+  const modal = document.getElementById('editModal');
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function clearActiveEditorSection() {
+  const zone = activeEditorZone;
+  if (!zone) return;
+  if (zone.id === 'brand') setField('brand', '');
+  else if (zone.id === 'title') { setField('title1', ''); setField('title2', ''); }
+  else if (zone.id === 'model') setField('model', '');
+  else if (zone.id === 'description') setField('description', '');
+  else if (zone.id === 'badge') { setField('badgeTitle', ''); setField('badgeValue', ''); }
+  else if (zone.id === 'image') { productImage = null; document.getElementById('imageInput').value = ''; }
+  else if (zone.kind === 'highlight') ['label', 'value', 'detail'].forEach(key => setSourceRowValue('highlight', zone.index, key, ''));
+  else if (zone.kind === 'spec') ['label', 'value', 'detail'].forEach(key => setSourceRowValue('spec', zone.index, key, ''));
+  else if (zone.kind === 'benefit') ['label', 'value'].forEach(key => setSourceRowValue('benefit', zone.index, key, ''));
+  drawPoster();
+  renderEditorContent(zone);
+}
+
+function makeRows(containerId, prefix, rows, mode = 'full') {
+  const container = document.getElementById(containerId);
+  container.innerHTML = rows.map((row, index) => `
+    <div class="row-card">
+      <div class="row-title">${index + 1}</div>
+      <div class="grid-2">
+        <label>Icono
+          <select data-row="${prefix}" data-index="${index}" data-key="icon">${optionHtml(row.icon)}</select>
+        </label>
+        <label>Titulo
+          <input data-row="${prefix}" data-index="${index}" data-key="label" value="${escapeAttr(row.label || '')}">
+        </label>
+      </div>
+      <label>${mode === 'benefit' ? 'Texto' : 'Valor'}
+        <input data-row="${prefix}" data-index="${index}" data-key="value" value="${escapeAttr(row.value || '')}">
+      </label>
+      ${mode === 'benefit' ? '' : `<label>Detalle
+        <input data-row="${prefix}" data-index="${index}" data-key="detail" value="${escapeAttr(row.detail || '')}">
+      </label>`}
+    </div>
+  `).join('');
+}
+
+function escapeAttr(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+function collectRows(prefix, count, benefit = false) {
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    const icon = document.querySelector(`[data-row="${prefix}"][data-index="${i}"][data-key="icon"]`)?.value || 'bolt';
+    const label = document.querySelector(`[data-row="${prefix}"][data-index="${i}"][data-key="label"]`)?.value.trim() || '';
+    const value = document.querySelector(`[data-row="${prefix}"][data-index="${i}"][data-key="value"]`)?.value.trim() || '';
+    const detail = benefit ? '' : (document.querySelector(`[data-row="${prefix}"][data-index="${i}"][data-key="detail"]`)?.value.trim() || '');
+    if (label || value || detail) rows.push({ icon, label, value, detail, sourceIndex: i });
+  }
+  return rows;
+}
+
+function isHiddenPromoText(value) {
+  const clean = normalizeKey(value);
+  return /\b(precio|stock|rubro)\b/.test(clean);
+}
+
+function promoRows(rows) {
+  return rows.filter(row => {
+    const text = `${row.label || ''} ${row.value || ''} ${row.detail || ''}`;
+    return !isHiddenPromoText(text);
+  });
+}
+
+function shouldDrawBadge(state) {
+  const text = `${state.badgeTitle || ''} ${state.badgeValue || ''}`;
+  return Boolean((state.badgeTitle || state.badgeValue) && !isHiddenPromoText(text));
+}
+
+function hexToRgb(hex) {
+  const clean = String(hex || '#000000').replace('#', '');
+  const value = parseInt(clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean, 16);
+  return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+}
+
+function withAlpha(hex, alpha) {
+  const c = hexToRgb(hex);
+  return `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;
+}
+
+function clamp(value, min, max) {
+  const number = Number(value);
+  if (Number.isNaN(number)) return min;
+  return Math.max(min, Math.min(max, number));
+}
+
+function mixColor(hexA, hexB, amount) {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  const t = clamp(amount, 0, 1);
+  const r = Math.round(a.r + (b.r - a.r) * t);
+  const g = Math.round(a.g + (b.g - a.g) * t);
+  const bl = Math.round(a.b + (b.b - a.b) * t);
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
+function drawSoftGlow(cx, cy, radius, color, alpha) {
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  grad.addColorStop(0, withAlpha(color, alpha));
+  grad.addColorStop(.55, withAlpha(color, alpha * .34));
+  grad.addColorStop(1, withAlpha(color, 0));
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function proceduralNumber(state, key, fallback) {
+  return clamp(state[key] ?? fallback, 0, 100) / 100;
+}
+
+function drawProceduralBackground(state) {
+  const preset = state.proceduralPreset || 'clean';
+  const base = state.proceduralBackdrop || state.bgColor || '#ffffff';
+  const accent = state.accentColor || '#d71010';
+  const dark = state.darkBarColor || '#101010';
+  const glow = proceduralNumber(state, 'proceduralGlow', 42);
+  const texture = proceduralNumber(state, 'proceduralTexture', 20) * .35;
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#ffffff');
+  bg.addColorStop(.48, mixColor(base, '#ffffff', .72));
+  bg.addColorStop(1, preset === 'premium' ? mixColor(dark, '#ffffff', .88) : mixColor(base, '#f3f7fa', .76));
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  if (preset === 'offer') {
+    drawSoftGlow(930, 80, 390, accent, .16 + glow * .2);
+    drawSoftGlow(120, 890, 470, accent, .06 + glow * .11);
+  } else if (preset === 'premium') {
+    drawSoftGlow(860, 210, 450, dark, .08 + glow * .13);
+    drawSoftGlow(420, 740, 380, accent, .05 + glow * .08);
+  } else if (preset === 'industrial') {
+    drawSoftGlow(840, 185, 460, '#7b8791', .12 + glow * .08);
+    drawSoftGlow(190, 890, 420, accent, .05 + glow * .08);
+  } else {
+    drawSoftGlow(820, 175, 420, accent, .05 + glow * .13);
+    drawSoftGlow(245, 820, 360, '#68b8ff', .04 + glow * .1);
+  }
+
+  if (texture > 0) {
+    ctx.save();
+    ctx.globalAlpha = texture * .18;
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 220; i++) {
+      const x = (i * 47) % W;
+      const y = (i * 83) % H;
+      ctx.fillRect(x, y, 1.2, 1.2);
+    }
+    ctx.restore();
+  }
+}
+
+function drawProductStage(state, x, y, w, h) {
+  const shadow = proceduralNumber(state, 'proceduralShadow', 58);
+  const glow = proceduralNumber(state, 'proceduralGlow', 42);
+  const frame = proceduralNumber(state, 'proceduralFrame', 54);
+  const accent = state.accentColor || '#d71010';
+  const preset = state.proceduralPreset || 'clean';
+
+  ctx.save();
+  ctx.shadowColor = `rgba(7, 18, 28, ${.1 + shadow * .24})`;
+  ctx.shadowBlur = 38 + shadow * 28;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 30 + shadow * 18;
+  roundedRect(x + 44, y + h - 58, w - 120, 62, 999, 'rgba(6, 16, 24, .17)', null);
+  ctx.restore();
+
+  drawSoftGlow(x + w * .68, y + h * .34, Math.min(w, h) * .58, accent, .05 + glow * .1);
+  const fill = ctx.createLinearGradient(x, y, x + w, y + h);
+  fill.addColorStop(0, preset === 'premium' ? 'rgba(255,255,255,.96)' : 'rgba(255,255,255,.82)');
+  fill.addColorStop(.58, 'rgba(255,255,255,.46)');
+  fill.addColorStop(1, preset === 'industrial' ? 'rgba(225,232,236,.58)' : 'rgba(255,255,255,.78)');
+  roundedRect(x + 48, y + 18, w - 86, h - 36, 20, fill, null);
+
+  if (frame > 0) {
+    ctx.save();
+    ctx.lineWidth = 2 + frame * 5;
+    ctx.strokeStyle = withAlpha(accent, .16 + frame * .22);
+    roundedRect(x + 48, y + 18, w - 86, h - 36, 20, null, ctx.strokeStyle);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,.7)';
+    roundedRect(x + 58, y + 28, w - 106, h - 56, 16, null, ctx.strokeStyle);
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = .18 + glow * .24;
+  const shine = ctx.createLinearGradient(x + 84, y, x + 230, y + h);
+  shine.addColorStop(0, 'rgba(255,255,255,0)');
+  shine.addColorStop(.48, 'rgba(255,255,255,.75)');
+  shine.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = shine;
+  ctx.beginPath();
+  ctx.moveTo(x + 132, y + 26);
+  ctx.lineTo(x + 232, y + 26);
+  ctx.lineTo(x + 122, y + h - 24);
+  ctx.lineTo(x + 22, y + h - 24);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawProductPlaceholder(state, x, y, w, h) {
+  const rubro = (state.description || state.badgeValue || 'PRODUCTO').split(/\n|\.|,/)[0].trim().toUpperCase() || 'PRODUCTO';
+  const accent = state.accentColor || '#d71010';
+  const cx = x + w * .55;
+  const cy = y + h * .47;
+  ctx.save();
+  roundedRect(x + 150, y + 118, w - 260, h - 220, 18, 'rgba(255,255,255,.78)', withAlpha(accent, .22));
+  drawSoftGlow(cx, cy, 190, accent, .11);
+  ctx.strokeStyle = withAlpha(accent, .5);
+  ctx.lineWidth = 10;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - 110, cy + 80);
+  ctx.lineTo(cx - 40, cy - 74);
+  ctx.lineTo(cx + 96, cy - 74);
+  ctx.lineTo(cx + 136, cy + 80);
+  ctx.closePath();
+  ctx.stroke();
+  drawIcon('gear', cx - 56, cy - 18, 72, accent, false);
+  ctx.fillStyle = withAlpha(state.bodyColor || '#111111', .72);
+  ctx.font = '900 24px "Barlow Condensed", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(rubro, cx, cy + 126);
+  ctx.font = '700 16px Barlow, Arial, sans-serif';
+  ctx.fillText('SIN FOTO CARGADA', cx, cy + 154);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function roundedRect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); }
+}
+
+function wrapText(text, x, y, maxWidth, lineHeight, maxLines = 4) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth || !line) {
+      line = test;
+    } else {
+      lines.push(line);
+      line = word;
+      if (lines.length >= maxLines) break;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  lines.forEach((ln, idx) => ctx.fillText(ln, x, y + idx * lineHeight));
+  return lines.length * lineHeight;
+}
+
+function fitText(text, x, y, maxWidth, fontSize, fontWeight, color, family = '"Barlow Condensed"') {
+  let size = fontSize;
+  ctx.font = `${fontWeight} ${size}px ${family}, Arial, sans-serif`;
+  while (size > 18 && ctx.measureText(text).width > maxWidth) {
+    size -= 2;
+    ctx.font = `${fontWeight} ${size}px ${family}, Arial, sans-serif`;
+  }
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+  return size;
+}
+
+function drawIcon(type, x, y, size, color, inverse = false) {
+  const cx = x + size / 2;
+  const cy = y + size / 2;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(4, size * .07);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (inverse) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.fillStyle = '#fff';
+  }
+  const s = size;
+  if (type === 'bolt') {
+    ctx.beginPath();
+    ctx.moveTo(x + s * .55, y + s * .08);
+    ctx.lineTo(x + s * .28, y + s * .55);
+    ctx.lineTo(x + s * .52, y + s * .55);
+    ctx.lineTo(x + s * .42, y + s * .92);
+    ctx.lineTo(x + s * .75, y + s * .42);
+    ctx.lineTo(x + s * .52, y + s * .42);
+    ctx.closePath();
+    ctx.fill();
+  } else if (type === 'fuel') {
+    ctx.strokeRect(x + s * .28, y + s * .2, s * .28, s * .58);
+    ctx.beginPath();
+    ctx.moveTo(x + s * .56, y + s * .3);
+    ctx.lineTo(x + s * .72, y + s * .42);
+    ctx.lineTo(x + s * .72, y + s * .72);
+    ctx.stroke();
+    ctx.fillRect(x + s * .34, y + s * .28, s * .16, s * .12);
+  } else if (type === 'wave') {
+    ctx.beginPath();
+    ctx.moveTo(x + s * .08, cy);
+    ctx.lineTo(x + s * .25, cy);
+    ctx.lineTo(x + s * .35, y + s * .25);
+    ctx.lineTo(x + s * .48, y + s * .78);
+    ctx.lineTo(x + s * .58, y + s * .42);
+    ctx.lineTo(x + s * .7, cy);
+    ctx.lineTo(x + s * .92, cy);
+    ctx.stroke();
+  } else if (type === 'plug') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, s * .28, Math.PI * .1, Math.PI * 1.8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + s * .42, y + s * .18);
+    ctx.lineTo(x + s * .42, y + s * .35);
+    ctx.moveTo(x + s * .58, y + s * .18);
+    ctx.lineTo(x + s * .58, y + s * .35);
+    ctx.moveTo(cx, y + s * .75);
+    ctx.lineTo(cx, y + s * .92);
+    ctx.stroke();
+  } else if (type === 'leaf') {
+    ctx.beginPath();
+    ctx.moveTo(x + s * .2, y + s * .7);
+    ctx.quadraticCurveTo(x + s * .48, y + s * .08, x + s * .82, y + s * .18);
+    ctx.quadraticCurveTo(x + s * .88, y + s * .62, x + s * .2, y + s * .7);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + s * .25, y + s * .68);
+    ctx.lineTo(x + s * .68, y + s * .32);
+    ctx.stroke();
+  } else if (type === 'gear') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, s * .23, 0, Math.PI * 2);
+    ctx.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * s * .32, cy + Math.sin(a) * s * .32);
+      ctx.lineTo(cx + Math.cos(a) * s * .43, cy + Math.sin(a) * s * .43);
+      ctx.stroke();
+    }
+  } else if (type === 'hand') {
+    ctx.beginPath();
+    ctx.moveTo(x + s * .18, y + s * .6);
+    ctx.lineTo(x + s * .46, y + s * .48);
+    ctx.lineTo(x + s * .7, y + s * .48);
+    ctx.moveTo(x + s * .45, y + s * .48);
+    ctx.lineTo(x + s * .55, y + s * .28);
+    ctx.lineTo(x + s * .75, y + s * .28);
+    ctx.stroke();
+  } else if (type === 'shield') {
+    ctx.beginPath();
+    ctx.moveTo(cx, y + s * .12);
+    ctx.lineTo(x + s * .82, y + s * .25);
+    ctx.lineTo(x + s * .75, y + s * .66);
+    ctx.quadraticCurveTo(cx, y + s * .9, x + s * .25, y + s * .66);
+    ctx.lineTo(x + s * .18, y + s * .25);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + s * .36, cy);
+    ctx.lineTo(x + s * .47, y + s * .62);
+    ctx.lineTo(x + s * .68, y + s * .4);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(x + s * .25, cy);
+    ctx.lineTo(x + s * .43, y + s * .68);
+    ctx.lineTo(x + s * .75, y + s * .32);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function trimBounds(img, threshold) {
+  const maxSide = 900;
+  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const tw = Math.max(1, Math.round(img.naturalWidth * scale));
+  const th = Math.max(1, Math.round(img.naturalHeight * scale));
+  const temp = document.createElement('canvas');
+  temp.width = tw;
+  temp.height = th;
+  const tctx = temp.getContext('2d', { willReadFrequently: true });
+  tctx.drawImage(img, 0, 0, tw, th);
+  const data = tctx.getImageData(0, 0, tw, th).data;
+  let minX = tw, minY = th, maxX = 0, maxY = 0;
+  for (let y = 0; y < th; y++) {
+    for (let x = 0; x < tw; x++) {
+      const idx = (y * tw + x) * 4;
+      const a = data[idx + 3];
+      const isWhite = data[idx] >= threshold && data[idx + 1] >= threshold && data[idx + 2] >= threshold;
+      if (a > 10 && !isWhite) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (minX >= maxX || minY >= maxY) return { sx: 0, sy: 0, sw: img.naturalWidth, sh: img.naturalHeight };
+  const pad = 18;
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(tw, maxX + pad);
+  maxY = Math.min(th, maxY + pad);
+  return {
+    sx: minX / scale,
+    sy: minY / scale,
+    sw: (maxX - minX) / scale,
+    sh: (maxY - minY) / scale
+  };
+}
+
+function drawProductImage(state, top, bottom) {
+  const x = 320;
+  const w = 730;
+  const h = Math.max(410, bottom - top - 20);
+  drawProductInRect(state, x, top, w, h, true);
+}
+
+function drawProductInRect(state, x, y, w, h, stage = true) {
+  addHitZone('image', 'Imagen del producto', x, y, w, h);
+  if (stage) drawProductStage(state, x, y, w, h);
+  if (!productImage) {
+    drawProductPlaceholder(state, x, y, w, h);
+    return;
+  }
+  const source = state.trimWhite ? trimBounds(productImage, Number(state.whiteThreshold || 246)) : {
+    sx: 0,
+    sy: 0,
+    sw: productImage.naturalWidth,
+    sh: productImage.naturalHeight
+  };
+  const scale = Number(state.imageScale || 100) / 100;
+  const ratio = Math.min(w / source.sw, h / source.sh) * scale;
+  const dw = source.sw * ratio;
+  const dh = source.sh * ratio;
+  const dx = x + (w - dw) / 2 + Number(state.imageX || 0);
+  const dy = y + (h - dh) / 2 + Number(state.imageY || 0);
+  ctx.save();
+  ctx.shadowColor = `rgba(5, 15, 24, ${.14 + proceduralNumber(state, 'proceduralShadow', 58) * .18})`;
+  ctx.shadowBlur = 24 + proceduralNumber(state, 'proceduralShadow', 58) * 28;
+  ctx.shadowOffsetY = 20 + proceduralNumber(state, 'proceduralShadow', 58) * 16;
+  ctx.drawImage(productImage, source.sx, source.sy, source.sw, source.sh, dx, dy, dw, dh);
+  ctx.restore();
+}
+
+function drawBrush(x, y, w, h, color) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x + 8, y + 5);
+  ctx.lineTo(x + w - 16, y);
+  ctx.lineTo(x + w, y + h * .18);
+  ctx.lineTo(x + w - 22, y + h - 7);
+  ctx.lineTo(x + 18, y + h);
+  ctx.lineTo(x, y + h * .72);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = .28;
+  for (let i = 0; i < 9; i++) {
+    ctx.fillRect(x - 12 + i * 18, y + h - 4 + (i % 3) * 2, w / 3, 5);
+  }
+  ctx.restore();
+}
+
+function drawPromoTitle(state, x, y, width, mode = 'stack') {
+  if (state.brand) {
+    addHitZone('brand', 'Marca', x, y - 48, width, 52);
+    ctx.font = '900 42px "Barlow Condensed", Arial, sans-serif';
+    ctx.fillStyle = state.brandColor;
+    ctx.fillText(state.brand.toUpperCase(), x, y);
+  }
+  addHitZone('title', 'Titulo principal', x, y + 12, width, 176);
+  if (mode === 'brush') {
+    if (state.title1) fitText(state.title1.toUpperCase(), x, y + 94, width, 86, 900, state.title1Color);
+    if (state.title2) {
+      drawBrush(x, y + 108, Math.min(width, 430), 70, state.accentColor);
+      fitText(state.title2.toUpperCase(), x + 18, y + 160, Math.min(width, 400), 58, 900, '#fff');
+    }
+  } else {
+    if (state.title1) fitText(state.title1.toUpperCase(), x, y + 78, width, 78, 900, state.title1Color);
+    if (state.title2) fitText(state.title2.toUpperCase(), x, y + 142, width, 68, 900, state.title2Color);
+  }
+  if (state.model) {
+    addHitZone('model', 'Modelo', x, y + 184, 310, 64);
+    roundedRect(x, y + 184, 310, 64, 8, state.accentColor, null);
+    fitText(state.model.toUpperCase(), x + 22, y + 232, 266, 48, 900, '#fff');
+  }
+  if (state.description) {
+    addHitZone('description', 'Descripcion', x, y + 266, width * .8, 108);
+    ctx.fillStyle = state.bodyColor;
+    ctx.font = '600 24px Barlow, Arial, sans-serif';
+    wrapText(state.description, x, y + 296, width * .78, 32, 3);
+  }
+}
+
+function drawVerticalFeatures(rows, state, x, y, width, iconSize = 64, darkIcons = false) {
+  rows.slice(0, 4).forEach((row, i) => {
+    const top = y + i * 118;
+    const sourceIndex = row.sourceIndex ?? i;
+    addHitZone(`${row.rowKind || 'highlight'}-${sourceIndex}`, `Destacado ${sourceIndex + 1}`, x - 4, top - 12, width, 94, { kind: row.rowKind || 'highlight', index: sourceIndex });
+    drawIcon(row.icon, x, top, iconSize, darkIcons ? state.accentColor : '#fff', !darkIcons);
+    ctx.fillStyle = darkIcons ? '#fff' : state.bodyColor;
+    ctx.font = '900 25px "Barlow Condensed", Arial, sans-serif';
+    ctx.fillText((row.label || '').toUpperCase(), x + iconSize + 22, top + 25);
+    ctx.font = '700 22px "Barlow Condensed", Arial, sans-serif';
+    wrapText((row.value || row.detail || '').toUpperCase(), x + iconSize + 22, top + 52, width - iconSize - 30, 24, 2);
+    ctx.strokeStyle = darkIcons ? 'rgba(255,255,255,.18)' : 'rgba(7,30,58,.18)';
+    ctx.beginPath();
+    ctx.moveTo(x + iconSize + 20, top + 86);
+    ctx.lineTo(x + width - 10, top + 86);
+    ctx.stroke();
+  });
+}
+
+function drawBottomStrip(rows, state, y, h, color = state.darkBarColor) {
+  if (!rows.length) return;
+  addHitZone('benefit-bar', 'Beneficios inferiores', 0, y, W, h);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, y, W, h);
+  const cols = Math.min(rows.length, 4);
+  const colW = W / cols;
+  rows.slice(0, 4).forEach((row, i) => {
+    const sourceIndex = row.sourceIndex ?? i;
+    const x = i * colW + 42;
+    addHitZone(`benefit-${sourceIndex}`, `Beneficio ${sourceIndex + 1}`, i * colW, y, colW, h, { kind: 'benefit', index: sourceIndex });
+    drawIcon(row.icon, x, y + 30, 58, '#fff');
+    fitText((row.label || '').toUpperCase(), x + 78, y + 62, colW - 104, 26, 900, '#fff');
+    if (row.value) {
+      ctx.font = '600 17px Barlow, Arial, sans-serif';
+      wrapText(row.value.toUpperCase(), x + 78, y + 88, colW - 104, 20, 2);
+    }
+  });
+}
+
+function drawBadgeStamp(state, x, y, text, icon = 'check') {
+  if (!text) return;
+  addHitZone('badge', 'Etiqueta superior', x, y, 170, 150);
+  ctx.save();
+  ctx.translate(x + 85, y + 75);
+  ctx.rotate(-.1);
+  drawBrush(-75, -52, 150, 104, state.accentColor);
+  drawIcon(icon, -50, -30, 56, '#fff', false);
+  fitText(text.toUpperCase(), 6, 0, 64, 26, 900, '#fff');
+  ctx.restore();
+}
+
+function drawDimensionLine(x1, y1, x2, y2, label, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([9, 7]);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  [ [x1, y1], [x2, y2] ].forEach(([x, y]) => {
+    ctx.beginPath();
+    ctx.arc(x, y, 7, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.font = '900 34px "Barlow Condensed", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, (x1 + x2) / 2, (y1 + y2) / 2 - 10);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawElevatedPanel(x, y, w, h, radius = 28, fill = 'rgba(255,255,255,.9)', stroke = 'rgba(10,35,58,.08)') {
+  ctx.save();
+  ctx.shadowColor = 'rgba(12, 28, 44, .16)';
+  ctx.shadowBlur = 38;
+  ctx.shadowOffsetY = 22;
+  roundedRect(x, y, w, h, radius, fill, stroke);
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,.78)';
+  ctx.lineWidth = 2;
+  roundedRect(x + 8, y + 8, w - 16, h - 16, Math.max(8, radius - 8), null, ctx.strokeStyle);
+  ctx.restore();
+}
+
+function drawTinyLabel(text, x, y, color) {
+  if (!text) return;
+  ctx.save();
+  ctx.font = '800 18px Barlow, Arial, sans-serif';
+  ctx.fillStyle = withAlpha(color, .72);
+  ctx.letterSpacing = '0px';
+  ctx.fillText(String(text).toUpperCase(), x, y);
+  ctx.restore();
+}
+
+function drawElegantTitle(state, x, y, width, light = false) {
+  const titleColor = light ? '#ffffff' : state.title1Color;
+  const subColor = state.title2Color || state.accentColor;
+  if (state.brand) {
+    addHitZone('brand', 'Marca', x, y - 42, width, 36);
+    drawTinyLabel(state.brand, x, y - 10, light ? '#ffffff' : state.accentColor);
+  }
+  addHitZone('title', 'Titulo principal', x, y, width, 165);
+  if (state.title1) fitText(state.title1.toUpperCase(), x, y + 64, width, 64, 900, titleColor);
+  if (state.title2) fitText(state.title2.toUpperCase(), x, y + 118, width, 54, 900, subColor);
+  if (state.model) {
+    addHitZone('model', 'Modelo', x, y + 144, 220, 48);
+    roundedRect(x, y + 144, 220, 48, 14, light ? 'rgba(255,255,255,.16)' : state.accentColor, light ? 'rgba(255,255,255,.28)' : null);
+    fitText(state.model.toUpperCase(), x + 18, y + 178, 184, 34, 900, '#fff');
+  }
+  if (state.description) {
+    addHitZone('description', 'Descripcion', x, y + 212, width * .84, 110);
+    ctx.fillStyle = light ? 'rgba(255,255,255,.82)' : withAlpha(state.bodyColor, .82);
+    ctx.font = '600 22px Barlow, Arial, sans-serif';
+    wrapText(state.description, x, y + 240, width * .84, 30, 3);
+  }
+}
+
+function drawFeatureCards(rows, state, x, y, w, dark = false) {
+  const usable = rows.slice(0, 4);
+  usable.forEach((row, i) => {
+    const top = y + i * 104;
+    const sourceIndex = row.sourceIndex ?? i;
+    addHitZone(`${row.rowKind || 'highlight'}-${sourceIndex}`, `Destacado ${sourceIndex + 1}`, x, top, w, 82, { kind: row.rowKind || 'highlight', index: sourceIndex });
+    const fill = dark ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.72)';
+    const stroke = dark ? 'rgba(255,255,255,.12)' : 'rgba(12,50,82,.08)';
+    roundedRect(x, top, w, 82, 20, fill, stroke);
+    drawIcon(row.icon, x + 18, top + 18, 46, dark ? '#fff' : state.accentColor);
+    ctx.fillStyle = dark ? '#fff' : state.bodyColor;
+    ctx.font = '900 21px "Barlow Condensed", Arial, sans-serif';
+    fitText((row.label || '').toUpperCase(), x + 78, top + 34, w - 96, 22, 900, dark ? '#fff' : state.bodyColor);
+    if (row.value || row.detail) {
+      ctx.font = '600 16px Barlow, Arial, sans-serif';
+      ctx.fillStyle = dark ? 'rgba(255,255,255,.68)' : withAlpha(state.bodyColor, .66);
+      wrapText((row.value || row.detail).toUpperCase(), x + 78, top + 58, w - 96, 18, 1);
+    }
+  });
+}
+
+function drawMinimalBottom(rows, state, y, dark = false) {
+  const usable = rows.slice(0, 4);
+  if (!usable.length) return;
+  addHitZone('benefit-bar', 'Beneficios inferiores', 50, y, W - 100, 96);
+  drawElevatedPanel(50, y, W - 100, 96, 24, dark ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.82)', dark ? 'rgba(255,255,255,.16)' : 'rgba(9,44,74,.08)');
+  const colW = (W - 100) / usable.length;
+  usable.forEach((row, i) => {
+    const sourceIndex = row.sourceIndex ?? i;
+    const x = 72 + i * colW;
+    addHitZone(`${row.rowKind || 'benefit'}-${sourceIndex}`, `Beneficio ${sourceIndex + 1}`, 50 + i * colW, y, colW, 96, { kind: row.rowKind || 'benefit', index: sourceIndex });
+    drawIcon(row.icon, x, y + 26, 44, dark ? '#fff' : state.accentColor);
+    fitText((row.label || '').toUpperCase(), x + 58, y + 54, colW - 76, 22, 900, dark ? '#fff' : state.bodyColor);
+    if (row.value) {
+      ctx.font = '600 14px Barlow, Arial, sans-serif';
+      ctx.fillStyle = dark ? 'rgba(255,255,255,.62)' : withAlpha(state.bodyColor, .58);
+      wrapText(row.value.toUpperCase(), x + 58, y + 74, colW - 76, 16, 1);
+    }
+  });
+}
+
+function drawBadge(state) {
+  if (!state.badgeTitle && !state.badgeValue) return;
+  const x = 828, y = 0, w = 226, h = 136;
+  addHitZone('badge', 'Etiqueta superior', x, y, w, h);
+  ctx.fillStyle = state.accentColor;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + h - 36);
+  ctx.lineTo(x + w / 2, y + h);
+  ctx.lineTo(x, y + h - 36);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = '900 21px "Barlow Condensed", Arial, sans-serif';
+  ctx.fillText(state.badgeTitle.toUpperCase(), x + 90, y + 52);
+  fitText(state.badgeValue.toUpperCase(), x + 90, y + 86, 120, 34, 900, '#fff');
+  drawIcon('fuel', x + 36, y + 38, 44, '#fff', false);
+}
+
+function drawHeroText(state) {
+  const left = 32;
+  if (state.brand) {
+    addHitZone('brand', 'Marca', left, 24, 280, 58);
+    ctx.font = '900 50px "Barlow Condensed", Arial, sans-serif';
+    ctx.fillStyle = state.brandColor;
+    ctx.fillText(state.brand.toUpperCase(), left, 72);
+  }
+  if (state.title1 || state.title2) addHitZone('title', 'Titulo principal', left, 88, 360, 150);
+  if (state.title1) fitText(state.title1.toUpperCase(), left, 158, 360, 84, 900, state.title1Color);
+  if (state.title2) fitText(state.title2.toUpperCase(), left, 230, 360, 72, 900, state.title2Color);
+  if (state.model) {
+    const mw = Math.min(280, Math.max(150, ctx.measureText(state.model).width + 58));
+    addHitZone('model', 'Modelo', left, 256, mw, 56);
+    ctx.fillStyle = state.accentColor;
+    ctx.beginPath();
+    ctx.moveTo(left, 256);
+    ctx.lineTo(left + mw, 256);
+    ctx.lineTo(left + mw - 20, 312);
+    ctx.lineTo(left, 312);
+    ctx.closePath();
+    ctx.fill();
+    fitText(state.model.toUpperCase(), left + 26, 298, mw - 48, 45, 900, '#fff');
+  }
+  if (state.description) {
+    addHitZone('description', 'Descripcion', left, state.model ? 326 : 270, 285, 126);
+    ctx.fillStyle = state.bodyColor;
+    ctx.font = '600 22px Barlow, Arial, sans-serif';
+    wrapText(state.description, left + 4, state.model ? 354 : 298, 260, 29, 4);
+  }
+}
+
+function drawHighlights(rows, state) {
+  if (!rows.length) return;
+  let y = 470;
+  rows.forEach((row, index) => {
+    const sourceIndex = row.sourceIndex ?? index;
+    addHitZone(`highlight-${sourceIndex}`, `Destacado ${sourceIndex + 1}`, 24, y - 48, 285, 94, { kind: 'highlight', index: sourceIndex });
+    drawIcon(row.icon, 36, y - 34, 74, '#fff', true);
+    ctx.fillStyle = state.accentColor;
+    ctx.font = '900 25px "Barlow Condensed", Arial, sans-serif';
+    ctx.fillText(row.label.toUpperCase(), 124, y - 8);
+    ctx.fillStyle = state.bodyColor;
+    fitText(row.value.toUpperCase(), 124, y + 26, 170, 33, 900, state.bodyColor);
+    if (row.detail) {
+      ctx.font = '900 18px "Barlow Condensed", Arial, sans-serif';
+      wrapText(row.detail.toUpperCase(), 124, y + 50, 170, 20, 2);
+    }
+    y += 100;
+  });
+}
+
+function drawSpecs(rows, state, y, h) {
+  if (!rows.length) return 0;
+  addHitZone('spec-bar', 'Caracteristicas', 0, y, W, h);
+  ctx.fillStyle = state.darkBarColor;
+  ctx.fillRect(0, y, W, h);
+  ctx.fillStyle = '#fff';
+  ctx.font = '900 32px "Barlow Condensed", Arial, sans-serif';
+  ctx.fillText('CARACTERISTICAS', 34, y + 45);
+  const top = y + 78;
+  const cols = Math.min(rows.length, 6);
+  const colW = W / cols;
+  rows.slice(0, 6).forEach((row, i) => {
+    const sourceIndex = row.sourceIndex ?? i;
+    const x = i * colW + 26;
+    addHitZone(`spec-${sourceIndex}`, `Caracteristica ${sourceIndex + 1}`, i * colW, y + 56, colW, h - 56, { kind: 'spec', index: sourceIndex });
+    if (i > 0) {
+      ctx.strokeStyle = 'rgba(255,255,255,.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(i * colW, top - 15);
+      ctx.lineTo(i * colW, y + h - 30);
+      ctx.stroke();
+    }
+    drawIcon(row.icon, x, top, 44, '#fff');
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 18px "Barlow Condensed", Arial, sans-serif';
+    wrapText(row.label.toUpperCase(), x + 64, top + 14, colW - 92, 20, 2);
+    fitText(row.value.toUpperCase(), x + 64, top + 66, colW - 92, 33, 900, '#fff');
+    if (row.detail) {
+      ctx.font = '900 17px "Barlow Condensed", Arial, sans-serif';
+      wrapText(row.detail.toUpperCase(), x + 64, top + 92, colW - 92, 18, 2);
+    }
+  });
+  return h;
+}
+
+function drawBenefits(rows, state, y, h) {
+  if (!rows.length) return 0;
+  addHitZone('benefit-bar', 'Beneficios inferiores', 0, y, W, h);
+  ctx.fillStyle = state.bottomBarColor;
+  ctx.fillRect(0, y, W, h);
+  const cols = Math.min(rows.length, 4);
+  const colW = W / cols;
+  rows.slice(0, 4).forEach((row, i) => {
+    const sourceIndex = row.sourceIndex ?? i;
+    const x = i * colW + 34;
+    addHitZone(`benefit-${sourceIndex}`, `Beneficio ${sourceIndex + 1}`, i * colW, y, colW, h, { kind: 'benefit', index: sourceIndex });
+    if (i > 0) {
+      ctx.strokeStyle = 'rgba(255,255,255,.38)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(i * colW, y + 22);
+      ctx.lineTo(i * colW, y + h - 22);
+      ctx.stroke();
+    }
+    drawIcon(row.icon, x, y + 28, 54, '#fff');
+    ctx.fillStyle = '#fff';
+    fitText(row.label.toUpperCase(), x + 76, y + 54, colW - 98, 22, 900, '#fff');
+    if (row.value) {
+      ctx.font = '600 16px Barlow, Arial, sans-serif';
+      wrapText(row.value.toUpperCase(), x + 76, y + 80, colW - 98, 18, 2);
+    }
+  });
+  return h;
+}
+
+function drawBrushPoster(state, highlights, specs, benefits) {
+  drawProceduralBackground(state);
+  addHitZone('background', 'Fondo y colores generales', 0, 0, W, H);
+  drawSoftGlow(760, 370, 520, state.accentColor, .09);
+  drawElegantTitle(state, 54, 96, 430, false);
+  drawFeatureCards(highlights.concat(specs), state, 54, 420, 330, false);
+  drawElevatedPanel(430, 82, 590, 750, 34, 'rgba(255,255,255,.86)', withAlpha(state.accentColor, .12));
+  drawProductInRect(state, 445, 98, 560, 710, false);
+  if (shouldDrawBadge(state)) {
+    addHitZone('badge', 'Etiqueta superior', 792, 66, 205, 56);
+    roundedRect(792, 66, 205, 56, 18, withAlpha(state.accentColor, .12), withAlpha(state.accentColor, .28));
+    drawIcon('check', 810, 80, 30, state.accentColor);
+    fitText((state.badgeValue || state.badgeTitle).toUpperCase(), 852, 101, 126, 23, 900, state.accentColor);
+  }
+  drawMinimalBottom(benefits.length ? benefits : specs, state, 924, false);
+}
+
+function drawMeasurePoster(state, highlights, specs, benefits) {
+  drawProceduralBackground(state);
+  addHitZone('background', 'Fondo y colores generales', 0, 0, W, H);
+  drawElegantTitle(state, 50, 82, 470, false);
+  drawFeatureCards(highlights.concat(specs), state, 54, 370, 292, false);
+  drawProductInRect(state, 300, 170, 700, 660, false);
+  const dimension = state.model || specs.find(row => /\d/.test(row.value || ''))?.value || '';
+  if (dimension) {
+    drawDimensionLine(350, 826, 945, 905, dimension.toUpperCase(), state.darkBarColor);
+    if (specs[1]?.value || state.title2) drawDimensionLine(355, 735, 460, 340, specs[1]?.value || state.title2, state.darkBarColor);
+  }
+  if (shouldDrawBadge(state)) {
+    addHitZone('badge', 'Etiqueta superior', 850, 52, 150, 150);
+    drawElevatedPanel(850, 52, 150, 150, 75, 'rgba(255,255,255,.75)', withAlpha(state.darkBarColor, .18));
+    drawIcon('shield', 892, 82, 66, state.darkBarColor);
+    fitText((state.badgeValue || state.badgeTitle).toUpperCase(), 834, 230, 190, 27, 900, state.darkBarColor);
+  }
+  drawMinimalBottom(benefits.length ? benefits : specs, state, 930, false);
+}
+
+function drawSidePanelPoster(state, highlights, specs, benefits) {
+  drawProceduralBackground(state);
+  addHitZone('background', 'Fondo y colores generales', 0, 0, W, H);
+  drawElevatedPanel(54, 54, 640, 820, 36, 'rgba(255,255,255,.88)', 'rgba(11,41,72,.08)');
+  drawProductInRect(state, 76, 74, 596, 780, false);
+  drawElevatedPanel(724, 70, 302, 760, 34, 'rgba(255,255,255,.82)', withAlpha(state.darkBarColor, .09));
+  drawElegantTitle(state, 758, 118, 230, false);
+  drawFeatureCards(highlights.concat(specs), state, 758, 436, 228, false);
+  drawMinimalBottom(benefits.length ? benefits : specs, state, 920, false);
+}
+
+function drawDarkPoster(state, highlights, specs, benefits) {
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#11161b');
+  bg.addColorStop(.6, '#171f25');
+  bg.addColorStop(1, '#0d1014');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  drawSoftGlow(820, 330, 560, state.accentColor, .14);
+  drawSoftGlow(240, 880, 460, '#ffffff', .05);
+  addHitZone('background', 'Fondo y colores generales', 0, 0, W, H);
+  drawElegantTitle(state, 54, 100, 410, true);
+  drawFeatureCards(highlights.concat(specs), state, 54, 430, 340, true);
+  drawElevatedPanel(455, 70, 570, 770, 38, 'rgba(255,255,255,.08)', 'rgba(255,255,255,.14)');
+  drawProductInRect(state, 470, 92, 540, 730, false);
+  drawMinimalBottom(benefits.length ? benefits : specs, state, 920, true);
+}
+
+function drawCatalogPoster(state, highlights, specs, benefits) {
+  drawProceduralBackground(state);
+  addHitZone('background', 'Fondo y colores generales', 0, 0, W, H);
+  const bottomBarH = benefits.length ? 120 : 0;
+  const specsBarH = specs.length ? 200 : 0;
+  const specsY = H - bottomBarH - specsBarH;
+  const imageBottom = specs.length || benefits.length ? specsY - 12 : H - 26;
+  drawProductImage(state, 145, imageBottom);
+  if (shouldDrawBadge(state)) drawBadge(state);
+  drawHeroText(state);
+  drawHighlights(highlights, state);
+  drawSpecs(specs, state, specsY, specsBarH);
+  drawBenefits(benefits, state, H - bottomBarH, bottomBarH);
+}
+
+function stateFromForm() {
+  return {
+    brand: fieldValue('brand').trim(),
+    model: fieldValue('model').trim(),
+    title1: fieldValue('title1').trim(),
+    title2: fieldValue('title2').trim(),
+    description: fieldValue('description').trim(),
+    badgeTitle: fieldValue('badgeTitle').trim(),
+    badgeValue: fieldValue('badgeValue').trim(),
+    bgColor: fieldValue('bgColor'),
+    brandColor: fieldValue('brandColor'),
+    title1Color: fieldValue('title1Color'),
+    title2Color: fieldValue('title2Color'),
+    accentColor: fieldValue('accentColor'),
+    bodyColor: fieldValue('bodyColor'),
+    darkBarColor: fieldValue('darkBarColor'),
+    bottomBarColor: fieldValue('bottomBarColor'),
+    trimWhite: fieldValue('trimWhite'),
+    imageScale: fieldValue('imageScale'),
+    imageX: fieldValue('imageX'),
+    imageY: fieldValue('imageY'),
+    whiteThreshold: fieldValue('whiteThreshold'),
+    layoutTemplate: fieldValue('layoutTemplate'),
+    proceduralPreset: fieldValue('proceduralPreset'),
+    proceduralBackdrop: fieldValue('proceduralBackdrop'),
+    proceduralShadow: fieldValue('proceduralShadow'),
+    proceduralGlow: fieldValue('proceduralGlow'),
+    proceduralFrame: fieldValue('proceduralFrame'),
+    proceduralTexture: fieldValue('proceduralTexture')
+  };
+}
+
+function drawPoster() {
+  const state = stateFromForm();
+  const highlights = promoRows(collectRows('highlight', 3).map(row => ({ ...row, rowKind: 'highlight' })));
+  const specs = promoRows(collectRows('spec', 6).map(row => ({ ...row, rowKind: 'spec' })));
+  const benefits = promoRows(collectRows('benefit', 4, true).map(row => ({ ...row, rowKind: 'benefit' })));
+  hitZones = [];
+  ctx.clearRect(0, 0, W, H);
+  if (state.layoutTemplate === 'measure') drawMeasurePoster(state, highlights, specs, benefits);
+  else if (state.layoutTemplate === 'sidepanel') drawSidePanelPoster(state, highlights, specs, benefits);
+  else if (state.layoutTemplate === 'dark') drawDarkPoster(state, highlights, specs, benefits);
+  else if (state.layoutTemplate === 'catalog') drawCatalogPoster(state, highlights, specs, benefits);
+  else drawBrushPoster(state, highlights, specs, benefits);
+}
+
+function applyProceduralPreset(preset = fieldValue('proceduralPreset')) {
+  const options = {
+    clean: {
+      layoutTemplate: 'brush',
+      proceduralBackdrop: '#ffffff',
+      proceduralShadow: '48',
+      proceduralGlow: '36',
+      proceduralFrame: '42',
+      proceduralTexture: '10',
+      imageScale: '104',
+      imageX: '24',
+      imageY: '0'
+    },
+    offer: {
+      layoutTemplate: 'brush',
+      proceduralBackdrop: '#fff4f4',
+      proceduralShadow: '66',
+      proceduralGlow: '72',
+      proceduralFrame: '76',
+      proceduralTexture: '18',
+      imageScale: '110',
+      imageX: '28',
+      imageY: '-4'
+    },
+    premium: {
+      layoutTemplate: 'dark',
+      proceduralBackdrop: '#f5f6f7',
+      proceduralShadow: '72',
+      proceduralGlow: '50',
+      proceduralFrame: '68',
+      proceduralTexture: '12',
+      imageScale: '106',
+      imageX: '18',
+      imageY: '0'
+    },
+    industrial: {
+      layoutTemplate: 'measure',
+      proceduralBackdrop: '#eef2f3',
+      proceduralShadow: '78',
+      proceduralGlow: '34',
+      proceduralFrame: '62',
+      proceduralTexture: '38',
+      imageScale: '104',
+      imageX: '16',
+      imageY: '4'
+    }
+  };
+  setField('proceduralPreset', preset);
+  Object.entries(options[preset] || options.clean).forEach(([name, value]) => setField(name, value));
+}
+
+function enhanceProceduralFicha() {
+  applyProceduralPreset(fieldValue('proceduralPreset'));
+  setField('trimWhite', true);
+  drawPoster();
+}
+
+function normalizeKey(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function setRow(prefix, index, data) {
+  Object.entries(data).forEach(([key, value]) => {
+    const el = document.querySelector(`[data-row="${prefix}"][data-index="${index}"][data-key="${key}"]`);
+    if (el) el.value = value || '';
+  });
+}
+
+function parseQuickText() {
+  const lines = document.getElementById('quickText').value.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const pairs = [];
+  const loose = [];
+  lines.forEach(line => {
+    const match = line.match(/^([^:=\-]+)\s*[:=\-]\s*(.+)$/);
+    if (match) pairs.push([normalizeKey(match[1]), match[1].trim(), match[2].trim()]);
+    else loose.push(line);
+  });
+  const specCandidates = [];
+  pairs.forEach(([key, rawKey, value]) => {
+    if (['marca', 'brand'].includes(key)) setField('brand', value);
+    else if (['modelo', 'model'].includes(key)) setField('model', value);
+    else if (['producto', 'titulo', 'title'].includes(key)) {
+      const parts = value.split(/\s+(?=A\s|DE\s|CON\s)/i);
+      setField('title1', (parts[0] || value).trim());
+      setField('title2', parts.slice(1).join(' ').trim());
+    } else if (['descripcion', 'description', 'detalle'].includes(key)) setField('description', value);
+    else if (['alimentacion', 'combustible'].includes(key)) {
+      setField('badgeTitle', rawKey.toUpperCase());
+      setField('badgeValue', value);
+    } else {
+      specCandidates.push({ rawKey, value });
+    }
+  });
+  loose.forEach((line, idx) => {
+    if (idx === 0 && !fieldValue('description')) setField('description', line);
+  });
+  specCandidates.filter(item => !isHiddenPromoText(`${item.rawKey} ${item.value}`)).slice(0, 6).forEach((item, index) => {
+    const icon = normalizeKey(item.rawKey).includes('consumo') ? 'fuel'
+      : normalizeKey(item.rawKey).includes('volt') ? 'plug'
+      : normalizeKey(item.rawKey).includes('tec') || normalizeKey(item.rawKey).includes('fase') ? 'wave'
+      : 'bolt';
+    setRow('spec', index, { icon, label: item.rawKey.toUpperCase(), value: item.value.toUpperCase(), detail: '' });
+    if (index < 3) setRow('highlight', index, { icon, label: item.rawKey.toUpperCase(), value: item.value.toUpperCase(), detail: '' });
+  });
+  drawPoster();
+}
+
+function clearTextData() {
+  ['brand', 'model', 'title1', 'title2', 'description', 'badgeTitle', 'badgeValue'].forEach(name => setField(name, ''));
+  document.querySelectorAll('[data-row]').forEach(el => {
+    if (el.dataset.key === 'icon') el.value = 'bolt';
+    else el.value = '';
+  });
+  drawPoster();
+}
+
+function downloadPoster() {
+  drawPoster();
+  const a = document.createElement('a');
+  const model = fieldValue('model').trim() || fieldValue('title1').trim() || productFileName;
+  a.download = `${model.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'ficha-producto'}.png`;
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+}
+
+function loadImageFile(file) {
+  if (!file) return;
+  productFileName = file.name.replace(/\.[^.]+$/, '') || 'ficha-producto';
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      productImage = img;
+      drawPoster();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function loadImageUrl(url) {
+  const cleanUrl = String(url || '').trim();
+  imageLoadToken += 1;
+  const token = imageLoadToken;
+  if (!cleanUrl) {
+    productImage = null;
+    drawPoster();
+    return;
+  }
+  productImage = null;
+  drawPoster();
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    if (token !== imageLoadToken) return;
+    productImage = img;
+    drawPoster();
+  };
+  img.onerror = () => {
+    if (token !== imageLoadToken) return;
+    drawPoster();
+  };
+  img.src = cleanUrl;
+}
+
+function clearRows(prefix, count) {
+  for (let i = 0; i < count; i++) {
+    setRow(prefix, i, { icon: 'bolt', label: '', value: '', detail: '' });
+  }
+}
+
+function applyRows(prefix, count, rows = []) {
+  clearRows(prefix, count);
+  rows.filter(row => !isHiddenPromoText(`${row.label || ''} ${row.value || ''} ${row.detail || ''}`)).slice(0, count).forEach((row, index) => {
+    setRow(prefix, index, {
+      icon: row.icon || 'bolt',
+      label: row.label || '',
+      value: row.value || '',
+      detail: row.detail || ''
+    });
+  });
+}
+
+function applyGeneratorPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return;
+  const fields = payload.fields || {};
+  const article = payload.article || {};
+  ['brand', 'model', 'title1', 'title2', 'description', 'badgeTitle', 'badgeValue'].forEach(name => {
+    if (!Object.prototype.hasOwnProperty.call(fields, name)) return;
+    const value = fields[name];
+    const isRubroDescription = name === 'description' && article.rubro && normalizeKey(value) === normalizeKey(article.rubro);
+    const isRubroBadge = (name === 'badgeTitle' || name === 'badgeValue') && isHiddenPromoText(`${fields.badgeTitle || ''} ${fields.badgeValue || ''}`);
+    setField(name, isRubroDescription || isRubroBadge ? '' : value);
+  });
+  const rows = payload.rows || {};
+  applyRows('highlight', 3, rows.highlights || []);
+  applyRows('spec', 6, rows.specs || []);
+  applyRows('benefit', 4, rows.benefits || []);
+  productFileName = article.codigo || fields.model || article.nombre || productFileName;
+  const imageUrl = payload.imageUrl || article.fotoUrl || '';
+  if (imageUrl) loadImageUrl(imageUrl);
+  else {
+    productImage = null;
+    drawPoster();
+  }
+}
+
+function formatImportMoney(value) {
+  const bridge = getSystemBridge();
+  if (bridge?.money) return bridge.money(value);
+  return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function getImportCatalog() {
+  const bridge = getSystemBridge();
+  const stored = bridge?.getImageGeneratorCatalog?.() || [];
+  if (stored.length) return stored;
+  try {
+    if (window.parent && window.parent !== window && Array.isArray(window.parent.__corralonImageGeneratorCatalog)) {
+      return window.parent.__corralonImageGeneratorCatalog;
+    }
+  } catch (e) {}
+  try {
+    if (window.opener && Array.isArray(window.opener.__corralonImageGeneratorCatalog)) {
+      return window.opener.__corralonImageGeneratorCatalog;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function importSearchText(article = {}) {
+  return normalizeKey([
+    article.nombre,
+    article.codigo,
+    article.rubro,
+    article.detalle,
+    Array.isArray(article.tagsOcultos) ? article.tagsOcultos.join(' ') : article.tagsOcultos
+  ].filter(Boolean).join(' '));
+}
+
+function renderImportList() {
+  const list = document.getElementById('importList');
+  const query = normalizeKey(document.getElementById('importSearch').value);
+  const entries = importCatalog
+    .map((article, index) => ({ article, index }))
+    .filter(({ article }) => !query || importSearchText(article).includes(query))
+    .slice(0, 180);
+  if (!entries.length) {
+    list.innerHTML = `<div class="import-empty">${importCatalog.length ? 'No encontre articulos con esa busqueda.' : 'Todavia no hay articulos cargados desde soloadmin.'}</div>`;
+    return;
+  }
+  list.innerHTML = entries.map(({ article, index }) => `
+    <button class="import-item" type="button" data-import-index="${index}">
+      <span class="import-thumb">${article.fotoUrl ? `<img src="${escapeAttr(article.fotoUrl)}" alt="">` : 'IMG'}</span>
+      <span>
+        <span class="import-name">${escapeAttr(article.nombre || 'Sin nombre')}</span>
+        <span class="import-meta">Cod: ${escapeAttr(article.codigo || '-')} · Rubro: ${escapeAttr(article.rubro || '-')}</span>
+      </span>
+      <span class="import-price">${formatImportMoney(article.precio || 0)}</span>
+    </button>
+  `).join('');
+}
+
+function openImportModal() {
+  importCatalog = getImportCatalog();
+  renderImportList();
+  const modal = document.getElementById('importModal');
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => document.getElementById('importSearch')?.focus({ preventScroll: true }));
+}
+
+function closeImportModal() {
+  const modal = document.getElementById('importModal');
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function selectImportArticle(index) {
+  const article = importCatalog[index];
+  if (!article) return;
+  const bridge = getSystemBridge();
+  const payload = bridge?.buildImageGeneratorPayload ? bridge.buildImageGeneratorPayload(article) : null;
+  if (!payload) return;
+  bridge?.setImageGeneratorPayload?.(payload);
+  applyGeneratorPayload(payload);
+  closeImportModal();
+}
+
+makeRows('highlights', 'highlight', demoHighlights);
+makeRows('specs', 'spec', demoSpecs);
+makeRows('benefits', 'benefit', demoBenefits, 'benefit');
+
+document.addEventListener('input', event => {
+  if (event.target.matches('[data-field], [data-row]')) drawPoster();
+});
+document.addEventListener('change', event => {
+  if (event.target.matches('[data-field], [data-row]')) drawPoster();
+});
+document.getElementById('imageInput').addEventListener('change', event => loadImageFile(event.target.files?.[0]));
+document.getElementById('downloadBtn').addEventListener('click', downloadPoster);
+document.getElementById('importBtn').addEventListener('click', openImportModal);
+document.getElementById('enhanceBtn').addEventListener('click', enhanceProceduralFicha);
+document.getElementById('parseBtn').addEventListener('click', parseQuickText);
+document.getElementById('clearBtn').addEventListener('click', clearTextData);
+canvas.addEventListener('click', event => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (W / rect.width);
+  const y = (event.clientY - rect.top) * (H / rect.height);
+  openEditor(findHitZone(x, y));
+});
+canvas.addEventListener('mousemove', event => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (W / rect.width);
+  const y = (event.clientY - rect.top) * (H / rect.height);
+  canvas.style.cursor = findHitZone(x, y) ? 'pointer' : 'default';
+});
+
+document.getElementById('editModalClose').addEventListener('click', closeEditor);
+document.getElementById('editModalDone').addEventListener('click', closeEditor);
+document.getElementById('editModalClear').addEventListener('click', clearActiveEditorSection);
+document.getElementById('editModal').addEventListener('click', event => {
+  if (event.target.id === 'editModal') closeEditor();
+});
+document.getElementById('importModalClose').addEventListener('click', closeImportModal);
+document.getElementById('importModalCancel').addEventListener('click', closeImportModal);
+document.getElementById('importModal').addEventListener('click', event => {
+  if (event.target.id === 'importModal') closeImportModal();
+});
+document.getElementById('importSearch').addEventListener('input', renderImportList);
+document.getElementById('importList').addEventListener('click', event => {
+  const button = event.target.closest('[data-import-index]');
+  if (button) selectImportArticle(Number(button.dataset.importIndex));
+});
+document.getElementById('editModalBody').addEventListener('input', event => {
+  const target = event.target;
+  if (target.matches('[data-edit-field]')) {
+    const source = byField(target.dataset.editField);
+    if (source) {
+      if (source.type === 'checkbox') source.checked = target.checked;
+      else source.value = target.value;
+    }
+    drawPoster();
+  }
+  if (target.matches('[data-edit-row]')) {
+    setSourceRowValue(target.dataset.editRow, target.dataset.editIndex, target.dataset.editKey, target.value);
+    drawPoster();
+  }
+});
+document.getElementById('editModalBody').addEventListener('change', event => {
+  const target = event.target;
+  if (target.matches('[data-edit-field]')) {
+    const source = byField(target.dataset.editField);
+    if (source) {
+      if (source.type === 'checkbox') source.checked = target.checked;
+      else source.value = target.value;
+    }
+    drawPoster();
+  }
+  if (target.matches('[data-edit-row]')) {
+    setSourceRowValue(target.dataset.editRow, target.dataset.editIndex, target.dataset.editKey, target.value);
+    drawPoster();
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.getElementById('editModal').classList.contains('open')) closeEditor();
+  if (event.key === 'Escape' && document.getElementById('importModal').classList.contains('open')) closeImportModal();
+});
+
+document.fonts?.ready?.then(drawPoster);
+const startupPayload = getSystemBridge()?.readImageGeneratorPayload?.(true);
+if (startupPayload) applyGeneratorPayload(startupPayload);
+else drawPoster();
+</script>
+</body>
+</html>

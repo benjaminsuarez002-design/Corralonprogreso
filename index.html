@@ -963,6 +963,13 @@
   .prode-match input { height:34px; border:1px solid #bfe4ff; border-radius:8px; text-align:center; font-weight:900; font-size:18px; }
   .prode-match input:disabled { background:#eef2f7; color:#7b8798; cursor:not-allowed; }
   .prode-scorebox span { text-align:center; color:#6b7890; font-weight:900; }
+  .prode-points-result { grid-column:2; display:flex; justify-content:center; align-items:center; gap:8px; min-height:28px; margin-top:-2px; font-family:'Barlow',sans-serif; line-height:1; }
+  .prode-points-pill { display:inline-flex; align-items:center; justify-content:center; min-width:50px; min-height:26px; padding:3px 12px; border-radius:999px; border:1px solid currentColor; font-family:'Barlow Condensed',sans-serif; font-size:19px; font-weight:900; background:#fff; box-shadow:0 6px 14px rgba(8,18,40,.08); }
+  .prode-real-pill { display:inline-flex; align-items:center; justify-content:center; min-height:26px; padding:4px 11px; border-radius:999px; background:#eef8ff; color:#24435f; border:1px solid #cfeaff; font-size:11px; font-weight:900; letter-spacing:.01em; white-space:nowrap; box-shadow:0 6px 14px rgba(8,18,40,.05); }
+  .prode-real-pill strong { margin-left:4px; color:#10203b; font-size:13px; font-weight:900; }
+  .prode-points-win { color:#008a3d; background:#eafff2; }
+  .prode-points-half { color:#b88400; background:#fff8d7; }
+  .prode-points-zero { color:#d71d1d; background:#fff0f0; }
   .prode-match-close { grid-column:1 / -1; margin-top:-4px; color:#6b7890; font-size:11px; font-weight:800; text-align:center; }
   .prode-side { display:grid; gap:12px; align-content:start; }
   .prode-rules { border:1px solid #d5edff; border-radius:18px; padding:12px; background:#fff; }
@@ -1015,7 +1022,11 @@
     .prode-team span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.1; }
     .prode-flag { width:30px; height:30px; font-size:12px; flex:0 0 auto; }
     .prode-scorebox { grid-column:1 / -1; grid-row:2; grid-template-columns:42px 12px 42px; gap:6px; justify-content:center; order:initial; margin-top:2px; }
-    .prode-match-close { grid-column:1 / -1; grid-row:3; margin-top:-2px; font-size:10px; line-height:1.2; }
+    .prode-points-result { grid-column:1 / -1; grid-row:3; margin-top:-3px; min-height:25px; }
+    .prode-points-pill { min-width:46px; min-height:24px; padding:2px 10px; font-size:18px; }
+    .prode-real-pill { min-height:24px; padding:3px 9px; font-size:10px; }
+    .prode-real-pill strong { font-size:12px; }
+    .prode-match-close { grid-column:1 / -1; grid-row:4; margin-top:-2px; font-size:10px; line-height:1.2; }
     .prode-match input { height:36px; font-size:16px; padding:0; border-radius:10px; }
     .prode-player { grid-template-columns:1fr; }
     .prode-player input,.prode-save { width:100%; }
@@ -6159,6 +6170,46 @@ function prodeScoreValue(value) {
   if(raw === '') return '';
   return String(Math.max(0, Number(raw)));
 }
+function prodeResultadoTipo(local, visitante) {
+  const l = Number(local);
+  const v = Number(visitante);
+  if(l === v) return 'empate';
+  return l > v ? 'local' : 'visitante';
+}
+function prodeResultadoCompleto(resultado = {}) {
+  return prodeScoreValue(resultado.local) !== '' && prodeScoreValue(resultado.visitante) !== '';
+}
+function prodePuntosPrediccion(pred = {}, real = {}) {
+  const pl = prodeScoreValue(pred.local) || '0';
+  const pv = prodeScoreValue(pred.visitante) || '0';
+  const rl = prodeScoreValue(real.local);
+  const rv = prodeScoreValue(real.visitante);
+  if(rl === '' || rv === '') return null;
+  if(pl === rl && pv === rv) return 10;
+  return prodeResultadoTipo(pl, pv) === prodeResultadoTipo(rl, rv) ? 5 : 0;
+}
+function prodePuntosHtml(pred, real) {
+  const puntos = prodePuntosPrediccion(pred, real);
+  if(puntos === null) return '';
+  const rl = prodeScoreValue(real.local) || '0';
+  const rv = prodeScoreValue(real.visitante) || '0';
+  const cls = puntos === 10 ? 'prode-points-win' : puntos === 5 ? 'prode-points-half' : 'prode-points-zero';
+  const label = puntos > 0 ? `+${puntos}` : '0';
+  return `<div class="prode-points-result" data-prode-points-result><span class="prode-real-pill">Resultado <strong>${rl}-${rv}</strong></span><span class="prode-points-pill ${cls}">${label}</span></div>`;
+}
+function prodeActualizarPuntosFila(row) {
+  const id = row?.dataset?.prodeMatch || '';
+  if(!id || !prodeUser().doc) return;
+  const pred = {
+    local: row.querySelector('[data-prode-score="local"]')?.value || '',
+    visitante: row.querySelector('[data-prode-score="visitante"]')?.value || ''
+  };
+  const html = prodePuntosHtml(pred, (prodeConfig.resultadosReales || {})[id] || {});
+  const actual = row.querySelector('[data-prode-points-result]');
+  if(actual) actual.remove();
+  if(!html) return;
+  (row.querySelector('.prode-team-visitante') || row.querySelector('.prode-scorebox'))?.insertAdjacentHTML('afterend', html);
+}
 function prodeNormalizarResultados(resultados = {}) {
   const limpio = {};
   prodePartidos.forEach((partido) => {
@@ -6219,6 +6270,7 @@ function renderProde() {
   if(tabs) tabs.innerHTML = prodeFases.map(f => `<button class="prode-tab ${f.id===prodeFaseActiva?'active':''}" type="button" data-prode-tab="${f.id}">${f.label}</button>`).join('');
   if(!list) return;
   const resultados = draft.resultados || {};
+  const resultadosReales = prodeConfig.resultadosReales || {};
   let faseActual = prodeFases.find(f => f.id === prodeFaseActiva) || prodeFases[0];
   if(faseActual && faseActual.id !== prodeFaseActiva) prodeFaseActiva = faseActual.id;
   if(tabs) tabs.innerHTML = prodeFases.map(f => `<button class="prode-tab ${f.id===prodeFaseActiva?'active':''}" type="button" data-prode-tab="${f.id}">${f.label}</button>`).join('');
@@ -6227,6 +6279,7 @@ function renderProde() {
     .sort((a, b) => prodePartidoTime(a) - prodePartidoTime(b));
   list.innerHTML = `<div class="prode-fixture-title">Fechas ${faseActual?.label || 'Fixture'} · horario Argentina</div>` + visibles.map((p) => {
     const r = resultados[p.id] || {};
+    const real = resultadosReales[p.id] || {};
     const cerrado = prodePartidoCerrado(p);
     const cierreTxt = p.cierre ? `<div class="prode-match-close">${p.fecha} · cierra ${fmtProdeDate(p.cierre)}</div>` : '';
     return `<div class="prode-match" data-prode-match="${p.id}">
@@ -6237,6 +6290,7 @@ function renderProde() {
         <input type="text" inputmode="numeric" maxlength="2" data-prode-score="visitante" value="${registrado ? (r.visitante ?? '') : ''}" ${cerrado || !registrado ? 'disabled' : ''}>
       </div>
       <div class="prode-team prode-team-visitante"><span class="prode-flag">${prodeFlagHtml(p.flagVisitante)}</span><span>${p.visitante}</span></div>
+      ${registrado ? prodePuntosHtml(r, real) : ''}
       ${cierreTxt}
     </div>`;
   }).join('');
@@ -6450,6 +6504,7 @@ document.getElementById('prodeModal')?.addEventListener('input', (e) => {
   }
   if(e.target.matches('[data-prode-score], #prodePlayerName')) {
     prodeGuardarDraftLocal();
+    if(e.target.matches('[data-prode-score]')) prodeActualizarPuntosFila(e.target.closest('[data-prode-match]'));
     clearTimeout(prodeSyncDraftRemoto._timer);
     prodeSyncDraftRemoto._timer = setTimeout(() => prodeSyncDraftRemoto().catch(() => {}), 450);
   }
@@ -6462,6 +6517,7 @@ document.getElementById('prodeModal')?.addEventListener('change', (e) => {
   }
   if(e.target.matches('[data-prode-score], #prodePlayerName')) {
     prodeGuardarDraftLocal();
+    if(e.target.matches('[data-prode-score]')) prodeActualizarPuntosFila(e.target.closest('[data-prode-match]'));
     prodeSyncDraftRemoto().catch(() => {});
   }
 });
