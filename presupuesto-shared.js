@@ -176,7 +176,8 @@
     const pageH = doc.internal.pageSize.getHeight();
     const footerY = pageH - 20;
     const footerNote = data.footerNote ? String(data.footerNote) : '';
-    const rowLimitY = footerY - (footerNote ? 26 : 18);
+    const footerLines = footerNote ? footerNote.split(/\r?\n/).filter(Boolean) : [];
+    const rowLimitY = footerY - (footerLines.length ? 18 + (footerLines.length * 6) : 18);
     const columns = {
       cantidad: 17,
       descripcion: 35,
@@ -219,9 +220,9 @@
     doc.setFont(undefined, 'normal');
     doc.setFontSize(13);
     doc.text('TOTAL: ' + fmtMoneda(total), 195, footerY, { align: 'right' });
-    if (footerNote) {
+    if (footerLines.length) {
       doc.setFontSize(9);
-      doc.text(footerNote, 105, footerY + 8, { align: 'center' });
+      doc.text(footerLines, 105, footerY + 8, { align: 'center', lineHeightFactor: 1.25 });
     }
     return doc;
   }

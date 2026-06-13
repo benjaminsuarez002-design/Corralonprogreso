@@ -1019,6 +1019,32 @@
     return Boolean(menuSessionUser());
   }
 
+  const PRESUPUESTO_MEDIOS_PAGO = [
+    'Banco santander',
+    'Cheques',
+    'Cta. Cte.',
+    'Dolares',
+    'Efectivo',
+    'Getnet',
+    'Lapos',
+    'Mercado Pago',
+    'Transf Bria.',
+    'Transf prov',
+    'Vale'
+  ];
+
+  function presupuestoMediosPago() {
+    return PRESUPUESTO_MEDIOS_PAGO.slice();
+  }
+
+  function normalizePresupuestoDatos(datos = {}) {
+    return {
+      nombre: String(datos.nombre || '').trim(),
+      medioPago: String(datos.medioPago || '').trim(),
+      nota: String(datos.nota || '').trim()
+    };
+  }
+
   window.CorralonFunciones = {
     deepClone,
     statesEqual,
@@ -1038,6 +1064,8 @@
     bindResizableColumns,
     bindLinearNavigation,
     menuSessionUser,
-    isMenuSessionActive
+    isMenuSessionActive,
+    presupuestoMediosPago,
+    normalizePresupuestoDatos
   };
 })();
