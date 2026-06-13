@@ -14,6 +14,8 @@
   const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
   const FULL_PROVIDER_MANIFEST_PREFIX = 'provider_full_manifest:';
   const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
+  const IMAGE_GENERATOR_CATALOG_KEY = 'corralon_image_generator_catalog_v1';
+  const IMAGE_GENERATOR_PAYLOAD_KEY = 'corralon_image_generator_payload_v1';
 
   function headers(extra = {}) {
     return {
@@ -71,6 +73,148 @@
 
   function money(value) {
     return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function imageGeneratorText(value) {
+    return String(value ?? '').trim();
+  }
+
+  function imageGeneratorNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function imageGeneratorNormalizeArticle(article = {}) {
+    const codigo = imageGeneratorText(article.codigo ?? article.idart ?? article.idArt ?? article.id ?? article.codigoArticulo);
+    const nombre = imageGeneratorText(article.nombre ?? article.descripcion ?? article.articulo ?? article.detalleArticulo ?? article.producto);
+    return {
+      codigo,
+      nombre,
+      detalle: imageGeneratorText(article.detalle ?? article.descripcionSecundaria ?? article.descripcion_larga),
+      rubro: imageGeneratorText(article.rubro ?? article.categoria ?? article.familia),
+      precio: imageGeneratorNumber(article.precioVigente ?? article.precioFinal ?? article.precio ?? article.precio_costo),
+      stock: imageGeneratorNumber(article.stock ?? article.existencia ?? article.cantidad),
+      fotoUrl: imageGeneratorText(article.fotoUrl ?? article.foto ?? article.imagen ?? article.imageUrl ?? article.urlImagen),
+      oferta: Boolean(article.oferta ?? article.ofertaVigente ?? article.enOferta ?? article.tagOferta),
+      ofertaPct: imageGeneratorNumber(article.ofertaPct ?? article.oferta_pct ?? article.ofertaPorcentaje ?? article.descuentoOferta),
+      destacado: Boolean(article.destacado ?? article.tagDestacado),
+      masVendido: Boolean(article.masVendido ?? article.mas_vendido ?? article.tagMasVendido),
+      ceramico: Boolean(article.ceramico ?? article.tagCeramico),
+      ceramicoM2: imageGeneratorNumber(article.ceramicoM2 ?? article.m2Ceramico ?? article.m2 ?? article.metros2Ceramico),
+      tagsOcultos: Array.isArray(article.tagsOcultos)
+        ? article.tagsOcultos.map(imageGeneratorText).filter(Boolean)
+        : imageGeneratorText(article.tagsOcultos ?? article.tagsBusqueda ?? article.tags ?? article.palabrasClave)
+    };
+  }
+
+  function imageGeneratorSplitTitle(nombre = '') {
+    const words = imageGeneratorText(nombre).split(/\s+/).filter(Boolean);
+    if (words.length <= 2) return { title1: words.join(' ').toUpperCase(), title2: '' };
+    const breakAt = Math.min(3, Math.max(1, Math.ceil(words.length / 2)));
+    return {
+      title1: words.slice(0, breakAt).join(' ').toUpperCase(),
+      title2: words.slice(breakAt).join(' ').toUpperCase()
+    };
+  }
+
+  function imageGeneratorOfferPrice(article) {
+    if (!article.oferta || article.ofertaPct <= 0) return article.precio;
+    return Math.max(0, article.precio * (1 - article.ofertaPct / 100));
+  }
+
+  function imageGeneratorRow(icon, label, value, detail = '') {
+    const cleanLabel = imageGeneratorText(label).toUpperCase();
+    const cleanValue = imageGeneratorText(value).toUpperCase();
+    const cleanDetail = imageGeneratorText(detail).toUpperCase();
+    return cleanLabel || cleanValue || cleanDetail ? { icon, label: cleanLabel, value: cleanValue, detail: cleanDetail } : null;
+  }
+
+  function buildImageGeneratorPayload(article = {}) {
+    const normalized = imageGeneratorNormalizeArticle(article);
+    const title = imageGeneratorSplitTitle(normalized.nombre);
+    const precioFinal = imageGeneratorOfferPrice(normalized);
+    const precioRow = normalized.precio > 0
+      ? imageGeneratorRow('check', normalized.oferta ? 'PRECIO OFERTA' : 'PRECIO', money(precioFinal), normalized.oferta && normalized.ofertaPct > 0 ? `${normalized.ofertaPct}% DTO` : '')
+      : null;
+    const stockRow = imageGeneratorRow('check', 'STOCK', normalized.stock ? `${normalized.stock}` : '', normalized.stock ? 'DISPONIBLES' : '');
+    const rubroRow = imageGeneratorRow('gear', 'RUBRO', normalized.rubro, '');
+    const specs = [
+      imageGeneratorRow('check', 'CODIGO', normalized.codigo, ''),
+      precioRow,
+      normalized.oferta && normalized.precio > 0 ? imageGeneratorRow('check', 'PRECIO LISTA', money(normalized.precio), '') : null,
+      stockRow,
+      rubroRow,
+      normalized.ceramicoM2 > 0 ? imageGeneratorRow('check', 'M2 POR CAJA', `${normalized.ceramicoM2}`, '') : null
+    ].filter(Boolean).slice(0, 6);
+    const highlights = [precioRow, stockRow, rubroRow].filter(Boolean).slice(0, 3);
+    const benefits = [
+      normalized.destacado ? { icon: 'check', label: 'DESTACADO', value: 'PRODUCTO DESTACADO' } : null,
+      normalized.masVendido ? { icon: 'check', label: 'MAS VENDIDO', value: 'ALTA ROTACION' } : null,
+      normalized.oferta ? { icon: 'bolt', label: 'EN OFERTA', value: normalized.ofertaPct > 0 ? `${normalized.ofertaPct}% DE DESCUENTO` : 'PRECIO ESPECIAL' } : null,
+      normalized.ceramico ? { icon: 'check', label: 'CERAMICO', value: normalized.ceramicoM2 > 0 ? `${normalized.ceramicoM2} M2 POR CAJA` : 'POR CAJA' } : null
+    ].filter(Boolean).slice(0, 4);
+
+    return {
+      article: normalized,
+      fields: {
+        brand: '',
+        model: normalized.codigo,
+        title1: title.title1 || normalized.nombre.toUpperCase(),
+        title2: title.title2,
+        description: normalized.detalle || normalized.rubro || '',
+        badgeTitle: normalized.rubro ? 'RUBRO' : '',
+        badgeValue: normalized.rubro || ''
+      },
+      rows: { highlights, specs, benefits },
+      imageUrl: normalized.fotoUrl,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  function setImageGeneratorCatalog(articles = []) {
+    const catalog = (articles || []).map(imageGeneratorNormalizeArticle).filter((article) => article.codigo || article.nombre);
+    try {
+      localStorage.setItem(IMAGE_GENERATOR_CATALOG_KEY, JSON.stringify({ savedAt: Date.now(), articles: catalog }));
+    } catch (e) {}
+    return catalog;
+  }
+
+  function getImageGeneratorCatalog() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(IMAGE_GENERATOR_CATALOG_KEY) || '{}');
+      return Array.isArray(parsed.articles) ? parsed.articles : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function setImageGeneratorPayload(articleOrPayload = {}) {
+    const payload = articleOrPayload.fields ? articleOrPayload : buildImageGeneratorPayload(articleOrPayload);
+    try {
+      sessionStorage.setItem(IMAGE_GENERATOR_PAYLOAD_KEY, JSON.stringify(payload));
+      localStorage.setItem(IMAGE_GENERATOR_PAYLOAD_KEY, JSON.stringify(payload));
+    } catch (e) {}
+    return payload;
+  }
+
+  function readImageGeneratorPayload(clearSession = false) {
+    try {
+      const raw = sessionStorage.getItem(IMAGE_GENERATOR_PAYLOAD_KEY) || localStorage.getItem(IMAGE_GENERATOR_PAYLOAD_KEY);
+      if (clearSession) sessionStorage.removeItem(IMAGE_GENERATOR_PAYLOAD_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function openImageGenerator(articleOrPayload = {}, options = {}) {
+    const payload = setImageGeneratorPayload(articleOrPayload);
+    const code = payload?.article?.codigo || payload?.fields?.model || '';
+    const url = `generador-imagen-producto.html${code ? `?articulo=${encodeURIComponent(code)}` : ''}`;
+    if (options.open === false) return { payload, url };
+    const target = options.target || '_blank';
+    const features = options.features || 'width=1280,height=900,resizable=yes,scrollbars=yes';
+    return window.open(url, target, features);
   }
 
   function getByHeader(obj, names) {
@@ -1416,8 +1560,13 @@
     }
 
     async function loadProviderNames() {
-      let providers = await getProvidersCache();
-      if (!providers.length) providers = await importProvidersCloud();
+      let providers = [];
+      try {
+        providers = await importProvidersCloud();
+      } catch (error) {
+        console.warn(error);
+        providers = await getProvidersCache();
+      }
       return providers
         .map((provider) => ({ ...provider, idNorm: norm(provider.id_proveedor), nameNorm: norm(provider.proveedor) }))
         .sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es', { numeric: true, sensitivity: 'base' }));
@@ -1670,6 +1819,12 @@
     replaceProviderArticles,
     buildArticlesXlsBlob,
     saveBlobAs,
+    buildImageGeneratorPayload,
+    setImageGeneratorCatalog,
+    getImageGeneratorCatalog,
+    setImageGeneratorPayload,
+    readImageGeneratorPayload,
+    openImageGenerator,
     faltantes: FALTANTES
   };
 })();
