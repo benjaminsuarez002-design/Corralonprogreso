@@ -5985,7 +5985,7 @@ const PRODE_PLAYERS_COLLECTION = 'prode_mundial_participantes';
 const PRODE_SHARES_COLLECTION = 'prode_mundial_compartidos';
 const PRODE_REF_LOOKUP_COLLECTION = 'prode_mundial_refs';
 const PRODE_FIXTURE_VERSION = 'grupos-2026-v1';
-let prodeFaseActiva = 'fecha1';
+let prodeFaseActiva = 'hoy';
 let prodeRankingUnsub = null;
 let prodeNavigationBound = false;
 let prodeRemoteLoadedFor = '';
@@ -6091,13 +6091,29 @@ function prodeFechaKey(partido) {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   return `${day}/${month}`;
 }
+function prodeFechaKeyTexto(partido) {
+  const match = String(partido?.fecha || '').match(/^(\d{1,2})\/(\d{1,2})/);
+  if(!match) return prodeFechaKey(partido);
+  return `${match[1].padStart(2, '0')}/${match[2].padStart(2, '0')}`;
+}
 function prodeFechaLabel(key) {
   const [day, month] = String(key || '').split('/');
   return { day: day || key, month: month || '' };
 }
+function prodeHoyKey() {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 function prodeBuildDateFases() {
   const partidosOrdenados = [...prodePartidos].sort((a, b) => prodePartidoTime(a) - prodePartidoTime(b));
-  const fases = [];
+  const hoyKey = prodeHoyKey();
+  const fases = [{
+    id: 'hoy',
+    label: 'Hoy',
+    fechas: [hoyKey],
+    partidos: partidosOrdenados.filter((partido) => prodeFechaKeyTexto(partido) === hoyKey).map((partido) => partido.id),
+    isToday: true
+  }];
   for(let i = 0; i < partidosOrdenados.length; i += 10) {
     const partidosChunk = partidosOrdenados.slice(i, i + 10);
     const chunk = [];
@@ -6115,7 +6131,7 @@ function prodeBuildDateFases() {
         ? `${prodeFechaLabel(first).day}-${prodeFechaLabel(last).day}/${months[0]}`
         : `${first}-${last}`;
     fases.push({
-      id: `fecha${fases.length + 1}`,
+      id: `fecha${Math.floor(i / 10) + 1}`,
       label,
       fechas: chunk,
       partidos: partidosChunk.map((partido) => partido.id)
@@ -6462,7 +6478,11 @@ function renderProde() {
   const visibles = prodePartidos
     .filter(p => faseActual?.partidos?.includes(p.id))
     .sort((a, b) => prodePartidoTime(a) - prodePartidoTime(b));
-  list.innerHTML = `<div class="prode-fixture-title">Fechas ${faseActual?.label || 'Fixture'} · horario Argentina</div>` + visibles.map((p) => {
+  const fixtureTitle = faseActual?.isToday ? 'Hoy · horario Argentina' : `Fechas ${faseActual?.label || 'Fixture'} · horario Argentina`;
+  const emptyHtml = faseActual?.isToday
+    ? '<div class="empty-state" style="padding:18px 10px;color:#6b7890;">No hay partidos hoy.</div>'
+    : '';
+  list.innerHTML = `<div class="prode-fixture-title">${fixtureTitle}</div>` + (visibles.length ? visibles.map((p) => {
     const r = resultados[p.id] || {};
     const real = resultadosReales[p.id] || {};
     const cerrado = prodePartidoCerrado(p);
@@ -6478,7 +6498,7 @@ function renderProde() {
       ${registrado ? prodePuntosHtml(r, real) : ''}
       ${cierreTxt}
     </div>`;
-  }).join('');
+  }).join('') : emptyHtml);
 }
 function abrirProde() {
   initProdeNavigation();
