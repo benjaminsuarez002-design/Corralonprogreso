@@ -3280,7 +3280,7 @@
 <script src="presupuesto-shared.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -6124,6 +6124,20 @@ function prodeBuildDateFases() {
   return fases;
 }
 const prodeFases = prodeBuildDateFases();
+const PRODE_AUTO_RESULTS_STORAGE_KEY = 'corralon_prode_auto_results_sync_v1';
+const PRODE_AUTO_RESULTS_INTERVAL_MS = 10 * 60 * 1000;
+const PRODE_AUTO_RESULTS_MIN_REMOTE_MS = 5 * 60 * 1000;
+const PRODE_AUTO_RESULTS_MIN_LOCAL_MS = 90 * 1000;
+const PRODE_ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260628&limit=300';
+const PRODE_ESPN_CODES = {
+  MX:'MEX', ZA:'RSA', KR:'KOR', CZ:'CZE', CA:'CAN', BA:'BIH', QA:'QAT', CH:'SUI',
+  BR:'BRA', MA:'MAR', HT:'HAI', SCT:'SCO', US:'USA', PY:'PAR', AU:'AUS', TR:'TUR',
+  DE:'GER', CW:'CUW', CI:'CIV', EC:'ECU', NL:'NED', JP:'JPN', SE:'SWE', TN:'TUN',
+  BE:'BEL', EG:'EGY', IR:'IRN', NZ:'NZL', ES:'ESP', CV:'CPV', SA:'KSA', UY:'URU',
+  FR:'FRA', SN:'SEN', IQ:'IRQ', NO:'NOR', AR:'ARG', DZ:'ALG', AT:'AUT', JO:'JOR',
+  PT:'POR', CD:'COD', UZ:'UZB', CO:'COL', GB:'ENG', HR:'CRO', GH:'GHA', PA:'PAN'
+};
+let prodeAutoResultsRunning = false;
 function prodeDraft() {
   try { return JSON.parse(localStorage.getItem(PRODE_STORAGE_KEY) || '{}') || {}; } catch(_) { return {}; }
 }
@@ -6268,6 +6282,129 @@ function prodeNormalizarResultados(resultados = {}) {
     limpio[partido.id] = { local, visitante };
   });
   return limpio;
+}
+function prodeCodigoEspn(flagCode) {
+  const raw = String(flagCode || '').trim().toUpperCase();
+  return PRODE_ESPN_CODES[raw] || raw;
+}
+function prodeResultadoAutoCompleto(resultado = {}) {
+  return prodeScoreValue(resultado.local) !== '' && prodeScoreValue(resultado.visitante) !== '';
+}
+function prodeResultadosIguales(a = {}, b = {}) {
+  return prodeScoreValue(a.local) === prodeScoreValue(b.local) && prodeScoreValue(a.visitante) === prodeScoreValue(b.visitante);
+}
+async function prodeFetchResultadosEspn() {
+  const response = await fetch(`${PRODE_ESPN_SCOREBOARD_URL}&_=${Date.now()}`, { cache:'no-store' });
+  if(!response.ok) throw new Error(`ESPN ${response.status}`);
+  const data = await response.json();
+  const eventos = Array.isArray(data.events) ? data.events : [];
+  const resultados = {};
+  eventos.forEach((event) => {
+    const competition = event?.competitions?.[0];
+    const status = competition?.status?.type || event?.status?.type || {};
+    if(!status.completed && status.state !== 'post') return;
+    const competitors = Array.isArray(competition?.competitors) ? competition.competitors : [];
+    prodePartidos.forEach((partido) => {
+      if(resultados[partido.id]) return;
+      const localCode = prodeCodigoEspn(partido.flagLocal);
+      const visitanteCode = prodeCodigoEspn(partido.flagVisitante);
+      const localTeam = competitors.find((c) => String(c?.team?.abbreviation || '').toUpperCase() === localCode);
+      const visitanteTeam = competitors.find((c) => String(c?.team?.abbreviation || '').toUpperCase() === visitanteCode);
+      if(!localTeam || !visitanteTeam) return;
+      const local = Number(localTeam.score);
+      const visitante = Number(visitanteTeam.score);
+      if(!Number.isFinite(local) || !Number.isFinite(visitante)) return;
+      resultados[partido.id] = {
+        local,
+        visitante,
+        fuente: 'ESPN',
+        evento: String(event.id || ''),
+        actualizado: new Date().toISOString()
+      };
+    });
+  });
+  return resultados;
+}
+function calcularPuntosProdeDesdeResultados(predicciones = {}, reales = {}, compartidos = 0) {
+  let puntos = Number(compartidos || 0);
+  Object.entries(reales || {}).forEach(([id, real]) => {
+    if(!prodeResultadoAutoCompleto(real)) return;
+    const pred = predicciones?.[id] || {};
+    const predLocal = prodeScoreValue(pred.local);
+    const predVisitante = prodeScoreValue(pred.visitante);
+    if(predLocal === '' && predVisitante === '') return;
+    const pl = predLocal === '' ? '0' : predLocal;
+    const pv = predVisitante === '' ? '0' : predVisitante;
+    const rl = prodeScoreValue(real.local);
+    const rv = prodeScoreValue(real.visitante);
+    if(pl === rl && pv === rv) puntos += 10;
+    else if(prodeResultadoTipo(pl, pv) === prodeResultadoTipo(rl, rv)) puntos += 5;
+  });
+  return puntos;
+}
+async function prodeRecalcularRanking(resultadosReales = {}) {
+  const snap = await getDocs(collection(db, PRODE_PLAYERS_COLLECTION));
+  let batch = writeBatch(db);
+  const commits = [];
+  let count = 0;
+  snap.forEach((jugador) => {
+    const data = jugador.data() || {};
+    const puntos = calcularPuntosProdeDesdeResultados(data.resultados || {}, resultadosReales, data.puntosCompartidos || data.compartidos || 0);
+    batch.set(jugador.ref, {
+      puntos,
+      puntosProde: puntos,
+      fixtureVersion: PRODE_FIXTURE_VERSION,
+      partidosFixture: prodePartidos.length,
+      updated_at: serverTimestamp()
+    }, { merge:true });
+    count++;
+    if(count % 450 === 0) {
+      commits.push(batch.commit());
+      batch = writeBatch(db);
+    }
+  });
+  commits.push(batch.commit());
+  await Promise.all(commits);
+}
+async function prodeAutoActualizarResultados({ force = false } = {}) {
+  if(prodeAutoResultsRunning) return;
+  const now = Date.now();
+  const remoteSync = new Date(prodeConfig.resultadosAutoSyncAt || prodeConfig.autoResultsSyncAt || 0).getTime();
+  const localSync = Number(localStorage.getItem(PRODE_AUTO_RESULTS_STORAGE_KEY) || 0);
+  if(!force) {
+    if(Number.isFinite(remoteSync) && remoteSync && now - remoteSync < PRODE_AUTO_RESULTS_MIN_REMOTE_MS) return;
+    if(Number.isFinite(localSync) && localSync && now - localSync < PRODE_AUTO_RESULTS_MIN_LOCAL_MS) return;
+  }
+  prodeAutoResultsRunning = true;
+  localStorage.setItem(PRODE_AUTO_RESULTS_STORAGE_KEY, String(now));
+  try {
+    const oficiales = await prodeFetchResultadosEspn();
+    const actuales = prodeConfig.resultadosReales || {};
+    const merged = { ...actuales };
+    let cambios = 0;
+    Object.entries(oficiales).forEach(([id, resultado]) => {
+      if(!prodeResultadosIguales(actuales[id], resultado)) {
+        merged[id] = resultado;
+        cambios++;
+      }
+    });
+    if(!cambios) return;
+    prodeConfig = { ...prodeConfig, resultadosReales: merged };
+    if(!document.getElementById('prodeModal')?.classList.contains('hidden')) renderProde();
+    await setDoc(doc(db, 'config', PRODE_CONFIG_DOC_ID), {
+      resultadosReales: merged,
+      resultadosAutoSyncAt: new Date().toISOString(),
+      resultadosAutoSource: 'ESPN',
+      fixtureVersion: PRODE_FIXTURE_VERSION,
+      partidosFixture: prodePartidos.length,
+      updated_at: serverTimestamp()
+    }, { merge:true });
+    await prodeRecalcularRanking(merged);
+  } catch(e) {
+    console.warn('No se pudieron actualizar resultados del Prode automaticamente', e);
+  } finally {
+    prodeAutoResultsRunning = false;
+  }
 }
 function prodeLeerResultadosVisibles() {
   const resultados = prodeNormalizarResultados(prodeDraft().resultados || {});
@@ -6579,7 +6716,9 @@ document.getElementById('prodeModal')?.addEventListener('click', (e) => { if(e.t
 onSnapshot(doc(db, 'config', PRODE_CONFIG_DOC_ID), snap => {
   if(snap.exists()) prodeConfig = { ...prodeConfig, ...(snap.data() || {}) };
   if(!document.getElementById('prodeModal')?.classList.contains('hidden')) renderProde();
+  prodeAutoActualizarResultados().catch(() => {});
 });
+setInterval(() => prodeAutoActualizarResultados().catch(() => {}), PRODE_AUTO_RESULTS_INTERVAL_MS);
 if(location.hash === '#prode') setTimeout(abrirProde, 350);
 
 document.getElementById('scrollBody').addEventListener('click', e => {
