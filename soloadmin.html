@@ -230,6 +230,11 @@
     background: linear-gradient(90deg, #31d981 0%, var(--verde) 100%);
     box-shadow: 0 0 0 2px rgba(0,200,83,.2);
   }
+  .chip-toggle[data-chip="accesoRapido"].active {
+    border-color: #0077d9;
+    background: linear-gradient(90deg, #18caff 0%, #0077d9 100%);
+    box-shadow: 0 0 0 2px rgba(0,119,217,.22);
+  }
   .chip-toggle[data-chip="ceramico"].active {
     border-color: #4cc9f0;
     background: linear-gradient(90deg, #4cc9f0 0%, #3a86ff 100%);
@@ -752,6 +757,13 @@
       <textarea id="fTagsOcultos" placeholder="Ej: portland, obra gruesa, pegamento"></textarea>
       <div class="field-help">No se muestran al cliente. Separalos por coma, salto de línea o punto y coma.</div>
     </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--texto);">
+        <input type="checkbox" id="fAccesoRapido">
+        Acceso rápido para tablet
+      </label>
+      <div class="field-help">Solo aparece en el link cerrado de autoservicio.</div>
+    </div>
     <div class="field"><label>Precio de venta</label><input type="number" id="fPrecio" placeholder="Ej: 12500" min="0" step="0.01"></div>
     <div class="field">
       <label>Foto del artículo</label>
@@ -783,6 +795,7 @@
       <button class="chip-toggle admin-filter-chip" type="button" data-chip="oferta">En oferta</button>
       <button class="chip-toggle admin-filter-chip" type="button" data-chip="destacado">Destacado</button>
       <button class="chip-toggle admin-filter-chip" type="button" data-chip="masVendido">Más vendido</button>
+      <button class="chip-toggle admin-filter-chip" type="button" data-chip="accesoRapido">Acceso rápido</button>
     </div>
     <div class="art-contador" id="artContador"></div>
     <div id="listaArticulos"><div class="empty-lista">Cargando...</div></div>
@@ -952,6 +965,7 @@
         <button class="chip-toggle" type="button" data-chip="oferta" id="editChipOferta">En oferta</button>
         <button class="chip-toggle" type="button" data-chip="destacado" id="editChipDestacado">Destacado</button>
         <button class="chip-toggle" type="button" data-chip="masVendido" id="editChipMasVendido">Más vendido</button>
+        <button class="chip-toggle" type="button" data-chip="accesoRapido" id="editChipAccesoRapido">Acceso rápido</button>
         <button class="chip-toggle" type="button" data-chip="ceramico" id="editChipCeramico">Ceramico</button>
       </div>
       <div class="oferta-summary" id="ofertaSummary" style="display:none;"></div>
@@ -1039,6 +1053,7 @@
         <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="oferta">En oferta</button>
         <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="destacado">Destacado</button>
         <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="masVendido">Más vendido</button>
+        <button class="chip-toggle apply-targets-filter-chip" type="button" data-chip="accesoRapido">Acceso rápido</button>
       </div>
       <button class="chip-toggle apply-targets-select-all" id="btnSelectAllApplyTargets" type="button" onclick="toggleSelectAllApplyTargets()">Seleccionar todo</button>
     </div>
@@ -1224,6 +1239,7 @@ let editMeta = {
   oferta: false,
   destacado: false,
   masVendido: false,
+  accesoRapido: false,
   ceramico: false,
   ceramicoM2: 0,
   ofertaPct: 0,
@@ -1500,6 +1516,7 @@ function extraerMetaOferta(articulo) {
     oferta: toBool(articulo?.oferta ?? articulo?.enOferta ?? articulo?.tagOferta),
     destacado: toBool(articulo?.destacado ?? articulo?.tagDestacado),
     masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido),
+    accesoRapido: toBool(articulo?.accesoRapido ?? articulo?.rapido ?? articulo?.tagRapido ?? articulo?.quickAccess),
     ceramico: toBool(articulo?.ceramico ?? articulo?.tagCeramico),
     ceramicoM2: sanitizeM2(articulo?.ceramicoM2 ?? articulo?.m2Ceramico ?? articulo?.m2 ?? articulo?.metros2Ceramico ?? 0),
     ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
@@ -1575,6 +1592,7 @@ function normalizarArticuloAdmin(articulo = {}) {
     ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? ''),
     destacado: toBool(articulo?.destacado ?? articulo?.tagDestacado),
     masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido),
+    accesoRapido: toBool(articulo?.accesoRapido ?? articulo?.rapido ?? articulo?.tagRapido ?? articulo?.quickAccess),
     ceramico: toBool(articulo?.ceramico ?? articulo?.tagCeramico),
     ceramicoM2: sanitizeM2(articulo?.ceramicoM2 ?? articulo?.m2Ceramico ?? articulo?.m2 ?? articulo?.metros2Ceramico ?? 0)
   };
@@ -1610,6 +1628,7 @@ function extraerMetadatosPersistentes(articulo = {}) {
     ofertaHasta: normalizado.ofertaHasta,
     destacado: !!normalizado.destacado,
     masVendido: !!normalizado.masVendido,
+    accesoRapido: !!normalizado.accesoRapido,
     ceramico: !!normalizado.ceramico,
     ceramicoM2: normalizado.ceramicoM2
   };
@@ -1622,6 +1641,7 @@ function extraerMetadatosPersistentes(articulo = {}) {
     meta.ofertaHasta ||
     meta.destacado ||
     meta.masVendido ||
+    meta.accesoRapido ||
     meta.ceramico ||
     meta.ceramicoM2 > 0
   );
@@ -1658,6 +1678,7 @@ function aplicarMetadatosArticulo(articulo = {}, meta = null) {
     ofertaHasta: meta.ofertaHasta ?? articulo.ofertaHasta ?? articulo.oferta_hasta ?? articulo.fechaOfertaHasta ?? '',
     destacado: meta.destacado ?? articulo.destacado ?? articulo.tagDestacado,
     masVendido: meta.masVendido ?? articulo.masVendido ?? articulo.mas_vendido ?? articulo.tagMasVendido,
+    accesoRapido: meta.accesoRapido ?? articulo.accesoRapido ?? articulo.rapido ?? articulo.tagRapido ?? articulo.quickAccess,
     ceramico: meta.ceramico ?? articulo.ceramico ?? articulo.tagCeramico,
     ceramicoM2: meta.ceramicoM2 ?? articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico ?? 0
   });
@@ -2340,6 +2361,7 @@ function parsearBusquedaAvanzadaAdmin(rawInput) {
     oferta: false,
     destacado: false,
     masVendido: false,
+    accesoRapido: false,
     stock: '',
     rubro: '',
     codigo: '',
@@ -2352,6 +2374,7 @@ function parsearBusquedaAvanzadaAdmin(rawInput) {
     if (token === 'oferta') { filtros.oferta = true; return; }
     if (token === 'destacado') { filtros.destacado = true; return; }
     if (token === 'masvendido' || token === 'mas vendido' || token === 'top') { filtros.masVendido = true; return; }
+    if (token === 'rapido' || token === 'accesorapido') { filtros.accesoRapido = true; return; }
     if (token === 'stock') { filtros.stock = 'available'; return; }
     if (token === 'sinstock' || token === 'agotado') { filtros.stock = 'empty'; return; }
     const rubroMatch = tokenOriginal.match(/^rubro:(.+)$/i);
@@ -2373,7 +2396,7 @@ function parsearBusquedaAvanzadaAdmin(rawInput) {
   const normalizedFreeText = normalizarTextoAdmin(freeText);
   const termCounts = agruparTerminosBusquedaAdmin(freeText);
   const hasText = !!normalizedFreeText;
-  const hasFilters = !!(filtros.oferta || filtros.destacado || filtros.masVendido || filtros.stock || filtros.rubro || filtros.codigo || filtros.precio.length);
+  const hasFilters = !!(filtros.oferta || filtros.destacado || filtros.masVendido || filtros.accesoRapido || filtros.stock || filtros.rubro || filtros.codigo || filtros.precio.length);
   return {
     raw,
     freeText,
@@ -2394,6 +2417,7 @@ function cumpleFiltrosBusquedaAdmin(articulo, parsed) {
   })) return false;
   if (filtros.destacado && !articulo.destacado) return false;
   if (filtros.masVendido && !articulo.masVendido) return false;
+  if (filtros.accesoRapido && !articulo.accesoRapido) return false;
   const stock = Number(articulo.stock || 0);
   if (filtros.stock === 'available' && !(Number.isFinite(stock) && stock > 0)) return false;
   if (filtros.stock === 'empty' && Number.isFinite(stock) && stock > 0) return false;
@@ -2592,6 +2616,7 @@ function obtenerAdminListaBase() {
   }
   if (adminChipActivo === 'destacado') lista = lista.filter(a => toBool(a.destacado ?? a.tagDestacado));
   if (adminChipActivo === 'masVendido') lista = lista.filter(a => toBool(a.masVendido ?? a.mas_vendido ?? a.tagMasVendido));
+  if (adminChipActivo === 'accesoRapido') lista = lista.filter(a => toBool(a.accesoRapido ?? a.rapido ?? a.tagRapido ?? a.quickAccess));
   return lista;
 }
 
@@ -2615,6 +2640,9 @@ function obtenerApplyTargetsListaBase() {
   if (applyTargetsChipActivo === 'masVendido') {
     lista = lista.filter((articulo) => toBool(articulo.masVendido ?? articulo.mas_vendido ?? articulo.tagMasVendido));
   }
+  if (applyTargetsChipActivo === 'accesoRapido') {
+    lista = lista.filter((articulo) => toBool(articulo.accesoRapido ?? articulo.rapido ?? articulo.tagRapido ?? articulo.quickAccess));
+  }
   return lista;
 }
 
@@ -2622,6 +2650,7 @@ function renderEditChips() {
   document.getElementById('editChipOferta').classList.toggle('active', !!editMeta.oferta);
   document.getElementById('editChipDestacado').classList.toggle('active', !!editMeta.destacado);
   document.getElementById('editChipMasVendido').classList.toggle('active', !!editMeta.masVendido);
+  document.getElementById('editChipAccesoRapido').classList.toggle('active', !!editMeta.accesoRapido);
   document.getElementById('editChipCeramico').classList.toggle('active', !!editMeta.ceramico);
   const summary = document.getElementById('ofertaSummary');
   if (editMeta.oferta) {
@@ -2911,6 +2940,11 @@ document.getElementById('editChipDestacado').addEventListener('click', () => {
 
 document.getElementById('editChipMasVendido').addEventListener('click', () => {
   editMeta.masVendido = !editMeta.masVendido;
+  renderEditChips();
+});
+
+document.getElementById('editChipAccesoRapido').addEventListener('click', () => {
+  editMeta.accesoRapido = !editMeta.accesoRapido;
   renderEditChips();
 });
 
@@ -3521,6 +3555,7 @@ window.guardarArticulo = async () => {
   const detalle = document.getElementById('fDetalle').value.trim();
   const rubro   = document.getElementById('fRubro').value.trim();
   const tagsOcultos = normalizarTagsOcultos(document.getElementById('fTagsOcultos').value);
+  const accesoRapido = !!document.getElementById('fAccesoRapido')?.checked;
   const precio  = parseFloat(document.getElementById('fPrecio').value);
   if (!codigo || !nombre || isNaN(precio)) { toast('Completá código, nombre y precio', 'err'); return; }
   if (todosArticulos.some(a => String(a.codigo || '').trim() === codigo)) { toast('Ya existe un artículo con ese código', 'err'); return; }
@@ -3544,6 +3579,7 @@ window.guardarArticulo = async () => {
       ofertaHasta: '',
       destacado: false,
       masVendido: false,
+      accesoRapido,
       ceramico: false,
       ceramicoM2: 0,
       timestamp: Date.now()
@@ -3554,6 +3590,7 @@ window.guardarArticulo = async () => {
     document.getElementById('fDetalle').value = '';
     document.getElementById('fRubro').value = '';
     document.getElementById('fTagsOcultos').value = '';
+    if (document.getElementById('fAccesoRapido')) document.getElementById('fAccesoRapido').checked = false;
     document.getElementById('fPrecio').value = '';
     fotoArchivoNuevo = null;
     dropZone.classList.remove('tiene-foto');
@@ -3648,6 +3685,7 @@ function obtenerArticuloEdicionParaGenerador() {
     ofertaHasta: sanitizeIsoDate(editMeta.ofertaHasta),
     destacado: !!editMeta.destacado,
     masVendido: !!editMeta.masVendido,
+    accesoRapido: !!editMeta.accesoRapido,
     ceramico: !!editMeta.ceramico,
     ceramicoM2: editMeta.ceramico ? sanitizeM2(editMeta.ceramicoM2) : 0
   });
@@ -3726,6 +3764,7 @@ function aplicarCamposMasivosEnDestino(destino, fuente, campos) {
     actualizado.ofertaHasta = fuente.ofertaHasta;
     actualizado.destacado = fuente.destacado;
     actualizado.masVendido = fuente.masVendido;
+    actualizado.accesoRapido = fuente.accesoRapido;
     actualizado.ceramico = fuente.ceramico;
     actualizado.ceramicoM2 = fuente.ceramicoM2;
   }
@@ -3780,6 +3819,7 @@ async function guardarEdicionInterna({ selectedCodes = [], fields = [] } = {}) {
     ofertaHasta: sanitizeIsoDate(editMeta.ofertaHasta),
     destacado: !!editMeta.destacado,
     masVendido: !!editMeta.masVendido,
+    accesoRapido: !!editMeta.accesoRapido,
     ceramico: !!editMeta.ceramico,
     ceramicoM2: editMeta.ceramico ? sanitizeM2(editMeta.ceramicoM2) : 0
   });
@@ -4014,7 +4054,11 @@ function renderAdminWindow({ anchorCode = '', anchorTop = null, animateCodes = n
         <div class="art-cod">Rubro: ${a.rubro || '-'}</div>
         <div class="art-cod">Tags invisibles: ${tagsOcultosComoTexto(obtenerTagsOcultosArticulo(a)) || '-'}</div>
         <div class="art-cod">${a.oferta ? `Oferta ${clampPct(a.ofertaPct)}% hasta ${fmtFecha(a.ofertaHasta)}` : 'Oferta inactiva'}</div>
-        <div class="art-cod">Etiquetas: ${a.destacado ? '⭐ Destacado ' : ''}${a.masVendido ? '🔥 Más vendido' : (!a.destacado ? '-' : '')}</div>
+        <div class="art-cod">Etiquetas: ${[
+          a.destacado ? '⭐ Destacado' : '',
+          a.masVendido ? '🔥 Más vendido' : '',
+          a.accesoRapido ? '⚡ Acceso rápido' : ''
+        ].filter(Boolean).join(' · ') || '-'}</div>
         <div class="art-precio">${fmtPrecio(a.precio)}${a.oferta ? ` · ${fmtPrecio(precioOferta(a.precio, a.ofertaPct))}` : ''}</div>
       </div>
       <div class="art-acciones">
