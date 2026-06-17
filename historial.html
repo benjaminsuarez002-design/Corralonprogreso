@@ -466,7 +466,7 @@ function notificarPresupuestoHistorial(p) {
   const datos = datosExtraPresupuesto(p);
   return guardarHistorialNotificacion({
     tipo: 'presupuesto',
-    id: String(p.id || p.numero || ''),
+    id: String(p.numero || p.id || ''),
     titulo: `Presupuesto ${p.numero || '-'}`,
     detalle: p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : ''),
     fecha: p.fecha || '',
@@ -585,11 +585,11 @@ function activarTabHistorial(tab) {
   if (garantiasPanel) garantiasPanel.classList.toggle('active', isGarantias);
 
   if (isRemitos) {
-    cargarHistorial();
+    return cargarHistorial();
   } else if (isPresupuestos) {
-    cargarPresupuestos();
+    return cargarPresupuestos();
   } else if (isGarantias) {
-    cargarGarantias();
+    return cargarGarantias();
   }
 }
 
@@ -1043,26 +1043,40 @@ function abrirDetallePresupuesto(index) {
   document.getElementById('detalleBg').classList.add('open');
 }
 
+function findPresupuestoIndexById(value) {
+  const target = String(value || '').trim();
+  if (!target) return -1;
+  return _presupuestosCache.findIndex((p) => (
+    String(p.id || '').trim() === target ||
+    String(p.numero || '').trim() === target ||
+    String(p.nro || '').trim() === target
+  ));
+}
+
 async function abrirHistorialSolicitadoDesdeMenu() {
   let target = null;
   try { target = JSON.parse(localStorage.getItem('corralon_open_historial_notification') || 'null'); } catch {}
+  const params = new URLSearchParams(location.search);
+  const urlTipo = params.get('abrirTipo');
+  const urlId = params.get('abrirId');
+  if (urlTipo && urlId) target = { tipo: urlTipo, id: urlId };
   if (!target?.tipo || !target?.id) return;
   localStorage.removeItem('corralon_open_historial_notification');
+  if (urlTipo || urlId) history.replaceState(null, '', location.pathname);
   if (target.tipo === 'remito') {
-    activarTabHistorial('remitos');
+    await activarTabHistorial('remitos');
     abrirDetalle(target.id);
     return;
   }
   if (target.tipo === 'presupuesto') {
-    activarTabHistorial('presupuestos');
-    await resolverHistorialNotificacion('presupuesto', target.id);
-    const idx = _presupuestosCache.findIndex(p => String(p.id || p.numero || '') === String(target.id));
+    await activarTabHistorial('presupuestos');
+    const idx = findPresupuestoIndexById(target.id);
     if (idx >= 0) abrirDetallePresupuesto(idx);
+    else toast('No se encontro el presupuesto web solicitado');
     return;
   }
   if (target.tipo === 'garantia') {
-    activarTabHistorial('garantias');
-    await resolverHistorialNotificacion('garantia', target.id);
+    await activarTabHistorial('garantias');
     const idx = _garantiasCache.findIndex(g => String(g.id || '') === String(target.id));
     if (idx >= 0) abrirFotoGarantia(idx);
   }
@@ -1253,7 +1267,6 @@ function descargarPdfDetalle() {
 
 function imprimirPdfDetalle() {
   if(!_pdfDetalleActual) { toast('No hay PDF preparado'); return; }
-  if(_detalleTipoActual === 'remito' && _remitoDetalleActual?.id) resolverHistorialNotificacion('remito', _remitoDetalleActual.id);
   const pdfBlob = _pdfDetalleActual.doc.output('blob', { type: 'application/pdf' });
   const pdfUrl = URL.createObjectURL(pdfBlob);
   const popup = window.open(pdfUrl, '_blank');

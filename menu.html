@@ -147,9 +147,24 @@
   .review-head h2 { margin: 0; color: var(--purple-dark); font-size: 22px; }
   .review-head button { margin-left: auto; border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; background: #fff; color: var(--purple-dark); font-weight: 900; cursor: pointer; }
   .review-list { max-height: 560px; overflow: auto; padding: 10px; }
-  .review-item { display: grid; grid-template-columns: 82px 1fr 120px; gap: 8px; align-items: center; min-height: 46px; padding: 8px 10px; border: 1px solid #e4dcfb; border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: pointer; font-weight: 800; }
+  .review-item { display: grid; grid-template-columns: 82px 1fr 120px 108px; gap: 8px; align-items: center; min-height: 46px; padding: 8px 10px; border: 1px solid #e4dcfb; border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: pointer; font-weight: 800; }
   .review-item:hover { background: #f4f0ff; }
   .review-item strong { color: var(--purple-dark); }
+  .review-resolved {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 30px;
+    border: 1px solid #cdbff5;
+    border-radius: 999px;
+    background: #f8f5ff;
+    color: var(--purple-dark);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .review-resolved input { accent-color: var(--purple); cursor: pointer; }
   .menu-userbar {
     padding: 12px 16px 0;
     display: flex;
@@ -186,8 +201,15 @@
     font-size: 13px;
     font-weight: 900;
   }
+  .menu-objective-card.is-loading {
+    border-color: #d9e8ff;
+    background: linear-gradient(180deg, #f7fbff 0%, #edf6ff 100%);
+  }
   .menu-objective-card strong {
     color: #227a42;
+  }
+  .menu-objective-card.is-loading strong {
+    color: #006fc9;
   }
   .menu-objective-card span {
     color: var(--muted);
@@ -522,7 +544,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, doc, getDocs, onSnapshot, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, onSnapshot, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -566,15 +588,16 @@
     let historialUnsubscribe = null;
     let reviewOrders = [];
     let historialNotifications = [];
-    let objectiveAliases = [];
-    let objectiveRecords = [];
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
-    let objectiveAliasesUnsubscribe = null;
-    let objectiveRecordsUnsubscribe = null;
+    let objectiveSummaryUnsubscribe = null;
+    let objectiveSummaryLoaded = false;
+    let objectivePreloadStarted = false;
+    let objectivePreloadPromise = null;
     const REVIEW_DISMISSED_KEY = 'corralon_review_orders_dismissed_v1';
     const MENU_NOTIFS_CACHE_KEY = 'corralon_menu_notifs_cache_v1';
     const MENU_OBJECTIVES_CACHE_KEY = 'corralon_menu_objectives_cache_v1';
+    const ALIAS_OBJECTIVES_SUMMARY_COLLECTION = 'aliasObjetivosResumen';
     const HISTORIAL_NOTIFS_START_MS = new Date('2026-06-04T00:00:00-03:00').getTime();
 
     function usuariosDefault() {
@@ -732,6 +755,11 @@
       menuLoading.classList.add('hidden');
     }
 
+    function mostrarCargaMenu(texto = 'Cargando menú...') {
+      menuLoading.querySelector('.menu-loader-text').textContent = texto;
+      menuLoading.classList.remove('hidden');
+    }
+
     function recordarSesion(usuario, activar) {
       if (activar) {
         localStorage.setItem(HISTORIAL_LOGIN_STORAGE_KEY, '1');
@@ -758,7 +786,10 @@
         recordarSesion(usuario, rememberLogin.checked);
         accesoManualEnPagina = true;
         loginError.textContent = '';
+        mostrarCargaMenu('Actualizando saldos...');
+        await preloadAliasObjectives();
         mostrarMenu(usuario);
+        ocultarCargaMenu();
       } else {
         loginError.textContent = '❌ Usuario o contraseña incorrectos';
         loginInput.value = '';
@@ -793,33 +824,8 @@
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
-    function normalizeText(value) {
-      return String(value || '').trim().toLowerCase();
-    }
-
     function formatMoney(value) {
       return '$ ' + Number(value || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
-    }
-
-    function recordMatchesAlias(record, alias) {
-      const transferId = String(record.transferId || record.aliasId || '');
-      if (transferId && transferId === String(alias.id || '')) return true;
-      const recordName = normalizeText(record.transferName || record.aliasNombre || record.transferencia);
-      const recordAlias = normalizeText(record.transferAlias || record.alias || record.alias_mp);
-      const recordCuit = normalizeText(record.transferCuit || record.cuit);
-      return Boolean(
-        (recordName && recordName === normalizeText(alias.nombre)) ||
-        (recordAlias && recordAlias === normalizeText(alias.alias)) ||
-        (recordCuit && recordCuit === normalizeText(alias.cuit))
-      );
-    }
-
-    function recordDateIso(record) {
-      return String(record.dateIso || record.fecha_iso || record.fechaIso || '').slice(0, 10);
-    }
-
-    function recordAmount(record) {
-      return Number(record.amountNumber || record.monto || record.monto_total || record.montoTotal || 0) || 0;
     }
 
     function readLocalJson(key, fallback) {
@@ -835,35 +841,45 @@
       try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
     }
 
-    function renderAliasObjectives() {
-      const today = todayIso();
-      const aliases = objectiveAliases
-        .filter((alias) => alias.prioritario && Number(alias.objetivoDiario || 0) > 0)
-        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' }));
-      if (!aliases.length) {
+    function normalizeObjectiveCards(raw) {
+      const cards = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.cards)
+          ? raw.cards
+          : [];
+      return cards
+        .map((card) => ({
+          aliasId: String(card.aliasId || ''),
+          alias: String(card.alias || 'Alias'),
+          objetivo: Number(card.objetivo || 0) || 0,
+          transferido: Number(card.transferido || 0) || 0,
+          missing: Math.max(0, Number(card.missing || 0) || 0)
+        }))
+        .filter((card) => card.alias || card.objetivo > 0);
+    }
+
+    function renderAliasObjectiveCards(cards, options = {}) {
+      const loading = Boolean(options.loading);
+      aliasObjectives.innerHTML = cards.map((card) => `
+        <div class="menu-objective-card${loading ? ' is-loading' : ''}">
+          <div>
+            <strong>${loading ? 'Actualizando objetivo alias' : `Objetivo alias: ${escapeHtml(card.alias || 'Alias')}`}</strong>
+            <span>${loading ? 'Cargando faltante por transferir...' : 'Faltante por transferir'}</span>
+          </div>
+          <div class="menu-objective-amount">${loading ? '...' : formatMoney(card.missing || 0)}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderAliasObjectivesSummary(data) {
+      const cards = normalizeObjectiveCards(data);
+      if (!cards.length) {
         aliasObjectives.innerHTML = '';
-        writeLocalJson(MENU_OBJECTIVES_CACHE_KEY, []);
+        writeLocalJson(MENU_OBJECTIVES_CACHE_KEY, { dateIso: todayIso(), cards: [] });
         return;
       }
-      const cards = aliases.map((alias) => {
-        const total = objectiveRecords
-          .filter((record) => recordDateIso(record) === today && recordMatchesAlias(record, alias))
-          .reduce((sum, record) => sum + recordAmount(record), 0);
-        const missing = Math.max(0, Number(alias.objetivoDiario || 0) - total);
-        return { alias: alias.nombre || 'Alias', missing };
-      });
-      writeLocalJson(MENU_OBJECTIVES_CACHE_KEY, cards);
-      aliasObjectives.innerHTML = cards.map((card) => {
-        return `
-          <div class="menu-objective-card">
-            <div>
-              <strong>Objetivo alias: ${escapeHtml(card.alias)}</strong>
-              <span>Faltante por transferir</span>
-            </div>
-            <div class="menu-objective-amount">${formatMoney(card.missing)}</div>
-          </div>
-        `;
-      }).join('');
+      writeLocalJson(MENU_OBJECTIVES_CACHE_KEY, { dateIso: todayIso(), cards });
+      renderAliasObjectiveCards(cards);
     }
 
     function renderCachedFastData() {
@@ -873,33 +889,44 @@
         historialNotifications = Array.isArray(notifCache.historialNotifications) ? notifCache.historialNotifications : [];
         renderReviewNotifications();
       }
-      const objectiveCache = readLocalJson(MENU_OBJECTIVES_CACHE_KEY, []);
-      if (Array.isArray(objectiveCache) && objectiveCache.length) {
-        aliasObjectives.innerHTML = objectiveCache.map((card) => `
-          <div class="menu-objective-card">
-            <div>
-              <strong>Objetivo alias: ${escapeHtml(card.alias || 'Alias')}</strong>
-              <span>Faltante por transferir</span>
-            </div>
-            <div class="menu-objective-amount">${formatMoney(card.missing || 0)}</div>
-          </div>
-        `).join('');
+      const objectiveCache = readLocalJson(MENU_OBJECTIVES_CACHE_KEY, null);
+      const cachedCards = normalizeObjectiveCards(objectiveCache);
+      if (cachedCards.length) {
+        renderAliasObjectiveCards(cachedCards);
       }
     }
 
+    async function preloadAliasObjectives() {
+      if (objectivePreloadStarted) return objectivePreloadPromise;
+      objectivePreloadStarted = true;
+      objectivePreloadPromise = (async () => {
+        try {
+          const snap = await getDocFromServer(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()));
+          objectiveSummaryLoaded = true;
+          renderAliasObjectivesSummary(snap.exists() ? snap.data() : null);
+        } catch (error) {
+          console.warn('No se pudo precargar resumen de objetivos desde servidor', error);
+          try {
+            const snap = await getDoc(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()));
+            objectiveSummaryLoaded = true;
+            renderAliasObjectivesSummary(snap.exists() ? snap.data() : null);
+          } catch (fallbackError) {
+            console.warn('No se pudo precargar resumen de objetivos desde cache', fallbackError);
+            if (!aliasObjectives.innerHTML.trim()) {
+              renderAliasObjectiveCards([{ alias: 'Alias', missing: 0 }], { loading: true });
+            }
+          }
+        }
+      })();
+      return objectivePreloadPromise;
+    }
+
     function setupAliasObjectives() {
-      if (!objectiveAliasesUnsubscribe) {
-        objectiveAliasesUnsubscribe = onSnapshot(collection(db, 'aliases'), (snap) => {
-          objectiveAliases = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-          renderAliasObjectives();
-        }, (error) => console.warn('No se pudieron escuchar objetivos de alias', error));
-      }
-      if (!objectiveRecordsUnsubscribe) {
-        const comprobantesHoy = query(collection(db, 'comprobantes'), where('dateIso', '==', todayIso()));
-        objectiveRecordsUnsubscribe = onSnapshot(comprobantesHoy, (snap) => {
-          objectiveRecords = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-          renderAliasObjectives();
-        }, (error) => console.warn('No se pudieron escuchar comprobantes para objetivos', error));
+      if (!objectiveSummaryUnsubscribe) {
+        objectiveSummaryUnsubscribe = onSnapshot(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()), (snap) => {
+          objectiveSummaryLoaded = true;
+          renderAliasObjectivesSummary(snap.exists() ? snap.data() : null);
+        }, (error) => console.warn('No se pudo escuchar resumen de objetivos de alias', error));
       }
     }
 
@@ -974,6 +1001,10 @@
           <strong>${escapeHtml(item.title)}</strong>
           <span>${escapeHtml(item.detail)}</span>
           <span>${escapeHtml(item.date || '')}</span>
+          <label class="review-resolved" title="Marcar como resuelto" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
+            <input type="checkbox" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
+            Resuelto
+          </label>
         </div>
       `).join('') : '<div style="padding:18px;font-weight:800;color:var(--muted)">No hay notificaciones.</div>';
     }
@@ -1043,24 +1074,45 @@
       }
     }
 
-    function openReviewOrder(id) {
-      const dismissed = dismissedReviewIds();
-      dismissed.add(String(id));
-      saveDismissedReviewIds(dismissed);
-      renderReviewNotifications();
-      reviewModal.classList.remove('visible');
-      localStorage.setItem('corralon_open_review_order_id', String(id));
-      location.href = 'pedidos.html';
+    function openNotificationTarget(url) {
+      const opened = window.open(url, '_blank');
+      if (opened) setTimeout(() => window.focus(), 0);
+      return Boolean(opened);
     }
 
-    async function openHistorialNotification(tipo, id) {
-      const item = historialNotifications.find((notif) => String(notif.id) === String(id) && String(notif.tipo) === String(tipo));
-      if (item && tipo !== 'remito') {
-        await setDoc(doc(db, 'historialNotificaciones', item.firestoreId || `${tipo}_${id}`), { resuelta: true, resueltaAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
-      }
+    function openReviewOrder(id) {
+      reviewModal.classList.remove('visible');
+      localStorage.setItem('corralon_open_review_order_id', String(id));
+      openNotificationTarget(`pedidos.html?abrirPedido=${encodeURIComponent(String(id))}`);
+    }
+
+    function openHistorialNotification(tipo, id) {
       reviewModal.classList.remove('visible');
       localStorage.setItem('corralon_open_historial_notification', JSON.stringify({ tipo, id }));
-      location.href = 'historial.html';
+      const params = new URLSearchParams({ abrirTipo: String(tipo || ''), abrirId: String(id || '') });
+      openNotificationTarget(`historial.html?${params.toString()}`);
+    }
+
+    function resolveMenuNotification(kind, id, tipo) {
+      if (kind === 'pedido') {
+        const dismissed = dismissedReviewIds();
+        dismissed.add(String(id));
+        saveDismissedReviewIds(dismissed);
+        renderReviewNotifications();
+        return;
+      }
+      const item = historialNotifications.find((notif) => String(notif.id) === String(id) && String(notif.tipo) === String(tipo));
+      historialNotifications = historialNotifications.map((notif) => (
+        String(notif.id) === String(id) && String(notif.tipo) === String(tipo)
+          ? { ...notif, resuelta: true }
+          : notif
+      ));
+      renderReviewNotifications();
+      setDoc(doc(db, 'historialNotificaciones', item?.firestoreId || `${tipo}_${id}`), {
+        resuelta: true,
+        resueltaAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }, { merge: true }).catch((error) => console.warn('No se pudo marcar notificación como resuelta', error));
     }
 
     reviewBell.addEventListener('click', () => {
@@ -1072,6 +1124,12 @@
       if (event.target === reviewModal) reviewModal.classList.remove('visible');
     });
     reviewList.addEventListener('click', (event) => {
+      const resolveCheck = event.target.closest('[data-resolve-notification]');
+      if (resolveCheck) {
+        event.stopPropagation();
+        resolveMenuNotification(resolveCheck.dataset.kind, resolveCheck.dataset.reviewId, resolveCheck.dataset.tipo);
+        return;
+      }
       const item = event.target.closest('[data-review-id]');
       if (!item) return;
       if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId);
@@ -1114,7 +1172,7 @@
       mostrarMenu(usuarioValidado);
     }
 
-    function inicializarMenu() {
+    async function inicializarMenu() {
       if (!usuariosMenu.length && !cargarUsuariosMenuDesdeCache()) {
         usuariosMenu = usuariosDefault();
       }
@@ -1125,18 +1183,26 @@
       renderLoginUsers();
       rememberLogin.checked = tieneSesionMenuRecordada();
       if (tieneSesionMenuRecordada()) {
+        mostrarCargaMenu('Actualizando saldos...');
+        await preloadAliasObjectives();
         mostrarMenu(obtenerUsuarioActivo());
+        ocultarCargaMenu();
       } else {
         mostrarLogin();
+        ocultarCargaMenu();
+        preloadAliasObjectives().catch((error) => console.warn('No se pudo iniciar la precarga de objetivos de alias', error));
       }
-      setTimeout(ocultarCargaMenu, 80);
       validarSesionEnSegundoPlano().catch((error) => {
         console.error('No se pudo validar la sesión del menú', error);
         if (!tieneSesionRecordada()) cerrarSesion();
       });
     }
 
-    inicializarMenu();
+    inicializarMenu().catch((error) => {
+      console.error('No se pudo inicializar el menú', error);
+      mostrarLogin();
+      ocultarCargaMenu();
+    });
   </script>
 </body>
 </html>

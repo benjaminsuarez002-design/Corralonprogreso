@@ -1807,6 +1807,7 @@
       const SUPABASE_BUCKET = "Archivos";
       const ALIASES_COLLECTION = "aliases";
       const COMPROBANTES_COLLECTION = "comprobantes";
+      const ALIAS_OBJECTIVES_SUMMARY_COLLECTION = "aliasObjetivosResumen";
       const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1";
       const ALIASES_CACHE_KEY = "corralon_comprobantes_aliases_cache_v1";
       const RECORDS_CACHE_KEY = "corralon_comprobantes_records_cache_v1";
@@ -2507,6 +2508,79 @@
         renderTodayRecords();
         renderSummaryDate();
         renderSummary();
+      }
+
+      function aliasMatchesRecord(record, alias) {
+        const transferId = String(record?.transferId || "");
+        if (transferId && transferId === String(alias?.id || "")) return true;
+        const name = normalize(record?.transferName);
+        const aliasText = normalize(record?.transferAlias);
+        const cuit = normalize(record?.transferCuit);
+        return Boolean(
+          (name && name === normalize(alias?.nombre)) ||
+          (aliasText && aliasText === normalize(alias?.alias)) ||
+          (cuit && cuit === normalize(alias?.cuit))
+        );
+      }
+
+      function buildAliasObjectivesSummary(sourceRecords = state.allRecords, sourceAliases = state.aliases) {
+        const today = todayIso();
+        const priorityAliases = sortedAliases(sourceAliases)
+          .filter((alias) => isPriorityAlias(alias) && Number(alias.objetivoDiario || 0) > 0);
+        return priorityAliases.map((alias) => {
+          const transferido = sourceRecords
+            .filter((record) => hasVisibleRecordData(record) && String(record.dateIso || "") === today)
+            .filter((record) => aliasMatchesRecord(record, alias))
+            .reduce((sum, record) => sum + Number(record.amountNumber || 0), 0);
+          const objetivo = Number(alias.objetivoDiario || 0) || 0;
+          return {
+            aliasId: alias.id,
+            alias: alias.nombre || "Alias",
+            objetivo,
+            transferido,
+            missing: Math.max(0, objetivo - transferido)
+          };
+        });
+      }
+
+      function mapAliasDoc(doc) {
+        const data = doc.data ? doc.data() : doc;
+        return {
+          id: doc.id || data.id || "",
+          nombre: String(data.nombre || ""),
+          alias: String(data.alias || ""),
+          cuit: String(data.cuit || ""),
+          prioritario: data.prioritario === true,
+          objetivoDiario: Number(data.objetivoDiario || 0)
+        };
+      }
+
+      async function writeAliasObjectivesSummary(cards) {
+        const today = todayIso();
+        await state.db.collection(ALIAS_OBJECTIVES_SUMMARY_COLLECTION).doc(today).set({
+          dateIso: today,
+          cards,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      }
+
+      async function syncAliasObjectivesSummaryFromServer() {
+        if (!state.db) return;
+        const today = todayIso();
+        const [aliasesSnap, recordsSnap] = await Promise.all([
+          state.db.collection(ALIASES_COLLECTION).get(),
+          state.db.collection(COMPROBANTES_COLLECTION).where("dateIso", "==", today).get()
+        ]);
+        const aliases = aliasesSnap.docs.map(mapAliasDoc);
+        const records = recordsSnap.docs.map(mapDoc);
+        await writeAliasObjectivesSummary(buildAliasObjectivesSummary(records, aliases));
+      }
+
+      function queueAliasObjectivesSummarySync() {
+        clearTimeout(queueAliasObjectivesSummarySync.timer);
+        queueAliasObjectivesSummarySync.timer = setTimeout(() => {
+          syncAliasObjectivesSummaryFromServer().catch((error) => throttleError("No se pudo actualizar resumen de alias", error));
+        }, 250);
       }
 
       function renderAliases() {
@@ -3311,6 +3385,7 @@
 
       async function deleteAlias(id) {
         await aliasRef(id).delete();
+        await syncAliasObjectivesSummaryFromServer();
       }
 
       async function toggleAliasPriority(id) {
@@ -3321,6 +3396,7 @@
           prioritario: nextPriority,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        await syncAliasObjectivesSummaryFromServer();
         if (nextPriority) openAliasObjectiveModal(id);
       }
 
@@ -3350,6 +3426,7 @@
           objetivoDiario: Math.max(0, Number(amount || 0)),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        await syncAliasObjectivesSummaryFromServer();
         closeAliasObjectiveModal();
         showToast(Number(amount || 0) > 0 ? "Objetivo guardado" : "Alias sin objetivo");
       }
@@ -3389,6 +3466,7 @@
           cuit,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        await syncAliasObjectivesSummaryFromServer();
         closeEditAliasModal();
       }
 
@@ -3546,6 +3624,7 @@
             payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             await state.db.collection(COMPROBANTES_COLLECTION).add(payload);
           }
+          await syncAliasObjectivesSummaryFromServer();
           resetDraft();
           activateTab("comp");
           showToast("Comprobante guardado");
@@ -3561,6 +3640,7 @@
         if (field === "machine") payload.machine = formatMachine(value);
         if (field === "amount") payload.amountNumber = parseAmount(value);
         await recordRef(id).update(payload);
+        if (field === "amount") await syncAliasObjectivesSummaryFromServer();
       }
 
       async function updateRecordAlias(id, aliasDoc) {
@@ -3571,6 +3651,7 @@
           transferCuit: aliasDoc ? aliasDoc.cuit : "",
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        await syncAliasObjectivesSummaryFromServer();
       }
 
       async function updateRecordAttachment(id, file) {
@@ -3583,8 +3664,9 @@
         });
       }
 
-      async function deleteRecord(id) {
+      async function deleteRecord(id, options = {}) {
         await recordRef(id).delete();
+        if (options.sync !== false) await syncAliasObjectivesSummaryFromServer();
       }
 
       function loadRecordIntoDraft(record) {
@@ -3683,8 +3765,9 @@
         }
         const ids = state.todayRecords.map((item) => item.id);
         for (const id of ids) {
-          await deleteRecord(id);
+          await deleteRecord(id, { sync: false });
         }
+        await syncAliasObjectivesSummaryFromServer();
         resetDraft();
       }
 
@@ -3812,6 +3895,7 @@
           renderTodayRecords();
           renderSummary();
           if (state.aliasSummaryId) renderAliasSummary(state.aliasSummaryId);
+          queueAliasObjectivesSummarySync();
         }, (error) => throttleError("No se pudieron leer alias", error));
       }
 
@@ -3822,6 +3906,7 @@
           writeJsonCache(RECORDS_CACHE_KEY, state.allRecords);
           refreshDerivedRecords();
           if (state.aliasSummaryId) renderAliasSummary(state.aliasSummaryId);
+          queueAliasObjectivesSummarySync();
         }, (error) => throttleError("No se pudieron leer comprobantes", error));
       }
 
