@@ -3335,19 +3335,23 @@
   <div class="wa-modal-box presupuesto-datos-box">
     <button class="wa-modal-close" id="presupuestoDatosClose" type="button">x</button>
     <div class="wa-modal-title">Datos del presupuesto</div>
-    <div class="wa-modal-sub">Opcional. Completa lo que necesites antes de generar.</div>
+    <div class="wa-modal-sub">Todos los campos son opcionales. Completá solo lo que necesites antes de generar.</div>
     <div class="presupuesto-datos-form">
       <label for="presupuestoNombre">
-        Nombre
-        <input id="presupuestoNombre" type="text" placeholder="Ingrese su nombre" autocomplete="name">
+        Nombre opcional
+        <input id="presupuestoNombre" type="text" placeholder="Opcional: ingrese su nombre" autocomplete="name">
+      </label>
+      <label for="presupuestoTelefono">
+        Teléfono opcional
+        <input id="presupuestoTelefono" type="tel" inputmode="tel" placeholder="Opcional: ingrese su teléfono" autocomplete="tel">
       </label>
       <label for="presupuestoMedioPago">
-        Medio de pago
+        Medio de pago opcional
         <select id="presupuestoMedioPago"></select>
       </label>
       <label for="presupuestoNota">
-        Nota
-        <textarea id="presupuestoNota" placeholder="Nota"></textarea>
+        Nota opcional
+        <textarea id="presupuestoNota" placeholder="Opcional: agregue una nota"></textarea>
       </label>
     </div>
     <div class="wa-modal-btns">
@@ -3459,6 +3463,7 @@ async function guardarNotificacionPresupuesto(registro) {
       fecha: registro.fecha || '',
       total: Number(registro.total || 0),
       cliente_nombre: registro.cliente_nombre || '',
+      telefono: registro.telefono || '',
       medio_pago: registro.medio_pago || '',
       nota: registro.nota || '',
       resuelta: false,
@@ -7258,6 +7263,7 @@ function normalizarDatosPresupuesto(datos) {
   }
   return {
     nombre: String(datos?.nombre || '').trim(),
+    telefono: String(datos?.telefono || '').trim(),
     medioPago: String(datos?.medioPago || '').trim(),
     nota: String(datos?.nota || '').trim()
   };
@@ -7278,22 +7284,24 @@ function abrirModalDatosPresupuesto() {
   prepararModalDatosPresupuesto();
   const modal = document.getElementById('presupuestoDatosModal');
   const nombre = document.getElementById('presupuestoNombre');
+  const telefono = document.getElementById('presupuestoTelefono');
   const medioPago = document.getElementById('presupuestoMedioPago');
   const nota = document.getElementById('presupuestoNota');
   const continuar = document.getElementById('presupuestoDatosContinue');
   const cancelar = document.getElementById('presupuestoDatosCancel');
   const cerrar = document.getElementById('presupuestoDatosClose');
-  if (!modal || !nombre || !medioPago || !nota || !continuar || !cancelar || !cerrar) {
+  if (!modal || !nombre || !telefono || !medioPago || !nota || !continuar || !cancelar || !cerrar) {
     return Promise.resolve(normalizarDatosPresupuesto({}));
   }
   nombre.value = '';
+  telefono.value = '';
   medioPago.value = '';
   nota.value = '';
   modal.classList.remove('hidden');
   setTimeout(() => nombre.focus(), 50);
   const keyboardNav = window.CorralonFunciones?.bindLinearNavigation?.({
     root: modal,
-    selector: '#presupuestoNombre, #presupuestoMedioPago, #presupuestoNota',
+    selector: '#presupuestoNombre, #presupuestoTelefono, #presupuestoMedioPago, #presupuestoNota',
     selectOnFocus: true
   }) || null;
 
@@ -7313,6 +7321,7 @@ function abrirModalDatosPresupuesto() {
     };
     const confirmar = () => cerrarModal(normalizarDatosPresupuesto({
       nombre: nombre.value,
+      telefono: telefono.value,
       medioPago: medioPago.value,
       nota: nota.value
     }));
@@ -7360,6 +7369,7 @@ async function crearPresupuesto() {
   let total = 0;
   items.forEach(it => { total += it.precio * it.cantidad; });
   const extrasPresupuesto = [];
+  if (datosPresupuesto.telefono) extrasPresupuesto.push(`Teléfono: ${datosPresupuesto.telefono}`);
   if (datosPresupuesto.medioPago) extrasPresupuesto.push(`Medio de pago: ${datosPresupuesto.medioPago}`);
   if (datosPresupuesto.nota) extrasPresupuesto.push(`Nota: ${datosPresupuesto.nota}`);
   const leyendaImpuestos = 'Los precios y el total ya tienen todos los impuestos incluidos';
@@ -7384,6 +7394,7 @@ async function crearPresupuesto() {
     fecha_iso: fecha.toISOString(),
     total,
     cliente_nombre: datosPresupuesto.nombre,
+    telefono: datosPresupuesto.telefono,
     medio_pago: datosPresupuesto.medioPago,
     nota: datosPresupuesto.nota,
     items: items.map(it => ({
@@ -7403,6 +7414,7 @@ async function crearPresupuesto() {
   }
   const mensajePartes = [`Hola, me gustaria pedir el presupuesto Nro ${numeroPedido}.`];
   if (datosPresupuesto.nombre) mensajePartes.push(`Nombre: ${datosPresupuesto.nombre}`);
+  if (datosPresupuesto.telefono) mensajePartes.push(`Teléfono: ${datosPresupuesto.telefono}`);
   if (datosPresupuesto.medioPago) mensajePartes.push(`Medio de pago: ${datosPresupuesto.medioPago}`);
   if (datosPresupuesto.nota) mensajePartes.push(`Nota: ${datosPresupuesto.nota}`);
   const mensaje = mensajePartes.join('\n');
