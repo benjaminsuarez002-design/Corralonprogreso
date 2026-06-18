@@ -961,11 +961,21 @@ function setAccionesDetalleModo(modo) {
 
 async function copiarPresupuestoColumna(tipo) {
   const items = Array.isArray(_presupuestoDetalleActual?.items) ? _presupuestoDetalleActual.items : [];
-  const texto = items.map((it) => tipo === 'cantidad' ? (it.cantidad ?? '') : (it.idart || it.idArt || it.codigo || '')).join('\n');
+  const texto = items.map((it) => {
+    if (tipo === 'cantidad') return it.cantidad ?? '';
+    if (tipo === 'completo') {
+      const idart = it.idart || it.idArt || it.codigo || '';
+      const descripcion = it.nombre || it.descripcion || it.articulo || '';
+      const cantidad = it.cantidad ?? '';
+      return [idart, descripcion, cantidad].join('\t');
+    }
+    return it.idart || it.idArt || it.codigo || '';
+  }).join('\n');
   if (!texto.trim()) { toast('No hay datos para copiar'); return; }
+  const mensaje = tipo === 'cantidad' ? 'Cantidades copiadas' : tipo === 'completo' ? 'Presupuesto completo copiado' : 'IDArt copiados';
   try {
     await navigator.clipboard.writeText(texto);
-    toast(tipo === 'cantidad' ? 'Cantidades copiadas' : 'IDArt copiados');
+    toast(mensaje);
   } catch (_) {
     const area = document.createElement('textarea');
     area.value = texto;
@@ -973,7 +983,7 @@ async function copiarPresupuestoColumna(tipo) {
     area.select();
     document.execCommand('copy');
     area.remove();
-    toast(tipo === 'cantidad' ? 'Cantidades copiadas' : 'IDArt copiados');
+    toast(mensaje);
   }
 }
 
@@ -1037,6 +1047,7 @@ function abrirDetallePresupuesto(index) {
     </div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('idart')">Copiar IDArt</button>
+      <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('completo')">Copiar completo</button>
       <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('cantidad')">Copiar cantidades</button>
     </div>`;
 
