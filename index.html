@@ -5414,7 +5414,7 @@ function moverResultadoActivo(direccion) {
   if (!total) return false;
   const destino = resultadoActivoIndex >= 0
     ? Math.max(0, Math.min(resultadoActivoIndex + paso, total - 1))
-    : (paso > 0 ? 0 : total - 1);
+    : 0;
   if (!asegurarResultadoRenderizado(destino)) return true;
   return setResultadoActivo(destino, { focus: true, scroll: true });
 }
@@ -5969,6 +5969,8 @@ let searchSelectAllOnFocus = false;
 let searchWasFocusedOnPointerDown = false;
 let searchPointerClientX = 0;
 let searchUseNativeSelection = false;
+let searchSelectAllApplyTimer = null;
+let searchSelectAllResetTimer = null;
 function usarSeleccionNativaBusqueda(event) {
   return window.matchMedia('(min-width: 980px)').matches && (!event || event.pointerType === 'mouse');
 }
@@ -6001,13 +6003,48 @@ function ubicarCursorBusquedaEnToque() {
 }
 function seleccionarTextoBusqueda() {
   if (!searchInput.value) return;
+  clearTimeout(searchSelectAllApplyTimer);
+  clearTimeout(searchSelectAllResetTimer);
   searchSelectAllOnFocus = true;
   searchInput.select();
-  setTimeout(() => {
+  searchSelectAllApplyTimer = setTimeout(() => {
     if (document.activeElement === searchInput && searchInput.value) searchInput.select();
   }, 0);
-  setTimeout(() => { searchSelectAllOnFocus = false; }, 180);
+  searchSelectAllResetTimer = setTimeout(() => { searchSelectAllOnFocus = false; }, 180);
 }
+
+function alternarSeleccionTextoBusqueda() {
+  const valor = String(searchInput.value || '');
+  const estabaEnBusqueda = document.activeElement === searchInput;
+  const estabaTodoSeleccionado = estabaEnBusqueda
+    && valor.length > 0
+    && searchInput.selectionStart === 0
+    && searchInput.selectionEnd === valor.length;
+  searchInput.focus({ preventScroll: true });
+  if (estabaTodoSeleccionado) {
+    clearTimeout(searchSelectAllApplyTimer);
+    clearTimeout(searchSelectAllResetTimer);
+    searchSelectAllOnFocus = false;
+    searchInput.setSelectionRange(valor.length, valor.length);
+    return;
+  }
+  seleccionarTextoBusqueda();
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (event.key === 'F1') {
+    event.preventDefault();
+    searchInput.focus({ preventScroll: true });
+    seleccionarTextoBusqueda();
+    return;
+  }
+  if (event.key === 'F2') {
+    event.preventDefault();
+    alternarSeleccionTextoBusqueda();
+  }
+});
+
 searchInput.addEventListener('focus', () => {
   if (!searchWasFocusedOnPointerDown && !searchUseNativeSelection) seleccionarTextoBusqueda();
   if (searchInput.value.trim()) mostrarAsistenteBusqueda();
@@ -7014,6 +7051,22 @@ document.getElementById('scrollBody').addEventListener('keydown', (e) => {
     e.preventDefault();
     devolverFocoBusqueda();
   }
+});
+
+document.addEventListener('keydown', (e) => {
+  const direccion = {
+    ArrowDown: 'down',
+    ArrowUp: 'up',
+    ArrowRight: 'right',
+    ArrowLeft: 'left'
+  }[e.key];
+  if (!direccion || e.defaultPrevented || resultadoActivoIndex >= 0) return;
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const target = e.target;
+  if (target?.matches?.('input, textarea, select') || target?.isContentEditable) return;
+  if (!obtenerElementosResultado().length) return;
+  e.preventDefault();
+  setResultadoActivo(0, { focus: true, scroll: true });
 });
 
 if (!INDEX_ENLACE_COMPARTIDO) {
