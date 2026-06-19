@@ -3080,7 +3080,7 @@
   <div id="chipsPanel">
     <div class="chips-grupo chips-grupo-izq">
       <button class="filtro-chip" type="button" data-chip="oferta">En oferta</button>
-      <button class="filtro-chip" type="button" data-chip="destacado">? Destacado</button>
+      <button class="filtro-chip" type="button" data-chip="destacado">&#9733; Destacado</button>
       <button class="filtro-chip" type="button" data-chip="masVendido">Más vendido</button>
       <button class="filtro-chip" type="button" data-chip="ceramico">Ceramico</button>
     </div>
@@ -3399,7 +3399,7 @@
 <script src="presupuesto-shared.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, onSnapshot, setDoc, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -3415,6 +3415,7 @@ const db  = getFirestore(app);
 const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
 const HOME_LANDING_DOC_ID = 'homeLanding';
 const STOCK_NOTICE_DOC_ID = 'stockNotice';
+const CART_POPULARITY_COLLECTION = 'articulosAgregadosCarrito';
 const HOME_LANDING_CACHE_KEY = 'corralon_index_home_landing_cache_v1';
 const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo.';
 
@@ -3540,6 +3541,9 @@ if (MODO_A_DESCONTAR) {
 }
 const CARRITO_STORAGE_KEY = MODO_A_DESCONTAR ? 'carrito_a_descontar' : 'carrito';
 let homeLandingConfig = { mode: 'auto', sections: { destacado: [], masVendido: [], oferta: [] } };
+let rankingVentasCargado = false;
+let rankingVentasPorCodigo = new Map();
+let codigosMasVendidos = new Set();
 let homeLandingFingerprintActiva = '';
 const homeCarouselInstances = new Map();
 let homeCarouselInitTimer = null;
@@ -3973,6 +3977,44 @@ function obtenerIdArticulo(articulo) {
   return String(articulo?._codigoArticulo ?? articulo?.codigoArticulo ?? articulo?.idart ?? articulo?.codigo ?? articulo?.idArt ?? articulo?.id ?? '').trim() || '-';
 }
 
+function aplicarRankingVentasArticulos(lista = []) {
+  if (!rankingVentasCargado) return lista;
+  return (lista || []).map((articulo) => {
+    const codigo = obtenerIdArticulo(articulo);
+    return {
+      ...articulo,
+      masVendido: codigosMasVendidos.has(codigo),
+      _ventasAgregados: Number(rankingVentasPorCodigo.get(codigo) || 0)
+    };
+  });
+}
+
+function ordenarPorRankingVentas(lista = []) {
+  return [...lista].sort((a, b) => {
+    const diferencia = Number(b?._ventasAgregados || 0) - Number(a?._ventasAgregados || 0);
+    if (diferencia) return diferencia;
+    return obtenerDescripcionArticulo(a).principal.localeCompare(obtenerDescripcionArticulo(b).principal, 'es', { sensitivity: 'base' });
+  });
+}
+
+function registrarAgregadoCarrito(articuloOCodigo) {
+  if (MODO_A_DESCONTAR) return;
+  const articulo = typeof articuloOCodigo === 'object'
+    ? articuloOCodigo
+    : buscarArticuloPorCodigo(String(articuloOCodigo || ''));
+  const codigo = obtenerIdArticulo(articulo || { codigo: articuloOCodigo });
+  if (!codigo || codigo === '-') return;
+  const nombre = articulo ? obtenerDescripcionArticulo(articulo).principal : '';
+  setDoc(doc(db, CART_POPULARITY_COLLECTION, encodeURIComponent(codigo)), {
+    codigo,
+    nombre,
+    agregados: increment(1),
+    updatedAt: serverTimestamp()
+  }, { merge: true }).catch((error) => {
+    console.warn('No se pudo actualizar el ranking de artículos', error);
+  });
+}
+
 function obtenerDescripcionArticulo(articulo) {
   if (articulo?._descripcionPrincipal) {
     return { principal: articulo._descripcionPrincipal, secundaria: articulo._descripcionSecundaria || '' };
@@ -4028,6 +4070,9 @@ function resolverArticulosPortadaManual(key) {
 }
 
 function obtenerArticulosPortada(key, fallbackPredicate, fallbackType = 'general') {
+  if (key === 'masVendido' && rankingVentasCargado) {
+    return ordenarPorRankingVentas((todosArticulos || []).filter((articulo) => !!articulo.masVendido)).slice(0, 8);
+  }
   const manuales = resolverArticulosPortadaManual(key);
   if (homeLandingConfig.mode === 'manual' && manuales.length) return manuales;
   return tomarArticulosHome(fallbackPredicate, 8, fallbackType);
@@ -4079,9 +4124,9 @@ function renderHomeArticuloFoto(articulo, alt) {
 function construirTagsArticulo(articulo) {
   const tags = [];
   if (articulo.ofertaVigente) tags.push('<span class="chip-oferta">Oferta</span>');
-  if (articulo.destacado) tags.push('<span class="chip-destacado">? Destacado</span>');
+  if (articulo.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
   if (articulo.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
-  if (articulo.accesoRapido) tags.push('<span class="chip-rapido"><span class="chip-rapido-icon">?</span>Rápido</span>');
+  if (articulo.accesoRapido) tags.push('<span class="chip-rapido"><span class="chip-rapido-icon">&#9889;</span>Rápido</span>');
   if (articulo.ceramico) tags.push(`<span class="chip-ceramico">${etiquetaCeramico(articulo)}</span>`);
   return tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
 }
@@ -4225,7 +4270,7 @@ function renderHomeLanding() {
             <button class="home-hero-btn secondary" type="button" data-home-chip="oferta">Entrar por ofertas</button>
           </div>
           <a class="home-quick-access-card" href="index.html?rapido=1" data-home-quick-access="1" onclick="window.location.href='index.html?rapido=1'; return false;">
-            <span class="home-quick-access-icon">?</span>
+            <span class="home-quick-access-icon">&#9889;</span>
             <span>
               <span class="home-quick-access-title">Acceso rápido</span>
               <span class="home-quick-access-copy">Autoservicio para cemento, hierro, cal y básicos del mostrador.</span>
@@ -4465,7 +4510,7 @@ function construirIndiceBusquedaArticulo(articulo) {
 }
 
 function prepararArticulosParaVista(data = []) {
-  return (Array.isArray(data) ? data : []).map(a => {
+  const preparados = (Array.isArray(data) ? data : []).map(a => {
     const normalizado = normalizarArticulo(a);
     const indice = construirIndiceBusquedaArticulo(normalizado);
     return {
@@ -4479,6 +4524,7 @@ function prepararArticulosParaVista(data = []) {
       _busqueda: indice.fields.full
     };
   });
+  return aplicarRankingVentasArticulos(preparados);
 }
 
 function guardarListaArticulosCache(url, data) {
@@ -5286,6 +5332,7 @@ function agregarPresupuestoCeramicoAlCarrito() {
       return;
     }
     agregarArticuloCarritoDesdeArticulo(articulo, cantidad);
+    registrarAgregadoCarrito(articulo);
     guardarCarrito();
     actualizarVistaCarrito();
     mostrarAvisoCarrito(`Agregadas ${cantidad} bolsa${cantidad === 1 ? '' : 's'} al carrito`);
@@ -5310,7 +5357,10 @@ function agregarPresupuestoCeramicoAlCarrito() {
     return;
   }
   let agregados = 0;
-  if (agregarArticuloCarritoDesdeArticulo(articulo, cantidad)) agregados++;
+  if (agregarArticuloCarritoDesdeArticulo(articulo, cantidad)) {
+    agregados++;
+    registrarAgregadoCarrito(articulo);
+  }
   if (includeGlue && agregarArticuloCarritoDesdeArticulo(ceramicoBudgetGlueArticulo, ceramicoBudgetBolsas)) agregados++;
   if (includeGrout && agregarArticuloCarritoDesdeArticulo(ceramicoBudgetGroutArticulo, ceramicoBudgetBolsas)) agregados++;
   guardarCarrito();
@@ -5458,7 +5508,7 @@ function abrirDetalleProducto(codigo) {
   const precioVisual = obtenerPrecioVisualArticulo(articulo);
   const tags = [];
   if (articulo.ofertaVigente) tags.push('<span class="chip-oferta">Oferta</span>');
-  if (articulo.destacado) tags.push('<span class="chip-destacado">? Destacado</span>');
+  if (articulo.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
   if (articulo.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
   if (articulo.ceramico) tags.push(`<span class="chip-ceramico">${etiquetaCeramico(articulo)}</span>`);
   document.getElementById('productDetailTags').innerHTML = tags.join('');
@@ -5538,9 +5588,9 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
       const precioVisual = obtenerPrecioVisualArticulo(a);
       const tags = [];
       if (a.ofertaVigente) tags.push('<span class="chip-oferta">Oferta</span>');
-      if (a.destacado) tags.push('<span class="chip-destacado">? Destacado</span>');
+      if (a.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
       if (a.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
-      if (a.accesoRapido) tags.push('<span class="chip-rapido"><span class="chip-rapido-icon">?</span>Rápido</span>');
+      if (a.accesoRapido) tags.push('<span class="chip-rapido"><span class="chip-rapido-icon">&#9889;</span>Rápido</span>');
       if (a.ceramico) tags.push(`<span class="chip-ceramico">${etiquetaCeramico(a)}</span>`);
       const tagsHtml = tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
       return `<div class="lista-row" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
@@ -5597,9 +5647,9 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
     const precioVisual = obtenerPrecioVisualArticulo(a);
     const tags = [];
     if (a.ofertaVigente) tags.push('<span class="chip-oferta">Oferta</span>');
-    if (a.destacado) tags.push('<span class="chip-destacado">? Destacado</span>');
+    if (a.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
     if (a.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
-    if (a.accesoRapido) tags.push('<span class="chip-rapido"><span class="chip-rapido-icon">?</span>Rápido</span>');
+    if (a.accesoRapido) tags.push('<span class="chip-rapido"><span class="chip-rapido-icon">&#9889;</span>Rápido</span>');
     if (a.ceramico) tags.push(`<span class="chip-ceramico">${etiquetaCeramico(a)}</span>`);
     const tagsHtml = tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
     return `<div class="producto-card" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
@@ -5786,7 +5836,7 @@ function aplicarBusquedaActual() {
   if (rubroActivo) resultado = resultado.filter(a => (a.rubro || '') === rubroActivo);
   if (chipActivo === 'oferta') resultado = resultado.filter(a => a.ofertaVigente);
   if (chipActivo === 'destacado') resultado = resultado.filter(a => !!a.destacado);
-  if (chipActivo === 'masVendido') resultado = resultado.filter(a => !!a.masVendido);
+  if (chipActivo === 'masVendido') resultado = ordenarPorRankingVentas(resultado.filter(a => !!a.masVendido));
   if (chipActivo === 'ceramico') resultado = resultado.filter(a => !!a.ceramico);
   if (sortActivo === 'price-asc') resultado.sort((a,b) => (a.precioVigente||0)-(b.precioVigente||0));
   else if (sortActivo === 'price-desc') resultado.sort((a,b) => (b.precioVigente||0)-(a.precioVigente||0));
@@ -7076,6 +7126,26 @@ if (!INDEX_ENLACE_COMPARTIDO) {
   restaurarListaArticulosCache();
 }
 
+onSnapshot(
+  query(collection(db, CART_POPULARITY_COLLECTION), orderBy('agregados', 'desc'), limit(10)),
+  (snapshot) => {
+    const siguienteRanking = new Map();
+    snapshot.docs.forEach((item) => {
+      const data = item.data() || {};
+      const codigo = String(data.codigo || '').trim();
+      if (codigo) siguienteRanking.set(codigo, Number(data.agregados || 0));
+    });
+    rankingVentasPorCodigo = siguienteRanking;
+    codigosMasVendidos = new Set(siguienteRanking.keys());
+    rankingVentasCargado = true;
+    if (!todosArticulos.length) return;
+    todosArticulos = aplicarRankingVentasArticulos(todosArticulos);
+    actualizarVistaEtiqueta();
+    aplicarBusquedaActual();
+  },
+  (error) => console.warn('No se pudo cargar el ranking de artículos', error)
+);
+
 onSnapshot(doc(db, "config", "listaActual"), async snap => {
   const loader = document.getElementById('loadingOverlay');
   if (!snap.exists()) {
@@ -7247,6 +7317,7 @@ document.getElementById('productDetailAddCart').addEventListener('click', () => 
   } else {
     carrito[codigo].cantidad += cantidad;
   }
+  registrarAgregadoCarrito(articulo || codigo);
   guardarCarrito();
   actualizarVistaCarrito();
   qtyInput.value = '';
@@ -7315,6 +7386,7 @@ document.getElementById('modalAddCart').addEventListener('click', () => {
   }
   if(!carrito[codigo]) { carrito[codigo] = { codigo, nombre: btn.dataset.nombre, precio: parseFloat(btn.dataset.precio)||0, foto: btn.dataset.foto, cantidad: cant }; }
   else { carrito[codigo].cantidad += cant; }
+  registrarAgregadoCarrito(obtenerArticuloDesdeCodigo(codigo) || codigo);
   guardarCarrito(); actualizarVistaCarrito();
   document.getElementById('quantityModal').classList.add('hidden');
   document.getElementById('darkOverlay').classList.add('hidden');
@@ -7347,6 +7419,12 @@ document.addEventListener('keydown', (e) => {
     }
   }
   if (e.key !== 'Escape') return;
+  const cartPanel = document.getElementById('cartPanel');
+  if (cartPanel?.classList.contains('open')) {
+    e.preventDefault();
+    cerrarPanel();
+    return;
+  }
   if (!document.getElementById('prodeModal').classList.contains('hidden')) {
     cerrarProde();
     return;

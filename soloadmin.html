@@ -1149,6 +1149,7 @@ let adminListObserver = null;
 let adminWindowAdvanceLatch = false;
 let adminWindowAdvanceResumeAt = 0;
 const ARTICULOS_META_DOC_ID = 'listaMetaArticulos';
+const ARTICULOS_META_BACKUP_KEY = 'corralon_admin_articulos_meta_backup_v1';
 const HOME_LANDING_DOC_ID = 'homeLanding';
 const STOCK_NOTICE_DOC_ID = 'stockNotice';
 const PRODE_CONFIG_DOC_ID = 'prodeMundial';
@@ -1681,6 +1682,21 @@ function mapearMetadatosPorCodigo(lista = []) {
   return mapa;
 }
 
+function guardarBackupMetadatos(lista = []) {
+  try {
+    localStorage.setItem(ARTICULOS_META_BACKUP_KEY, JSON.stringify(lista || []));
+  } catch (_) {}
+}
+
+function cargarBackupMetadatos() {
+  try {
+    const lista = JSON.parse(localStorage.getItem(ARTICULOS_META_BACKUP_KEY) || '[]');
+    return mapearMetadatosPorCodigo(Array.isArray(lista) ? lista : []);
+  } catch (_) {
+    return new Map();
+  }
+}
+
 function aplicarMetadatosArticulo(articulo = {}, meta = null) {
   if (!meta) return normalizarArticuloAdmin(articulo);
   return normalizarArticuloAdmin({
@@ -1717,18 +1733,25 @@ function tieneCampoPropio(obj, keys = []) {
   return keys.some((key) => Object.prototype.hasOwnProperty.call(obj || {}, key));
 }
 
-function aplicarCeramicoPrevioSiFalta(articulo = {}, metaPrevio = null) {
+function aplicarMetadatosPreviosSiFaltan(articulo = {}, metaPrevio = null) {
   if (!metaPrevio) return articulo;
-  const tieneCeramico = tieneCampoPropio(articulo, ['ceramico', 'tagCeramico']);
-  const tieneM2 = tieneCampoPropio(articulo, ['ceramicoM2', 'm2Ceramico', 'm2', 'metros2Ceramico']);
-  const tienePlacas = tieneCampoPropio(articulo, ['ceramicoPlacas', 'placasCeramico', 'placasPorCaja', 'placas']);
-  if (tieneCeramico && tieneM2 && tienePlacas) return articulo;
-  return {
-    ...articulo,
-    ceramico: tieneCeramico ? articulo.ceramico : metaPrevio.ceramico,
-    ceramicoM2: tieneM2 ? (articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico) : metaPrevio.ceramicoM2,
-    ceramicoPlacas: tienePlacas ? (articulo.ceramicoPlacas ?? articulo.placasCeramico ?? articulo.placasPorCaja ?? articulo.placas) : metaPrevio.ceramicoPlacas
+  const resultado = { ...articulo };
+  const conservarSiFalta = (destino, aliases, valor) => {
+    if (!tieneCampoPropio(articulo, aliases)) resultado[destino] = valor;
   };
+  conservarSiFalta('detalle', ['detalle'], metaPrevio.detalle);
+  conservarSiFalta('tagsOcultos', ['tagsOcultos', 'tagsBusqueda', 'tags', 'palabrasClave'], metaPrevio.tagsOcultos);
+  conservarSiFalta('fotoUrl', ['fotoUrl'], metaPrevio.fotoUrl);
+  conservarSiFalta('oferta', ['oferta', 'enOferta', 'tagOferta'], metaPrevio.oferta);
+  conservarSiFalta('ofertaPct', ['ofertaPct', 'oferta_pct', 'ofertaPorcentaje', 'descuentoOferta'], metaPrevio.ofertaPct);
+  conservarSiFalta('ofertaHasta', ['ofertaHasta', 'oferta_hasta', 'fechaOfertaHasta'], metaPrevio.ofertaHasta);
+  conservarSiFalta('destacado', ['destacado', 'tagDestacado'], metaPrevio.destacado);
+  conservarSiFalta('masVendido', ['masVendido', 'mas_vendido', 'tagMasVendido'], metaPrevio.masVendido);
+  conservarSiFalta('accesoRapido', ['accesoRapido', 'rapido', 'tagRapido', 'quickAccess'], metaPrevio.accesoRapido);
+  conservarSiFalta('ceramico', ['ceramico', 'tagCeramico'], metaPrevio.ceramico);
+  conservarSiFalta('ceramicoM2', ['ceramicoM2', 'm2Ceramico', 'm2', 'metros2Ceramico'], metaPrevio.ceramicoM2);
+  conservarSiFalta('ceramicoPlacas', ['ceramicoPlacas', 'placasCeramico', 'placasPorCaja', 'placas'], metaPrevio.ceramicoPlacas);
+  return resultado;
 }
 
 function sincronizarCatalogoGeneradorImagen(lista = todosArticulos) {
@@ -1742,7 +1765,7 @@ function setTodosArticulos(lista, { render = true, adminListSnapshot = null } = 
   const metaAnterior = articulosMetaMap;
   todosArticulos = (lista || []).map((articulo) => {
     const codigo = String(articulo?.codigo ?? articulo?.idart ?? '').trim();
-    return enriquecerArticuloAdminBusqueda(aplicarCeramicoPrevioSiFalta(articulo, metaAnterior.get(codigo)));
+    return enriquecerArticuloAdminBusqueda(aplicarMetadatosPreviosSiFaltan(articulo, metaAnterior.get(codigo)));
   });
   articulosMetaMap = construirMapaMetadatos(todosArticulos);
   sincronizarCatalogoGeneradorImagen(todosArticulos);
@@ -2010,6 +2033,7 @@ async function subirListaBaseArticulos(lista) {
 
 async function subirMetadatosArticulos(lista) {
   const payload = serializarMetadatosArticulos(lista);
+  guardarBackupMetadatos(payload);
   return subirJSONaCloudinary(payload);
 }
 
@@ -2035,21 +2059,31 @@ async function cargarJsonRemoto(url) {
 }
 
 async function cargarListaPublicada(baseUrl) {
+  const metaAnterior = articulosMetaMap;
   const [baseData, metaSnap] = await Promise.all([
     cargarJsonRemoto(baseUrl),
     getDoc(doc(db, 'config', ARTICULOS_META_DOC_ID))
   ]);
   const metaUrl = metaSnap.exists() ? String(metaSnap.data()?.url || '').trim() : '';
   let metaData = [];
+  let metadataDisponible = !metaUrl;
   if (metaUrl) {
     try {
       metaData = await cargarJsonRemoto(metaUrl);
+      metadataDisponible = true;
     } catch (error) {
       console.warn('No se pudieron cargar los metadatos separados de artículos', error);
     }
   }
   jsonListaMetaUrl = metaUrl;
-  articulosMetaMap = mapearMetadatosPorCodigo(metaData);
+  const metaRemota = mapearMetadatosPorCodigo(metaData);
+  if (metadataDisponible) {
+    articulosMetaMap = metaRemota;
+    guardarBackupMetadatos(metaData);
+  } else {
+    const metaBackup = cargarBackupMetadatos();
+    articulosMetaMap = metaAnterior.size ? metaAnterior : metaBackup;
+  }
   return aplicarMetadatosLista(baseData, articulosMetaMap);
 }
 

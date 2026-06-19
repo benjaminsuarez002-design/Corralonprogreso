@@ -516,6 +516,14 @@ function loading(show) {
 function fmt(n) {
   return '$' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
+function fmtCantidad(valor) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return String(valor ?? '');
+  return numero.toLocaleString('es-AR', {
+    useGrouping: false,
+    maximumFractionDigits: 6
+  });
+}
 function parseMonto(valor) {
   let texto = String(valor ?? '').trim();
   if(!texto) return 0;
@@ -974,11 +982,11 @@ function setAccionesDetalleModo(modo) {
 async function copiarPresupuestoColumna(tipo) {
   const items = Array.isArray(_presupuestoDetalleActual?.items) ? _presupuestoDetalleActual.items : [];
   const texto = items.map((it) => {
-    if (tipo === 'cantidad') return it.cantidad ?? '';
+    if (tipo === 'cantidad') return fmtCantidad(it.cantidad);
     if (tipo === 'completo') {
       const idart = it.idart || it.idArt || it.codigo || '';
       const descripcion = it.nombre || it.descripcion || it.articulo || '';
-      const cantidad = it.cantidad ?? '';
+      const cantidad = fmtCantidad(it.cantidad);
       return [idart, descripcion, cantidad].join('\t');
     }
     return it.idart || it.idArt || it.codigo || '';
@@ -1047,7 +1055,7 @@ function abrirDetallePresupuesto(index) {
       const subtotal = cant * precio;
       return `
         <div class="detalle-fila">
-          <div class="detalle-td" style="text-align:center">${cant}</div>
+          <div class="detalle-td" style="text-align:center">${fmtCantidad(cant)}</div>
           <div class="detalle-td">${esc(it.nombre || '')}${it.codigo ? ` <span style="color:#999;">(${esc(it.codigo)})</span>` : ''}</div>
           <div class="detalle-td num">$${precio.toLocaleString('es-AR')}</div>
           <div class="detalle-td num bold">$${subtotal.toLocaleString('es-AR')}</div>
@@ -1188,7 +1196,7 @@ function renderDetalleRemito(remito) {
       const precio = Number(it.precio) || 0;
       return `
         <div class="detalle-fila">
-          <div class="detalle-td" style="text-align:center">${cant}</div>
+          <div class="detalle-td" style="text-align:center">${fmtCantidad(cant)}</div>
           <div class="detalle-td">${esc(it.descripcion||'')}</div>
           <div class="detalle-td num">$${precio.toLocaleString('es-AR')}</div>
           <div class="detalle-td num bold">$${Number(cant*precio).toLocaleString('es-AR')}</div>
