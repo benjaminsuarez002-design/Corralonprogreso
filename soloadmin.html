@@ -1030,6 +1030,10 @@
       <label>m2</label>
       <input type="number" id="ceramicoM2Input" min="0" step="0.01" placeholder="Ej: 2.68">
     </div>
+    <div class="field">
+      <label>Placas por caja</label>
+      <input type="number" id="ceramicoPlacasInput" min="0" step="1" placeholder="Ej: 20">
+    </div>
     <div class="modal-acciones">
       <button class="btn-cancelar" type="button" onclick="quitarModalCeramico()">Quitar</button>
       <button class="btn-guardar-edit" type="button" onclick="guardarModalCeramico()">Guardar m2</button>
@@ -1242,6 +1246,7 @@ let editMeta = {
   accesoRapido: false,
   ceramico: false,
   ceramicoM2: 0,
+  ceramicoPlacas: 0,
   ofertaPct: 0,
   ofertaHasta: ''
 };
@@ -1504,6 +1509,12 @@ function sanitizeM2(value) {
   return Math.max(0, Math.round(parsed * 100) / 100);
 }
 
+function sanitizePlacas(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.round(parsed));
+}
+
 function sanitizeIsoDate(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -1519,6 +1530,7 @@ function extraerMetaOferta(articulo) {
     accesoRapido: toBool(articulo?.accesoRapido ?? articulo?.rapido ?? articulo?.tagRapido ?? articulo?.quickAccess),
     ceramico: toBool(articulo?.ceramico ?? articulo?.tagCeramico),
     ceramicoM2: sanitizeM2(articulo?.ceramicoM2 ?? articulo?.m2Ceramico ?? articulo?.m2 ?? articulo?.metros2Ceramico ?? 0),
+    ceramicoPlacas: sanitizePlacas(articulo?.ceramicoPlacas ?? articulo?.placasCeramico ?? articulo?.placasPorCaja ?? articulo?.placas ?? 0),
     ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? '')
   };
@@ -1594,7 +1606,8 @@ function normalizarArticuloAdmin(articulo = {}) {
     masVendido: toBool(articulo?.masVendido ?? articulo?.mas_vendido ?? articulo?.tagMasVendido),
     accesoRapido: toBool(articulo?.accesoRapido ?? articulo?.rapido ?? articulo?.tagRapido ?? articulo?.quickAccess),
     ceramico: toBool(articulo?.ceramico ?? articulo?.tagCeramico),
-    ceramicoM2: sanitizeM2(articulo?.ceramicoM2 ?? articulo?.m2Ceramico ?? articulo?.m2 ?? articulo?.metros2Ceramico ?? 0)
+    ceramicoM2: sanitizeM2(articulo?.ceramicoM2 ?? articulo?.m2Ceramico ?? articulo?.m2 ?? articulo?.metros2Ceramico ?? 0),
+    ceramicoPlacas: sanitizePlacas(articulo?.ceramicoPlacas ?? articulo?.placasCeramico ?? articulo?.placasPorCaja ?? articulo?.placas ?? 0)
   };
 }
 
@@ -1630,7 +1643,8 @@ function extraerMetadatosPersistentes(articulo = {}) {
     masVendido: !!normalizado.masVendido,
     accesoRapido: !!normalizado.accesoRapido,
     ceramico: !!normalizado.ceramico,
-    ceramicoM2: normalizado.ceramicoM2
+    ceramicoM2: normalizado.ceramicoM2,
+    ceramicoPlacas: normalizado.ceramicoPlacas
   };
   const tieneContenido = !!(
     meta.detalle ||
@@ -1643,7 +1657,8 @@ function extraerMetadatosPersistentes(articulo = {}) {
     meta.masVendido ||
     meta.accesoRapido ||
     meta.ceramico ||
-    meta.ceramicoM2 > 0
+    meta.ceramicoM2 > 0 ||
+    meta.ceramicoPlacas > 0
   );
   return tieneContenido ? meta : null;
 }
@@ -1680,7 +1695,8 @@ function aplicarMetadatosArticulo(articulo = {}, meta = null) {
     masVendido: meta.masVendido ?? articulo.masVendido ?? articulo.mas_vendido ?? articulo.tagMasVendido,
     accesoRapido: meta.accesoRapido ?? articulo.accesoRapido ?? articulo.rapido ?? articulo.tagRapido ?? articulo.quickAccess,
     ceramico: meta.ceramico ?? articulo.ceramico ?? articulo.tagCeramico,
-    ceramicoM2: meta.ceramicoM2 ?? articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico ?? 0
+    ceramicoM2: meta.ceramicoM2 ?? articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico ?? 0,
+    ceramicoPlacas: meta.ceramicoPlacas ?? articulo.ceramicoPlacas ?? articulo.placasCeramico ?? articulo.placasPorCaja ?? articulo.placas ?? 0
   });
 }
 
@@ -1705,11 +1721,13 @@ function aplicarCeramicoPrevioSiFalta(articulo = {}, metaPrevio = null) {
   if (!metaPrevio) return articulo;
   const tieneCeramico = tieneCampoPropio(articulo, ['ceramico', 'tagCeramico']);
   const tieneM2 = tieneCampoPropio(articulo, ['ceramicoM2', 'm2Ceramico', 'm2', 'metros2Ceramico']);
-  if (tieneCeramico && tieneM2) return articulo;
+  const tienePlacas = tieneCampoPropio(articulo, ['ceramicoPlacas', 'placasCeramico', 'placasPorCaja', 'placas']);
+  if (tieneCeramico && tieneM2 && tienePlacas) return articulo;
   return {
     ...articulo,
     ceramico: tieneCeramico ? articulo.ceramico : metaPrevio.ceramico,
-    ceramicoM2: tieneM2 ? (articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico) : metaPrevio.ceramicoM2
+    ceramicoM2: tieneM2 ? (articulo.ceramicoM2 ?? articulo.m2Ceramico ?? articulo.m2 ?? articulo.metros2Ceramico) : metaPrevio.ceramicoM2,
+    ceramicoPlacas: tienePlacas ? (articulo.ceramicoPlacas ?? articulo.placasCeramico ?? articulo.placasPorCaja ?? articulo.placas) : metaPrevio.ceramicoPlacas
   };
 }
 
@@ -2666,7 +2684,8 @@ function renderEditChips() {
   const ceramicoSummary = document.getElementById('ceramicoSummary');
   if (editMeta.ceramico) {
     ceramicoSummary.style.display = 'block';
-    ceramicoSummary.innerHTML = `Ceramico: <b>${sanitizeM2(editMeta.ceramicoM2) || 0} m2</b> · <button type="button" style="border:none;background:transparent;color:var(--amarillo);font-weight:700;cursor:pointer;" onclick="abrirModalCeramico()">Editar m2</button>`;
+    const placas = sanitizePlacas(editMeta.ceramicoPlacas);
+    ceramicoSummary.innerHTML = `Ceramico: <b>${sanitizeM2(editMeta.ceramicoM2) || 0} m2</b>${placas ? ` · <b>${placas} placas</b>` : ''} · <button type="button" style="border:none;background:transparent;color:var(--amarillo);font-weight:700;cursor:pointer;" onclick="abrirModalCeramico()">Editar</button>`;
   } else {
     ceramicoSummary.style.display = 'none';
     ceramicoSummary.innerHTML = '';
@@ -2880,6 +2899,7 @@ window.guardarModalOferta = function () {
 window.abrirModalCeramico = function () {
   ceramicoModalSnapshot = { ...editMeta };
   document.getElementById('ceramicoM2Input').value = editMeta.ceramicoM2 || '';
+  document.getElementById('ceramicoPlacasInput').value = editMeta.ceramicoPlacas || '';
   document.getElementById('modalCeramico').classList.add('visible');
   requestAnimationFrame(() => document.getElementById('ceramicoM2Input')?.focus({ preventScroll: true }));
 };
@@ -2897,6 +2917,7 @@ window.cancelarModalCeramico = function () {
 window.quitarModalCeramico = function () {
   editMeta.ceramico = false;
   editMeta.ceramicoM2 = 0;
+  editMeta.ceramicoPlacas = 0;
   ceramicoModalSnapshot = null;
   renderEditChips();
   window.cerrarModalCeramico();
@@ -2904,12 +2925,14 @@ window.quitarModalCeramico = function () {
 
 window.guardarModalCeramico = function () {
   const m2 = sanitizeM2(document.getElementById('ceramicoM2Input').value);
+  const placas = sanitizePlacas(document.getElementById('ceramicoPlacasInput').value);
   if (m2 <= 0) {
     toast('Ingresá los m2 del ceramico', 'err');
     return;
   }
   editMeta.ceramico = true;
   editMeta.ceramicoM2 = m2;
+  editMeta.ceramicoPlacas = placas;
   ceramicoModalSnapshot = null;
   renderEditChips();
   window.cerrarModalCeramico();
@@ -3582,6 +3605,7 @@ window.guardarArticulo = async () => {
       accesoRapido,
       ceramico: false,
       ceramicoM2: 0,
+      ceramicoPlacas: 0,
       timestamp: Date.now()
     });
     setTodosArticulos([...todosArticulos, nuevoArticulo]);
@@ -3687,7 +3711,8 @@ function obtenerArticuloEdicionParaGenerador() {
     masVendido: !!editMeta.masVendido,
     accesoRapido: !!editMeta.accesoRapido,
     ceramico: !!editMeta.ceramico,
-    ceramicoM2: editMeta.ceramico ? sanitizeM2(editMeta.ceramicoM2) : 0
+    ceramicoM2: editMeta.ceramico ? sanitizeM2(editMeta.ceramicoM2) : 0,
+    ceramicoPlacas: editMeta.ceramico ? sanitizePlacas(editMeta.ceramicoPlacas) : 0
   });
 }
 
@@ -3767,6 +3792,7 @@ function aplicarCamposMasivosEnDestino(destino, fuente, campos) {
     actualizado.accesoRapido = fuente.accesoRapido;
     actualizado.ceramico = fuente.ceramico;
     actualizado.ceramicoM2 = fuente.ceramicoM2;
+    actualizado.ceramicoPlacas = fuente.ceramicoPlacas;
   }
   if (campos.has('detalle')) {
     actualizado.detalle = fuente.detalle;
@@ -3821,7 +3847,8 @@ async function guardarEdicionInterna({ selectedCodes = [], fields = [] } = {}) {
     masVendido: !!editMeta.masVendido,
     accesoRapido: !!editMeta.accesoRapido,
     ceramico: !!editMeta.ceramico,
-    ceramicoM2: editMeta.ceramico ? sanitizeM2(editMeta.ceramicoM2) : 0
+    ceramicoM2: editMeta.ceramico ? sanitizeM2(editMeta.ceramicoM2) : 0,
+    ceramicoPlacas: editMeta.ceramico ? sanitizePlacas(editMeta.ceramicoPlacas) : 0
   });
 
   const camposSeleccionados = new Set(fields || []);

@@ -5,7 +5,7 @@
   const ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
   const USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
   const USERS_COLLECTION = 'menuUsuarios';
-  const ALL_MENU_IDS = ['lista', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'proveedores', 'listas_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
+  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'proveedores', 'listas_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const firebaseConfig = {
     apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
