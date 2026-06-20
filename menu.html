@@ -563,7 +563,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, onSnapshot, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -615,8 +615,6 @@
     let objectiveSummaryLoaded = false;
     let objectivePreloadStarted = false;
     let objectivePreloadPromise = null;
-    const REVIEW_DISMISSED_KEY = 'corralon_review_orders_dismissed_v1';
-    const MENU_NOTIFS_CACHE_KEY = 'corralon_menu_notifs_cache_v1';
     const MENU_OBJECTIVES_CACHE_KEY = 'corralon_menu_objectives_cache_v1';
     let menuDragItem = null;
     let menuDragTarget = null;
@@ -965,8 +963,11 @@
         recordarSesion(usuario, rememberLogin.checked);
         accesoManualEnPagina = true;
         loginError.textContent = '';
-        mostrarCargaMenu('Actualizando saldos...');
-        await preloadAliasObjectives();
+        mostrarCargaMenu('Cargando comprobantes y notificaciones...');
+        await Promise.all([
+          preloadAliasObjectives(),
+          preloadReviewNotifications(usuario)
+        ]);
         mostrarMenu(usuario);
         ocultarCargaMenu();
       } else {
@@ -1062,12 +1063,9 @@
     }
 
     function renderCachedFastData() {
-      const notifCache = readLocalJson(MENU_NOTIFS_CACHE_KEY, null);
-      if (notifCache) {
-        reviewOrders = Array.isArray(notifCache.reviewOrders) ? notifCache.reviewOrders : [];
-        historialNotifications = Array.isArray(notifCache.historialNotifications) ? notifCache.historialNotifications : [];
-        renderReviewNotifications();
-      }
+      try {
+        localStorage.removeItem('corralon_menu_notifs_cache_v1');
+      } catch (_) {}
       const objectiveCache = readLocalJson(MENU_OBJECTIVES_CACHE_KEY, null);
       const cachedCards = normalizeObjectiveCards(objectiveCache);
       if (cachedCards.length) {
@@ -1100,6 +1098,51 @@
       return objectivePreloadPromise;
     }
 
+    async function preloadReviewNotifications(usuario) {
+      if (!isAdminUser(usuario)) {
+        reviewOrders = [];
+        historialNotifications = [];
+        renderReviewNotifications();
+        return;
+      }
+      try {
+        let resueltosLocales = [];
+        try {
+          resueltosLocales = JSON.parse(localStorage.getItem('corralon_review_orders_dismissed_v1') || '[]');
+          localStorage.removeItem('corralon_review_orders_dismissed_v1');
+        } catch (_) {}
+        if (Array.isArray(resueltosLocales) && resueltosLocales.length) {
+          await Promise.all([...new Set(resueltosLocales.map(String).filter(Boolean))].map((id) => (
+            setDoc(doc(db, 'pedidos', id), {
+              notificacionResuelta: true,
+              notificacionResueltaAt: serverTimestamp()
+            }, { merge: true })
+          ))).catch((error) => console.warn('No se pudieron migrar algunas notificaciones resueltas', error));
+        }
+        const [pedidosSnap, historialSnap] = await Promise.all([
+          getDocsFromServer(query(collection(db, 'pedidos'), where('confirmado', '==', true))),
+          getDocsFromServer(query(collection(db, 'historialNotificaciones'), where('resuelta', '==', false)))
+        ]);
+        reviewOrders = pedidosSnap.docs
+          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .filter((order) => !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
+          .sort((a, b) => Number(b.id) - Number(a.id));
+        historialNotifications = historialSnap.docs
+          .map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
+          .filter((item) => notifDesdeHoy(item))
+          .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
+        knownReviewIds = new Set(reviewOrders.map((order) => String(order.id)));
+        knownHistorialIds = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
+        renderReviewNotifications();
+        cleanupOrphanRemitoNotifications();
+      } catch (error) {
+        reviewOrders = [];
+        historialNotifications = [];
+        renderReviewNotifications();
+        console.warn('No se pudieron precargar las notificaciones desde Firebase', error);
+      }
+    }
+
     function setupAliasObjectives() {
       if (!objectiveSummaryUnsubscribe) {
         objectiveSummaryUnsubscribe = onSnapshot(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()), (snap) => {
@@ -1107,15 +1150,6 @@
           renderAliasObjectivesSummary(snap.exists() ? snap.data() : null);
         }, (error) => console.warn('No se pudo escuchar resumen de objetivos de alias', error));
       }
-    }
-
-    function dismissedReviewIds() {
-      try { return new Set(JSON.parse(localStorage.getItem(REVIEW_DISMISSED_KEY) || '[]').map(String)); }
-      catch { return new Set(); }
-    }
-
-    function saveDismissedReviewIds(ids) {
-      localStorage.setItem(REVIEW_DISMISSED_KEY, JSON.stringify([...ids]));
     }
 
     function showReviewToast(order) {
@@ -1160,9 +1194,8 @@
     }
 
     function allVisibleNotifications() {
-      const dismissed = dismissedReviewIds();
       const pedidos = reviewOrders
-        .filter((order) => !dismissed.has(String(order.id)))
+        .filter((order) => !order.notificacionResuelta)
         .map((order) => ({ kind: 'pedido', id: String(order.id), title: `Pedido ${order.id}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '' }));
       const historial = historialNotifications
         .filter((item) => !item.resuelta)
@@ -1174,7 +1207,6 @@
       const visible = allVisibleNotifications();
       reviewBell.classList.toggle('visible', visible.length > 0);
       reviewBellCount.textContent = String(visible.length);
-      writeLocalJson(MENU_NOTIFS_CACHE_KEY, { reviewOrders, historialNotifications });
       reviewList.innerHTML = visible.length ? visible.map((item) => `
         <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
           <strong>${escapeHtml(item.title)}</strong>
@@ -1224,13 +1256,12 @@
       if (!reviewUnsubscribe) {
         const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('confirmado', '==', true));
         reviewUnsubscribe = onSnapshot(pedidosRevisionQuery, (snap) => {
-          const dismissed = dismissedReviewIds();
           const previous = knownReviewIds;
           reviewOrders = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-            .filter((order) => !order.pedido && notifDesdeHoy(order))
+            .filter((order) => !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
             .sort((a, b) => Number(b.id) - Number(a.id));
           const current = new Set(reviewOrders.map((order) => String(order.id)));
-          const fresh = reviewOrders.find((order) => !previous.has(String(order.id)) && !dismissed.has(String(order.id)));
+          const fresh = reviewOrders.find((order) => !previous.has(String(order.id)));
           knownReviewIds = current;
           renderReviewNotifications();
           if (fresh) showReviewToast(fresh);
@@ -1274,10 +1305,12 @@
 
     function resolveMenuNotification(kind, id, tipo) {
       if (kind === 'pedido') {
-        const dismissed = dismissedReviewIds();
-        dismissed.add(String(id));
-        saveDismissedReviewIds(dismissed);
+        reviewOrders = reviewOrders.filter((order) => String(order.id) !== String(id));
         renderReviewNotifications();
+        setDoc(doc(db, 'pedidos', String(id)), {
+          notificacionResuelta: true,
+          notificacionResueltaAt: serverTimestamp()
+        }, { merge: true }).catch((error) => console.warn('No se pudo marcar el pedido como resuelto', error));
         return;
       }
       const item = historialNotifications.find((notif) => String(notif.id) === String(id) && String(notif.tipo) === String(tipo));
@@ -1357,14 +1390,17 @@
       }
       renderCachedFastData();
       const usuarioInicial = tieneSesionMenuRecordada() ? obtenerUsuarioActivo() : null;
-      if (usuarioInicial && isAdminUser(usuarioInicial)) setupReviewNotifications(usuarioInicial);
       setupAliasObjectives();
       renderLoginUsers();
       rememberLogin.checked = tieneSesionMenuRecordada();
       if (tieneSesionMenuRecordada()) {
-        mostrarCargaMenu('Actualizando saldos...');
-        await preloadAliasObjectives();
-        mostrarMenu(obtenerUsuarioActivo());
+        const usuarioActivo = obtenerUsuarioActivo();
+        mostrarCargaMenu('Cargando comprobantes y notificaciones...');
+        await Promise.all([
+          preloadAliasObjectives(),
+          preloadReviewNotifications(usuarioActivo)
+        ]);
+        mostrarMenu(usuarioActivo);
         ocultarCargaMenu();
       } else {
         mostrarLogin();
