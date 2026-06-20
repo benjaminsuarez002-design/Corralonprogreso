@@ -33,10 +33,10 @@
   #appContent {
     display: none;
     width: 100%;
-    max-width: 760px;
+    max-width: 980px;
   }
   .menu-card {
-    width: min(100%, 760px);
+    width: min(100%, 980px);
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 18px;
@@ -225,7 +225,7 @@
   .menu-grid {
     padding: 16px;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
   }
   .menu-btn {
@@ -238,6 +238,20 @@
     font-size: 15px;
     font-weight: 800;
     transition: .18s ease;
+    cursor: grab;
+    user-select: none;
+    touch-action: pan-y;
+  }
+  .menu-btn:active { cursor: grabbing; }
+  .menu-btn.is-dragging {
+    opacity: .42;
+    cursor: grabbing;
+    transform: scale(.98);
+    box-shadow: inset 0 0 0 2px var(--purple);
+  }
+  .menu-btn.is-drag-target {
+    border-color: var(--purple);
+    box-shadow: 0 0 0 3px rgba(108,79,199,.15);
   }
   .menu-btn:hover {
     border-color: var(--purple);
@@ -458,6 +472,10 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  @media (max-width: 900px) {
+    .menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
   @media (max-width: 680px) {
     body { padding: 12px; }
     .menu-grid { grid-template-columns: 1fr; padding: 12px; }
@@ -565,11 +583,13 @@
     const MENU_ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
     const MENU_USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
     const MENU_USERS_COLLECTION = 'menuUsuarios';
+    const MENU_ORDER_STORAGE_KEY = 'corralon_menu_order_v1';
     const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'proveedores', 'listas_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
     const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
     const loginBg = document.getElementById('loginBg');
     const menuLoading = document.getElementById('menuLoading');
     const appContent = document.getElementById('appContent');
+    const menuGrid = document.querySelector('.menu-grid');
     const loginUserInput = document.getElementById('loginUserInput');
     const loginUsersList = document.getElementById('loginUsersList');
     const loginInput = document.getElementById('loginInput');
@@ -598,6 +618,163 @@
     const REVIEW_DISMISSED_KEY = 'corralon_review_orders_dismissed_v1';
     const MENU_NOTIFS_CACHE_KEY = 'corralon_menu_notifs_cache_v1';
     const MENU_OBJECTIVES_CACHE_KEY = 'corralon_menu_objectives_cache_v1';
+    let menuDragItem = null;
+    let menuDragTarget = null;
+    let menuDragMoved = false;
+    let menuSuppressClickUntil = 0;
+    let menuTouchTimer = null;
+    let menuTouchItem = null;
+    let menuTouchPointerId = null;
+    let menuTouchStartX = 0;
+    let menuTouchStartY = 0;
+    let menuTouchDragging = false;
+
+    function menuOrderKey(usuario = obtenerUsuarioActivo()) {
+      const userId = String(usuario?.id || usuario?.usuario || 'default').trim() || 'default';
+      return `${MENU_ORDER_STORAGE_KEY}:${userId}`;
+    }
+
+    function aplicarOrdenMenu(usuario = obtenerUsuarioActivo()) {
+      if (!menuGrid) return;
+      let orden = [];
+      try {
+        orden = JSON.parse(localStorage.getItem(menuOrderKey(usuario)) || '[]');
+      } catch (_) {}
+      const botones = new Map([...menuGrid.querySelectorAll('.menu-btn[data-menu-id]')].map((item) => [item.dataset.menuId, item]));
+      orden.forEach((id) => {
+        const item = botones.get(String(id));
+        if (item) {
+          menuGrid.appendChild(item);
+          botones.delete(String(id));
+        }
+      });
+      botones.forEach((item) => menuGrid.appendChild(item));
+    }
+
+    function guardarOrdenMenu(usuario = obtenerUsuarioActivo()) {
+      if (!menuGrid) return;
+      const orden = [...menuGrid.querySelectorAll('.menu-btn[data-menu-id]')].map((item) => item.dataset.menuId);
+      try { localStorage.setItem(menuOrderKey(usuario), JSON.stringify(orden)); } catch (_) {}
+    }
+
+    function limpiarMarcaDestinoMenu() {
+      if (menuDragTarget) menuDragTarget.classList.remove('is-drag-target');
+      menuDragTarget = null;
+    }
+
+    function marcarDestinoMenu(item, target) {
+      if (!menuGrid || !item || !target || item === target || target.style.display === 'none') {
+        limpiarMarcaDestinoMenu();
+        return false;
+      }
+      if (menuDragTarget === target) return true;
+      limpiarMarcaDestinoMenu();
+      target.classList.add('is-drag-target');
+      menuDragTarget = target;
+      return true;
+    }
+
+    function intercambiarBotonesMenu(item, target) {
+      if (!menuGrid || !item || !target || item === target) return false;
+      const marca = document.createComment('menu-swap');
+      menuGrid.insertBefore(marca, item);
+      menuGrid.insertBefore(item, target);
+      menuGrid.insertBefore(target, marca);
+      marca.remove();
+      return true;
+    }
+
+    function finalizarArrastreMenu(item, guardar = true) {
+      clearTimeout(menuTouchTimer);
+      menuTouchTimer = null;
+      item?.classList.remove('is-dragging');
+      limpiarMarcaDestinoMenu();
+      if (guardar && menuDragMoved) guardarOrdenMenu();
+      if (menuDragMoved) menuSuppressClickUntil = Date.now() + 350;
+      menuDragItem = null;
+      menuTouchItem = null;
+      menuTouchPointerId = null;
+      menuTouchDragging = false;
+      menuDragMoved = false;
+    }
+
+    function configurarArrastreMenu() {
+      if (!menuGrid || menuGrid.dataset.sortableReady === '1') return;
+      menuGrid.dataset.sortableReady = '1';
+      menuGrid.querySelectorAll('.menu-btn[data-menu-id]').forEach((item) => {
+        item.draggable = true;
+        item.addEventListener('dragstart', (event) => {
+          menuDragItem = item;
+          menuDragMoved = false;
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', item.dataset.menuId || 'menu');
+          requestAnimationFrame(() => item.classList.add('is-dragging'));
+        });
+        item.addEventListener('dragend', () => finalizarArrastreMenu(item));
+      });
+      menuGrid.addEventListener('dragover', (event) => {
+        if (!menuDragItem) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        const target = event.target.closest('.menu-btn[data-menu-id]');
+        marcarDestinoMenu(menuDragItem, target);
+      });
+      menuGrid.addEventListener('drop', (event) => {
+        event.preventDefault();
+        menuDragMoved = intercambiarBotonesMenu(menuDragItem, menuDragTarget);
+      });
+      menuGrid.addEventListener('click', (event) => {
+        if (Date.now() < menuSuppressClickUntil) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, true);
+
+      menuGrid.addEventListener('pointerdown', (event) => {
+        if (event.pointerType !== 'touch' || event.button !== 0) return;
+        const item = event.target.closest('.menu-btn[data-menu-id]');
+        if (!item) return;
+        menuTouchItem = item;
+        menuTouchPointerId = event.pointerId;
+        menuTouchStartX = event.clientX;
+        menuTouchStartY = event.clientY;
+        menuDragMoved = false;
+        clearTimeout(menuTouchTimer);
+        menuTouchTimer = setTimeout(() => {
+          if (!menuTouchItem) return;
+          menuTouchDragging = true;
+          menuDragItem = menuTouchItem;
+          menuTouchItem.classList.add('is-dragging');
+          navigator.vibrate?.(18);
+        }, 320);
+      });
+      document.addEventListener('pointermove', (event) => {
+        if (event.pointerId !== menuTouchPointerId || !menuTouchItem) return;
+        if (!menuTouchDragging) {
+          if (Math.hypot(event.clientX - menuTouchStartX, event.clientY - menuTouchStartY) > 10) {
+            clearTimeout(menuTouchTimer);
+            menuTouchTimer = null;
+            menuTouchItem = null;
+            menuTouchPointerId = null;
+          }
+          return;
+        }
+        event.preventDefault();
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.menu-btn[data-menu-id]');
+        marcarDestinoMenu(menuTouchItem, target);
+      }, { passive: false });
+      const terminarTouch = (event) => {
+        if (event.pointerId !== menuTouchPointerId) return;
+        if (event.type === 'pointerup' && menuTouchDragging) {
+          menuDragMoved = intercambiarBotonesMenu(menuTouchItem, menuDragTarget);
+        }
+        finalizarArrastreMenu(menuTouchItem, menuTouchDragging);
+      };
+      document.addEventListener('pointerup', terminarTouch);
+      document.addEventListener('pointercancel', terminarTouch);
+    }
+
+    configurarArrastreMenu();
     const ALIAS_OBJECTIVES_SUMMARY_COLLECTION = 'aliasObjetivosResumen';
     const HISTORIAL_NOTIFS_START_MS = new Date('2026-06-04T00:00:00-03:00').getTime();
 
@@ -732,6 +909,7 @@
     }
 
     function aplicarPermisosMenu(usuario = obtenerUsuarioActivo()) {
+      aplicarOrdenMenu(usuario);
       const permisos = new Set(permisosUsuario(usuario));
       document.querySelectorAll('[data-menu-id]').forEach((link) => {
         link.style.display = permisos.has(link.dataset.menuId) ? '' : 'none';
