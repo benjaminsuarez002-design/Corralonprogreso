@@ -971,9 +971,12 @@
   .prode-player { display:grid; grid-template-columns:1fr auto; gap:8px; margin-bottom:12px; }
   .prode-player input { min-height:38px; border:1px solid #bfe4ff; border-radius:10px; padding:0 12px; font-family:'Barlow',sans-serif; font-weight:700; }
   .prode-save { min-height:38px; border:0; border-radius:10px; padding:0 16px; background:#0076d6; color:#fff; font-weight:900; cursor:pointer; }
-  .prode-tabs { display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:10px; }
-  .prode-tab { border:1px solid #d5edff; border-radius:999px; padding:8px 12px; background:#fff; color:#006fc9; font-weight:900; white-space:nowrap; }
-  .prode-tab.active { background:#006fc9; color:#fff; }
+  .prode-tabs { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:10px; }
+  .prode-date-arrow { width:38px; height:38px; border:0; border-radius:50%; background:#006fc9; color:#fff; font-size:24px; font-weight:900; line-height:1; cursor:pointer; box-shadow:0 7px 16px rgba(0,111,201,.2); }
+  .prode-date-arrow:disabled { background:#d7e4ee; color:#8ca0b1; cursor:default; box-shadow:none; }
+  .prode-date-current { min-width:180px; text-align:center; color:#10203b; }
+  .prode-date-current strong { display:block; font-family:'Barlow Condensed',sans-serif; font-size:22px; font-weight:900; line-height:1; }
+  .prode-date-current span { display:block; margin-top:3px; color:#6b7890; font-size:11px; font-weight:800; text-transform:uppercase; }
   .prode-fixture-title { margin:12px 0 8px; font-size:12px; font-weight:900; color:#6b7890; text-transform:uppercase; letter-spacing:.08em; }
   .prode-match { display:grid; grid-template-columns:minmax(150px,1fr) 125px minmax(150px,1fr); align-items:center; gap:10px; padding:12px; border:1px solid #d5edff; border-radius:16px; background:#f8fdff; margin-bottom:10px; }
   .prode-team { display:flex; align-items:center; gap:8px; font-weight:900; color:#10203b; }
@@ -1030,8 +1033,9 @@
     .prode-side { display:none; }
     .prode-title { font-size:23px; overflow-wrap:anywhere; }
     .prode-sub { font-size:11px; overflow-wrap:anywhere; }
-    .prode-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; max-width:100%; overflow:visible; padding-bottom:4px; margin-bottom:8px; }
-    .prode-tab { min-height:38px; padding:0 6px; font-size:12px; flex:0 0 auto; text-align:center; white-space:normal; line-height:1.05; }
+    .prode-tabs { gap:8px; margin-bottom:8px; }
+    .prode-date-current { min-width:150px; }
+    .prode-date-current strong { font-size:20px; }
     .prode-fixture-title { margin:10px 2px 7px; font-size:11px; line-height:1.2; }
     .prode-match { position:relative; grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:34px; row-gap:9px; padding:11px 10px; max-width:100%; border-radius:14px; }
     .prode-match::before { content:'vs'; position:absolute; left:50%; top:26px; transform:translate(-50%,-50%); color:#6b7890; font-size:11px; font-weight:900; text-transform:uppercase; pointer-events:none; }
@@ -1064,7 +1068,7 @@
     .prode-title { font-size:21px; }
     .prode-icon-btn { padding:0 8px; }
     .prode-stats { grid-template-columns:1fr; }
-    .prode-tabs { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .prode-date-current { min-width:130px; }
     .prode-scorebox { grid-template-columns:40px 10px 40px; }
     .prode-flag { width:28px; height:28px; font-size:11px; flex:0 0 auto; }
     .prode-match .prode-team { font-size:11px; gap:5px; }
@@ -6259,7 +6263,9 @@ const PRODE_PLAYERS_COLLECTION = 'prode_mundial_participantes';
 const PRODE_SHARES_COLLECTION = 'prode_mundial_compartidos';
 const PRODE_REF_LOOKUP_COLLECTION = 'prode_mundial_refs';
 const PRODE_FIXTURE_VERSION = 'grupos-2026-v1';
-let prodeFaseActiva = 'hoy';
+const PRODE_FECHA_INICIO = '2026-06-11';
+const PRODE_FECHA_FINAL = '2026-07-19';
+let prodeFechaActiva = prodeFechaIso(new Date());
 let prodeRankingUnsub = null;
 let prodeNavigationBound = false;
 let prodeRemoteLoadedFor = '';
@@ -6357,6 +6363,34 @@ function prodePartidoTime(partido) {
   const d = new Date(partido.cierre || '');
   if(Number.isNaN(d.getTime())) return 0;
   return d.getTime() + 5 * 60 * 1000;
+}
+function prodeFechaIso(fecha) {
+  const d = fecha instanceof Date ? fecha : new Date(fecha);
+  if(Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function prodeFechaPartidoIso(partido) {
+  return prodeFechaIso(new Date(prodePartidoTime(partido)));
+}
+function prodeMoverFecha(dias) {
+  prodeGuardarDraftLocal();
+  const [year, month, day] = prodeFechaActiva.split('-').map(Number);
+  const nuevaFecha = prodeFechaIso(new Date(year, month - 1, day + dias));
+  if(nuevaFecha < PRODE_FECHA_INICIO || nuevaFecha > PRODE_FECHA_FINAL) return;
+  prodeFechaActiva = nuevaFecha;
+  renderProde();
+}
+function prodeEtiquetaFecha() {
+  const [year, month, day] = prodeFechaActiva.split('-').map(Number);
+  const fecha = new Date(year, month - 1, day);
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const diferencia = Math.round((fecha.getTime() - hoy.getTime()) / 86400000);
+  const titulo = diferencia === 0 ? 'Hoy' : diferencia === -1 ? 'Ayer' : diferencia === 1 ? 'Mañana' : fecha.toLocaleDateString('es-AR', { weekday:'long' });
+  return {
+    titulo: titulo.charAt(0).toUpperCase() + titulo.slice(1),
+    fecha: fecha.toLocaleDateString('es-AR', { day:'2-digit', month:'long', year:'numeric' })
+  };
 }
 function prodeFechaKey(partido) {
   const d = new Date(prodePartidoTime(partido));
@@ -6742,20 +6776,16 @@ function renderProde() {
     name.placeholder = registrado ? 'Tu nombre' : 'Registrate primero';
   }
   if(saveBtn) saveBtn.textContent = registrado ? 'Guardar' : 'Registrarme';
-  if(tabs) tabs.innerHTML = prodeFases.map(f => `<button class="prode-tab ${f.id===prodeFaseActiva?'active':''}" type="button" data-prode-tab="${f.id}">${f.label}</button>`).join('');
+  const etiquetaFecha = prodeEtiquetaFecha();
+  if(tabs) tabs.innerHTML = `<button class="prode-date-arrow" type="button" data-prode-day="-1" title="Día anterior" aria-label="Día anterior" ${prodeFechaActiva <= PRODE_FECHA_INICIO ? 'disabled' : ''}>‹</button><div class="prode-date-current"><strong>${etiquetaFecha.titulo}</strong><span>${etiquetaFecha.fecha}</span></div><button class="prode-date-arrow" type="button" data-prode-day="1" title="Día siguiente" aria-label="Día siguiente" ${prodeFechaActiva >= PRODE_FECHA_FINAL ? 'disabled' : ''}>›</button>`;
   if(!list) return;
   const resultados = draft.resultados || {};
   const resultadosReales = prodeConfig.resultadosReales || {};
-  let faseActual = prodeFases.find(f => f.id === prodeFaseActiva) || prodeFases[0];
-  if(faseActual && faseActual.id !== prodeFaseActiva) prodeFaseActiva = faseActual.id;
-  if(tabs) tabs.innerHTML = prodeFases.map(f => `<button class="prode-tab ${f.id===prodeFaseActiva?'active':''}" type="button" data-prode-tab="${f.id}">${f.label}</button>`).join('');
   const visibles = prodePartidos
-    .filter(p => faseActual?.partidos?.includes(p.id))
+    .filter(p => prodeFechaPartidoIso(p) === prodeFechaActiva)
     .sort((a, b) => prodePartidoTime(a) - prodePartidoTime(b));
-  const fixtureTitle = faseActual?.isToday ? 'Hoy · horario Argentina' : `Fechas ${faseActual?.label || 'Fixture'} · horario Argentina`;
-  const emptyHtml = faseActual?.isToday
-    ? '<div class="empty-state" style="padding:18px 10px;color:#6b7890;">No hay partidos hoy.</div>'
-    : '';
+  const fixtureTitle = `${etiquetaFecha.titulo} · horario Argentina`;
+  const emptyHtml = '<div class="empty-state" style="padding:18px 10px;color:#6b7890;text-align:center;">No hay partidos en esta fecha.</div>';
   list.innerHTML = `<div class="prode-fixture-title">${fixtureTitle}</div>` + (visibles.length ? visibles.map((p) => {
     const r = resultados[p.id] || {};
     const real = resultadosReales[p.id] || {};
@@ -6969,11 +6999,9 @@ document.getElementById('prodeRegisterSave')?.addEventListener('click', registra
 document.getElementById('prodeLoginSave')?.addEventListener('click', entrarProdeRegistrado);
 document.getElementById('prodeRankingClose')?.addEventListener('click', cerrarRankingProde);
 document.getElementById('prodeTabs')?.addEventListener('click', (e) => {
-  const tab = e.target.closest('[data-prode-tab]');
-  if(!tab) return;
-  prodeGuardarDraftLocal();
-  prodeFaseActiva = tab.dataset.prodeTab;
-  renderProde();
+  const arrow = e.target.closest('[data-prode-day]');
+  if(!arrow) return;
+  prodeMoverFecha(Number(arrow.dataset.prodeDay || 0));
 });
 document.getElementById('prodeModal')?.addEventListener('input', (e) => {
   if(!prodeUser().doc && e.target.matches('[data-prode-score], #prodePlayerName')) {
