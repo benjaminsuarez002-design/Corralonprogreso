@@ -684,6 +684,36 @@ document.addEventListener('keyup', e => {
     ultimoEnterRemitoAt = Date.now();
   }
 });
+document.addEventListener('beforeinput', e => {
+  if(e.defaultPrevented) return;
+  const input = e.target;
+  if(!input?.matches?.('.money-live') || input.readOnly) return;
+  let raw = input.dataset.moneyRaw ?? rawMoneyTextFromValue(input.value);
+  const seleccionado = input.selectionStart === 0 && input.selectionEnd === String(input.value || '').length;
+  if(e.inputType === 'deleteContentBackward') {
+    e.preventDefault();
+    raw = seleccionado ? '' : raw.slice(0, -1);
+    setMoneyLiveValue(input, raw);
+  } else if(e.inputType === 'insertText' && /^\d$/.test(e.data || '')) {
+    e.preventDefault();
+    if(seleccionado) raw = '';
+    if(raw.includes(',')) {
+      const [entero, decimales = ''] = raw.split(',');
+      raw = `${entero},${(decimales + e.data).slice(0, 2)}`;
+    } else {
+      raw += e.data;
+    }
+    setMoneyLiveValue(input, raw);
+  } else if(e.inputType === 'insertText' && (e.data === ',' || e.data === '.')) {
+    e.preventDefault();
+    if(seleccionado) raw = '';
+    if(!raw.includes(',')) raw = `${raw || '0'},`;
+    setMoneyLiveValue(input, raw);
+  } else {
+    return;
+  }
+  if(input.id === 'nPrecio') updatePreview('precio');
+});
 document.addEventListener('input', e => {
   const input = e.target;
   if(!input?.matches?.('#nCant, .item-input.num, .money-live')) return;
