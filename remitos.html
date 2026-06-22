@@ -185,12 +185,12 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 
 <div class="items-list" id="itemsList">
   <div class="fila-agregar" id="filaAgregar">
-    <input type="text" class="inp num" id="nCant" placeholder="1" inputmode="decimal" autocomplete="off"
+    <input type="text" class="inp num" id="nCant" placeholder="1" inputmode="decimal" enterkeyhint="next" autocomplete="off"
       oninput="updatePreview('cant')">
-    <input type="text" class="inp" id="nDesc" placeholder="Descripción..." autocomplete="off">
-    <input type="text" class="inp num money-live" id="nPrecio" placeholder="0" inputmode="decimal" autocomplete="off"
+    <input type="text" class="inp" id="nDesc" placeholder="Descripción..." enterkeyhint="next" autocomplete="off">
+    <input type="text" class="inp num money-live" id="nPrecio" placeholder="0" inputmode="decimal" enterkeyhint="done" autocomplete="off"
       oninput="updatePreview('precio')">
-    <input type="text" class="inp num" id="nSub" placeholder="0" inputmode="decimal" autocomplete="off"
+    <input type="text" class="inp num" id="nSub" placeholder="0" inputmode="decimal" enterkeyhint="done" autocomplete="off"
       onchange="updatePreview('subtotal')">
     <button class="btn-add" onclick="agregarItem()">+</button>
   </div>
@@ -573,13 +573,18 @@ function moverDesdePrecioRemito(precioInput) {
   return seleccionarCampo(subtotalInput);
 }
 
+function esEnterRemito(event) {
+  return event.key === 'Enter' || event.code === 'Enter' || event.keyCode === 13 || event.which === 13;
+}
+
 function manejarEnterRemito(event, target) {
-  if(!['Enter','Tab'].includes(event.key) || !esCampoNavegable(target)) return false;
+  const esEnter = esEnterRemito(event);
+  if((!esEnter && event.key !== 'Tab') || event.isComposing || !esCampoNavegable(target)) return false;
   event.preventDefault();
   if(target.id === 'fechaInput') parseFecha(target.value);
   if(target.id === 'nPrecio' && !event.shiftKey) {
     updatePreview('precio');
-    if(parseMonto(document.getElementById('nCant')?.value) && parseMonto(target.value)) {
+    if(parseMonto(target.value)) {
       agregarItem();
       return seleccionarCampo(document.getElementById('nCant'));
     }
@@ -615,8 +620,11 @@ function manejarFlechasRemito(event, target) {
   return moverCampoVertical(target, event.key === 'ArrowDown' ? 1 : -1);
 }
 
+let ultimoEnterRemitoTarget = null;
+let ultimoEnterRemitoAt = 0;
+
 document.addEventListener('keydown', e => {
-  const target = document.activeElement;
+  const target = esCampoNavegable(e.target) ? e.target : document.activeElement;
   if(!target) return;
   if(handleMoneyLiveKey(e)) {
     if(target.id === 'nPrecio') updatePreview('precio');
@@ -632,8 +640,23 @@ document.addEventListener('keydown', e => {
     }
     return;
   }
-  if(manejarEnterRemito(e, target)) return;
+  if(manejarEnterRemito(e, target)) {
+    if(esEnterRemito(e)) {
+      ultimoEnterRemitoTarget = target;
+      ultimoEnterRemitoAt = Date.now();
+    }
+    return;
+  }
   manejarFlechasRemito(e, target);
+});
+document.addEventListener('keyup', e => {
+  if(!esEnterRemito(e) || e.isComposing) return;
+  const target = esCampoNavegable(e.target) ? e.target : document.activeElement;
+  if(!target || (target === ultimoEnterRemitoTarget && Date.now() - ultimoEnterRemitoAt < 600)) return;
+  if(manejarEnterRemito(e, target)) {
+    ultimoEnterRemitoTarget = target;
+    ultimoEnterRemitoAt = Date.now();
+  }
 });
 document.addEventListener('focusin', e => {
   if(e.target.matches?.('.money-live')) e.target.dataset.moneyRaw = rawMoneyTextFromValue(e.target.value);
