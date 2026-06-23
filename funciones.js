@@ -508,6 +508,98 @@
     };
   }
 
+  function parseLocaleNumber(value) {
+    let text = String(value ?? '').trim().replace(/[^\d.,-]/g, '');
+    if (!text) return 0;
+    const negative = text.startsWith('-');
+    text = text.replace(/-/g, '');
+    const comma = text.lastIndexOf(',');
+    const dot = text.lastIndexOf('.');
+    const decimalAt = Math.max(comma, dot);
+    let integer = text;
+    let decimal = '';
+    if (decimalAt >= 0) {
+      const separator = text[decimalAt];
+      const digitsAfter = text.slice(decimalAt + 1).replace(/\D/g, '');
+      const separatorIsDecimal = separator === ',' || digitsAfter.length !== 3 || text.indexOf(separator) !== decimalAt;
+      if (separatorIsDecimal) {
+        integer = text.slice(0, decimalAt);
+        decimal = digitsAfter;
+      }
+    }
+    integer = integer.replace(/\D/g, '') || '0';
+    const number = Number(`${negative ? '-' : ''}${integer}.${decimal || '0'}`);
+    return Number.isFinite(number) ? number : 0;
+  }
+
+  function formatLocaleNumber(value, options = {}) {
+    const decimals = Math.max(0, Number(options.decimals ?? 2));
+    const suffix = String(options.suffix || '');
+    return `${parseLocaleNumber(value).toLocaleString('es-AR', {
+      minimumFractionDigits: options.fixed === false ? 0 : decimals,
+      maximumFractionDigits: decimals
+    })}${suffix}`;
+  }
+
+  function bindLiveLocaleNumber(options = {}) {
+    const root = options.root || document;
+    const selector = options.selector || '[data-live-number]';
+    const decimals = Math.max(0, Number(options.decimals ?? 2));
+    const suffix = String(options.suffix || '');
+
+    function formatEditing(input, fixed = false) {
+      const original = String(input.value || '').replace(suffix, '').trim();
+      const numericText = original.replace(/[^\d.,-]/g, '');
+      const trailingDecimal = /[.,]$/.test(numericText);
+      const match = numericText.match(/[.,](\d*)$/);
+      const typedDecimals = match ? match[1].slice(0, decimals) : '';
+      const number = parseLocaleNumber(numericText);
+      const displayNumber = fixed ? number : Math.trunc(number);
+      let output = displayNumber.toLocaleString('es-AR', {
+        minimumFractionDigits: fixed ? decimals : 0,
+        maximumFractionDigits: fixed ? decimals : 0
+      });
+      if (!fixed && (trailingDecimal || match)) output += `,${typedDecimals}`;
+      input.value = `${output}${suffix}`;
+      const caret = output.length;
+      input.setSelectionRange?.(caret, caret);
+    }
+
+    root.addEventListener('input', (event) => {
+      const input = event.target?.closest?.(selector);
+      if (input && root.contains(input)) formatEditing(input, false);
+    });
+    root.addEventListener('focusin', (event) => {
+      const input = event.target?.closest?.(selector);
+      if (!input || !root.contains(input)) return;
+      const end = String(input.value || '').replace(suffix, '').trim().length;
+      input.setSelectionRange?.(0, end);
+    });
+    root.addEventListener('focusout', (event) => {
+      const input = event.target?.closest?.(selector);
+      if (input && root.contains(input)) formatEditing(input, true);
+    });
+
+    return { format: (input, fixed = true) => formatEditing(input, fixed) };
+  }
+
+  function bindLabelSelect(options = {}) {
+    const root = options.root || document;
+    const labelSelector = options.labelSelector || 'label';
+    const controlSelector = options.controlSelector || 'input, textarea, select';
+
+    root.addEventListener('click', (event) => {
+      const label = event.target?.closest?.(labelSelector);
+      if (!label || !root.contains(label)) return;
+      const control = label.htmlFor
+        ? root.querySelector(`#${CSS.escape(label.htmlFor)}`)
+        : label.querySelector(controlSelector) || label.nextElementSibling?.matches?.(controlSelector) && label.nextElementSibling;
+      if (!control || control.disabled) return;
+      control.focus?.();
+      if (typeof control.select === 'function' && control.type !== 'checkbox' && control.type !== 'radio') control.select();
+    });
+  }
+
   function createVirtualTableNavigator(options = {}) {
     const viewport = options.viewport;
     const rowsRoot = options.rowsRoot || options.root || document;
@@ -1063,6 +1155,10 @@
     bindTableSort,
     bindResizableColumns,
     bindLinearNavigation,
+    parseLocaleNumber,
+    formatLocaleNumber,
+    bindLiveLocaleNumber,
+    bindLabelSelect,
     menuSessionUser,
     isMenuSessionActive,
     presupuestoMediosPago,

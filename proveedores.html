@@ -95,14 +95,14 @@
     <div class="modal-grid">
       <label>IDProveedor</label><input id="editId" required>
       <label>Proveedor</label><input id="editName" required>
-      <label>Desc. factura</label><input id="editDiscountInvoice" inputmode="decimal">
-      <label>Desc. lista</label><input id="editDiscountList" inputmode="decimal">
+      <label>Desc. factura</label><input id="editDiscountInvoice" class="percent-live" inputmode="decimal" placeholder="0,00 %">
+      <label>Desc. lista</label><input id="editDiscountList" class="percent-live" inputmode="decimal" placeholder="0,00 %">
       <label>Ultima act.</label><input id="editDate" type="date">
       <label>Vendedor</label><input id="editSeller">
-      <label>Telefono</label><input id="editPhone">
+      <label>Telefono</label><input id="editPhone" inputmode="tel">
       <label>Pagina</label><input id="editPageLink" inputmode="url" placeholder="https://...">
-      <label>Porc. flete</label><input id="editFreightPercent" inputmode="decimal">
-      <label>Porc. IVA</label><input id="editIvaPercent" inputmode="decimal">
+      <label>Porc. flete</label><input id="editFreightPercent" class="percent-live" inputmode="decimal" placeholder="0,00 %">
+      <label>Porc. IVA</label><input id="editIvaPercent" class="percent-live" inputmode="decimal" placeholder="0,00 %">
       <label>Iva incluido?</label><input id="editIvaIncluded" type="checkbox">
       <label>Nota</label><textarea id="editNote"></textarea>
     </div>
@@ -131,8 +131,8 @@ function getAll(){return CorralonSystem.getProvidersCache()}
 function providerFrom(obj){return CorralonSystem.providerFromObject(obj)}
 function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function providerUrl(value){const text=String(value||'').trim();return text?/^https?:\/\//i.test(text)?text:`https://${text}`:''}
-function parsePercentInput(value){let text=String(value??'').replace('%','').replace(',','.').trim();if(!text)return 0;let n=Number(text);if(!Number.isFinite(n))return 0;return Math.abs(n)>1?n/100:n}
-function percentInput(value){return (Number(value||0)*100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function parsePercentInput(value){const n=CorralonFunciones.parseLocaleNumber(value);return Math.abs(n)>1?n/100:n}
+function percentInput(value){return CorralonFunciones.formatLocaleNumber(Number(value||0)*100,{decimals:2,suffix:' %'})}
 function boolInput(value){if(typeof value==='boolean')return value;const text=norm(value);return ['-1','1','true','si','sí','yes','x'].includes(text)}
 function providerUpdatedDisplay(p){const value=p?.updated_at||p?.ultima_actualizacion||'';if(!value)return'';const d=new Date(String(value).replace(' ','T'));return Number.isNaN(d.getTime())?String(value):d.toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
 function providerDateClass(p){const value=p?.updated_at||p?.ultima_actualizacion||'';if(!value)return'';const d=new Date(String(value).replace(' ','T'));if(Number.isNaN(d.getTime()))return'';const days=(Date.now()-d.getTime())/86400000;if(days<=30)return'date-fresh';if(days<=60)return'date-warn';return'date-old'}
@@ -150,6 +150,18 @@ function openProviderModal(provider=null){editingProviderId=provider?.id_proveed
 function closeProviderModal(){providerModal.classList.remove('visible');editingProviderId=null;providerForm.reset();editId.disabled=false}
 async function saveProvider(provider){const localProvider=CorralonSystem.normalizeProviderPageLink(provider);const response=await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?on_conflict=id_proveedor`,{method:'POST',headers:headers({Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(CorralonSystem.providerRemotePayload(localProvider))});if(!response.ok)throw new Error(await response.text());const index=providerRows.findIndex(p=>String(p.id_proveedor)===String(localProvider.id_proveedor));if(index>=0)providerRows[index]=localProvider;else providerRows.push(localProvider);providerRows.sort((a,b)=>String(a.proveedor||'').localeCompare(String(b.proveedor||''),'es'));await CorralonSystem.setProvidersCache(providerRows.map(CorralonSystem.normalizeProviderPageLink));render()}
 providerForm.addEventListener('submit',async(event)=>{event.preventDefault();const current=providerRows.find(p=>String(p.id_proveedor)===String(editId.value).trim())||{};const pageLink=String(editPageLink.value).trim();const provider={...current,id_proveedor:String(editId.value).trim(),proveedor:String(editName.value).trim(),descuento_factura:parsePercentInput(editDiscountInvoice.value),descuento_lista:parsePercentInput(editDiscountList.value),ultima_actualizacion:editDate.value||null,vendedor:String(editSeller.value).trim(),telefono:String(editPhone.value).trim(),pagina_link:pageLink,reserva_texto_1:pageLink||null,nota:String(editNote.value).trim(),proveedor_norm:norm(editName.value),porc_flete:parsePercentInput(editFreightPercent.value),porc_iva:parsePercentInput(editIvaPercent.value),iva_incluido:editIvaIncluded.checked,descuento_total_fc:current.descuento_total_fc??null};if(!provider.id_proveedor||!provider.proveedor)return;try{el.status.textContent='Guardando proveedor...';await saveProvider(provider);closeProviderModal()}catch(error){console.error(error);el.status.textContent='Error guardando proveedor'}});
+CorralonFunciones.bindLinearNavigation({
+  root:providerForm,
+  selector:'.modal-grid input, .modal-grid textarea, .modal-actions button[type="submit"]',
+  selectOnFocus:true
+});
+CorralonFunciones.bindLiveLocaleNumber({
+  root:providerForm,
+  selector:'.percent-live',
+  decimals:2,
+  suffix:' %'
+});
+CorralonFunciones.bindLabelSelect({root:providerForm});
 newProviderBtn.onclick=()=>openProviderModal();
 closeModalBtn.onclick=closeProviderModal;cancelModalBtn.onclick=closeProviderModal;providerModal.addEventListener('click',(event)=>{if(event.target===providerModal)closeProviderModal()});
 el.rows.addEventListener('click',(event)=>{const btn=event.target.closest('[data-edit]');if(!btn)return;const provider=providerRows.find(p=>String(p.id_proveedor)===String(btn.dataset.edit));if(provider)openProviderModal(provider)});
@@ -186,6 +198,7 @@ function initProvidersAccessTable(){
   });
 }
 document.addEventListener('keydown',(event)=>{
+  if(event.defaultPrevented)return;
   if(event.key!=='F2')return;
   const input=document.activeElement;
   if(!input||!input.matches('input[type="text"], input:not([type]), input[type="date"], textarea'))return;
