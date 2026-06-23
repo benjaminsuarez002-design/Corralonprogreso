@@ -1154,7 +1154,7 @@ const HOME_LANDING_DOC_ID = 'homeLanding';
 const STOCK_NOTICE_DOC_ID = 'stockNotice';
 const PRODE_CONFIG_DOC_ID = 'prodeMundial';
 const PRODE_PLAYERS_COLLECTION = 'prode_mundial_participantes';
-const PRODE_FIXTURE_VERSION = 'grupos-2026-v1';
+const PRODE_FIXTURE_VERSION = 'mundial-2026-v2';
 const PRODE_PARTIDOS = [
   { id:'gA1', grupo:'Grupo A', fecha:'11/06 16:00', label:'Mexico vs Sudafrica' },
   { id:'gA2', grupo:'Grupo A', fecha:'11/06 23:00', label:'Corea del Sur vs Republica Checa' },
@@ -1229,6 +1229,20 @@ const PRODE_PARTIDOS = [
   { id:'gL5', grupo:'Grupo L', fecha:'27/06 18:00', label:'Panama vs Inglaterra' },
   { id:'gL6', grupo:'Grupo L', fecha:'27/06 18:00', label:'Croacia vs Ghana' }
 ];
+[
+  ['16avos', '16avos de final', ['2026-06-28','2026-06-28','2026-06-28','2026-06-29','2026-06-29','2026-06-29','2026-06-30','2026-06-30','2026-06-30','2026-07-01','2026-07-01','2026-07-01','2026-07-02','2026-07-02','2026-07-03','2026-07-03']],
+  ['8avos', '8avos de final', ['2026-07-04','2026-07-04','2026-07-05','2026-07-05','2026-07-06','2026-07-06','2026-07-07','2026-07-07']],
+  ['4tos', 'Cuartos de final', ['2026-07-09','2026-07-10','2026-07-10','2026-07-11']],
+  ['semi', 'Semifinal', ['2026-07-14','2026-07-15']],
+  ['final', 'Final', ['2026-07-19']]
+].forEach(([fase, grupo, fechas]) => fechas.forEach((fechaIso, index) => PRODE_PARTIDOS.push({
+  id:`${fase}_${index + 1}`,
+  grupo,
+  fechaIso,
+  fecha:`${fechaIso.slice(8,10)}/${fechaIso.slice(5,7)}`,
+  label:'Por definir vs Por definir',
+  pendiente:true
+})));
 let prodeResultadosDraft = {};
 let prodeFechaActiva = '';
 const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo.';
@@ -1302,6 +1316,7 @@ adminTabButtons.forEach((button) => {
 });
 
 function prodePartidoTimeAdmin(partido) {
+  if(partido.fechaIso) return new Date(`${partido.fechaIso}T12:00:00-03:00`).getTime();
   const match = String(partido.fecha || '').match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
   if(!match) return 0;
   const [, dd, mm, hh, min] = match;
@@ -1369,9 +1384,9 @@ window.abrirModalProdeResultados = function(fechaId) {
       const r = prodeResultadosDraft[p.id] || {};
       return `<div class="prode-result-row">
         <div class="prode-config-fase">${p.label}<span class="prode-result-meta">${p.fecha} hs Argentina · ${p.grupo}</span></div>
-        <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="local" value="${r.local ?? ''}" placeholder="L">
+        <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="local" value="${r.local ?? ''}" placeholder="L" ${p.pendiente ? 'disabled' : ''}>
         <span style="text-align:center;color:var(--muted);font-weight:900;">-</span>
-        <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="visitante" value="${r.visitante ?? ''}" placeholder="V">
+        <input type="number" min="0" step="1" data-prode-real="${p.id}" data-prode-real-field="visitante" value="${r.visitante ?? ''}" placeholder="V" ${p.pendiente ? 'disabled' : ''}>
       </div>`;
     }).join('');
   }
