@@ -6589,8 +6589,12 @@ const PRODE_ESPN_CODES = {
   PT:'POR', CD:'COD', UZ:'UZB', CO:'COL', GB:'ENG', HR:'CRO', GH:'GHA', PA:'PAN'
 };
 let prodeAutoResultsRunning = false;
+function prodeDraftStorageKey(docNum = prodeUser().doc) {
+  const dni = prodeDocId(docNum);
+  return dni ? `${PRODE_STORAGE_KEY}_${dni}` : PRODE_STORAGE_KEY;
+}
 function prodeDraft() {
-  try { return JSON.parse(localStorage.getItem(PRODE_STORAGE_KEY) || '{}') || {}; } catch(_) { return {}; }
+  try { return JSON.parse(localStorage.getItem(prodeDraftStorageKey()) || '{}') || {}; } catch(_) { return {}; }
 }
 function prodeUser() {
   try { return JSON.parse(localStorage.getItem(PRODE_USER_KEY) || '{}') || {}; } catch(_) { return {}; }
@@ -6872,7 +6876,8 @@ function prodeLeerResultadosVisibles() {
 }
 function prodeGuardarDraftLocal() {
   const nombre = document.getElementById('prodePlayerName')?.value || prodeUser().nombre || prodeDraft().nombre || '';
-  localStorage.setItem(PRODE_STORAGE_KEY, JSON.stringify({
+  localStorage.setItem(prodeDraftStorageKey(), JSON.stringify({
+    dni: prodeUser().doc || '',
     nombre,
     resultados: prodeLeerResultadosVisibles(),
     updated_at: new Date().toISOString()
@@ -7028,7 +7033,8 @@ async function entrarProdeRegistrado() {
   const refSlug = data.refSlug || prodeRefSlug(data.nombre || docNum);
   await setDoc(doc(db, PRODE_REF_LOOKUP_COLLECTION, refSlug), { doc: docNum, nombre: data.nombre || '', updated_at: serverTimestamp() }, { merge:true }).catch(() => {});
   setProdeUser({ doc: docNum, nombre: data.nombre || '', telefono: data.telefono || '', refSlug });
-  localStorage.setItem(PRODE_STORAGE_KEY, JSON.stringify({
+  localStorage.setItem(prodeDraftStorageKey(docNum), JSON.stringify({
+    dni: docNum,
     nombre: data.nombre || '',
     resultados: prodeNormalizarResultados(data.resultados || {}),
     updated_at: new Date().toISOString()
@@ -7051,7 +7057,8 @@ async function cargarProdeRemotoSiCorresponde() {
   const localTime = new Date(local.updated_at || 0).getTime();
   const remoteTime = data.updated_at?.toDate ? data.updated_at.toDate().getTime() : new Date(data.updated_at || 0).getTime();
   if(!local.resultados || !Object.keys(local.resultados || {}).length || Number.isNaN(localTime) || remoteTime >= localTime) {
-    localStorage.setItem(PRODE_STORAGE_KEY, JSON.stringify({
+    localStorage.setItem(prodeDraftStorageKey(user.doc), JSON.stringify({
+      dni: user.doc,
       nombre: data.nombre || user.nombre || '',
       resultados: prodeNormalizarResultados(data.resultados || {}),
       updated_at: new Date().toISOString()
