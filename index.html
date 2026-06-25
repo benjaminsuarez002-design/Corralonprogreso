@@ -760,7 +760,9 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: opacity .28s ease;
   }
+  .product-detail-photo img.is-changing { opacity: .25; }
   .product-detail-gallery { display: grid; gap: 8px; }
   .product-detail-thumbs { display: flex; gap: 7px; overflow-x: auto; padding: 2px 2px 4px; }
   .product-detail-thumb {
@@ -824,19 +826,19 @@
     white-space: pre-wrap;
   }
   .product-detail-price {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
+    display: grid;
+    align-items: start;
+    gap: 4px;
     margin-top: 2px;
   }
   .product-detail-price-note {
-    font-family:'Barlow Condensed',sans-serif;
-    font-size: clamp(18px, 3vw, 24px);
-    font-weight: 700;
-    color: var(--texto-dark);
+    display: none;
   }
+  .product-detail-price .precio-lista { text-align: left; font-size: 14px; min-height: 0; }
+  .product-detail-price .precio-lista.oferta-tachada { font-size: 21px; }
+  .product-detail-price .precio-lista.precio-caja.oferta-tachada { font-size: 21px; }
   .product-detail-price .precio-vigente { font-size: clamp(30px, 4vw, 40px); }
+  .product-detail-price .precio-vigente small { color: #356b9f; font-size: .58em; font-weight: 800; }
   .product-detail-controls {
     display: flex;
     align-items: center;
@@ -1791,6 +1793,14 @@
     color: #6c6386;
     font-size: 14px;
     font-weight: 800;
+  }
+  .precio-lista.precio-caja.oferta-tachada {
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .precio-lista.oferta-tachada {
+    text-decoration: line-through;
+    color: #8792a8;
   }
   .precio-vigente {
     font-family:'Barlow',sans-serif;
@@ -3311,8 +3321,8 @@
           <div class="product-detail-stock-line">Stock: <strong id="productDetailStock">-</strong></div>
         </div>
         <div class="product-detail-price">
-          <span class="precio-vigente" id="productDetailPriceFinal"></span>
           <span class="precio-lista" id="productDetailPriceBase"></span>
+          <span class="precio-vigente" id="productDetailPriceFinal"></span>
           <span class="product-detail-price-note" id="productDetailPriceNote"></span>
         </div>
         <div class="product-detail-actions">
@@ -4243,7 +4253,7 @@ function renderHomeSectionCard(articulo, index) {
         </div>
         <div class="home-card-footer">
           <div class="home-card-price">
-            <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}">${precioVisual.precioBaseHtml}</div>
+            <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}${articulo.ofertaVigente ? ' oferta-tachada' : ''}">${precioVisual.precioBaseHtml}</div>
             <div class="precio-vigente">${precioVisual.precioFinalHtml}</div>
           </div>
           <button class="agregar-btn" data-detail-trigger="1" data-detail-code="${codigo}" type="button">Agregar</button>
@@ -5049,6 +5059,7 @@ function abrirPopupImagen(src, alt) {
 }
 
 function cerrarDetalleProducto({ restoreResultFocus = true } = {}) {
+  detenerCarruselDetalleProducto();
   const modal = document.getElementById('productDetailModal');
   modal.classList.add('hidden');
   modal.classList.remove('visible');
@@ -5197,8 +5208,8 @@ function obtenerPrecioVisualArticulo(articulo = {}) {
   if (articulo.ceramico && cajaM2 > 0) {
     return {
       esCeramico: true,
-      precioBaseHtml: `Caja ${fmtPrecio(precioCaja)}`,
-      precioFinalHtml: `${fmtPrecio(precioCaja / cajaM2)} <span>/ m2</span>`,
+      precioBaseHtml: articulo.ofertaVigente ? `${fmtPrecio(precioCaja / cajaM2)} / m2 · caja ${fmtPrecio(precioCaja)}` : `Caja ${fmtPrecio(precioCaja)}`,
+      precioFinalHtml: `${fmtPrecio(precioVigente / cajaM2)} <span>/ m2</span> <small>caja ${fmtPrecio(precioVigente)}</small>`,
       precioCarrito: precioVigente
     };
   }
@@ -5563,10 +5574,55 @@ function imagenesArticuloPublico(articulo = {}) {
   ].filter(Boolean))];
 }
 
+let productDetailImages = [];
+let productDetailImageIndex = 0;
+let productDetailCarouselTimer = null;
+
+function detenerCarruselDetalleProducto() {
+  clearInterval(productDetailCarouselTimer);
+  productDetailCarouselTimer = null;
+}
+
+function seleccionarImagenDetalleProducto(index, { manual = false } = {}) {
+  if (!productDetailImages.length) return;
+  productDetailImageIndex = (index + productDetailImages.length) % productDetailImages.length;
+  const foto = productDetailImages[productDetailImageIndex];
+  const photoBtn = document.getElementById('productDetailPhoto');
+  const alt = photoBtn.dataset.alt || 'Foto artículo';
+  const img = photoBtn.querySelector('img');
+  if (img) {
+    img.classList.add('is-changing');
+    setTimeout(() => {
+      img.src = foto;
+      img.alt = alt;
+      img.classList.remove('is-changing');
+    }, 140);
+  } else {
+    photoBtn.innerHTML = `<img src="${foto}" alt="${escaparHtml(alt)}">`;
+  }
+  photoBtn.dataset.foto = foto;
+  document.querySelectorAll('.product-detail-thumb').forEach((item, itemIndex) => {
+    const active = itemIndex === productDetailImageIndex;
+    item.classList.toggle('active', active);
+    if (active) item.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'center' });
+  });
+  if (manual) iniciarCarruselDetalleProducto();
+}
+
+function iniciarCarruselDetalleProducto() {
+  detenerCarruselDetalleProducto();
+  if (productDetailImages.length <= 1) return;
+  productDetailCarouselTimer = setInterval(() => {
+    seleccionarImagenDetalleProducto(productDetailImageIndex + 1);
+  }, 3200);
+}
+
 function renderDetalleProductoFoto(articulo, titulo) {
   const photoBtn = document.getElementById('productDetailPhoto');
   const thumbs = document.getElementById('productDetailThumbs');
   const imagenes = imagenesArticuloPublico(articulo);
+  productDetailImages = imagenes;
+  productDetailImageIndex = 0;
   const foto = imagenes[0] || '';
   if (foto) {
     photoBtn.innerHTML = `<img src="${foto}" alt="${escaparHtml(titulo)}">`;
@@ -5584,6 +5640,7 @@ function renderDetalleProductoFoto(articulo, titulo) {
       </button>
     `).join('') : '';
   }
+  iniciarCarruselDetalleProducto();
 }
 
 function abrirDetalleProducto(codigo) {
@@ -5606,8 +5663,9 @@ function abrirDetalleProducto(codigo) {
   const detailPriceBase = document.getElementById('productDetailPriceBase');
   detailPriceBase.textContent = precioVisual.esCeramico ? precioVisual.precioBaseHtml : (articulo.ofertaVigente ? `Precio lista ${fmtPrecio(precioLista)}` : '');
   detailPriceBase.classList.toggle('precio-caja', precioVisual.esCeramico);
+  detailPriceBase.classList.toggle('oferta-tachada', !!articulo.ofertaVigente);
   document.getElementById('productDetailPriceFinal').innerHTML = precioVisual.precioFinalHtml;
-  document.getElementById('productDetailPriceNote').textContent = String(articulo.rubro || '').trim() || '';
+  document.getElementById('productDetailPriceNote').textContent = '';
   document.getElementById('productDetailDescription').textContent = descripcion.secundaria || 'Sin detalle disponible.';
   renderDetalleProductoFoto(articulo, descripcion.principal);
   const addBtn = document.getElementById('productDetailAddCart');
@@ -5695,7 +5753,7 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
         </div>
         <div class="lista-cell lista-stock"><div class="stock-pill ${stockClass}">${stockLista}</div></div>
         <div class="lista-cell lista-precio">
-          <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}">${precioVisual.precioBaseHtml}</div>
+          <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}${a.ofertaVigente ? ' oferta-tachada' : ''}">${precioVisual.precioBaseHtml}</div>
           <div class="precio-vigente">${precioVisual.precioFinalHtml}</div>
         </div>
         <div class="lista-cell lista-actions">
@@ -5753,7 +5811,7 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
           </div>
         </div>
         <div class="card-cta">
-          <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}">${precioVisual.precioBaseHtml}</div>
+          <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}${a.ofertaVigente ? ' oferta-tachada' : ''}">${precioVisual.precioBaseHtml}</div>
           <div class="precio-vigente">${precioVisual.precioFinalHtml}</div>
           <button class="agregar-btn" data-detail-trigger="1" data-detail-code="${codigoArticulo}" type="button">Agregar</button>
         </div>
@@ -7658,12 +7716,8 @@ document.getElementById('productDetailPhoto').addEventListener('click', () => {
 document.getElementById('productDetailThumbs')?.addEventListener('click', (event) => {
   const thumb = event.target.closest('.product-detail-thumb');
   if (!thumb) return;
-  const foto = thumb.dataset.foto || '';
-  const photoBtn = document.getElementById('productDetailPhoto');
-  const alt = photoBtn.dataset.alt || 'Foto artículo';
-  photoBtn.innerHTML = `<img src="${foto}" alt="${escaparHtml(alt)}">`;
-  photoBtn.dataset.foto = foto;
-  document.querySelectorAll('.product-detail-thumb').forEach((item) => item.classList.toggle('active', item === thumb));
+  const thumbs = [...document.querySelectorAll('.product-detail-thumb')];
+  seleccionarImagenDetalleProducto(Math.max(0, thumbs.indexOf(thumb)), { manual:true });
 });
 document.getElementById('productDetailAddCart').addEventListener('click', () => {
   const btn = document.getElementById('productDetailAddCart');
