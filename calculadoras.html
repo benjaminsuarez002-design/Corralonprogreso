@@ -233,6 +233,7 @@
     }
   </style>
   <script src="corralon-system.js"></script>
+  <script src="funciones.js"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="calculadoras"></script>
 </head>
@@ -438,6 +439,9 @@
     const $ = (id) => document.getElementById(id);
 
     function parseEsNumber(value) {
+      if (window.CorralonFunciones?.evaluateNumericExpression) {
+        return CorralonFunciones.evaluateNumericExpression(value);
+      }
       const s = String(value ?? '').trim();
       if (!s) return 0;
 
@@ -474,6 +478,11 @@
       }
       return parseEsNumber(el.value);
     };
+
+    function isFormulaLike(value) {
+      const text = String(value ?? '').replace(/\$/g, '').replace(/\s/g, '').trim();
+      return /[+*/()%]/.test(text) || /(?<!^)-/.test(text);
+    }
 
     const fmtMoney = (v) => {
       const val = Number.isFinite(v) ? v : 0;
@@ -1017,18 +1026,14 @@
     });
 
     prelista.addEventListener('input', (event) => {
-      if (event.data === '.' || event.data === ',') prelistaDecimalMode = true;
-      if (!prelista.value.includes(',') && !prelista.value.endsWith('.')) {
-        const cleaned = prelista.value.replace(/\$/g, '').replace(/\s/g, '').replace(/[^\d,.-]/g, '');
-        if (!cleaned.includes('.') && !cleaned.includes(',')) prelistaDecimalMode = false;
-      }
-      const start = prelista.selectionStart ?? prelista.value.length;
-      const prevLen = prelista.value.length;
-      prelista.value = formatMoneyTyping(prelista.value, prelistaDecimalMode);
       prelista.dataset.raw = String(parseEsNumber(prelista.value));
-      const nextLen = prelista.value.length;
-      const nextPos = Math.max(0, Math.min(nextLen, start + (nextLen - prevLen)));
-      try { prelista.setSelectionRange(nextPos, nextPos); } catch (_) {}
+      if (!isFormulaLike(prelista.value)) {
+        if (event.data === '.' || event.data === ',') prelistaDecimalMode = true;
+        if (!prelista.value.includes(',') && !prelista.value.endsWith('.')) {
+          const cleaned = prelista.value.replace(/\$/g, '').replace(/\s/g, '').replace(/[^\d,.-]/g, '');
+          if (!cleaned.includes('.') && !cleaned.includes(',')) prelistaDecimalMode = false;
+        }
+      }
       recalcAll();
     });
 

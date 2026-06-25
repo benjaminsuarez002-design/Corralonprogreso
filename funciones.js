@@ -532,6 +532,83 @@
     return Number.isFinite(number) ? number : 0;
   }
 
+  function evaluateNumericExpression(value) {
+    const source = String(value ?? '').trim();
+    if (!source) return 0;
+    const clean = source
+      .replace(/\$/g, '')
+      .replace(/\s+/g, '')
+      .replace(/[−–—]/g, '-');
+
+    if (!/[+\-*/()%]/.test(clean.replace(/^-/, ''))) return parseLocaleNumber(clean);
+
+    let index = 0;
+    const peek = () => clean[index] || '';
+    const eat = (char) => {
+      if (peek() === char) {
+        index += 1;
+        return true;
+      }
+      return false;
+    };
+
+    function readNumber() {
+      const start = index;
+      while (/[\d.,]/.test(peek())) index += 1;
+      if (start === index) return 0;
+      return parseLocaleNumber(clean.slice(start, index));
+    }
+
+    function factor() {
+      let sign = 1;
+      while (peek() === '+' || peek() === '-') {
+        if (eat('-')) sign *= -1;
+        else eat('+');
+      }
+
+      let valueOut;
+      if (eat('(')) {
+        valueOut = expression();
+        eat(')');
+      } else {
+        valueOut = readNumber();
+      }
+
+      valueOut *= sign;
+      while (eat('%')) valueOut /= 100;
+      return valueOut;
+    }
+
+    function term() {
+      let valueOut = factor();
+      while (peek() === '*' || peek() === '/') {
+        const op = peek();
+        index += 1;
+        const right = factor();
+        valueOut = op === '*' ? valueOut * right : (right ? valueOut / right : 0);
+      }
+      return valueOut;
+    }
+
+    function expression() {
+      let valueOut = term();
+      while (peek() === '+' || peek() === '-') {
+        const op = peek();
+        index += 1;
+        const rightStart = index;
+        const right = term();
+        const rightText = clean.slice(rightStart, index);
+        const isRelativePercent = /%$/.test(rightText) && !/[*/]/.test(rightText);
+        const delta = isRelativePercent ? valueOut * right : right;
+        valueOut = op === '+' ? valueOut + delta : valueOut - delta;
+      }
+      return valueOut;
+    }
+
+    const result = expression();
+    return Number.isFinite(result) ? result : 0;
+  }
+
   function formatLocaleNumber(value, options = {}) {
     const decimals = Math.max(0, Number(options.decimals ?? 2));
     const suffix = String(options.suffix || '');
@@ -1156,6 +1233,7 @@
     bindResizableColumns,
     bindLinearNavigation,
     parseLocaleNumber,
+    evaluateNumericExpression,
     formatLocaleNumber,
     bindLiveLocaleNumber,
     bindLabelSelect,
