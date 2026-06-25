@@ -761,6 +761,21 @@
     object-fit: cover;
     display: block;
   }
+  .product-detail-gallery { display: grid; gap: 8px; }
+  .product-detail-thumbs { display: flex; gap: 7px; overflow-x: auto; padding: 2px 2px 4px; }
+  .product-detail-thumb {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+    border: 2px solid rgba(0,212,255,.2);
+    border-radius: 10px;
+    background: #fff;
+    padding: 0;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .product-detail-thumb.active { border-color: var(--rojo); box-shadow: 0 0 0 2px rgba(0,119,217,.12); }
+  .product-detail-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .product-detail-placeholder {
     width: 72px;
     height: 72px;
@@ -1029,6 +1044,8 @@
   .prode-ranking-row.prode-ranking-me { border-color:transparent; box-shadow:0 9px 22px rgba(0,86,179,.2); }
   .prode-ranking-row.prode-ranking-me::before { content:''; --selected-card-ribbon-angle:0deg; position:absolute; inset:0; z-index:2; padding:3px; border-radius:inherit; background:conic-gradient(from var(--selected-card-ribbon-angle),#75cff8 0deg,#e9fbff 28deg,#fff 44deg,#f6c84c 62deg,#fff 82deg,#18caff 118deg,#75cff8 180deg,#e9fbff 208deg,#fff 224deg,#f6c84c 242deg,#fff 262deg,#18caff 298deg,#75cff8 360deg); animation:selectedCardRibbon 2.4s linear infinite; -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); mask-composite:exclude; pointer-events:none; }
   .prode-ranking-row small { display:block; color:#6b7890; font-weight:700; margin-top:2px; }
+  .prode-loading { min-height:280px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:#006fc9; font-weight:900; text-align:center; }
+  .prode-loading-spinner { width:42px; height:42px; border:4px solid #d9f0ff; border-top-color:#0076d6; border-radius:50%; animation:spin .8s linear infinite; }
   .prode-predictions-modal { z-index:100002; }
   .prode-predictions-card { width:min(94vw,700px); }
   .prode-predictions-card .prode-mini-head { position:sticky; top:-18px; z-index:6; margin:-18px -18px 12px; padding:18px; background:#fff; border-bottom:1px solid #d9efff; }
@@ -3281,7 +3298,10 @@
       <button class="product-detail-close" id="productDetailClose" type="button" aria-label="Cerrar">×</button>
     </div>
     <div class="product-detail-body">
-      <button class="product-detail-photo" id="productDetailPhoto" type="button" aria-label="Ver foto en pantalla completa"></button>
+      <div class="product-detail-gallery">
+        <button class="product-detail-photo" id="productDetailPhoto" type="button" aria-label="Ver foto en pantalla completa"></button>
+        <div class="product-detail-thumbs" id="productDetailThumbs"></div>
+      </div>
       <div class="product-detail-main">
         <div id="productDetailTags" class="product-detail-tags"></div>
         <div id="productDetailTitle" class="product-detail-title">Producto</div>
@@ -3448,7 +3468,7 @@
 <script src="presupuesto-shared.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -3741,7 +3761,7 @@ function extraerMetadatosArticulo(raw = {}) {
     codigo,
     detalle: String(raw?.detalle ?? '').trim(),
     tagsOcultos: obtenerTagsOcultosArticulo(raw),
-    fotoUrl: String(raw?.fotoUrl || '').trim(),
+    imagenes: [...new Set([String(raw?.fotoUrl || '').trim(), ...(Array.isArray(raw?.imagenes) ? raw.imagenes : []).map((url) => String(url || '').trim())].filter(Boolean))],
     oferta: toBool(raw?.oferta ?? raw?.enOferta ?? raw?.tagOferta),
     destacado: toBool(raw?.destacado ?? raw?.tagDestacado),
     masVendido: toBool(raw?.masVendido ?? raw?.mas_vendido ?? raw?.tagMasVendido),
@@ -3752,10 +3772,12 @@ function extraerMetadatosArticulo(raw = {}) {
     ofertaPct: clampPct(raw?.ofertaPct ?? raw?.oferta_pct ?? raw?.ofertaPorcentaje ?? raw?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(raw?.ofertaHasta ?? raw?.oferta_hasta ?? raw?.fechaOfertaHasta ?? '')
   };
+  meta.fotoUrl = String(raw?.fotoUrl || '').trim() || meta.imagenes[0] || '';
   const tieneContenido = !!(
     meta.detalle ||
     meta.tagsOcultos.length ||
     meta.fotoUrl ||
+    meta.imagenes.length ||
     meta.oferta ||
     meta.ofertaPct > 0 ||
     meta.ofertaHasta ||
@@ -3785,6 +3807,7 @@ function aplicarMetadatosArticulo(raw = {}, meta = null) {
     detalle: meta.detalle ?? raw.detalle ?? '',
     tagsOcultos: meta.tagsOcultos ?? raw.tagsOcultos ?? raw.tagsBusqueda ?? raw.tags ?? raw.palabrasClave ?? '',
     fotoUrl: meta.fotoUrl ?? raw.fotoUrl ?? '',
+    imagenes: meta.imagenes ?? raw.imagenes ?? [],
     oferta: meta.oferta ?? raw.oferta ?? raw.enOferta ?? raw.tagOferta,
     ofertaPct: meta.ofertaPct ?? raw.ofertaPct ?? raw.oferta_pct ?? raw.ofertaPorcentaje ?? raw.descuentoOferta ?? 0,
     ofertaHasta: meta.ofertaHasta ?? raw.ofertaHasta ?? raw.oferta_hasta ?? raw.fechaOfertaHasta ?? '',
@@ -5533,9 +5556,18 @@ function buscarArticuloPorCodigo(codigo) {
   return (todosArticulos || []).find((articulo) => obtenerIdArticulo(articulo) === needle) || null;
 }
 
+function imagenesArticuloPublico(articulo = {}) {
+  return [...new Set([
+    String(articulo?.fotoUrl || '').trim(),
+    ...(Array.isArray(articulo?.imagenes) ? articulo.imagenes : []).map((url) => String(url || '').trim())
+  ].filter(Boolean))];
+}
+
 function renderDetalleProductoFoto(articulo, titulo) {
   const photoBtn = document.getElementById('productDetailPhoto');
-  const foto = String(articulo?.fotoUrl || '').trim();
+  const thumbs = document.getElementById('productDetailThumbs');
+  const imagenes = imagenesArticuloPublico(articulo);
+  const foto = imagenes[0] || '';
   if (foto) {
     photoBtn.innerHTML = `<img src="${foto}" alt="${escaparHtml(titulo)}">`;
     photoBtn.dataset.foto = foto;
@@ -5544,6 +5576,13 @@ function renderDetalleProductoFoto(articulo, titulo) {
     photoBtn.innerHTML = `<svg class="product-detail-placeholder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
     photoBtn.dataset.foto = placeholderData;
     photoBtn.dataset.alt = titulo;
+  }
+  if (thumbs) {
+    thumbs.innerHTML = imagenes.length > 1 ? imagenes.map((url, index) => `
+      <button class="product-detail-thumb ${index === 0 ? 'active' : ''}" type="button" data-foto="${escaparHtml(url)}" aria-label="Ver imagen ${index + 1}">
+        <img src="${escaparHtml(url)}" alt="${escaparHtml(titulo)} ${index + 1}">
+      </button>
+    `).join('') : '';
   }
 }
 
@@ -6300,7 +6339,6 @@ if (topNavContacto) topNavContacto.addEventListener('click', () => contactModal?
 document.getElementById('contactModalClose')?.addEventListener('click', closeContactModal);
 contactModal?.addEventListener('click', (e) => { if (e.target === contactModal) closeContactModal(); });
 
-const PRODE_STORAGE_KEY = 'corralon_prode_mundial_v1';
 const PRODE_USER_KEY = 'corralon_prode_user_v1';
 const PRODE_DEVICE_KEY = 'corralon_prode_device_v1';
 const PRODE_CONFIG_DOC_ID = 'prodeMundial';
@@ -6317,6 +6355,10 @@ let prodeRankingUnsub = null;
 let prodeNavigationBound = false;
 let prodeRemoteLoadedFor = '';
 let prodeRemoteReadyFor = '';
+let prodeRemoteDraft = { nombre:'', resultados:{} };
+let prodeDataLoading = false;
+let prodeConfigLoadedFromServer = false;
+let prodeConfigServerPromise = null;
 const prodeScoreSyncTimers = new Map();
 let prodeConfig = {
   fases: {
@@ -6579,10 +6621,8 @@ function prodeBuildDateFases() {
   return fases;
 }
 const prodeFases = prodeBuildDateFases();
-const PRODE_AUTO_RESULTS_STORAGE_KEY = 'corralon_prode_auto_results_sync_v1';
 const PRODE_AUTO_RESULTS_INTERVAL_MS = 10 * 60 * 1000;
 const PRODE_AUTO_RESULTS_MIN_REMOTE_MS = 5 * 60 * 1000;
-const PRODE_AUTO_RESULTS_MIN_LOCAL_MS = 90 * 1000;
 const PRODE_ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260628&limit=300';
 const PRODE_ESPN_CODES = {
   MX:'MEX', ZA:'RSA', KR:'KOR', CZ:'CZE', CA:'CAN', BA:'BIH', QA:'QAT', CH:'SUI',
@@ -6593,12 +6633,8 @@ const PRODE_ESPN_CODES = {
   PT:'POR', CD:'COD', UZ:'UZB', CO:'COL', GB:'ENG', HR:'CRO', GH:'GHA', PA:'PAN'
 };
 let prodeAutoResultsRunning = false;
-function prodeDraftStorageKey(docNum = prodeUser().doc) {
-  const dni = prodeDocId(docNum);
-  return dni ? `${PRODE_STORAGE_KEY}_${dni}` : PRODE_STORAGE_KEY;
-}
 function prodeDraft() {
-  try { return JSON.parse(localStorage.getItem(prodeDraftStorageKey()) || '{}') || {}; } catch(_) { return {}; }
+  return prodeRemoteDraft || { nombre:'', resultados:{} };
 }
 function prodeUser() {
   try { return JSON.parse(localStorage.getItem(PRODE_USER_KEY) || '{}') || {}; } catch(_) { return {}; }
@@ -6830,13 +6866,10 @@ async function prodeAutoActualizarResultados({ force = false } = {}) {
   if(prodeAutoResultsRunning) return;
   const now = Date.now();
   const remoteSync = new Date(prodeConfig.resultadosAutoSyncAt || prodeConfig.autoResultsSyncAt || 0).getTime();
-  const localSync = Number(localStorage.getItem(PRODE_AUTO_RESULTS_STORAGE_KEY) || 0);
   if(!force) {
     if(Number.isFinite(remoteSync) && remoteSync && now - remoteSync < PRODE_AUTO_RESULTS_MIN_REMOTE_MS) return;
-    if(Number.isFinite(localSync) && localSync && now - localSync < PRODE_AUTO_RESULTS_MIN_LOCAL_MS) return;
   }
   prodeAutoResultsRunning = true;
-  localStorage.setItem(PRODE_AUTO_RESULTS_STORAGE_KEY, String(now));
   try {
     const oficiales = await prodeFetchResultadosEspn();
     const actuales = prodeConfig.resultadosReales || {};
@@ -6880,12 +6913,12 @@ function prodeLeerResultadosVisibles() {
 }
 function prodeGuardarDraftLocal() {
   const nombre = document.getElementById('prodePlayerName')?.value || prodeUser().nombre || prodeDraft().nombre || '';
-  localStorage.setItem(prodeDraftStorageKey(), JSON.stringify({
+  prodeRemoteDraft = {
     dni: prodeUser().doc || '',
     nombre,
     resultados: prodeLeerResultadosVisibles(),
     updated_at: new Date().toISOString()
-  }));
+  };
 }
 async function prodeSyncDraftRemoto() {
   const user = prodeUser();
@@ -6918,8 +6951,9 @@ async function prodeSyncPartidoRemoto(row) {
 }
 function renderProde() {
   prodeAjustarFechaActiva();
-  const draft = prodeDraft();
   const registrado = !!prodeUser().doc;
+  const dataLista = prodeConfigLoadedFromServer && (!registrado || (prodeRemoteReadyFor === prodeUser().doc));
+  const draft = dataLista ? prodeDraft() : { nombre:'', resultados:{} };
   const remotoListo = registrado && prodeRemoteReadyFor === prodeUser().doc;
   const name = document.getElementById('prodePlayerName');
   const saveBtn = document.getElementById('prodeSaveBtn');
@@ -6931,6 +6965,11 @@ function renderProde() {
     name.placeholder = registrado ? 'Tu nombre' : 'Registrate primero';
   }
   if(saveBtn) saveBtn.textContent = registrado ? 'Guardar' : 'Registrarme';
+  if(list && registrado && !dataLista) {
+    if(tabs) tabs.innerHTML = '';
+    list.innerHTML = '<div class="prode-loading"><div class="prode-loading-spinner"></div><div>Cargando predicciones y resultados...</div><small>Esperando datos de Firebase</small></div>';
+    return;
+  }
   const etiquetaFecha = prodeEtiquetaFecha();
   const fechasDisponibles = prodeFechasConPartidos();
   const indiceFecha = fechasDisponibles.indexOf(prodeFechaActiva);
@@ -6967,9 +7006,22 @@ function renderProde() {
 }
 function abrirProde() {
   initProdeNavigation();
-  renderProde();
   document.getElementById('prodeModal')?.classList.remove('hidden');
-  cargarProdeRemotoSiCorresponde();
+  prodeDataLoading = true;
+  prodeRemoteLoadedFor = '';
+  prodeRemoteReadyFor = '';
+  prodeConfigLoadedFromServer = false;
+  prodeConfigServerPromise = null;
+  renderProde();
+  cargarProdeConfigDesdeServidor().then(() => {
+    if(prodeUser().doc) return cargarProdeRemotoSiCorresponde();
+    prodeDataLoading = false;
+    renderProde();
+  }).catch((error) => {
+    console.error(error);
+    const list = document.getElementById('prodeMatches');
+    if(list) list.innerHTML = '<div class="prode-loading"><div>No se pudo cargar Firebase.</div><small>Revisá la conexión e intentá de nuevo.</small></div>';
+  });
   handleProdeReferral();
   if(!prodeUser().doc) abrirProdeRegistro();
 }
@@ -7004,7 +7056,7 @@ async function registrarProde() {
   const telefono = document.getElementById('prodeRegTel')?.value.trim() || '';
   if(!nombre || !docNum || !telefono) { prodeRegisterMsg('Completá nombre, documento y teléfono.'); return; }
   const ref = doc(db, PRODE_PLAYERS_COLLECTION, docNum);
-  const snap = await getDoc(ref).catch(() => null);
+  const snap = await getDocFromServer(ref).catch(() => null);
   if(snap?.exists()) {
     const docInput = document.getElementById('prodeRegDoc');
     if(docInput) {
@@ -7030,6 +7082,7 @@ async function registrarProde() {
   await setDoc(doc(db, PRODE_REF_LOOKUP_COLLECTION, prodeRefSlug(nombre)), { doc: docNum, nombre, updated_at: serverTimestamp() }, { merge:true }).catch(() => {});
   setProdeUser({ doc: docNum, nombre, telefono, refSlug: prodeRefSlug(nombre) });
   prodeRemoteReadyFor = docNum;
+  prodeRemoteDraft = { dni: docNum, nombre, resultados: prodeNormalizarResultados(previo.resultados || {}), updated_at: new Date().toISOString() };
   const name = document.getElementById('prodePlayerName');
   if(name) name.value = nombre;
   cerrarProdeRegistro();
@@ -7040,7 +7093,7 @@ async function registrarProde() {
 async function entrarProdeRegistrado() {
   const docNum = prodeDocId(document.getElementById('prodeLoginDoc')?.value || '');
   if(!docNum) { prodeRegisterMsg('Poné tu documento.'); return; }
-  const snap = await getDoc(doc(db, PRODE_PLAYERS_COLLECTION, docNum)).catch(() => null);
+  const snap = await getDocFromServer(doc(db, PRODE_PLAYERS_COLLECTION, docNum)).catch(() => null);
   if(!snap?.exists()) {
     const input = document.getElementById('prodeLoginDoc');
     if(input) {
@@ -7056,12 +7109,12 @@ async function entrarProdeRegistrado() {
   await setDoc(doc(db, PRODE_REF_LOOKUP_COLLECTION, refSlug), { doc: docNum, nombre: data.nombre || '', updated_at: serverTimestamp() }, { merge:true }).catch(() => {});
   setProdeUser({ doc: docNum, nombre: data.nombre || '', telefono: data.telefono || '', refSlug });
   prodeRemoteReadyFor = docNum;
-  localStorage.setItem(prodeDraftStorageKey(docNum), JSON.stringify({
+  prodeRemoteDraft = {
     dni: docNum,
     nombre: data.nombre || '',
     resultados: prodeNormalizarResultados(data.resultados || {}),
     updated_at: new Date().toISOString()
-  }));
+  };
   const name = document.getElementById('prodePlayerName');
   if(name) name.value = data.nombre || '';
   cerrarProdeRegistro();
@@ -7069,24 +7122,43 @@ async function entrarProdeRegistrado() {
   renderProde();
   handleProdeReferral();
 }
+async function cargarProdeConfigDesdeServidor() {
+  if(prodeConfigLoadedFromServer) return;
+  if(!prodeConfigServerPromise) {
+    prodeConfigServerPromise = getDocFromServer(doc(db, 'config', PRODE_CONFIG_DOC_ID))
+      .then((snap) => {
+        if(snap.exists()) prodeConfig = { ...prodeConfig, ...(snap.data() || {}) };
+        prodeConfigLoadedFromServer = true;
+      })
+      .catch((error) => {
+        console.warn('No se pudo cargar config del Prode desde servidor', error);
+        prodeConfigLoadedFromServer = true;
+      });
+  }
+  await prodeConfigServerPromise;
+}
 async function cargarProdeRemotoSiCorresponde() {
   const user = prodeUser();
   if(!user.doc || prodeRemoteLoadedFor === user.doc) return;
   prodeRemoteLoadedFor = user.doc;
-  const snap = await getDoc(doc(db, PRODE_PLAYERS_COLLECTION, user.doc)).catch(() => null);
+  await cargarProdeConfigDesdeServidor();
+  const snap = await getDocFromServer(doc(db, PRODE_PLAYERS_COLLECTION, user.doc)).catch(() => null);
   if(!snap?.exists()) {
+    prodeRemoteDraft = { dni:user.doc, nombre:user.nombre || '', resultados:{}, updated_at:new Date().toISOString() };
     prodeRemoteReadyFor = user.doc;
+    prodeDataLoading = false;
     renderProde();
     return;
   }
   const data = snap.data() || {};
-  localStorage.setItem(prodeDraftStorageKey(user.doc), JSON.stringify({
+  prodeRemoteDraft = {
     dni: user.doc,
     nombre: data.nombre || user.nombre || '',
     resultados: prodeNormalizarResultados(data.resultados || {}),
     updated_at: new Date().toISOString()
-  }));
+  };
   prodeRemoteReadyFor = user.doc;
+  prodeDataLoading = false;
   renderProde();
 }
 function prodeShareUrl() {
@@ -7141,8 +7213,8 @@ function abrirRankingProde() {
   const list = document.getElementById('prodeRankingList');
   if(list) list.innerHTML = '<div class="prode-ranking-row"><span>...</span><div>Cargando</div><strong></strong></div>';
   if(prodeRankingUnsub) prodeRankingUnsub();
-  prodeRankingUnsub = onSnapshot(query(collection(db, PRODE_PLAYERS_COLLECTION), orderBy('puntos', 'desc')), snap => {
-    const docs = snap.docs.slice(0, 50);
+  getDocsFromServer(query(collection(db, PRODE_PLAYERS_COLLECTION), orderBy('puntos', 'desc'), limit(50))).then((snap) => {
+    const docs = snap.docs;
     if(!list) return;
     const miDoc = String(prodeUser().doc || '');
     list.innerHTML = docs.length ? docs.map((d, i) => {
@@ -7150,6 +7222,9 @@ function abrirRankingProde() {
       const esMiPosicion = String(d.id) === miDoc;
       return `<div class="prode-ranking-row ${esMiPosicion ? 'prode-ranking-me' : ''}" tabindex="0" role="button" data-prode-player="${escaparHtml(d.id)}" title="Ver predicciones"><span>${i + 1}</span><div>${escaparHtml(x.nombre || 'Sin nombre')}${esMiPosicion ? ' <small style="display:inline;color:#0076d6;">Tu posición</small>' : ''}<small>DNI ***${escaparHtml(x.doc3 || String(d.id).slice(-3))}</small></div><strong>${Number(x.puntos || 0)} pts</strong></div>`;
     }).join('') : '<div class="prode-ranking-row"><span>-</span><div>Sin participantes todavía</div><strong></strong></div>';
+  }).catch((error) => {
+    console.error(error);
+    if(list) list.innerHTML = '<div class="prode-ranking-row"><span>!</span><div>No se pudo cargar desde Firebase</div><strong></strong></div>';
   });
 }
 async function abrirPrediccionesJugador(playerId) {
@@ -7164,7 +7239,7 @@ async function abrirPrediccionesJugador(playerId) {
   if(subtitle) subtitle.textContent = 'Cargando participante...';
   if(list) list.innerHTML = '<div class="prode-prediction-empty">Cargando predicciones...</div>';
   try {
-    const snap = await getDoc(doc(db, PRODE_PLAYERS_COLLECTION, String(playerId)));
+    const snap = await getDocFromServer(doc(db, PRODE_PLAYERS_COLLECTION, String(playerId)));
     if(!snap.exists()) throw new Error('Participante no encontrado');
     const jugador = snap.data() || {};
     const predicciones = prodeNormalizarResultados(jugador.resultados || {});
@@ -7579,6 +7654,16 @@ document.getElementById('productDetailPhoto').addEventListener('click', () => {
     document.getElementById('productDetailPhoto').dataset.foto || placeholderData,
     document.getElementById('productDetailPhoto').dataset.alt || 'Foto artículo'
   );
+});
+document.getElementById('productDetailThumbs')?.addEventListener('click', (event) => {
+  const thumb = event.target.closest('.product-detail-thumb');
+  if (!thumb) return;
+  const foto = thumb.dataset.foto || '';
+  const photoBtn = document.getElementById('productDetailPhoto');
+  const alt = photoBtn.dataset.alt || 'Foto artículo';
+  photoBtn.innerHTML = `<img src="${foto}" alt="${escaparHtml(alt)}">`;
+  photoBtn.dataset.foto = foto;
+  document.querySelectorAll('.product-detail-thumb').forEach((item) => item.classList.toggle('active', item === thumb));
 });
 document.getElementById('productDetailAddCart').addEventListener('click', () => {
   const btn = document.getElementById('productDetailAddCart');
