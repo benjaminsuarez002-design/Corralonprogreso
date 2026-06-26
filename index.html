@@ -743,6 +743,7 @@
     align-items: start;
   }
   .product-detail-photo {
+    position: relative;
     width: 100%;
     aspect-ratio: 1 / 1;
     border-radius: 18px;
@@ -763,6 +764,23 @@
     transition: opacity .28s ease;
   }
   .product-detail-photo img.is-changing { opacity: .25; }
+  .product-detail-photo-hint {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    border-radius: 999px;
+    background: rgba(0,59,120,.86);
+    color: #fff;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .35px;
+    padding: 5px 9px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.18);
+    pointer-events: none;
+    text-transform: uppercase;
+  }
   .product-detail-gallery { display: grid; gap: 8px; }
   .product-detail-thumbs { display: flex; gap: 7px; overflow-x: auto; padding: 2px 2px 4px; }
   .product-detail-thumb {
@@ -2581,6 +2599,11 @@
       flex-direction: column;
       gap: 12px;
     }
+    .product-detail-gallery {
+      width: calc(100% + 24px);
+      margin: -12px -12px 0;
+      gap: 8px;
+    }
     .product-detail-photo {
       width: 100%;
       max-width: 100%;
@@ -2589,6 +2612,20 @@
       max-height: 280px;
       order: 0;
       align-self: stretch;
+      border-left: 0;
+      border-right: 0;
+      border-top: 0;
+      border-radius: 18px 18px 12px 12px;
+    }
+    .product-detail-photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center center;
+    }
+    .product-detail-thumbs {
+      padding-left: 12px;
+      padding-right: 12px;
     }
     .product-detail-main {
       order: 1;
@@ -2666,7 +2703,7 @@
     .lista-cell { padding: 9px 10px; }
     .lista-desc-main { font-size: 14px; }
     .lista-actions .agregar-btn { min-width: 94px; }
-    .product-detail-photo { min-height: 200px; max-height: 240px; }
+    .product-detail-photo { min-height: 220px; max-height: 280px; }
     .product-detail-title { font-size: 18px; }
     .product-detail-price .precio-vigente { font-size: 16px; }
     .product-detail-price-note { font-size: 14px; }
@@ -3087,15 +3124,18 @@
   #popupZoom { position:fixed; top:var(--popup-visual-top); left:var(--popup-visual-left); width:var(--popup-visual-width); height:var(--popup-visual-height); background:rgba(0,0,0,0.92); z-index:100000; display:flex; align-items:flex-start; justify-content:center; padding:var(--popup-top-safe) 0 var(--popup-bottom-safe); overflow:auto; cursor:zoom-out; }
   #popupZoom.hidden { display:none; }
   #popupZoom img { margin-top:var(--popup-center-gap, 0px); max-width:100%; max-height:var(--popup-max-height); object-fit:contain; }
+  #popupZoomClose { position:fixed; top:calc(var(--popup-visual-top) + max(12px, env(safe-area-inset-top))); right:calc(var(--popup-visual-left) + max(12px, env(safe-area-inset-right))); width:44px; height:44px; border:0; border-radius:999px; background:rgba(255,255,255,.95); color:#003b78; font-size:28px; line-height:1; font-weight:800; cursor:pointer; z-index:100001; box-shadow:0 8px 24px rgba(0,0,0,.32); display:flex; align-items:center; justify-content:center; }
+  #popupZoom.hidden #popupZoomClose { display:none; }
 </style>
 
 <div id="popupBg" class="hidden">
   <div id="popupBox">
     <button id="popupClose" onclick="document.getElementById('popupBg').classList.add('hidden')">x</button>
-    <img id="popupImg" src="" alt="Promo" onclick="document.getElementById('popupZoom').classList.remove('hidden')">
+    <img id="popupImg" src="" alt="Promo">
   </div>
 </div>
-<div id="popupZoom" class="hidden" onclick="this.classList.add('hidden')">
+<div id="popupZoom" class="hidden">
+  <button id="popupZoomClose" type="button" aria-label="Cerrar imagen">×</button>
   <img id="popupZoomImg" src="" alt="Promo zoom">
 </div>
 
@@ -3744,6 +3784,13 @@ function sanitizeIsoDate(value) {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
 }
 
+function formatoFechaCortaIso(value) {
+  const iso = sanitizeIsoDate(value);
+  if (!iso) return '';
+  const [, mes, dia] = iso.split('-');
+  return `${dia}/${mes}`;
+}
+
 function normalizarTagsOcultos(value) {
   const source = Array.isArray(value)
     ? value
@@ -4224,7 +4271,10 @@ function renderHomeArticuloFoto(articulo, alt) {
 
 function construirTagsArticulo(articulo) {
   const tags = [];
-  if (articulo.ofertaVigente) tags.push('<span class="chip-oferta">Oferta</span>');
+  if (articulo.ofertaVigente) {
+    const hastaOferta = formatoFechaCortaIso(articulo.ofertaHasta);
+    tags.push(`<span class="chip-oferta">Oferta${hastaOferta ? ` hasta ${hastaOferta}` : ''}</span>`);
+  }
   if (articulo.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
   if (articulo.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
   if (articulo.accesoRapido) tags.push('<span class="chip-rapido"><span class="chip-rapido-icon">&#9889;</span>Rápido</span>');
@@ -5069,11 +5119,30 @@ function maybeAdvancePublicWindowFromScroll() {
   advancePublicWindow();
 }
 
+let popupZoomHistoryActive = false;
+
+function cerrarPopupImagen({ fromPop = false } = {}) {
+  const zoom = document.getElementById('popupZoom');
+  if (!zoom || zoom.classList.contains('hidden')) {
+    popupZoomHistoryActive = false;
+    return;
+  }
+  zoom.classList.add('hidden');
+  if (popupZoomHistoryActive) {
+    popupZoomHistoryActive = false;
+    if (!fromPop) history.back();
+  }
+}
+
 function abrirPopupImagen(src, alt) {
   const zoom = document.getElementById('popupZoom');
   const zoomImg = document.getElementById('popupZoomImg');
   zoomImg.src = src || placeholderData;
   zoomImg.alt = alt || 'Foto artículo';
+  if (zoom.classList.contains('hidden')) {
+    history.pushState({ ...(history.state || {}), corralonImageZoom: true }, '', location.href);
+    popupZoomHistoryActive = true;
+  }
   zoom.classList.remove('hidden');
 }
 
@@ -5622,7 +5691,7 @@ function seleccionarImagenDetalleProducto(index, { manual = false } = {}) {
       img.classList.remove('is-changing');
     }, 140);
   } else {
-    photoBtn.innerHTML = `<img src="${foto}" alt="${escaparHtml(alt)}">`;
+    photoBtn.innerHTML = `<span class="product-detail-photo-hint">Toca imagen para ver</span><img src="${foto}" alt="${escaparHtml(alt)}">`;
   }
   photoBtn.dataset.foto = foto;
   document.querySelectorAll('.product-detail-thumb').forEach((item, itemIndex) => {
@@ -5649,11 +5718,11 @@ function renderDetalleProductoFoto(articulo, titulo) {
   productDetailImageIndex = 0;
   const foto = imagenes[0] || '';
   if (foto) {
-    photoBtn.innerHTML = `<img src="${foto}" alt="${escaparHtml(titulo)}">`;
+    photoBtn.innerHTML = `<span class="product-detail-photo-hint">Toca imagen para ver</span><img src="${foto}" alt="${escaparHtml(titulo)}">`;
     photoBtn.dataset.foto = foto;
     photoBtn.dataset.alt = titulo;
   } else {
-    photoBtn.innerHTML = `<svg class="product-detail-placeholder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
+    photoBtn.innerHTML = `<span class="product-detail-photo-hint">Toca imagen para ver</span><svg class="product-detail-placeholder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
     photoBtn.dataset.foto = placeholderData;
     photoBtn.dataset.alt = titulo;
   }
@@ -5676,7 +5745,10 @@ function abrirDetalleProducto(codigo) {
   const precioVigente = Number(articulo.precioVigente ?? precioLista);
   const precioVisual = obtenerPrecioVisualArticulo(articulo);
   const tags = [];
-  if (articulo.ofertaVigente) tags.push('<span class="chip-oferta">Oferta</span>');
+  if (articulo.ofertaVigente) {
+    const hastaOferta = formatoFechaCortaIso(articulo.ofertaHasta);
+    tags.push(`<span class="chip-oferta">Oferta${hastaOferta ? ` hasta ${hastaOferta}` : ''}</span>`);
+  }
   if (articulo.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
   if (articulo.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
   if (articulo.ceramico) tags.push(`<span class="chip-ceramico">${etiquetaCeramico(articulo)}</span>`);
@@ -7741,6 +7813,9 @@ function openQuantityModal(prod) {
 
 document.querySelector('.close-modal').addEventListener('click', () => { document.getElementById('quantityModal').classList.add('hidden'); document.getElementById('darkOverlay').classList.add('hidden'); });
 document.getElementById('modalCancel').addEventListener('click', () => { document.getElementById('quantityModal').classList.add('hidden'); document.getElementById('darkOverlay').classList.add('hidden'); });
+document.getElementById('popupImg')?.addEventListener('click', (event) => {
+  abrirPopupImagen(event.currentTarget.src, event.currentTarget.alt || 'Promo');
+});
 document.getElementById('productDetailClose').addEventListener('click', cerrarDetalleProducto);
 document.getElementById('productDetailShare')?.addEventListener('click', compartirDetalleProducto);
 document.getElementById('productDetailModal').addEventListener('click', (e) => {
@@ -7751,6 +7826,18 @@ document.getElementById('productDetailPhoto').addEventListener('click', () => {
     document.getElementById('productDetailPhoto').dataset.foto || placeholderData,
     document.getElementById('productDetailPhoto').dataset.alt || 'Foto artículo'
   );
+});
+document.getElementById('popupZoomClose')?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  cerrarPopupImagen();
+});
+document.getElementById('popupZoom')?.addEventListener('click', (event) => {
+  if (event.target.id === 'popupZoom') cerrarPopupImagen();
+});
+window.addEventListener('popstate', () => {
+  if (popupZoomHistoryActive && !document.getElementById('popupZoom')?.classList.contains('hidden')) {
+    cerrarPopupImagen({ fromPop: true });
+  }
 });
 document.getElementById('productDetailThumbs')?.addEventListener('click', (event) => {
   const thumb = event.target.closest('.product-detail-thumb');
@@ -7902,7 +7989,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (!document.getElementById('popupZoom').classList.contains('hidden')) {
-    document.getElementById('popupZoom').classList.add('hidden');
+    cerrarPopupImagen();
     return;
   }
   if (document.getElementById('productDetailModal').classList.contains('visible')) {
