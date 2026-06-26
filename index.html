@@ -3771,7 +3771,7 @@ function extraerMetadatosArticulo(raw = {}) {
     codigo,
     detalle: String(raw?.detalle ?? '').trim(),
     tagsOcultos: obtenerTagsOcultosArticulo(raw),
-    imagenes: [...new Set([String(raw?.fotoUrl || '').trim(), ...(Array.isArray(raw?.imagenes) ? raw.imagenes : []).map((url) => String(url || '').trim())].filter(Boolean))],
+    imagenes: [...new Set([...(Array.isArray(raw?.imagenes) ? raw.imagenes : []).map((url) => String(url || '').trim()), String(raw?.fotoUrl || '').trim()].filter(Boolean))],
     oferta: toBool(raw?.oferta ?? raw?.enOferta ?? raw?.tagOferta),
     destacado: toBool(raw?.destacado ?? raw?.tagDestacado),
     masVendido: toBool(raw?.masVendido ?? raw?.mas_vendido ?? raw?.tagMasVendido),
@@ -3782,7 +3782,7 @@ function extraerMetadatosArticulo(raw = {}) {
     ofertaPct: clampPct(raw?.ofertaPct ?? raw?.oferta_pct ?? raw?.ofertaPorcentaje ?? raw?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(raw?.ofertaHasta ?? raw?.oferta_hasta ?? raw?.fechaOfertaHasta ?? '')
   };
-  meta.fotoUrl = String(raw?.fotoUrl || '').trim() || meta.imagenes[0] || '';
+  meta.fotoUrl = meta.imagenes[0] || String(raw?.fotoUrl || '').trim();
   const tieneContenido = !!(
     meta.detalle ||
     meta.tagsOcultos.length ||
@@ -4198,7 +4198,7 @@ function tomarArticulosHome(predicate, limit = 8, tipo = 'general') {
 }
 
 function renderHomeArticuloFoto(articulo, alt) {
-  const foto = String(articulo?.fotoUrl || '').trim();
+  const foto = imagenPrincipalArticulo(articulo);
   if (foto) return `<img class="foto-real" src="${foto}" alt="${escaparHtml(alt)}">`;
   return `<div class="foto-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>`;
 }
@@ -5058,6 +5058,11 @@ function abrirPopupImagen(src, alt) {
   zoom.classList.remove('hidden');
 }
 
+function imagenPrincipalArticulo(articulo = {}) {
+  const galeria = Array.isArray(articulo?.imagenes) ? articulo.imagenes : [];
+  return String(galeria.find((url) => String(url || '').trim()) || articulo?.fotoUrl || '').trim();
+}
+
 function cerrarDetalleProducto({ restoreResultFocus = true } = {}) {
   detenerCarruselDetalleProducto();
   const modal = document.getElementById('productDetailModal');
@@ -5095,7 +5100,7 @@ function linkArticuloDirecto(codigo, articulo = null, titulo = '') {
   const url = new URL(location.href);
   url.hash = '';
   url.searchParams.set('articulo', codigo);
-  const foto = String(articulo?.fotoUrl || '').trim();
+  const foto = imagenPrincipalArticulo(articulo);
   if (foto) {
     const precio = Number(articulo?.precioVigente ?? articulo?.precio ?? 0);
     url.searchParams.set('previewImg', foto);
@@ -5142,7 +5147,7 @@ async function obtenerArchivoImagenCompartir(fotoUrl, titulo) {
 }
 
 async function compartirConImagenSiSePuede(articulo, titulo, linkDirecto) {
-  const foto = String(articulo?.fotoUrl || '').trim();
+  const foto = imagenPrincipalArticulo(articulo);
   if (!foto || !navigator.share || !matchMedia('(max-width: 768px)').matches) return false;
   const file = await obtenerArchivoImagenCompartir(foto, titulo);
   if (!file) return false;
@@ -5260,7 +5265,7 @@ function agregarArticuloCarritoDesdeArticulo(articulo, cantidad) {
       codigo,
       nombre: descripcion.principal,
       precio: Number(articulo.precioVigente ?? articulo.precio ?? 0),
-      foto: articulo.fotoUrl || '',
+      foto: imagenPrincipalArticulo(articulo) || '',
       cantidad: qty
     };
   } else {
@@ -5569,8 +5574,8 @@ function buscarArticuloPorCodigo(codigo) {
 
 function imagenesArticuloPublico(articulo = {}) {
   return [...new Set([
-    String(articulo?.fotoUrl || '').trim(),
-    ...(Array.isArray(articulo?.imagenes) ? articulo.imagenes : []).map((url) => String(url || '').trim())
+    ...(Array.isArray(articulo?.imagenes) ? articulo.imagenes : []).map((url) => String(url || '').trim()),
+    String(articulo?.fotoUrl || '').trim()
   ].filter(Boolean))];
 }
 
@@ -5679,7 +5684,7 @@ function abrirDetalleProducto(codigo) {
   addBtn.dataset.codigo = obtenerIdArticulo(articulo);
   addBtn.dataset.nombre = descripcion.principal;
   addBtn.dataset.precio = String(precioVisual.precioCarrito);
-  addBtn.dataset.foto = articulo.fotoUrl || '';
+  addBtn.dataset.foto = imagenPrincipalArticulo(articulo) || '';
   const modal = document.getElementById('productDetailModal');
   modal.classList.remove('hidden');
   modal.classList.add('visible');
@@ -5741,7 +5746,7 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
       const tagsHtml = tags.length ? `<div class="card-tags">${tags.join('')}</div>` : '';
       return `<div class="lista-row" data-detail-code="${codigoArticulo}" data-result-item="1" tabindex="-1" role="button" aria-label="Ver detalle de ${descripcion.principal}">
         <div class="lista-cell lista-img-cell">
-          <button class="lista-img-btn${a.fotoUrl ? '' : ' is-empty'}" type="button" data-detail-trigger="1" data-detail-code="${codigoArticulo}" aria-label="Ver detalle">
+          <button class="lista-img-btn${imagenPrincipalArticulo(a) ? '' : ' is-empty'}" type="button" data-detail-trigger="1" data-detail-code="${codigoArticulo}" aria-label="Ver detalle">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           </button>
         </div>
@@ -5784,8 +5789,9 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
     const nombreHtml = resaltarTextoBusqueda(descripcion.principal, highlightTerms);
     const detalleHtml = descripcion.secundaria ? resaltarTextoBusqueda(descripcion.secundaria, highlightTerms) : escaparHtml('Detalle del artículo');
     const codigoHtml = resaltarTextoBusqueda(codigoArticulo, highlightTerms);
-    const foto = a.fotoUrl
-      ? `<img class="foto-real" src="${a.fotoUrl}" alt="${descripcion.principal}">`
+    const fotoPrincipal = imagenPrincipalArticulo(a);
+    const foto = fotoPrincipal
+      ? `<img class="foto-real" src="${fotoPrincipal}" alt="${descripcion.principal}">`
       : `<div class="foto-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>`;
     const { stockText, stockClass } = obtenerStockInfo(a);
     const precioLista = Number(a.precio || 0);
