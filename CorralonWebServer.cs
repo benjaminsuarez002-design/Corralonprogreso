@@ -766,7 +766,12 @@ internal sealed class ServerForm : Form
     private static string InjectArticleSharePreview(string html, HttpListenerRequest request, string fullPath)
     {
         if (String.IsNullOrWhiteSpace(html) || request == null) return html;
-        if (!String.Equals(Path.GetFileName(fullPath), "index.html", StringComparison.OrdinalIgnoreCase)) return html;
+        string fileName = Path.GetFileName(fullPath ?? "");
+        string requestPath = request.Url == null ? "" : request.Url.AbsolutePath.Trim('/');
+        bool isIndexRequest =
+            String.Equals(fileName, "index.html", StringComparison.OrdinalIgnoreCase) ||
+            String.Equals(requestPath, "index.html", StringComparison.OrdinalIgnoreCase);
+        if (!isIndexRequest) return html;
 
         string codigo = (request.QueryString["articulo"] ?? "").Trim();
         string image = CleanHttpUrl(request.QueryString["previewImg"]);
@@ -790,6 +795,8 @@ internal sealed class ServerForm : Form
         meta.AppendLine("<meta property=\"og:image\" content=\"" + HtmlAttr(image) + "\">");
         meta.AppendLine("<meta property=\"og:image:secure_url\" content=\"" + HtmlAttr(image) + "\">");
         meta.AppendLine("<meta property=\"og:image:alt\" content=\"" + HtmlAttr(title) + "\">");
+        meta.AppendLine("<meta property=\"og:image:width\" content=\"1200\">");
+        meta.AppendLine("<meta property=\"og:image:height\" content=\"1200\">");
         meta.AppendLine("<meta name=\"twitter:card\" content=\"summary_large_image\">");
         meta.AppendLine("<meta name=\"twitter:title\" content=\"" + HtmlAttr(title) + "\">");
         meta.AppendLine("<meta name=\"twitter:description\" content=\"" + HtmlAttr(description) + "\">");
