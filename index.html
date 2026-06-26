@@ -5164,6 +5164,12 @@ async function compartirConImagenSiSePuede(articulo, titulo, linkDirecto) {
   }
 }
 
+function textoCompartirArticulo(articulo, titulo, linkDirecto) {
+  const foto = String(articulo?.fotoUrl || '').trim();
+  if (!foto) return linkDirecto;
+  return `${titulo}\n${foto}\n${linkDirecto}`;
+}
+
 async function compartirDetalleProducto() {
   const codigo = productDetailAdminCode || document.getElementById('productDetailCode')?.textContent || '';
   if(!codigo) return;
@@ -5171,11 +5177,12 @@ async function compartirDetalleProducto() {
   const titulo = document.getElementById('productDetailTitle')?.textContent || obtenerDescripcionArticulo(articulo).principal || 'Articulo';
   const linkDirecto = linkArticuloDirecto(codigo, articulo, titulo);
   if (articulo && await compartirConImagenSiSePuede(articulo, titulo, linkDirecto)) return;
-  await copiarTextoSeguro(linkDirecto);
+  const textoCompartir = textoCompartirArticulo(articulo, titulo, linkDirecto);
+  await copiarTextoSeguro(textoCompartir);
   if(navigator.share && matchMedia('(max-width: 768px)').matches) {
-    try { await navigator.share({ title: titulo, text: titulo, url: linkDirecto }); } catch {}
+    try { await navigator.share({ title: titulo, text: textoCompartir }); } catch {}
   } else {
-    mostrarAvisoCarrito('Link copiado');
+    mostrarAvisoCarrito('Link con imagen copiado');
   }
 }
 
