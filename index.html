@@ -3501,7 +3501,7 @@ const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que uste
 // POPUP AL ABRIR
 onSnapshot(doc(db, 'config', 'popup'), snap => {
   const params = new URLSearchParams(location.search);
-  if (params.has('articulo') || params.has('prodeRef') || location.hash === '#prode' || location.hash === '#adescontar') return;
+  if (params.has('articulo') || params.has('prodeRef') || location.hash === '#prode' || location.hash === '#adescontar' || obtenerChipCatalogoDesdeHash()) return;
   if (window.CorralonFunciones?.isMenuSessionActive?.()) {
     document.getElementById('popupBg')?.classList.add('hidden');
     return;
@@ -3601,6 +3601,25 @@ let rubroActivo = '';
 let sortActivo = '';
 let chipActivo = '';
 let vistaActiva = 'cards';
+
+function obtenerChipCatalogoDesdeHash() {
+  const hash = normalizarTexto(String(location.hash || '').replace(/^#/, '')).replace(/[^a-z0-9]/g, '');
+  const mapa = {
+    oferta: 'oferta',
+    ofertas: 'oferta',
+    destacado: 'destacado',
+    destacados: 'destacado',
+    masvendido: 'masVendido',
+    masvendidos: 'masVendido',
+    top: 'masVendido',
+    ceramico: 'ceramico',
+    ceramicos: 'ceramico'
+  };
+  return mapa[hash] || '';
+}
+
+chipActivo = obtenerChipCatalogoDesdeHash();
+
 const MODO_ACCESO_RAPIDO = (() => {
   try {
     const params = new URLSearchParams(window.location.search || '');
@@ -7438,6 +7457,20 @@ onSnapshot(doc(db, 'config', PRODE_CONFIG_DOC_ID), snap => {
 });
 setInterval(() => prodeAutoActualizarResultados().catch(() => {}), PRODE_AUTO_RESULTS_INTERVAL_MS);
 if(location.hash === '#prode') setTimeout(abrirProde, 350);
+window.addEventListener('hashchange', () => {
+  if (location.hash === '#prode') {
+    abrirProde();
+    return;
+  }
+  if (location.hash === '#adescontar') return;
+  const chipHash = obtenerChipCatalogoDesdeHash();
+  if (!chipHash) return;
+  chipActivo = chipHash;
+  rubroActivo = '';
+  actualizarChipsEtiqueta();
+  aplicarBusquedaActual();
+  scrollMainToTop();
+});
 
 document.getElementById('scrollBody').addEventListener('click', e => {
   if (e.target.closest('.agregar-btn:not([data-detail-trigger])')) {

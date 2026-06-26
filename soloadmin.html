@@ -128,8 +128,10 @@
   .toast.err { border-color: var(--rojo); color: var(--rojo2); }
   .lista-col { grid-column: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   @media (max-width: 700px) { .lista-col { grid-column: 1; } }
-  .art-item { background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 10px; display: flex; gap: 12px; align-items: flex-start; transition: border-color .2s; }
+  .art-item { background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 10px; display: flex; gap: 12px; align-items: flex-start; transition: border-color .2s, box-shadow .2s, transform .2s; outline: none; }
   .art-item:hover { border-color: #3e4260; }
+  .art-item.admin-result-active,
+  .art-item:focus-visible { border-color: rgba(255,171,0,.9); box-shadow: 0 0 0 2px rgba(255,171,0,.2), 0 10px 24px rgba(0,0,0,.22); transform: translateY(-1px); }
   .art-item.window-item-enter { animation: adminItemEnter .22s ease; }
   @keyframes adminItemEnter {
     from { opacity: .42; transform: translateY(8px); }
@@ -1130,11 +1132,11 @@
     <div class="modal-title">Configurar oferta <button class="btn-cerrar-modal" onclick="cerrarModalOferta()">✕</button></div>
     <div class="offer-preview" id="offerPreview"></div>
     <div class="field">
-      <label>Porcentaje de descuento</label>
-      <input type="number" id="ofertaPctInput" min="1" max="99" step="0.01" placeholder="Ej: 10">
+      <label for="ofertaPctInput">Porcentaje de descuento</label>
+      <input type="text" id="ofertaPctInput" inputmode="decimal" autocomplete="off" placeholder="Ej: 10">
     </div>
     <div class="field">
-      <label>Hasta</label>
+      <label for="ofertaHastaInput">Hasta</label>
       <div class="admin-date-row">
         <input type="text" id="ofertaHastaInput" placeholder="Ej: 4 6" onblur="parseOfertaFecha(this.value)">
         <button class="admin-date-btn" type="button" onclick="toggleOfertaDp()">▦</button>
@@ -1635,6 +1637,46 @@ function syncTopPanelsHeight() {
   if (formHeight > 0) {
     topListCard.style.height = `${formHeight}px`;
   }
+}
+
+let adminResultadoActivoIndex = -1;
+
+function obtenerAdminResultados() {
+  return [...document.querySelectorAll('#listaArticulos .art-item[data-admin-result-item]')];
+}
+
+function limpiarAdminResultadoActivo() {
+  obtenerAdminResultados().forEach((item) => item.classList.remove('admin-result-active'));
+  adminResultadoActivoIndex = -1;
+}
+
+function setAdminResultadoActivo(index, { focus = true, scroll = true } = {}) {
+  const items = obtenerAdminResultados();
+  if (!items.length) {
+    adminResultadoActivoIndex = -1;
+    return false;
+  }
+  const normalizado = Math.max(0, Math.min(index, items.length - 1));
+  items.forEach((item, idx) => item.classList.toggle('admin-result-active', idx === normalizado));
+  adminResultadoActivoIndex = normalizado;
+  const activo = items[normalizado];
+  if (!activo) return false;
+  if (scroll) activo.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  if (focus) activo.focus({ preventScroll: true });
+  return true;
+}
+
+function enfocarPrimerAdminResultado() {
+  return setAdminResultadoActivo(0, { focus: true, scroll: true });
+}
+
+function moverAdminResultado(paso) {
+  const items = obtenerAdminResultados();
+  if (!items.length) return false;
+  const destino = adminResultadoActivoIndex >= 0
+    ? Math.max(0, Math.min(adminResultadoActivoIndex + paso, items.length - 1))
+    : 0;
+  return setAdminResultadoActivo(destino, { focus: true, scroll: true });
 }
 
 if (typeof ResizeObserver !== 'undefined') {
@@ -3045,7 +3087,7 @@ window.cancelarModalAplicarCampos = function() {
 
 function renderOfferPreview() {
   const precioLista = Number(document.getElementById('editPrecio').value || 0);
-  const pct = clampPct(document.getElementById('ofertaPctInput').value);
+  const pct = ofertaPctValue();
   const hasta = ofertaHastaIso();
   const precioFinal = precioOferta(precioLista, pct);
   document.getElementById('offerPreview').innerHTML = `
@@ -3061,6 +3103,52 @@ const OFERTA_DIAS = ['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
 let ofertaDpY = new Date().getFullYear();
 let ofertaDpM = new Date().getMonth();
 let ofertaDpSel = null;
+let ofertaModalNav = null;
+let ofertaModalLivePct = null;
+let ofertaModalFuncionesReady = false;
+
+function ofertaPctValue() {
+  const input = document.getElementById('ofertaPctInput');
+  const value = input?.value ?? '';
+  const cleaned = String(value).replace(/%/g, '').trim();
+  const parsed = window.CorralonFunciones?.parseLocaleNumber
+    ? window.CorralonFunciones.parseLocaleNumber(cleaned)
+    : parseDecimalInput(cleaned);
+  return clampPct(parsed);
+}
+
+function ofertaFormatPctInput(fixed = false) {
+  const input = document.getElementById('ofertaPctInput');
+  if (!input) return;
+  if (ofertaModalLivePct) {
+    ofertaModalLivePct.format(input, fixed);
+    return;
+  }
+  const value = ofertaPctValue();
+  input.value = fixed
+    ? value.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+    : String(input.value || '').replace('.', ',');
+}
+
+function inicializarFuncionesModalOferta() {
+  if (ofertaModalFuncionesReady) return;
+  const modal = document.getElementById('modalOferta');
+  if (!modal || !window.CorralonFunciones) return;
+  ofertaModalNav = window.CorralonFunciones.bindLinearNavigation({
+    root: modal,
+    selector: '#ofertaPctInput, #ofertaHastaInput, .admin-date-btn, .btn-cancelar, .btn-guardar-edit',
+    selectOnFocus: true,
+    wrap: true
+  });
+  ofertaModalLivePct = window.CorralonFunciones.bindLiveLocaleNumber({
+    root: modal,
+    selector: '#ofertaPctInput',
+    decimals: 2,
+    suffix: '%'
+  });
+  window.CorralonFunciones.bindLabelSelect({ root: modal });
+  ofertaModalFuncionesReady = true;
+}
 
 function ofertaDateToIso(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
@@ -3148,8 +3236,11 @@ window.ofertaSelDia = function(d) {
 };
 
 window.abrirModalOferta = function () {
+  inicializarFuncionesModalOferta();
   ofertaModalSnapshot = { ...editMeta };
-  document.getElementById('ofertaPctInput').value = editMeta.ofertaPct || '';
+  document.getElementById('ofertaPctInput').value = editMeta.ofertaPct
+    ? `${Number(editMeta.ofertaPct).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`
+    : '';
   const clean = sanitizeIsoDate(editMeta.ofertaHasta);
   const input = document.getElementById('ofertaHastaInput');
   input.dataset.iso = clean;
@@ -3167,6 +3258,9 @@ window.abrirModalOferta = function () {
   }
   renderOfferPreview();
   document.getElementById('modalOferta').classList.add('visible');
+  requestAnimationFrame(() => {
+    ofertaModalNav?.focusFirst?.();
+  });
 };
 
 window.cerrarModalOferta = function () {
@@ -3181,7 +3275,8 @@ window.cancelarModalOferta = function () {
 };
 
 window.guardarModalOferta = function () {
-  const pct = clampPct(document.getElementById('ofertaPctInput').value);
+  ofertaFormatPctInput(true);
+  const pct = ofertaPctValue();
   const hasta = ofertaHastaIso();
   if (pct <= 0) {
     toast('Ingresá un porcentaje mayor a 0 para la oferta', 'err');
@@ -3241,8 +3336,17 @@ window.guardarModalCeramico = function () {
 };
 
 document.getElementById('ofertaPctInput').addEventListener('input', renderOfferPreview);
+document.getElementById('ofertaPctInput').addEventListener('blur', () => {
+  ofertaFormatPctInput(true);
+  renderOfferPreview();
+});
 document.getElementById('ofertaHastaInput').addEventListener('change', renderOfferPreview);
-document.getElementById('ofertaHastaInput').addEventListener('input', renderOfferPreview);
+document.getElementById('ofertaHastaInput').addEventListener('input', () => {
+  const input = document.getElementById('ofertaHastaInput');
+  const parsed = window.CorralonFunciones?.parseFechaFlexible?.(input.value);
+  if (parsed) input.dataset.iso = ofertaDateToIso(parsed.date);
+  renderOfferPreview();
+});
 document.getElementById('editPrecio').addEventListener('input', () => {
   renderEditChips();
   if (document.getElementById('modalOferta').classList.contains('visible')) renderOfferPreview();
@@ -3518,10 +3622,18 @@ searchAdminInput.addEventListener('focus', () => filtrarLista());
 applyTargetsSearchInput.addEventListener('focus', () => renderApplyTargetsList(true));
 portadaTargetsSearchInput.addEventListener('focus', () => renderPortadaTargetsList(true));
 searchAdminInput.addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter') return;
-  event.preventDefault();
-  filtrarLista();
-  ocultarAdminAssist('searchAdminAssist', searchAdminInput);
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    filtrarLista();
+    toggleAdminAssistPanel('searchAdminAssist', false);
+    requestAnimationFrame(() => enfocarPrimerAdminResultado());
+    return;
+  }
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    toggleAdminAssistPanel('searchAdminAssist', false);
+    enfocarPrimerAdminResultado();
+  }
 });
 applyTargetsSearchInput.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
@@ -4577,7 +4689,7 @@ function renderAdminWindow({ anchorCode = '', anchorTop = null, animateCodes = n
   const hayMas = end < total;
   document.getElementById('artContador').innerHTML = `<b>${total}</b> artículo${total !== 1 ? 's' : ''} · mostrando <b>${start + 1}</b> a <b>${end}</b>`;
   el.innerHTML = pageItems.map(a => `
-    <div class="art-item${animateCodes?.has(String(a.codigo || '').trim()) ? ' window-item-enter' : ''}" data-code="${a.codigo}">
+    <div class="art-item${animateCodes?.has(String(a.codigo || '').trim()) ? ' window-item-enter' : ''}" data-code="${a.codigo}" data-admin-result-item="1" tabindex="-1" role="button" aria-label="Editar ${a.nombre || 'articulo'}">
       ${a.fotoUrl ? `<img class="art-foto" src="${a.fotoUrl}" alt="${a.nombre}">` : `<div class="art-foto-placeholder">📷</div>`}
       <div class="art-info">
         <div class="art-nombre">${a.nombre || '-'}</div>
@@ -4618,6 +4730,46 @@ window.filtrarLista = ({ adminListSnapshot = null } = {}) => {
   if (adminRubroActivo) lista = lista.filter(a => String(a.rubro || '').trim() === adminRubroActivo);
   renderLista(lista, { adminListSnapshot });
 };
+
+document.getElementById('listaArticulos').addEventListener('focusin', (event) => {
+  const item = event.target.closest('[data-admin-result-item]');
+  if (!item) return;
+  const idx = obtenerAdminResultados().indexOf(item);
+  if (idx >= 0) setAdminResultadoActivo(idx, { focus: false, scroll: false });
+});
+
+document.getElementById('listaArticulos').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-admin-result-item]');
+  if (!item || event.target.closest('button')) return;
+  const idx = obtenerAdminResultados().indexOf(item);
+  if (idx >= 0) setAdminResultadoActivo(idx, { focus: false, scroll: false });
+});
+
+document.getElementById('listaArticulos').addEventListener('keydown', (event) => {
+  const item = event.target.closest('[data-admin-result-item]');
+  if (!item) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    moverAdminResultado(1);
+    return;
+  }
+  if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+    event.preventDefault();
+    moverAdminResultado(-1);
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const codigo = item.dataset.code || '';
+    if (codigo) abrirEditar(codigo);
+    return;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    searchAdminInput.focus({ preventScroll: true });
+    searchAdminInput.select();
+  }
+});
 
 function actualizarChipsAdminUI() {
   document.querySelectorAll('#adminChipFilters .admin-filter-chip').forEach((chip) => {
