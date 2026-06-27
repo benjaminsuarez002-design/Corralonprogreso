@@ -1554,6 +1554,27 @@ function prodeResultadoTipo(local, visitante) {
   if(l < v) return 'visitante';
   return 'empate';
 }
+function prodePrediccionTimeAdmin(pred = {}) {
+  if(!pred || typeof pred !== 'object') return 0;
+  const raw = pred.guardadoEn || pred.savedAt || pred.updatedAt || pred.guardadoEnIso || pred.savedAtIso || pred.guardadoEnMs || pred.savedAtMs || '';
+  if(raw && typeof raw.toDate === 'function') return raw.toDate().getTime();
+  if(raw && typeof raw.seconds === 'number') return (raw.seconds * 1000) + Math.floor((raw.nanoseconds || 0) / 1000000);
+  if(raw && typeof raw._seconds === 'number') return (raw._seconds * 1000) + Math.floor((raw._nanoseconds || 0) / 1000000);
+  if(typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+  if(typeof raw === 'string') {
+    const parsed = new Date(raw).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+function prodePrediccionTardiaAdmin(id, pred = {}) {
+  const partido = PRODE_PARTIDOS.find((item) => item.id === id);
+  if(!partido || partido.pendiente) return false;
+  const guardado = prodePrediccionTimeAdmin(pred);
+  if(!guardado) return false;
+  const inicio = prodePartidoTimeAdmin(partido);
+  return !!inicio && guardado >= inicio;
+}
 function calcularPuntosProdeJugador(predicciones = {}, reales = {}, compartidos = 0) {
   let puntos = Number(compartidos || 0);
   Object.entries(reales || {}).forEach(([id, real]) => {
@@ -1564,6 +1585,7 @@ function calcularPuntosProdeJugador(predicciones = {}, reales = {}, compartidos 
     const pv = Number(pred.visitante === '' || pred.visitante == null ? 0 : pred.visitante);
     const rl = Number(real.local), rv = Number(real.visitante);
     if(!Number.isFinite(pl) || !Number.isFinite(pv) || !Number.isFinite(rl) || !Number.isFinite(rv)) return;
+    if(prodePrediccionTardiaAdmin(id, pred)) return;
     if(pl === rl && pv === rv) puntos += 10;
     else if(prodeResultadoTipo(pl, pv) === prodeResultadoTipo(rl, rv)) puntos += 5;
   });

@@ -1038,6 +1038,7 @@
   .prode-points-pill { display:inline-flex; align-items:center; justify-content:center; min-width:50px; min-height:26px; padding:3px 12px; border-radius:999px; border:1px solid currentColor; font-family:'Barlow Condensed',sans-serif; font-size:19px; font-weight:900; background:#fff; box-shadow:0 6px 14px rgba(8,18,40,.08); }
   .prode-real-pill { display:inline-flex; align-items:center; justify-content:center; min-height:26px; padding:4px 11px; border-radius:999px; background:#eef8ff; color:#24435f; border:1px solid #cfeaff; font-size:11px; font-weight:900; letter-spacing:.01em; white-space:nowrap; box-shadow:0 6px 14px rgba(8,18,40,.05); }
   .prode-real-pill strong { margin-left:4px; color:#10203b; font-size:13px; font-weight:900; }
+  .prode-invalid-pill { display:inline-flex; align-items:center; justify-content:center; min-height:26px; padding:4px 11px; border-radius:999px; background:#fff0f0; color:#c91b1b; border:1px solid #ffb7b7; font-size:11px; font-weight:900; letter-spacing:.01em; white-space:nowrap; box-shadow:0 6px 14px rgba(201,27,27,.08); }
   .prode-points-win { color:#008a3d; background:#eafff2; }
   .prode-points-half { color:#b88400; background:#fff8d7; }
   .prode-points-zero { color:#d71d1d; background:#fff0f0; }
@@ -1112,6 +1113,7 @@
     .prode-points-pill { min-width:46px; min-height:24px; padding:2px 10px; font-size:18px; }
     .prode-real-pill { min-height:24px; padding:3px 9px; font-size:10px; }
     .prode-real-pill strong { font-size:12px; }
+    .prode-invalid-pill { min-height:24px; padding:3px 9px; font-size:10px; }
     .prode-match-close { grid-column:1 / -1; grid-row:4; margin-top:-2px; font-size:10px; line-height:1.2; }
     .prode-match input { height:36px; font-size:16px; padding:0; border-radius:10px; }
     .prode-player { grid-template-columns:1fr; }
@@ -6630,6 +6632,27 @@ function prodePartidoTime(partido) {
   if(Number.isNaN(d.getTime())) return 0;
   return d.getTime() + 5 * 60 * 1000;
 }
+function prodePrediccionTime(pred = {}) {
+  if(!pred || typeof pred !== 'object') return 0;
+  const raw = pred.guardadoEn || pred.savedAt || pred.updatedAt || pred.guardadoEnIso || pred.savedAtIso || pred.guardadoEnMs || pred.savedAtMs || '';
+  if(raw && typeof raw.toDate === 'function') return raw.toDate().getTime();
+  if(raw && typeof raw.seconds === 'number') return (raw.seconds * 1000) + Math.floor((raw.nanoseconds || 0) / 1000000);
+  if(raw && typeof raw._seconds === 'number') return (raw._seconds * 1000) + Math.floor((raw._nanoseconds || 0) / 1000000);
+  if(typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+  if(typeof raw === 'string') {
+    const parsed = new Date(raw).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+function prodePrediccionTardia(id, pred = {}) {
+  const partido = prodePartidoPorId(id);
+  if(!partido || partido.pendiente) return false;
+  const guardado = prodePrediccionTime(pred);
+  if(!guardado) return false;
+  const inicio = prodePartidoTime(partido);
+  return !!inicio && guardado >= inicio;
+}
 function prodeFechaIso(fecha) {
   const d = fecha instanceof Date ? fecha : new Date(fecha);
   if(Number.isNaN(d.getTime())) return '';
@@ -6925,23 +6948,26 @@ function prodeResultadoTipo(local, visitante) {
 function prodeResultadoCompleto(resultado = {}) {
   return prodeScoreValue(resultado.local) !== '' && prodeScoreValue(resultado.visitante) !== '';
 }
-function prodePuntosPrediccion(pred = {}, real = {}) {
+function prodePuntosPrediccion(pred = {}, real = {}, id = '') {
   const pl = prodeScoreValue(pred.local) || '0';
   const pv = prodeScoreValue(pred.visitante) || '0';
   const rl = prodeScoreValue(real.local);
   const rv = prodeScoreValue(real.visitante);
   if(rl === '' || rv === '') return null;
+  if(id && prodePrediccionTardia(id, pred)) return 0;
   if(pl === rl && pv === rv) return 10;
   return prodeResultadoTipo(pl, pv) === prodeResultadoTipo(rl, rv) ? 5 : 0;
 }
-function prodePuntosHtml(pred, real) {
-  const puntos = prodePuntosPrediccion(pred, real);
+function prodePuntosHtml(pred, real, id = '') {
+  const puntos = prodePuntosPrediccion(pred, real, id);
   if(puntos === null) return '';
   const rl = prodeScoreValue(real.local) || '0';
   const rv = prodeScoreValue(real.visitante) || '0';
   const cls = puntos === 10 ? 'prode-points-win' : puntos === 5 ? 'prode-points-half' : 'prode-points-zero';
   const label = puntos > 0 ? `+${puntos}` : '0';
-  return `<div class="prode-points-result" data-prode-points-result><span class="prode-real-pill">Resultado <strong>${rl}-${rv}</strong></span><span class="prode-points-pill ${cls}">${label}</span></div>`;
+  const invalida = id && prodePrediccionTardia(id, pred);
+  const invalidHtml = invalida ? '<span class="prode-invalid-pill">Fuera de término · inválido</span>' : '';
+  return `<div class="prode-points-result" data-prode-points-result><span class="prode-real-pill">Resultado <strong>${rl}-${rv}</strong></span>${invalidHtml}<span class="prode-points-pill ${cls}">${label}</span></div>`;
 }
 function prodeActualizarPuntosFila(row) {
   const id = row?.dataset?.prodeMatch || '';
@@ -6950,7 +6976,7 @@ function prodeActualizarPuntosFila(row) {
     local: row.querySelector('[data-prode-score="local"]')?.value || '',
     visitante: row.querySelector('[data-prode-score="visitante"]')?.value || ''
   };
-  const html = prodePuntosHtml(pred, (prodeConfig.resultadosReales || {})[id] || {});
+  const html = prodePuntosHtml(pred, (prodeConfig.resultadosReales || {})[id] || {}, id);
   const actual = row.querySelector('[data-prode-points-result]');
   if(actual) actual.remove();
   if(!html) return;
@@ -6963,7 +6989,18 @@ function prodeNormalizarResultados(resultados = {}) {
     const local = prodeScoreValue(r.local);
     const visitante = prodeScoreValue(r.visitante);
     if(local === '' && visitante === '') return;
-    limpio[partido.id] = { local, visitante };
+    limpio[partido.id] = {
+      local,
+      visitante,
+      ...(r.guardadoEn ? { guardadoEn:r.guardadoEn } : {}),
+      ...(r.guardadoEnIso ? { guardadoEnIso:r.guardadoEnIso } : {}),
+      ...(r.guardadoEnMs ? { guardadoEnMs:r.guardadoEnMs } : {}),
+      ...(r.savedAt ? { savedAt:r.savedAt } : {}),
+      ...(r.savedAtIso ? { savedAtIso:r.savedAtIso } : {}),
+      ...(r.savedAtMs ? { savedAtMs:r.savedAtMs } : {}),
+      ...(r.partidoInicioIso ? { partidoInicioIso:r.partidoInicioIso } : {}),
+      ...(r.partidoCierreIso ? { partidoCierreIso:r.partidoCierreIso } : {})
+    };
   });
   return limpio;
 }
@@ -7021,6 +7058,7 @@ function calcularPuntosProdeDesdeResultados(predicciones = {}, reales = {}, comp
     const pv = predVisitante === '' ? '0' : predVisitante;
     const rl = prodeScoreValue(real.local);
     const rv = prodeScoreValue(real.visitante);
+    if(prodePrediccionTardia(id, pred)) return;
     if(pl === rl && pv === rv) puntos += 10;
     else if(prodeResultadoTipo(pl, pv) === prodeResultadoTipo(rl, rv)) puntos += 5;
   });
@@ -7095,9 +7133,15 @@ function prodeLeerResultadosVisibles() {
       prodeRestaurarFilaCerrada(row);
       return;
     }
+    const anterior = resultados[id] || {};
     resultados[id] = {
       local: prodeScoreValue(row.querySelector('[data-prode-score="local"]')?.value || ''),
-      visitante: prodeScoreValue(row.querySelector('[data-prode-score="visitante"]')?.value || '')
+      visitante: prodeScoreValue(row.querySelector('[data-prode-score="visitante"]')?.value || ''),
+      ...(anterior.guardadoEn ? { guardadoEn:anterior.guardadoEn } : {}),
+      ...(anterior.guardadoEnIso ? { guardadoEnIso:anterior.guardadoEnIso } : {}),
+      ...(anterior.guardadoEnMs ? { guardadoEnMs:anterior.guardadoEnMs } : {}),
+      ...(anterior.partidoInicioIso ? { partidoInicioIso:anterior.partidoInicioIso } : {}),
+      ...(anterior.partidoCierreIso ? { partidoCierreIso:anterior.partidoCierreIso } : {})
     };
     if(resultados[id].local === '' && resultados[id].visitante === '') delete resultados[id];
   });
@@ -7138,8 +7182,19 @@ async function prodeSyncPartidoRemoto(row) {
   const local = prodeScoreValue(row.querySelector('[data-prode-score="local"]')?.value || '');
   const visitante = prodeScoreValue(row.querySelector('[data-prode-score="visitante"]')?.value || '');
   const field = `resultados.${id}`;
+  const now = new Date();
+  const partido = prodePartidoPorId(id);
+  const inicioPartido = partido ? prodePartidoTime(partido) : 0;
   const patch = {
-    [field]: local === '' && visitante === '' ? deleteField() : {local, visitante},
+    [field]: local === '' && visitante === '' ? deleteField() : {
+      local,
+      visitante,
+      guardadoEn: serverTimestamp(),
+      guardadoEnIso: now.toISOString(),
+      guardadoEnMs: now.getTime(),
+      partidoInicioIso: inicioPartido ? new Date(inicioPartido).toISOString() : '',
+      partidoCierreIso: partido?.cierre || ''
+    },
     fixtureVersion:PRODE_FIXTURE_VERSION,
     partidosFixture:prodePartidos.length,
     updated_at:serverTimestamp()
@@ -7196,7 +7251,7 @@ function renderProde() {
         <input type="text" inputmode="numeric" maxlength="2" data-prode-score="visitante" value="${registrado ? (r.visitante ?? '') : ''}" ${cerrado || !remotoListo || p.pendiente ? 'disabled' : ''}>
       </div>
       <div class="prode-team prode-team-visitante"><span class="prode-flag">${p.pendiente ? '–' : prodeFlagHtml(p.flagVisitante)}</span><span>${escaparHtml(p.visitante || 'Por definir')}</span></div>
-      ${registrado ? prodePuntosHtml(r, real) : ''}
+      ${registrado ? prodePuntosHtml(r, real, p.id) : ''}
       ${cierreTxt}
     </div>`;
   }).join('') : emptyHtml);
@@ -7456,7 +7511,7 @@ async function abrirPrediccionesJugador(playerId) {
         <div class="prode-team prode-team-local"><span class="prode-flag">${prodeFlagHtml(partido.flagLocal)}</span><span>${escaparHtml(partido.local)}</span></div>
         <div class="prode-scorebox"><input type="text" value="${local}" disabled><span>-</span><input type="text" value="${visitante}" disabled></div>
         <div class="prode-team prode-team-visitante"><span class="prode-flag">${prodeFlagHtml(partido.flagVisitante)}</span><span>${escaparHtml(partido.visitante)}</span></div>
-        ${prodePuntosHtml(pred, (prodeConfig.resultadosReales || {})[partido.id] || {})}
+        ${prodePuntosHtml(pred, (prodeConfig.resultadosReales || {})[partido.id] || {}, partido.id)}
         <div class="prode-match-close">${escaparHtml(partido.fecha)} · horario Argentina</div>
       </div>`;
     }).join('') : '<div class="prode-prediction-empty">Este participante todavía no cargó predicciones.</div>');
