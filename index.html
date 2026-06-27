@@ -6878,6 +6878,39 @@ function prodePartidoCerrado(partido) {
   if(!cierre) return false;
   return new Date() >= new Date(cierre);
 }
+function prodePartidoPorId(id) {
+  return prodePartidos.find((partido) => partido.id === id) || null;
+}
+function prodeFilaCerrada(row) {
+  const id = row?.dataset?.prodeMatch || '';
+  const partido = prodePartidoPorId(id);
+  return !!(partido && prodePartidoCerrado(partido));
+}
+function prodeRestaurarFilaCerrada(row) {
+  if(!row) return;
+  const id = row.dataset.prodeMatch || '';
+  const pred = prodeDraft().resultados?.[id] || {};
+  const local = row.querySelector('[data-prode-score="local"]');
+  const visitante = row.querySelector('[data-prode-score="visitante"]');
+  if(local) {
+    local.value = pred.local ?? '';
+    local.disabled = true;
+  }
+  if(visitante) {
+    visitante.value = pred.visitante ?? '';
+    visitante.disabled = true;
+  }
+  clearTimeout(prodeScoreSyncTimers.get(id));
+  prodeScoreSyncTimers.delete(id);
+  prodeActualizarPuntosFila(row);
+}
+function prodeActualizarBloqueosEnVivo() {
+  const modal = document.getElementById('prodeModal');
+  if(!modal || modal.classList.contains('hidden')) return;
+  document.querySelectorAll('#prodeMatches [data-prode-match]').forEach((row) => {
+    if(prodeFilaCerrada(row)) prodeRestaurarFilaCerrada(row);
+  });
+}
 function prodeScoreValue(value) {
   const raw = String(value ?? '').replace(/\D/g, '').slice(0, 2);
   if(raw === '') return '';
@@ -7058,6 +7091,10 @@ function prodeLeerResultadosVisibles() {
   const resultados = prodeNormalizarResultados(prodeDraft().resultados || {});
   document.querySelectorAll('[data-prode-match]').forEach((row) => {
     const id = row.dataset.prodeMatch;
+    if(prodeFilaCerrada(row)) {
+      prodeRestaurarFilaCerrada(row);
+      return;
+    }
     resultados[id] = {
       local: prodeScoreValue(row.querySelector('[data-prode-score="local"]')?.value || ''),
       visitante: prodeScoreValue(row.querySelector('[data-prode-score="visitante"]')?.value || '')
@@ -7093,6 +7130,11 @@ async function prodeSyncPartidoRemoto(row) {
   const user = prodeUser();
   const id = row?.dataset?.prodeMatch || '';
   if(!user.doc || !id || prodeRemoteReadyFor !== user.doc) return;
+  if(prodeFilaCerrada(row)) {
+    prodeRestaurarFilaCerrada(row);
+    prodeToastMsg('Ese partido ya está cerrado');
+    return;
+  }
   const local = prodeScoreValue(row.querySelector('[data-prode-score="local"]')?.value || '');
   const visitante = prodeScoreValue(row.querySelector('[data-prode-score="visitante"]')?.value || '');
   const field = `resultados.${id}`;
@@ -7487,6 +7529,11 @@ document.getElementById('prodeModal')?.addEventListener('input', (e) => {
   }
   if(e.target.matches('[data-prode-score]')) {
     const row = e.target.closest('[data-prode-match]');
+    if(prodeFilaCerrada(row)) {
+      prodeRestaurarFilaCerrada(row);
+      prodeToastMsg('Ese partido ya está cerrado');
+      return;
+    }
     prodeGuardarDraftLocal();
     prodeActualizarPuntosFila(row);
     const id = row?.dataset?.prodeMatch || '';
@@ -7508,6 +7555,11 @@ document.getElementById('prodeModal')?.addEventListener('change', (e) => {
   if(e.target.matches('[data-prode-score]')) {
     const row = e.target.closest('[data-prode-match]');
     const id = row?.dataset?.prodeMatch || '';
+    if(prodeFilaCerrada(row)) {
+      prodeRestaurarFilaCerrada(row);
+      prodeToastMsg('Ese partido ya está cerrado');
+      return;
+    }
     prodeGuardarDraftLocal();
     prodeActualizarPuntosFila(row);
     clearTimeout(prodeScoreSyncTimers.get(id));
@@ -7526,6 +7578,11 @@ onSnapshot(doc(db, 'config', PRODE_CONFIG_DOC_ID), snap => {
   if(snap.exists()) prodeConfig = { ...prodeConfig, ...(snap.data() || {}) };
   if(!document.getElementById('prodeModal')?.classList.contains('hidden')) renderProde();
   prodeAutoActualizarResultados().catch(() => {});
+});
+setInterval(prodeActualizarBloqueosEnVivo, 15000);
+window.addEventListener('focus', prodeActualizarBloqueosEnVivo);
+document.addEventListener('visibilitychange', () => {
+  if(!document.hidden) prodeActualizarBloqueosEnVivo();
 });
 setInterval(() => prodeAutoActualizarResultados().catch(() => {}), PRODE_AUTO_RESULTS_INTERVAL_MS);
 if(location.hash === '#prode') setTimeout(abrirProde, 350);
