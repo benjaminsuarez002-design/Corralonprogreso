@@ -6655,6 +6655,14 @@ const prodeEliminatoriasPendientes = [
   pendiente:true
 })));
 prodePartidos.push(...prodeDieciseisavos, ...prodeOctavosParciales, ...prodeEliminatoriasPendientes);
+const prodePartidosBase = prodePartidos.map((partido) => ({ ...partido }));
+function prodeAplicarFixtureDinamico(fixture = {}) {
+  const dynamic = fixture && typeof fixture === 'object' ? fixture : {};
+  prodePartidos.splice(0, prodePartidos.length, ...prodePartidosBase.map((partido) => ({
+    ...partido,
+    ...(dynamic[partido.id] || {})
+  })));
+}
 function prodePartidoTime(partido) {
   if(partido.fechaIso && !partido.cierre) return new Date(`${partido.fechaIso}T12:00:00`).getTime();
   const d = new Date(partido.cierre || '');
@@ -6837,7 +6845,8 @@ function prodeBuildDateFases() {
 const prodeFases = prodeBuildDateFases();
 const PRODE_AUTO_RESULTS_INTERVAL_MS = 10 * 60 * 1000;
 const PRODE_AUTO_RESULTS_MIN_REMOTE_MS = 5 * 60 * 1000;
-const PRODE_ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260628&limit=300';
+const PRODE_ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=300';
+const PRODE_ESPN_KNOCKOUT_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260628-20260719&limit=300';
 const PRODE_ESPN_CODES = {
   MX:'MEX', ZA:'RSA', KR:'KOR', CZ:'CZE', CA:'CAN', BA:'BIH', QA:'QAT', CH:'SUI',
   BR:'BRA', MA:'MAR', HT:'HAI', SCT:'SCO', US:'USA', PY:'PAR', AU:'AUS', TR:'TUR',
@@ -7047,20 +7056,247 @@ function prodeCodigoEspn(flagCode) {
 function prodeResultadoAutoCompleto(resultado = {}) {
   return prodeScoreValue(resultado.local) !== '' && prodeScoreValue(resultado.visitante) !== '';
 }
+function prodePartesFechaArgentina(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if(Number.isNaN(date.getTime())) return null;
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone:'America/Argentina/Buenos_Aires',
+    year:'numeric',
+    month:'2-digit',
+    day:'2-digit',
+    hour:'2-digit',
+    minute:'2-digit',
+    hourCycle:'h23'
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: parts.hour,
+    minute: parts.minute
+  };
+}
+function prodeFechaArgentinaDesdeEspn(value) {
+  const parts = prodePartesFechaArgentina(value);
+  if(!parts) return { fechaIso:'', fecha:'' };
+  return {
+    fechaIso: `${parts.year}-${parts.month}-${parts.day}`,
+    fecha: `${parts.day}/${parts.month} ${parts.hour}:${parts.minute}`
+  };
+}
+function prodeCierreArgentinaDesdeEspn(value) {
+  const date = new Date(value);
+  if(Number.isNaN(date.getTime())) return '';
+  const cierre = new Date(date.getTime() - 5 * 60 * 1000);
+  const parts = prodePartesFechaArgentina(cierre);
+  if(!parts) return '';
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+function prodeFlagDesdeEspnCode(code) {
+  const raw = String(code || '').trim().toUpperCase();
+  if(!raw) return '';
+  const match = Object.entries(PRODE_ESPN_CODES).find(([, espnCode]) => espnCode === raw);
+  if(match) return match[0];
+  return /^[A-Z]{2}$/.test(raw) ? raw : '';
+}
+function prodeDescripcionGanadorDe(partido) {
+  if(!partido) return '';
+  const local = String(partido.local || '').trim();
+  const visitante = String(partido.visitante || '').trim();
+  if(!local || !visitante) return '';
+  if(/por definir|ganador/i.test(`${local} ${visitante}`)) return '';
+  return `Ganador de ${local} / ${visitante}`;
+}
+function prodePlaceholderPorLlave(fase, numero) {
+  const n = Number(numero);
+  if(!Number.isFinite(n) || n <= 0) return '';
+  const faseNorm = String(fase || '').toLowerCase();
+  const map = {
+    rd32: { id:'16avos', label:'Ganador 16avos' },
+    r32: { id:'16avos', label:'Ganador 16avos' },
+    'round of 32': { id:'16avos', label:'Ganador 16avos' },
+    rd16: { id:'8avos', label:'Ganador 8avos' },
+    r16: { id:'8avos', label:'Ganador 8avos' },
+    'round of 16': { id:'8avos', label:'Ganador 8avos' },
+    qf: { id:'4tos', label:'Ganador 4tos' },
+    quarterfinal: { id:'4tos', label:'Ganador 4tos' },
+    sf: { id:'semi', label:'Ganador semifinal' },
+    semifinal: { id:'semi', label:'Ganador semifinal' },
+    final: { id:'final', label:'Ganador final' }
+  };
+  const meta = map[faseNorm];
+  if(!meta) return '';
+  const partido = prodePartidos.find((item) => item.id === `${meta.id}_${n}`)
+    || prodePartidosBase.find((item) => item.id === `${meta.id}_${n}`);
+  return prodeDescripcionGanadorDe(partido) || `${meta.label} ${n}`;
+}
+function prodeTraducirPlaceholderEspn(text) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  let match = value.match(/Round of 32\s+(\d+)\s+Winner/i);
+  if(match) return prodePlaceholderPorLlave('round of 32', match[1]);
+  match = value.match(/Round of 16\s+(\d+)\s+Winner/i);
+  if(match) return prodePlaceholderPorLlave('round of 16', match[1]);
+  match = value.match(/Quarterfinal\s+(\d+)\s+Winner/i);
+  if(match) return prodePlaceholderPorLlave('quarterfinal', match[1]);
+  match = value.match(/Semifinal\s+(\d+)\s+Winner/i);
+  if(match) return prodePlaceholderPorLlave('semifinal', match[1]);
+  match = value.match(/Final\s+(\d+)\s+Winner/i);
+  if(match) return prodePlaceholderPorLlave('final', match[1]);
+  match = value.match(/\b(RD32|R32|RD16|R16|QF|SF)\s*W\s*(\d+)\b/i);
+  if(match) return prodePlaceholderPorLlave(match[1], match[2]);
+  match = value.match(/\b(RD32|R32|RD16|R16|QF|SF)(\d+)\b/i);
+  if(match) return prodePlaceholderPorLlave(match[1], match[2]);
+  return value || 'Por definir';
+}
+function prodePlaceholderEspn(text) {
+  const value = String(text || '').trim();
+  return /winner|loser|round of|quarterfinal|semifinal|to be determined|tbd/i.test(value)
+    || /^(RD32|R32|RD16|R16|QF|SF|TBD)\s*W?\s*\d*/i.test(value);
+}
+function prodeNombreDesdeEspnCode(code, fallback = '') {
+  const flag = prodeFlagDesdeEspnCode(code);
+  const partido = prodePartidosBase.find((item) => item.flagLocal === flag || item.flagVisitante === flag);
+  if(partido) return partido.flagLocal === flag ? partido.local : partido.visitante;
+  const fallbackMap = {
+    'United States':'Estados Unidos',
+    'South Africa':'Sudafrica',
+    'Czech Republic':'Republica Checa',
+    'Bosnia-Herzegovina':'Bosnia y Herzegovina',
+    'Bosnia and Herzegovina':'Bosnia y Herzegovina',
+    'Ivory Coast':'Costa de Marfil',
+    'Netherlands':'Paises Bajos',
+    'England':'Inglaterra',
+    'DR Congo':'RD Congo',
+    'Congo DR':'RD Congo',
+    'Cape Verde':'Cabo Verde',
+    'Saudi Arabia':'Arabia Saudita',
+    'Switzerland':'Suiza',
+    'Germany':'Alemania',
+    'Spain':'Espana',
+    'Morocco':'Marruecos',
+    'Japan':'Japon',
+    'Algeria':'Argelia',
+    'Austria':'Austria',
+    'Croatia':'Croacia',
+    'Portugal':'Portugal',
+    'Colombia':'Colombia',
+    'Ghana':'Ghana',
+    'Canada':'Canada',
+    'Brazil':'Brasil',
+    'Paraguay':'Paraguay',
+    'France':'Francia',
+    'Sweden':'Suecia',
+    'Mexico':'Mexico',
+    'Ecuador':'Ecuador',
+    'Belgium':'Belgica',
+    'Senegal':'Senegal',
+    'Australia':'Australia',
+    'Egypt':'Egipto',
+    'Argentina':'Argentina'
+  };
+  return fallbackMap[fallback] || fallback || flag || 'Por definir';
+}
+function prodeEquipoDesdeEspn(competitor = {}) {
+  const team = competitor?.team || {};
+  const abbreviation = String(team.abbreviation || '').trim().toUpperCase();
+  const display = team.shortDisplayName || team.displayName || team.name || abbreviation;
+  const placeholder = prodePlaceholderEspn(abbreviation) || prodePlaceholderEspn(display);
+  return {
+    nombre: placeholder ? prodeTraducirPlaceholderEspn(display || abbreviation) : prodeNombreDesdeEspnCode(abbreviation, display),
+    flag: placeholder ? '' : prodeFlagDesdeEspnCode(abbreviation),
+    placeholder
+  };
+}
+function prodeCompetidoresHomeAway(event = {}) {
+  const competitors = event?.competitions?.[0]?.competitors || [];
+  return {
+    home: competitors.find((c) => c.homeAway === 'home') || competitors[0],
+    away: competitors.find((c) => c.homeAway === 'away') || competitors[1],
+    competitors
+  };
+}
+function prodeEventosOrdenadosEspn(data = {}) {
+  return (Array.isArray(data.events) ? data.events : [])
+    .slice()
+    .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+}
+function prodeFixtureMetaDesdeIndice(index) {
+  if(index <= 16) return { id:`16avos_${index}`, fase:'16avos', faseLabel:'16avos de final' };
+  if(index <= 24) return { id:`8avos_${index - 16}`, fase:'8avos', faseLabel:'8avos de final' };
+  if(index <= 28) return { id:`4tos_${index - 24}`, fase:'4tos', faseLabel:'Cuartos de final' };
+  if(index <= 30) return { id:`semi_${index - 28}`, fase:'semi', faseLabel:'Semifinal' };
+  if(index === 31) return { id:'final_1', fase:'final', faseLabel:'Final' };
+  return null;
+}
+async function prodeFetchFixtureEspn() {
+  const response = await fetch(`${PRODE_ESPN_KNOCKOUT_URL}&_=${Date.now()}`, { cache:'no-store' });
+  if(!response.ok) throw new Error(`ESPN ${response.status}`);
+  const data = await response.json();
+  const fixture = {};
+  let knockoutIndex = 0;
+  prodeEventosOrdenadosEspn(data).forEach((event) => {
+    const { home, away, competitors } = prodeCompetidoresHomeAway(event);
+    const labels = competitors.map((c) => `${c?.team?.displayName || ''} ${c?.team?.shortDisplayName || ''} ${c?.team?.abbreviation || ''}`).join(' ');
+    if(/loser/i.test(labels)) return;
+    knockoutIndex++;
+    const meta = prodeFixtureMetaDesdeIndice(knockoutIndex);
+    if(!meta || !home || !away) return;
+    const local = prodeEquipoDesdeEspn(home);
+    const visitante = prodeEquipoDesdeEspn(away);
+    const fecha = prodeFechaArgentinaDesdeEspn(event.date);
+    const pendiente = !!(local.placeholder || visitante.placeholder || !local.flag || !visitante.flag);
+    fixture[meta.id] = {
+      ...meta,
+      fecha: fecha.fecha,
+      fechaIso: fecha.fechaIso,
+      cierre: prodeCierreArgentinaDesdeEspn(event.date),
+      local: local.nombre,
+      visitante: visitante.nombre,
+      flagLocal: local.flag,
+      flagVisitante: visitante.flag,
+      label: `${local.nombre || 'Por definir'} vs ${visitante.nombre || 'Por definir'}`,
+      pendiente,
+      espnEventId: String(event.id || ''),
+      fuente: 'ESPN'
+    };
+  });
+  return fixture;
+}
 function prodeResultadosIguales(a = {}, b = {}) {
   return prodeScoreValue(a.local) === prodeScoreValue(b.local) && prodeScoreValue(a.visitante) === prodeScoreValue(b.visitante);
 }
-async function prodeFetchResultadosEspn() {
+async function prodeFetchResultadosEspn(fixtureDinamico = prodeConfig.fixtureDinamico || {}) {
   const response = await fetch(`${PRODE_ESPN_SCOREBOARD_URL}&_=${Date.now()}`, { cache:'no-store' });
   if(!response.ok) throw new Error(`ESPN ${response.status}`);
   const data = await response.json();
   const eventos = Array.isArray(data.events) ? data.events : [];
+  const fixturePorEvento = new Map(Object.entries(fixtureDinamico || {})
+    .filter(([, partido]) => partido?.espnEventId)
+    .map(([id, partido]) => [String(partido.espnEventId), id]));
   const resultados = {};
   eventos.forEach((event) => {
     const competition = event?.competitions?.[0];
     const status = competition?.status?.type || event?.status?.type || {};
     if(!status.completed && status.state !== 'post') return;
     const competitors = Array.isArray(competition?.competitors) ? competition.competitors : [];
+    const dynamicId = fixturePorEvento.get(String(event.id || ''));
+    if(dynamicId) {
+      const home = competitors.find((c) => c.homeAway === 'home') || competitors[0];
+      const away = competitors.find((c) => c.homeAway === 'away') || competitors[1];
+      const local = Number(home?.score);
+      const visitante = Number(away?.score);
+      if(Number.isFinite(local) && Number.isFinite(visitante)) {
+        resultados[dynamicId] = {
+          local,
+          visitante,
+          fuente: 'ESPN',
+          evento: String(event.id || ''),
+          actualizado: new Date().toISOString()
+        };
+      }
+      return;
+    }
     prodePartidos.forEach((partido) => {
       if(resultados[partido.id]) return;
       const localCode = prodeCodigoEspn(partido.flagLocal);
@@ -7133,7 +7369,18 @@ async function prodeAutoActualizarResultados({ force = false } = {}) {
   }
   prodeAutoResultsRunning = true;
   try {
-    const oficiales = await prodeFetchResultadosEspn();
+    const fixtureEspn = await prodeFetchFixtureEspn().catch((error) => {
+      console.warn('No se pudo actualizar fixture del Prode automaticamente', error);
+      return {};
+    });
+    const fixtureActual = prodeConfig.fixtureDinamico || {};
+    const fixtureMerged = { ...fixtureActual, ...fixtureEspn };
+    const fixtureCambios = JSON.stringify(fixtureActual) !== JSON.stringify(fixtureMerged);
+    if(fixtureCambios) {
+      prodeConfig = { ...prodeConfig, fixtureDinamico: fixtureMerged };
+      prodeAplicarFixtureDinamico(fixtureMerged);
+    }
+    const oficiales = await prodeFetchResultadosEspn(fixtureMerged);
     const actuales = prodeConfig.resultadosReales || {};
     const merged = { ...actuales };
     let cambios = 0;
@@ -7143,18 +7390,20 @@ async function prodeAutoActualizarResultados({ force = false } = {}) {
         cambios++;
       }
     });
-    if(!cambios) return;
-    prodeConfig = { ...prodeConfig, resultadosReales: merged };
+    if(!cambios && !fixtureCambios) return;
+    prodeConfig = { ...prodeConfig, resultadosReales: merged, fixtureDinamico: fixtureMerged };
     if(!document.getElementById('prodeModal')?.classList.contains('hidden')) renderProde();
     await setDoc(doc(db, 'config', PRODE_CONFIG_DOC_ID), {
       resultadosReales: merged,
+      fixtureDinamico: fixtureMerged,
+      fixtureAutoSyncAt: new Date().toISOString(),
       resultadosAutoSyncAt: new Date().toISOString(),
       resultadosAutoSource: 'ESPN',
       fixtureVersion: PRODE_FIXTURE_VERSION,
       partidosFixture: prodePartidos.length,
       updated_at: serverTimestamp()
     }, { merge:true });
-    await prodeRecalcularRanking(merged);
+    if(cambios) await prodeRecalcularRanking(merged);
   } catch(e) {
     console.warn('No se pudieron actualizar resultados del Prode automaticamente', e);
   } finally {
@@ -7417,6 +7666,7 @@ async function cargarProdeConfigDesdeServidor() {
     prodeConfigServerPromise = getDocFromServer(doc(db, 'config', PRODE_CONFIG_DOC_ID))
       .then((snap) => {
         if(snap.exists()) prodeConfig = { ...prodeConfig, ...(snap.data() || {}) };
+        prodeAplicarFixtureDinamico(prodeConfig.fixtureDinamico || {});
         prodeConfigLoadedFromServer = true;
       })
       .catch((error) => {
@@ -7668,13 +7918,20 @@ document.getElementById('prodeModal')?.addEventListener('pointerdown', (e) => {
 document.getElementById('prodeModal')?.addEventListener('click', (e) => { if(e.target.id === 'prodeModal') cerrarProde(); });
 onSnapshot(doc(db, 'config', PRODE_CONFIG_DOC_ID), snap => {
   if(snap.exists()) prodeConfig = { ...prodeConfig, ...(snap.data() || {}) };
+  prodeAplicarFixtureDinamico(prodeConfig.fixtureDinamico || {});
   if(!document.getElementById('prodeModal')?.classList.contains('hidden')) renderProde();
   prodeAutoActualizarResultados().catch(() => {});
 });
 setInterval(prodeActualizarBloqueosEnVivo, 15000);
-window.addEventListener('focus', prodeActualizarBloqueosEnVivo);
+window.addEventListener('focus', () => {
+  prodeActualizarBloqueosEnVivo();
+  prodeAutoActualizarResultados().catch(() => {});
+});
 document.addEventListener('visibilitychange', () => {
-  if(!document.hidden) prodeActualizarBloqueosEnVivo();
+  if(!document.hidden) {
+    prodeActualizarBloqueosEnVivo();
+    prodeAutoActualizarResultados().catch(() => {});
+  }
 });
 setInterval(() => prodeAutoActualizarResultados().catch(() => {}), PRODE_AUTO_RESULTS_INTERVAL_MS);
 if(location.hash === '#prode') setTimeout(abrirProde, 350);

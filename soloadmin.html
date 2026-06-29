@@ -1404,6 +1404,7 @@ PRODE_PARTIDOS.push(
   label:'Por definir vs Por definir',
   pendiente:true
 })));
+const PRODE_PARTIDOS_BASE = PRODE_PARTIDOS.map((partido) => ({ ...partido }));
 let prodeResultadosDraft = {};
 let prodeFechaActiva = '';
 const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo.';
@@ -1510,7 +1511,29 @@ function prodeBuildDateFasesAdmin() {
   }
   return fases;
 }
-const PRODE_FECHAS_ADMIN = prodeBuildDateFasesAdmin();
+let PRODE_FECHAS_ADMIN = prodeBuildDateFasesAdmin();
+function aplicarProdeFixtureDinamicoAdmin(fixture = {}) {
+  const dynamic = fixture && typeof fixture === 'object' ? fixture : {};
+  PRODE_PARTIDOS.splice(0, PRODE_PARTIDOS.length, ...PRODE_PARTIDOS_BASE.map((partido) => {
+    const item = dynamic[partido.id] || {};
+    const partes = String(partido.label || '').split(' vs ');
+    const local = item.local || partes[0] || 'Por definir';
+    const visitante = item.visitante || partes[1] || 'Por definir';
+    return {
+      ...partido,
+      ...item,
+      grupo: item.faseLabel || item.grupo || partido.grupo,
+      label: item.label || `${local} vs ${visitante}`,
+      fecha: item.fecha || partido.fecha,
+      fechaIso: item.fechaIso || partido.fechaIso,
+      pendiente: item.pendiente ?? partido.pendiente
+    };
+  }));
+  PRODE_FECHAS_ADMIN = prodeBuildDateFasesAdmin();
+  if(prodeFechaActiva && !PRODE_FECHAS_ADMIN.some((fase) => fase.id === prodeFechaActiva)) {
+    prodeFechaActiva = PRODE_FECHAS_ADMIN[0]?.id || '';
+  }
+}
 function renderProdeConfig(data = {}) {
   const resultadosGrid = document.getElementById('prodeResultadosGrid');
   prodeResultadosDraft = { ...(data.resultadosReales || {}) };
@@ -1561,8 +1584,11 @@ window.cerrarModalProdeResultados = function() {
 async function cargarProdeConfig() {
   try {
     const snap = await getDoc(doc(db, 'config', PRODE_CONFIG_DOC_ID));
-    renderProdeConfig(snap.exists() ? snap.data() : {});
+    const data = snap.exists() ? snap.data() : {};
+    aplicarProdeFixtureDinamicoAdmin(data.fixtureDinamico || {});
+    renderProdeConfig(data);
   } catch(e) {
+    aplicarProdeFixtureDinamicoAdmin({});
     renderProdeConfig({});
   }
 }
