@@ -702,8 +702,8 @@
 
     function showRaw(element) {
       if (!element || !root.contains(element)) return;
-      if (!element.dataset.currencyFormatted) element.dataset.currencyFormatted = getValue(element);
-      const raw = element.dataset.currencyRaw || rawCurrencyText(getValue(element), options);
+      element.dataset.currencyFormatted = getValue(element);
+      const raw = rawCurrencyText(getValue(element), options);
       element.dataset.currencyRaw = raw;
       setValue(element, raw);
       element.classList.add(selectedClass);
@@ -713,7 +713,9 @@
 
     function restore(element) {
       if (!element || !root.contains(element)) return;
-      const formatted = element.dataset.currencyFormatted || formatCurrencyText(getValue(element), options);
+      const formatted = formatCurrencyText(getValue(element), options);
+      element.dataset.currencyFormatted = formatted;
+      element.dataset.currencyRaw = rawCurrencyText(getValue(element), options);
       setValue(element, formatted);
       element.classList.remove(selectedClass);
       if (options.restoreTextAlign !== false) element.style.textAlign = '';
@@ -730,6 +732,18 @@
     root.addEventListener('click', (event) => {
       const element = event.target?.closest?.(selector);
       if (element) showRaw(element);
+    });
+    root.addEventListener('input', (event) => {
+      const element = event.target?.closest?.(selector);
+      if (!element || !root.contains(element)) return;
+      element.dataset.currencyRaw = rawCurrencyText(getValue(element), options);
+    });
+    document.addEventListener('selectionchange', () => {
+      root.querySelectorAll(`${selector}.${selectedClass}`).forEach((element) => {
+        if (element.matches?.('input, textarea')) return;
+        if (document.activeElement === element) return;
+        restore(element);
+      });
     });
 
     return { showRaw, restore, rawCurrencyText, formatCurrencyText };

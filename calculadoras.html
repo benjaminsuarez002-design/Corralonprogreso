@@ -261,10 +261,10 @@
           </div>
 
           <div class="lbl">Precio lista</div>
-          <div class="val"><input id="prelista" type="text" inputmode="decimal" value="$ 0,00"></div>
+          <div class="val"><input id="prelista" type="text" inputmode="decimal" data-format="money" value="$ 0,00"></div>
 
           <div class="lbl">TOTAL</div>
-          <div class="val mono nav-output" id="totalPrecio" tabindex="0">$ 0,00</div>
+          <div class="val mono nav-output" id="totalPrecio" data-format="money" tabindex="0">$ 0,00</div>
 
           <div class="lbl">dividido</div>
           <div class="val"><input id="divivido" type="number" step="0.000001" value="1"></div>
@@ -325,7 +325,7 @@
           <div class="val mono" id="porcFleteCalc" tabindex="0">0,00%</div>
 
           <div class="lbl">Total</div>
-          <div class="val mono" id="totalFacturaFinal" tabindex="0">$ 0,00</div>
+          <div class="val mono" id="totalFacturaFinal" data-format="money" tabindex="0">$ 0,00</div>
         </div>
 
         <div class="spacer"></div>
@@ -387,7 +387,7 @@
             <div class="val"><input id="porc1" type="text" inputmode="decimal" data-format="percent" value="0,00%"></div>
 
             <div class="lbl">Precio Final</div>
-            <div class="val mono" id="pFinalPct" tabindex="0">$ 0,00</div>
+            <div class="val mono" id="pFinalPct" data-format="money" tabindex="0">$ 0,00</div>
           </div>
         </section>
 
@@ -401,7 +401,7 @@
             <div class="val"><input id="porc2" type="text" inputmode="decimal" data-format="percent" value="0,00%"></div>
 
             <div class="lbl">Precio Final</div>
-            <div class="val mono" id="pSinPct" tabindex="0">$ 0,00</div>
+            <div class="val mono" id="pSinPct" data-format="money" tabindex="0">$ 0,00</div>
           </div>
         </section>
       </section>
@@ -1230,6 +1230,17 @@
       });
     });
 
+    const currencySelection = window.CorralonFunciones?.bindRawCurrencySelection?.({
+      root: document,
+      selector: '[data-format="money"]',
+      prefix: '$ ',
+      decimals: 2,
+      textAlign: 'right'
+    });
+    if (window.CorralonFunciones && currencySelection) {
+      window.CorralonFunciones.currencySelection = currencySelection;
+    }
+
     document.querySelectorAll('.grid .lbl').forEach((labelEl) => {
       labelEl.style.cursor = 'pointer';
       labelEl.addEventListener('click', () => {
@@ -1241,11 +1252,18 @@
           field.focus();
           if (field.matches('input[type="number"], input[type="text"], textarea')) {
             try { field.select(); } catch (_) {}
+            if (field.matches('[data-format="money"]')) {
+              window.CorralonFunciones?.currencySelection?.showRaw?.(field);
+            }
           }
           return;
         }
 
         const textNode = valueCell.querySelector('.mono') || valueCell;
+        if (textNode.matches?.('[data-format="money"]')) {
+          window.CorralonFunciones?.currencySelection?.showRaw?.(textNode);
+          return;
+        }
         const range = document.createRange();
         range.selectNodeContents(textNode);
         const sel = window.getSelection();
