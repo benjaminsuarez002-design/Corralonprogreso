@@ -660,6 +660,81 @@
     return { format: (input, fixed = true) => formatEditing(input, fixed) };
   }
 
+  function rawCurrencyText(value, options = {}) {
+    const decimals = Math.max(0, Number(options.decimals ?? 2));
+    return parseLocaleNumber(value).toFixed(decimals).replace('.', ',');
+  }
+
+  function formatCurrencyText(value, options = {}) {
+    const prefix = options.prefix ?? '$ ';
+    return `${prefix}${formatLocaleNumber(value, { decimals: options.decimals ?? 2 })}`;
+  }
+
+  function bindRawCurrencySelection(options = {}) {
+    const root = options.root || document;
+    const selector = options.selector || '.money, .moneda, [data-currency], [data-money]';
+    const selectedClass = options.selectedClass || 'currency-raw-selected';
+
+    function getValue(element) {
+      if (!element) return '';
+      return element.matches?.('input, textarea') ? element.value : element.textContent;
+    }
+
+    function setValue(element, value) {
+      if (!element) return;
+      if (element.matches?.('input, textarea')) element.value = value;
+      else element.textContent = value;
+    }
+
+    function selectElementText(element) {
+      if (!element) return;
+      element.focus?.({ preventScroll: true });
+      if (typeof element.select === 'function') {
+        element.select();
+        return;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    function showRaw(element) {
+      if (!element || !root.contains(element)) return;
+      if (!element.dataset.currencyFormatted) element.dataset.currencyFormatted = getValue(element);
+      const raw = element.dataset.currencyRaw || rawCurrencyText(getValue(element), options);
+      element.dataset.currencyRaw = raw;
+      setValue(element, raw);
+      element.classList.add(selectedClass);
+      element.style.textAlign = options.textAlign || 'right';
+      selectElementText(element);
+    }
+
+    function restore(element) {
+      if (!element || !root.contains(element)) return;
+      const formatted = element.dataset.currencyFormatted || formatCurrencyText(getValue(element), options);
+      setValue(element, formatted);
+      element.classList.remove(selectedClass);
+      if (options.restoreTextAlign !== false) element.style.textAlign = '';
+    }
+
+    root.addEventListener('focusin', (event) => {
+      const element = event.target?.closest?.(selector);
+      if (element) showRaw(element);
+    });
+    root.addEventListener('focusout', (event) => {
+      const element = event.target?.closest?.(selector);
+      if (element) restore(element);
+    });
+    root.addEventListener('click', (event) => {
+      const element = event.target?.closest?.(selector);
+      if (element) showRaw(element);
+    });
+
+    return { showRaw, restore, rawCurrencyText, formatCurrencyText };
+  }
+
   function bindLabelSelect(options = {}) {
     const root = options.root || document;
     const labelSelector = options.labelSelector || 'label';
@@ -1236,6 +1311,9 @@
     evaluateNumericExpression,
     formatLocaleNumber,
     bindLiveLocaleNumber,
+    rawCurrencyText,
+    formatCurrencyText,
+    bindRawCurrencySelection,
     bindLabelSelect,
     menuSessionUser,
     isMenuSessionActive,

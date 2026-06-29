@@ -354,6 +354,9 @@
       outline-offset: -2px;
       background: #ffe8eb;
     }
+    .row div.price-raw-selected {
+      text-align: right;
+    }
     .provider-link {
       color: #1f63d8;
       text-decoration: underline;
@@ -1136,6 +1139,25 @@
     function formatMoney(value) {
       return CorralonSystem.money(value);
     }
+    function rawPriceText(value) {
+      const number = Number(value || 0);
+      if (!Number.isFinite(number)) return '';
+      return number.toFixed(2).replace('.', ',');
+    }
+    function restorePriceCell(cell) {
+      if (!cell || Number(cell.dataset.col) !== 2) return;
+      cell.textContent = cell.dataset.priceFormatted || formatMoney(cell.dataset.priceRaw || 0);
+      cell.classList.add('money');
+      cell.classList.remove('price-raw-selected');
+    }
+    function selectPriceCellRaw(cell) {
+      if (!cell || Number(cell.dataset.col) !== 2) return false;
+      cell.textContent = cell.dataset.priceRaw || '';
+      cell.classList.remove('money');
+      cell.classList.add('price-raw-selected');
+      selectCellText(cell);
+      return true;
+    }
     function parseMoney(value) {
       return CorralonSystem.parseMoney(value);
     }
@@ -1608,7 +1630,7 @@
         <div class="row ${state.selectedId === row.idorden ? 'selected' : ''} ${isAdjustedPrice(row) ? 'adjusted' : ''}" data-id="${escapeHtml(row.idorden)}" data-match-index="${index}" title="${escapeHtml(row.articulo)}">
           <div tabindex="-1" data-col="0">${escapeHtml(row.cod_proveedor)}</div>
           <div tabindex="-1" data-col="1">${escapeHtml(row.articulo)}</div>
-          <div tabindex="-1" data-col="2" class="money">${formatMoney(row.precio_costo)}</div>
+          <div tabindex="-1" data-col="2" class="money" data-price-raw="${escapeHtml(rawPriceText(row.precio_costo))}" data-price-formatted="${escapeHtml(formatMoney(row.precio_costo))}">${formatMoney(row.precio_costo)}</div>
           <div tabindex="-1" data-col="3" class="${providerLinkForRow(row) ? 'provider-link' : ''}" title="${providerLinkForRow(row) ? 'Doble clic para abrir la pagina del proveedor' : escapeHtml(row.proveedor)}">${escapeHtml(row.proveedor)}</div>
         </div>
       `).join('');
@@ -1677,6 +1699,11 @@
       }
       const cell = active.closest?.('.row [data-col], .slot-value, .slot-label');
       if (cell) {
+        if (Number(cell.dataset.col) === 2) {
+          if (isCellTextSelected(cell)) clearCellTextSelection(cell);
+          else selectPriceCellRaw(cell);
+          return true;
+        }
         if (isCellTextSelected(cell)) clearCellTextSelection(cell);
         else selectCellText(cell);
         return true;
@@ -2724,6 +2751,14 @@
       }
     });
     el.viewport.addEventListener('scroll', requestSlice);
+    el.rows.addEventListener('focusin', (event) => {
+      const cell = event.target.closest('.row [data-col="2"]');
+      if (cell) selectPriceCellRaw(cell);
+    });
+    el.rows.addEventListener('focusout', (event) => {
+      const cell = event.target.closest('.row [data-col="2"]');
+      if (cell) restorePriceCell(cell);
+    });
     el.rows.addEventListener('click', (event) => {
       hideRowContextMenu();
       const rowEl = event.target.closest('.row');
@@ -2731,8 +2766,11 @@
       const row = rowById(rowEl.dataset.id);
       selectRow(row);
       state.tableNav.matchIndex = Number(rowEl.dataset.matchIndex) || 0;
-      state.tableNav.col = Number(event.target.closest('[data-col]')?.dataset.col) || 0;
-      if (event.detail === 2 && Number(event.target.closest('[data-col]')?.dataset.col) === 3) {
+      const clickedCell = event.target.closest('[data-col]');
+      const clickedCol = Number(clickedCell?.dataset.col) || 0;
+      state.tableNav.col = clickedCol;
+      if (clickedCol === 2) selectPriceCellRaw(clickedCell);
+      if (event.detail === 2 && clickedCol === 3) {
         if (openProviderPage(row)) event.preventDefault();
         return;
       }
