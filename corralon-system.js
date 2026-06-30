@@ -1698,6 +1698,8 @@
     function catalogMatches(row, filter) {
       const providerIdMatch = !filter.providerId || idVariants(filter.providerId).some((id) => idVariants(row.idProveedor).includes(id));
       const providerTextMatch = filter.providerId || !filter.provider || row.proveedorNorm.includes(filter.provider);
+      const exactCodeMatch = filter.code && (row.codProvNorm === filter.code || row.idartNorm === filter.code);
+      if (exactCodeMatch) return providerIdMatch && providerTextMatch;
       return (!filter.code || row.codProvNorm.includes(filter.code) || row.idartNorm.includes(filter.code)) &&
         providerIdMatch &&
         providerTextMatch &&
