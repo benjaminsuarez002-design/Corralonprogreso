@@ -1040,6 +1040,7 @@
   .prode-points-pill { display:inline-flex; align-items:center; justify-content:center; min-width:50px; min-height:26px; padding:3px 12px; border-radius:999px; border:1px solid currentColor; font-family:'Barlow Condensed',sans-serif; font-size:19px; font-weight:900; background:#fff; box-shadow:0 6px 14px rgba(8,18,40,.08); }
   .prode-real-pill { display:inline-flex; align-items:center; justify-content:center; min-height:26px; padding:4px 11px; border-radius:999px; background:#eef8ff; color:#24435f; border:1px solid #cfeaff; font-size:11px; font-weight:900; letter-spacing:.01em; white-space:nowrap; box-shadow:0 6px 14px rgba(8,18,40,.05); }
   .prode-real-pill strong { margin-left:4px; color:#10203b; font-size:13px; font-weight:900; }
+  .prode-penalty-pill { margin-left:6px; color:#0076c8; font-size:10px; font-weight:900; }
   .prode-invalid-pill { display:inline-flex; align-items:center; justify-content:center; min-height:26px; padding:4px 11px; border-radius:999px; background:#fff0f0; color:#c91b1b; border:1px solid #ffb7b7; font-size:11px; font-weight:900; letter-spacing:.01em; white-space:nowrap; box-shadow:0 6px 14px rgba(201,27,27,.08); }
   .prode-points-win { color:#008a3d; background:#eafff2; }
   .prode-points-half { color:#b88400; background:#fff8d7; }
@@ -1115,6 +1116,7 @@
     .prode-points-pill { min-width:46px; min-height:24px; padding:2px 10px; font-size:18px; }
     .prode-real-pill { min-height:24px; padding:3px 9px; font-size:10px; }
     .prode-real-pill strong { font-size:12px; }
+    .prode-penalty-pill { font-size:9px; }
     .prode-invalid-pill { min-height:24px; padding:3px 9px; font-size:10px; }
     .prode-match-close { grid-column:1 / -1; grid-row:4; margin-top:-2px; font-size:10px; line-height:1.2; }
     .prode-match input { height:36px; font-size:16px; padding:0; border-radius:10px; }
@@ -6987,8 +6989,27 @@ function prodeScoreValue(value) {
 function prodeResultadoTipo(local, visitante) {
   const l = Number(local);
   const v = Number(visitante);
+  if(!Number.isFinite(l) || !Number.isFinite(v)) return '';
   if(l === v) return 'empate';
   return l > v ? 'local' : 'visitante';
+}
+function prodeResultadoGanador(resultado = {}) {
+  const ganador = String(resultado.ganador || resultado.winner || '').trim().toLowerCase();
+  if(['local', 'visitante', 'empate'].includes(ganador)) return ganador;
+  return prodeResultadoTipo(resultado.local, resultado.visitante);
+}
+function prodeNumeroResultado(value) {
+  if(value === '' || value == null) return null;
+  const numero = Number(value);
+  return Number.isFinite(numero) ? numero : null;
+}
+function prodeResultadoConPenalesTexto(resultado = {}) {
+  const marcadorLocal = prodeScoreValue(resultado.local) || '0';
+  const marcadorVisitante = prodeScoreValue(resultado.visitante) || '0';
+  const local = prodeNumeroResultado(resultado.penalesLocal ?? resultado.shootoutLocal);
+  const visitante = prodeNumeroResultado(resultado.penalesVisitante ?? resultado.shootoutVisitante);
+  if(local == null || visitante == null) return `${marcadorLocal}-${marcadorVisitante}`;
+  return `${marcadorLocal} (${local}) - ${marcadorVisitante} (${visitante})`;
 }
 function prodeResultadoCompleto(resultado = {}) {
   return prodeScoreValue(resultado.local) !== '' && prodeScoreValue(resultado.visitante) !== '';
@@ -7001,18 +7022,16 @@ function prodePuntosPrediccion(pred = {}, real = {}, id = '') {
   if(rl === '' || rv === '') return null;
   if(id && prodePrediccionTardia(id, pred)) return 0;
   if(pl === rl && pv === rv) return 10;
-  return prodeResultadoTipo(pl, pv) === prodeResultadoTipo(rl, rv) ? 5 : 0;
+  return prodeResultadoTipo(pl, pv) === prodeResultadoGanador(real) ? 5 : 0;
 }
 function prodePuntosHtml(pred, real, id = '') {
   const puntos = prodePuntosPrediccion(pred, real, id);
   if(puntos === null) return '';
-  const rl = prodeScoreValue(real.local) || '0';
-  const rv = prodeScoreValue(real.visitante) || '0';
   const cls = puntos === 10 ? 'prode-points-win' : puntos === 5 ? 'prode-points-half' : 'prode-points-zero';
   const label = puntos > 0 ? `+${puntos}` : '0';
   const invalida = id && prodePrediccionTardia(id, pred);
   const invalidHtml = invalida ? '<span class="prode-invalid-pill">Fuera de término · inválido</span>' : '';
-  return `<div class="prode-points-result" data-prode-points-result><span class="prode-real-pill">Resultado <strong>${rl}-${rv}</strong></span>${invalidHtml}<span class="prode-points-pill ${cls}">${label}</span></div>`;
+  return `<div class="prode-points-result" data-prode-points-result><span class="prode-real-pill">Resultado <strong>${prodeResultadoConPenalesTexto(real)}</strong></span>${invalidHtml}<span class="prode-points-pill ${cls}">${label}</span></div>`;
 }
 function prodeActualizarPuntosFila(row) {
   const id = row?.dataset?.prodeMatch || '';
@@ -7216,6 +7235,43 @@ function prodeCompetidoresHomeAway(event = {}) {
     competitors
   };
 }
+function prodePenaltyScoreEspn(competitor = {}) {
+  return prodeNumeroResultado(
+    competitor.shootoutScore
+    ?? competitor.penaltyScore
+    ?? competitor.penalties
+    ?? competitor.penaltyShootoutScore
+    ?? competitor.shootout?.score
+  );
+}
+function prodeResultadoDesdeEspn(event = {}, localTeam = {}, visitanteTeam = {}) {
+  const local = prodeNumeroResultado(localTeam?.score);
+  const visitante = prodeNumeroResultado(visitanteTeam?.score);
+  if(local == null || visitante == null) return null;
+  const penalesLocal = prodePenaltyScoreEspn(localTeam);
+  const penalesVisitante = prodePenaltyScoreEspn(visitanteTeam);
+  const localWinner = localTeam?.winner === true || String(localTeam?.winner).toLowerCase() === 'true';
+  const visitanteWinner = visitanteTeam?.winner === true || String(visitanteTeam?.winner).toLowerCase() === 'true';
+  let ganador = prodeResultadoTipo(local, visitante);
+  if(localWinner && !visitanteWinner) ganador = 'local';
+  if(visitanteWinner && !localWinner) ganador = 'visitante';
+  if(ganador === 'empate' && penalesLocal != null && penalesVisitante != null && penalesLocal !== penalesVisitante) {
+    ganador = penalesLocal > penalesVisitante ? 'local' : 'visitante';
+  }
+  return {
+    local,
+    visitante,
+    ganador,
+    ...(penalesLocal != null && penalesVisitante != null ? {
+      penalesLocal,
+      penalesVisitante,
+      definicion: 'penales'
+    } : {}),
+    fuente: 'ESPN',
+    evento: String(event.id || ''),
+    actualizado: new Date().toISOString()
+  };
+}
 function prodeEventosOrdenadosEspn(data = {}) {
   return (Array.isArray(data.events) ? data.events : [])
     .slice()
@@ -7264,7 +7320,11 @@ async function prodeFetchFixtureEspn() {
   return fixture;
 }
 function prodeResultadosIguales(a = {}, b = {}) {
-  return prodeScoreValue(a.local) === prodeScoreValue(b.local) && prodeScoreValue(a.visitante) === prodeScoreValue(b.visitante);
+  return prodeScoreValue(a.local) === prodeScoreValue(b.local)
+    && prodeScoreValue(a.visitante) === prodeScoreValue(b.visitante)
+    && prodeResultadoGanador(a) === prodeResultadoGanador(b)
+    && prodeNumeroResultado(a.penalesLocal ?? a.shootoutLocal) === prodeNumeroResultado(b.penalesLocal ?? b.shootoutLocal)
+    && prodeNumeroResultado(a.penalesVisitante ?? a.shootoutVisitante) === prodeNumeroResultado(b.penalesVisitante ?? b.shootoutVisitante);
 }
 async function prodeFetchResultadosEspn(fixtureDinamico = prodeConfig.fixtureDinamico || {}) {
   const response = await fetch(`${PRODE_ESPN_SCOREBOARD_URL}&_=${Date.now()}`, { cache:'no-store' });
@@ -7284,17 +7344,8 @@ async function prodeFetchResultadosEspn(fixtureDinamico = prodeConfig.fixtureDin
     if(dynamicId) {
       const home = competitors.find((c) => c.homeAway === 'home') || competitors[0];
       const away = competitors.find((c) => c.homeAway === 'away') || competitors[1];
-      const local = Number(home?.score);
-      const visitante = Number(away?.score);
-      if(Number.isFinite(local) && Number.isFinite(visitante)) {
-        resultados[dynamicId] = {
-          local,
-          visitante,
-          fuente: 'ESPN',
-          evento: String(event.id || ''),
-          actualizado: new Date().toISOString()
-        };
-      }
+      const resultado = prodeResultadoDesdeEspn(event, home, away);
+      if(resultado) resultados[dynamicId] = resultado;
       return;
     }
     prodePartidos.forEach((partido) => {
@@ -7304,16 +7355,8 @@ async function prodeFetchResultadosEspn(fixtureDinamico = prodeConfig.fixtureDin
       const localTeam = competitors.find((c) => String(c?.team?.abbreviation || '').toUpperCase() === localCode);
       const visitanteTeam = competitors.find((c) => String(c?.team?.abbreviation || '').toUpperCase() === visitanteCode);
       if(!localTeam || !visitanteTeam) return;
-      const local = Number(localTeam.score);
-      const visitante = Number(visitanteTeam.score);
-      if(!Number.isFinite(local) || !Number.isFinite(visitante)) return;
-      resultados[partido.id] = {
-        local,
-        visitante,
-        fuente: 'ESPN',
-        evento: String(event.id || ''),
-        actualizado: new Date().toISOString()
-      };
+      const resultado = prodeResultadoDesdeEspn(event, localTeam, visitanteTeam);
+      if(resultado) resultados[partido.id] = resultado;
     });
   });
   return resultados;
@@ -7332,7 +7375,7 @@ function calcularPuntosProdeDesdeResultados(predicciones = {}, reales = {}, comp
     const rv = prodeScoreValue(real.visitante);
     if(prodePrediccionTardia(id, pred)) return;
     if(pl === rl && pv === rv) puntos += 10;
-    else if(prodeResultadoTipo(pl, pv) === prodeResultadoTipo(rl, rv)) puntos += 5;
+    else if(prodeResultadoTipo(pl, pv) === prodeResultadoGanador(real)) puntos += 5;
   });
   return puntos;
 }

@@ -609,6 +609,7 @@
     let historialUnsubscribe = null;
     let reviewOrders = [];
     let historialNotifications = [];
+    let reviewModalSnapshot = null;
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
     let objectiveSummaryUnsubscribe = null;
@@ -1124,14 +1125,14 @@
           getDocsFromServer(query(collection(db, 'historialNotificaciones'), where('resuelta', '==', false)))
         ]);
         reviewOrders = pedidosSnap.docs
-          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .map((docSnap) => ({ ...docSnap.data(), firestoreId: docSnap.id }))
           .filter((order) => !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
           .sort((a, b) => Number(b.id) - Number(a.id));
         historialNotifications = historialSnap.docs
           .map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
           .filter((item) => notifDesdeHoy(item))
           .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
-        knownReviewIds = new Set(reviewOrders.map((order) => String(order.id)));
+        knownReviewIds = new Set(reviewOrders.map(reviewOrderDocId));
         knownHistorialIds = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
         renderReviewNotifications();
         cleanupOrphanRemitoNotifications();
@@ -1195,10 +1196,22 @@
       return (fecha || creada) >= HISTORIAL_NOTIFS_START_MS;
     }
 
+    function reviewOrderDocId(order) {
+      return String(order?.firestoreId || order?._docId || order?.docId || order?.id || '').trim();
+    }
+
+    function notificationKey(item) {
+      return `${item?.kind || ''}:${item?.tipo || ''}:${item?.docId || item?.firestoreId || item?.id || ''}`;
+    }
+
     function allVisibleNotifications() {
       const pedidos = reviewOrders
         .filter((order) => !order.notificacionResuelta)
-        .map((order) => ({ kind: 'pedido', id: String(order.id), title: `Pedido ${order.id}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '' }));
+        .map((order) => {
+          const docId = reviewOrderDocId(order);
+          const visibleId = String(order.id || docId);
+          return { kind: 'pedido', id: visibleId, docId, title: `Pedido ${visibleId}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '' };
+        });
       const historial = historialNotifications
         .filter((item) => !item.resuelta)
         .map((item) => ({ kind: 'historial', id: String(item.id), tipo: item.tipo, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', date: item.fecha || '' }));
@@ -1206,16 +1219,19 @@
     }
 
     function renderReviewNotifications() {
-      const visible = allVisibleNotifications();
-      reviewBell.classList.toggle('visible', visible.length > 0);
-      reviewBellCount.textContent = String(visible.length);
+      const currentVisible = allVisibleNotifications();
+      const visible = reviewModal.classList.contains('visible') && reviewModalSnapshot
+        ? reviewModalSnapshot
+        : currentVisible;
+      reviewBell.classList.toggle('visible', currentVisible.length > 0);
+      reviewBellCount.textContent = String(currentVisible.length);
       reviewList.innerHTML = visible.length ? visible.map((item) => `
-        <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
+        <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
           <strong>${escapeHtml(item.title)}</strong>
           <span>${escapeHtml(item.detail)}</span>
           <span>${escapeHtml(item.date || '')}</span>
-          <label class="review-resolved" title="Marcar como resuelto" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
-            <input type="checkbox" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-tipo="${escapeHtml(item.tipo || '')}">
+          <label class="review-resolved" title="Marcar como resuelto" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
+            <input type="checkbox" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
             Resuelto
           </label>
         </div>
@@ -1259,11 +1275,11 @@
         const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('confirmado', '==', true));
         reviewUnsubscribe = onSnapshot(pedidosRevisionQuery, (snap) => {
           const previous = knownReviewIds;
-          reviewOrders = snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          reviewOrders = snap.docs.map((docSnap) => ({ ...docSnap.data(), firestoreId: docSnap.id }))
             .filter((order) => !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
             .sort((a, b) => Number(b.id) - Number(a.id));
-          const current = new Set(reviewOrders.map((order) => String(order.id)));
-          const fresh = reviewOrders.find((order) => !previous.has(String(order.id)));
+          const current = new Set(reviewOrders.map(reviewOrderDocId));
+          const fresh = reviewOrders.find((order) => !previous.has(reviewOrderDocId(order)));
           knownReviewIds = current;
           renderReviewNotifications();
           if (fresh) showReviewToast(fresh);
@@ -1305,11 +1321,17 @@
       openNotificationTarget(`historial.html?${params.toString()}`);
     }
 
-    function resolveMenuNotification(kind, id, tipo) {
+    function resolveMenuNotification(kind, id, tipo, docId = '') {
+      const targetDocId = String(docId || id || '').trim();
+      if (!targetDocId) return;
+      const targetKey = notificationKey({ kind, tipo, id, docId: targetDocId });
+      if (reviewModalSnapshot) {
+        reviewModalSnapshot = reviewModalSnapshot.filter((item) => notificationKey(item) !== targetKey);
+      }
       if (kind === 'pedido') {
-        reviewOrders = reviewOrders.filter((order) => String(order.id) !== String(id));
+        reviewOrders = reviewOrders.filter((order) => reviewOrderDocId(order) !== targetDocId);
         renderReviewNotifications();
-        setDoc(doc(db, 'pedidos', String(id)), {
+        setDoc(doc(db, 'pedidos', targetDocId), {
           notificacionResuelta: true,
           notificacionResueltaAt: serverTimestamp()
         }, { merge: true }).catch((error) => console.warn('No se pudo marcar el pedido como resuelto', error));
@@ -1330,18 +1352,27 @@
     }
 
     reviewBell.addEventListener('click', () => {
+      reviewModalSnapshot = allVisibleNotifications();
       renderReviewNotifications();
       reviewModal.classList.add('visible');
     });
-    closeReviewModal.addEventListener('click', () => reviewModal.classList.remove('visible'));
+    closeReviewModal.addEventListener('click', () => {
+      reviewModalSnapshot = null;
+      reviewModal.classList.remove('visible');
+      renderReviewNotifications();
+    });
     reviewModal.addEventListener('mousedown', (event) => {
-      if (event.target === reviewModal) reviewModal.classList.remove('visible');
+      if (event.target === reviewModal) {
+        reviewModalSnapshot = null;
+        reviewModal.classList.remove('visible');
+        renderReviewNotifications();
+      }
     });
     reviewList.addEventListener('click', (event) => {
       const resolveCheck = event.target.closest('[data-resolve-notification]');
       if (resolveCheck) {
         event.stopPropagation();
-        resolveMenuNotification(resolveCheck.dataset.kind, resolveCheck.dataset.reviewId, resolveCheck.dataset.tipo);
+        resolveMenuNotification(resolveCheck.dataset.kind, resolveCheck.dataset.reviewId, resolveCheck.dataset.tipo, resolveCheck.dataset.reviewDoc);
         return;
       }
       const item = event.target.closest('[data-review-id]');
