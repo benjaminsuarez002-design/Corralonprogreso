@@ -3784,6 +3784,8 @@ let publicWindowAdvancing = false;
 let publicListObserver = null;
 let listaCacheFingerprintActiva = '';
 let listaCacheUrlActiva = '';
+let listaCacheServerSignatureActiva = '';
+let unsubscribeListaActual = null;
 try {
   vistaActiva = localStorage.getItem('vistaArticulos') === 'lista' ? 'lista' : 'cards';
 } catch (e) {}
@@ -3831,6 +3833,34 @@ function fingerprintConfigPortada(config = {}) {
   } catch (e) {
     return String(Date.now());
   }
+}
+
+function valorFirmaFirebase(value) {
+  if (value == null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return String(value.getTime());
+  if (typeof value.toMillis === 'function') return String(value.toMillis());
+  if (typeof value.seconds === 'number') return `${value.seconds}:${value.nanoseconds || 0}`;
+  try { return JSON.stringify(value); } catch (_) { return String(value); }
+}
+
+function firmaDocumentoLista(data = {}) {
+  if (!data) return '';
+  const url = String(data.url || '').trim();
+  const version = valorFirmaFirebase(data.updatedAt ?? data.updated_at ?? data.version ?? data.lista_version ?? '');
+  return `${url}|${version}`;
+}
+
+function firmaServidorLista(info = {}) {
+  if (!info?.exists) return '';
+  return `${info.listaSignature || ''}::${info.metaSignature || ''}`;
+}
+
+function cacheListaCoincideServidor(cached, serverInfo) {
+  if (!cached || !serverInfo?.exists || !Array.isArray(cached.data) || !cached.data.length) return false;
+  const serverSignature = firmaServidorLista(serverInfo);
+  return Boolean(serverSignature && cached.serverSignature && cached.serverSignature === serverSignature);
 }
 
 function toBool(value) {
@@ -3990,10 +4020,10 @@ function aplicarMetadatosArticulo(raw = {}, meta = null) {
   };
 }
 
-async function cargarListaConMetadatos(baseUrl) {
+async function cargarListaConMetadatos(baseUrl, metaSnapPreparado = null) {
   const [baseData, metaSnap] = await Promise.all([
     cargarJsonRemoto(baseUrl),
-    getDoc(doc(db, 'config', ARTICULOS_META_DOC_ID))
+    metaSnapPreparado ? Promise.resolve(metaSnapPreparado) : getDoc(doc(db, 'config', ARTICULOS_META_DOC_ID))
   ]);
   const metaUrl = metaSnap.exists() ? String(metaSnap.data()?.url || '').trim() : '';
   let metaData = [];
@@ -4849,22 +4879,29 @@ function prepararArticulosParaVista(data = []) {
   return aplicarRankingVentasArticulos(preparados);
 }
 
-function guardarListaArticulosCache(url, data) {
+function guardarListaArticulosCache(url, data, serverInfo = null) {
   if (!Array.isArray(data) || !data.length) return;
+  const serverSignature = firmaServidorLista(serverInfo);
   guardarJsonCache(LISTA_ARTICULOS_CACHE_KEY, {
     url: String(url || ''),
+    metaUrl: String(serverInfo?.metaUrl || ''),
+    listaDocSignature: serverInfo?.listaSignature || '',
+    metaDocSignature: serverInfo?.metaSignature || '',
+    serverSignature,
     savedAt: Date.now(),
     fingerprint: fingerprintListaArticulos(data),
     data
   });
 }
 
-function restaurarListaArticulosCache() {
+function restaurarListaArticulosCache({ serverInfo = null } = {}) {
   const cached = leerJsonCache(LISTA_ARTICULOS_CACHE_KEY, null);
   if (!cached || !Array.isArray(cached.data) || !cached.data.length) return false;
+  if (serverInfo && !cacheListaCoincideServidor(cached, serverInfo)) return false;
   try {
     listaCacheUrlActiva = String(cached.url || '');
     listaCacheFingerprintActiva = cached.fingerprint || fingerprintListaArticulos(cached.data);
+    listaCacheServerSignatureActiva = cached.serverSignature || '';
     todosArticulos = prepararArticulosParaVista(cached.data);
     actualizarVistaEtiqueta();
     aplicarBusquedaActual();
@@ -5420,6 +5457,109 @@ async function compartirConImagenSiSePuede(articulo, titulo, linkDirecto) {
   } catch (error) {
     if (error?.name === 'AbortError') return true;
     return false;
+  }
+}
+
+function infoListaDesdeSnapshots(listaSnap, metaSnap = null) {
+  if (!listaSnap?.exists?.()) return { exists: false, url: '', metaUrl: '', listaSignature: '', metaSignature: '', listaSnap, metaSnap };
+  const listaData = listaSnap.data() || {};
+  const metaData = metaSnap?.exists?.() ? (metaSnap.data() || {}) : {};
+  const url = String(listaData.url || '').trim();
+  const metaUrl = String(metaData.url || '').trim();
+  return {
+    exists: true,
+    url,
+    metaUrl,
+    listaSnap,
+    metaSnap,
+    listaSignature: firmaDocumentoLista(listaData),
+    metaSignature: metaUrl ? firmaDocumentoLista(metaData) : ''
+  };
+}
+
+async function obtenerInfoListaServidor() {
+  const listaRef = doc(db, 'config', 'listaActual');
+  const metaRef = doc(db, 'config', ARTICULOS_META_DOC_ID);
+  const [listaSnap, metaSnap] = await Promise.all([
+    getDocFromServer(listaRef),
+    getDocFromServer(metaRef).catch(() => null)
+  ]);
+  return infoListaDesdeSnapshots(listaSnap, metaSnap);
+}
+
+async function obtenerInfoListaDesdeSnapshot(listaSnap) {
+  const metaSnap = await getDocFromServer(doc(db, 'config', ARTICULOS_META_DOC_ID)).catch(() => getDoc(doc(db, 'config', ARTICULOS_META_DOC_ID)).catch(() => null));
+  return infoListaDesdeSnapshots(listaSnap, metaSnap);
+}
+
+async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false } = {}) {
+  const loader = document.getElementById('loadingOverlay');
+  if (!serverInfo?.exists || !serverInfo.url) {
+    disconnectPublicListObserver();
+    if (!todosArticulos.length) {
+      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
+    }
+    if (loader) loader.style.display = 'none';
+    return;
+  }
+
+  if (desdeCachePermitida && restaurarListaArticulosCache({ serverInfo })) {
+    return;
+  }
+
+  const serverSignature = firmaServidorLista(serverInfo);
+  if (todosArticulos.length && listaCacheServerSignatureActiva && listaCacheServerSignatureActiva === serverSignature) {
+    if (loader) loader.style.display = 'none';
+    return;
+  }
+
+  const data = await cargarListaConMetadatos(serverInfo.url, serverInfo.metaSnap);
+  const fingerprint = fingerprintListaArticulos(data);
+  guardarListaArticulosCache(serverInfo.url, data, serverInfo);
+  if (
+    todosArticulos.length &&
+    listaCacheUrlActiva === String(serverInfo.url || '') &&
+    listaCacheFingerprintActiva === fingerprint &&
+    listaCacheServerSignatureActiva === serverSignature
+  ) {
+    if (loader) loader.style.display = 'none';
+    return;
+  }
+
+  listaCacheUrlActiva = String(serverInfo.url || '');
+  listaCacheFingerprintActiva = fingerprint;
+  listaCacheServerSignatureActiva = serverSignature;
+  const teniaListaRenderizada = todosArticulos.length > 0;
+  todosArticulos = prepararArticulosParaVista(data);
+  if (teniaListaRenderizada) {
+    ejecutarSinAnimacionesSync(() => {
+      actualizarVistaEtiqueta();
+      aplicarBusquedaActual();
+      abrirArticuloCompartidoSiCorresponde();
+    });
+  } else {
+    actualizarVistaEtiqueta();
+    aplicarBusquedaActual();
+    abrirArticuloCompartidoSiCorresponde();
+  }
+  if (loader) loader.style.display = 'none';
+}
+
+async function iniciarCargaListaArticulos() {
+  const loader = document.getElementById('loadingOverlay');
+  if (loader) loader.style.display = 'flex';
+  try {
+    const serverInfo = await obtenerInfoListaServidor();
+    await aplicarListaServidor(serverInfo, { desdeCachePermitida: true });
+  } catch (error) {
+    console.error(error);
+    disconnectPublicListObserver();
+    if (!todosArticulos.length) {
+      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error validando lista</p></div>`;
+    }
+    if (loader) loader.style.display = 'none';
+  } finally {
+    iniciarEscuchaListaArticulos();
   }
 }
 
@@ -8261,7 +8401,6 @@ document.addEventListener('keydown', (e) => {
 
 if (!INDEX_ENLACE_COMPARTIDO) {
   restaurarConfigPortadaCache();
-  restaurarListaArticulosCache();
 }
 
 onSnapshot(
@@ -8284,53 +8423,26 @@ onSnapshot(
   (error) => console.warn('No se pudo cargar el ranking de artículos', error)
 );
 
-onSnapshot(doc(db, "config", "listaActual"), async snap => {
-  const loader = document.getElementById('loadingOverlay');
-  if (!snap.exists()) {
-    disconnectPublicListObserver();
-    if (!todosArticulos.length) {
-      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
-    }
-    if (loader) loader.style.display = 'none';
-    return;
-  }
-  try {
-    const url = snap.data().url;
-    const data = await cargarListaConMetadatos(url);
-    const fingerprint = fingerprintListaArticulos(data);
-    guardarListaArticulosCache(url, data);
-    if (
-      todosArticulos.length &&
-      listaCacheUrlActiva === String(url || '') &&
-      listaCacheFingerprintActiva === fingerprint
-    ) {
+function iniciarEscuchaListaArticulos() {
+  if (unsubscribeListaActual) return;
+  unsubscribeListaActual = onSnapshot(doc(db, "config", "listaActual"), async snap => {
+    if (snap.metadata?.fromCache) return;
+    try {
+      const serverInfo = await obtenerInfoListaDesdeSnapshot(snap);
+      await aplicarListaServidor(serverInfo, { desdeCachePermitida: false });
+    } catch (e) {
+      console.error(e);
+      disconnectPublicListObserver();
+      if (!todosArticulos.length) {
+        document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error cargando lista</p></div>`;
+      }
+      const loader = document.getElementById('loadingOverlay');
       if (loader) loader.style.display = 'none';
-      return;
     }
-    listaCacheUrlActiva = String(url || '');
-    listaCacheFingerprintActiva = fingerprint;
-    const teniaListaRenderizada = todosArticulos.length > 0;
-    todosArticulos = prepararArticulosParaVista(data);
-    if (teniaListaRenderizada) {
-      ejecutarSinAnimacionesSync(() => {
-        actualizarVistaEtiqueta();
-        aplicarBusquedaActual();
-        abrirArticuloCompartidoSiCorresponde();
-      });
-    } else {
-      actualizarVistaEtiqueta();
-      aplicarBusquedaActual();
-      abrirArticuloCompartidoSiCorresponde();
-    }
-  } catch (e) {
-    console.error(e);
-    disconnectPublicListObserver();
-    if (!todosArticulos.length) {
-      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error cargando lista</p></div>`;
-    }
-  }
-  if (loader) loader.style.display = 'none';
-});
+  });
+}
+
+setTimeout(iniciarCargaListaArticulos, 0);
 
 let carrito = {};
 function guardarCarrito() { localStorage.setItem(CARRITO_STORAGE_KEY, JSON.stringify(carrito)); }
