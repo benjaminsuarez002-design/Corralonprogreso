@@ -906,7 +906,15 @@
     font-size: 15px;
     color: #2f2456;
   }
+  .product-detail-stock-block {
+    display: grid;
+    gap: 4px;
+  }
   .product-detail-stock-line strong { color: var(--texto-dark); }
+  .product-detail-stock-line.ok,
+  .product-detail-stock-line.ok strong { color: #0f7d47; }
+  .product-detail-stock-line.bad,
+  .product-detail-stock-line.bad strong { color: #a32020; }
   .product-detail-actions {
     display: flex;
     justify-content: flex-start;
@@ -1687,6 +1695,77 @@
   .stock-pill.bad {
     color: #8e3030;
   }
+  .stock-branch-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .stock-branch-stack .stock-pill {
+    white-space: normal;
+    line-height: 1.15;
+  }
+  .stock-label-short,
+  .stock-value-short {
+    display: none;
+  }
+  .stock-meta-block {
+    display: grid;
+    gap: 2px;
+  }
+  .stock-meta-line {
+    line-height: 1.18;
+  }
+  .stock-meta-line.ok {
+    color: #2a6a42;
+    font-weight: 700;
+  }
+  .stock-meta-line.bad {
+    color: #8e3030;
+    font-weight: 700;
+  }
+  .stock-meta-line.codigo-line {
+    color: #5e6073;
+    font-weight: 600;
+  }
+  @media (min-width: 701px) {
+    .productos-grid .stock-branch-stack {
+      flex-direction: row;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 4px;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    .productos-grid .stock-branch-stack::before {
+      content: "Stock:";
+      color: #5e6073;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .productos-grid .stock-branch-stack .stock-pill {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 2px;
+      min-width: 0;
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .productos-grid .stock-label-full,
+    .productos-grid .stock-value-full {
+      display: none;
+    }
+    .productos-grid .stock-label-short,
+    .productos-grid .stock-value-short {
+      display: inline;
+    }
+    .productos-grid .stock-branch-stack .stock-pill + .stock-pill::before {
+      content: "|";
+      color: #9db0c2;
+      margin-right: 4px;
+    }
+  }
   .codigo-linea { color: #5e6073; font-weight: 600; }
   .card-cta {
     align-self: stretch;
@@ -1787,7 +1866,9 @@
     color: #625c77;
     line-height: 1.2;
   }
+  .lista-stock { align-items: flex-start; }
   .lista-stock .stock-pill { font-size: 14px; }
+  .lista-stock .stock-branch-stack .stock-pill { font-size: 12px; }
   .lista-precio {
     display: grid;
     gap: 2px;
@@ -3369,7 +3450,7 @@
         <div class="product-detail-subline">
           <div class="product-detail-subline-row">- <strong>Código:</strong> <span id="productDetailCode">-</span></div>
           <div class="product-detail-subline-row">- <strong>Detalle:</strong> <span id="productDetailDescription">Sin detalle disponible.</span></div>
-          <div class="product-detail-stock-line">Stock: <strong id="productDetailStock">-</strong></div>
+          <div id="productDetailStock" class="product-detail-stock-block"></div>
         </div>
         <div class="product-detail-price">
           <span class="precio-lista" id="productDetailPriceBase"></span>
@@ -3548,6 +3629,8 @@ const STOCK_NOTICE_DOC_ID = 'stockNotice';
 const CART_POPULARITY_COLLECTION = 'articulosAgregadosCarrito';
 const HOME_LANDING_CACHE_KEY = 'corralon_index_home_landing_cache_v1';
 const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que usted quiere comprar, podemos pedirlo.';
+const STOCK_LABEL_PROGRESO_RUTA = 'Stock Progreso y Ruta';
+const STOCK_LABEL_CALLE5_ESPANA = 'Stock Calle 5 y Espana';
 
 // POPUP AL ABRIR
 onSnapshot(doc(db, 'config', 'popup'), snap => {
@@ -4185,11 +4268,88 @@ function obtenerDescripcionArticulo(articulo) {
 }
 
 function obtenerStockInfo(articulo) {
-  const stockNum = (articulo.stock !== undefined && articulo.stock !== '' && !isNaN(Number(articulo.stock))) ? Number(articulo.stock) : null;
+  const parseStockNumber = (value) => {
+    if (value === undefined || value === null || value === '') return null;
+    let text = String(value).trim().replace(/[^0-9,.-]/g, '');
+    if (!text) return null;
+    const lastDot = text.lastIndexOf('.');
+    const lastComma = text.lastIndexOf(',');
+    if (lastDot > -1 && lastComma > -1) {
+      if (lastComma > lastDot) { text = text.replace(/\./g, ''); text = text.replace(/,/g, '.'); }
+      else { text = text.replace(/,/g, ''); }
+    } else if (lastComma > -1) {
+      text = text.replace(/\./g, ''); text = text.replace(/,/g, '.');
+    } else if ((text.match(/\./g) || []).length > 1) {
+      text = text.replace(/\./g, '');
+    }
+    const num = Number(text);
+    return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
+  };
+
+  const progresoNum = parseStockNumber(
+    articulo.stockSucursalProgresoRuta ??
+    articulo.stock_sucursal_progreso_ruta ??
+    articulo.stock_progreso_ruta ??
+    articulo.stockSucProgresoRuta ??
+    articulo.stockSuc1
+  );
+  const calle5Num = parseStockNumber(
+    articulo.stockSucursalCalle5Espana ??
+    articulo.stock_sucursal_calle5_espana ??
+    articulo.stock_calle5_espana ??
+    articulo.stockSucCalle5Espana ??
+    articulo.stockSuc2
+  );
+  const hasBranchStock = progresoNum !== null || calle5Num !== null;
+  const totalRaw = parseStockNumber(articulo.stock);
+  const stockNum = hasBranchStock ? Number(((progresoNum || 0) + (calle5Num || 0)).toFixed(2)) : totalRaw;
   const stockText = stockNum === null ? '-' : `${stockNum.toFixed(2)} disponibles`;
   const stockClass = (stockNum !== null && stockNum > 0) ? 'ok' : 'bad';
   const stockLista = stockNum === null ? '-' : stockNum.toFixed(2);
-  return { stockNum, stockText, stockClass, stockLista };
+  const sucursalStockLines = hasBranchStock ? [
+    {
+      key: 'progreso_ruta',
+      label: STOCK_LABEL_PROGRESO_RUTA,
+      shortLabel: 'Progreso',
+      num: progresoNum,
+      text: progresoNum === null ? '-' : `${progresoNum.toFixed(2)} disponibles`,
+      short: progresoNum === null ? '-' : progresoNum.toFixed(2),
+      class: progresoNum !== null && progresoNum > 0 ? 'ok' : 'bad'
+    },
+    {
+      key: 'calle5_espana',
+      label: STOCK_LABEL_CALLE5_ESPANA,
+      shortLabel: 'Calle 5',
+      num: calle5Num,
+      text: calle5Num === null ? '-' : `${calle5Num.toFixed(2)} disponibles`,
+      short: calle5Num === null ? '-' : calle5Num.toFixed(2),
+      class: calle5Num !== null && calle5Num > 0 ? 'ok' : 'bad'
+    }
+  ] : [];
+  return { stockNum, stockText, stockClass, stockLista, hasBranchStock, sucursalStockLines };
+}
+
+function renderStockMetaHtml(articulo, codigo) {
+  const { hasBranchStock, sucursalStockLines, stockText } = obtenerStockInfo(articulo);
+  if (!hasBranchStock) return `Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}`;
+  return `<div class="stock-meta-block">
+    ${sucursalStockLines.map((line) => `<div class="stock-meta-line ${line.class}">${escaparHtml(line.label)}: ${escaparHtml(line.text)}</div>`).join('')}
+    <div class="stock-meta-line codigo-line">Código: ${escaparHtml(codigo)}</div>
+  </div>`;
+}
+
+function renderStockPillsHtml(articulo, { withDisponibles = false } = {}) {
+  const { hasBranchStock, sucursalStockLines, stockClass, stockText, stockLista } = obtenerStockInfo(articulo);
+  if (!hasBranchStock) {
+    return `<div class="stock-pill ${stockClass}">Stock: ${escaparHtml(withDisponibles ? stockText : stockLista)}</div>`;
+  }
+  return `<div class="stock-branch-stack">${sucursalStockLines.map((line) => `<div class="stock-pill ${line.class}"><span class="stock-label-full">${escaparHtml(line.label)}:</span><span class="stock-label-short">${escaparHtml(line.shortLabel)}:</span> <span class="stock-value-full">${escaparHtml(withDisponibles ? line.text : line.short)}</span><span class="stock-value-short">${escaparHtml(line.short)}</span></div>`).join('')}</div>`;
+}
+
+function renderProductDetailStockHtml(articulo) {
+  const { hasBranchStock, sucursalStockLines, stockText } = obtenerStockInfo(articulo);
+  if (!hasBranchStock) return `<div class="product-detail-stock-line">Stock: <strong>${escaparHtml(stockText)}</strong></div>`;
+  return sucursalStockLines.map((line) => `<div class="product-detail-stock-line ${line.class}">${escaparHtml(line.label)}: <strong>${escaparHtml(line.text)}</strong></div>`).join('');
 }
 
 function sanitizarCodigosPortada(value) {
@@ -4247,12 +4407,12 @@ function obtenerPuntajeOfertaHome(articulo) {
   const precioVigente = Number(articulo.precioVigente ?? precioLista);
   const ahorro = Math.max(0, precioLista - precioVigente);
   const ahorroPct = precioLista > 0 ? (ahorro / precioLista) : 0;
-  const stock = Math.max(0, Number(articulo.stock || 0));
+  const stock = Math.max(0, Number(obtenerStockInfo(articulo).stockNum || 0));
   return (ahorroPct * 10000) + (ahorro / 200) + (articulo.fotoUrl ? 35 : 0) + Math.min(stock, 120);
 }
 
 function obtenerPuntajeCuradoHome(articulo) {
-  const stock = Math.max(0, Number(articulo.stock || 0));
+  const stock = Math.max(0, Number(obtenerStockInfo(articulo).stockNum || 0));
   const precio = Number(articulo.precioVigente ?? articulo.precio ?? 0);
   return (articulo.fotoUrl ? 40 : 0) + Math.min(stock, 140) + Math.min(precio / 25000, 20);
 }
@@ -4304,7 +4464,7 @@ function renderHomeSpotlight(articulo, label, accent, index) {
     <div class="home-spotlight-copy">
       <div class="home-spotlight-eyebrow">${escaparHtml(label)}</div>
       <div class="home-spotlight-title">${escaparHtml(descripcion.principal)}</div>
-      <div class="home-spotlight-meta">Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}</div>
+      <div class="home-spotlight-meta">${renderStockMetaHtml(articulo, codigo)}</div>
       <div class="home-spotlight-price">${precioVisual.esCeramico ? `<span style="font-size:12px;color:#356b9f;margin-right:4px;">${precioVisual.precioBaseHtml}</span>` : ''}${precioVisual.esCeramico ? precioVisual.precioFinalCompactoHtml : precioVisual.precioFinalHtml}</div>
     </div>
   </article>`;
@@ -4328,7 +4488,7 @@ function renderHomeSectionCard(articulo, index) {
           <div class="home-card-detail">${escaparHtml(detalle)}</div>
         </div>
         <div class="home-card-meta">
-          <div class="stock-pill ${stockClass}">Stock: ${escaparHtml(stockText)}</div>
+          ${renderStockPillsHtml(articulo, { withDisponibles: true })}
           <div class="codigo-linea">Código: ${escaparHtml(codigo)}</div>
         </div>
         <div class="home-card-footer">
@@ -4355,7 +4515,7 @@ function renderHomeCompactItem(articulo, idxLocal, label = '') {
     <div class="home-spotlight-copy">
       ${label ? `<div class="home-spotlight-eyebrow">${escaparHtml(label)}</div>` : construirTagsArticulo(articulo)}
       <div class="home-spotlight-title">${escaparHtml(descripcion.principal)}</div>
-      <div class="home-spotlight-meta">Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}</div>
+      <div class="home-spotlight-meta">${renderStockMetaHtml(articulo, codigo)}</div>
       <div class="home-spotlight-price">${precioVisual.esCeramico ? `<span style="font-size:12px;color:#356b9f;margin-right:4px;">${precioVisual.precioBaseHtml}</span>` : (articulo.ofertaVigente ? `<span style="font-size:12px;text-decoration:line-through;color:#7890aa;margin-right:4px;">${fmtPrecio(precioLista)}</span>` : '')}${precioVisual.esCeramico ? precioVisual.precioFinalCompactoHtml : precioVisual.precioFinalHtml}</div>
     </div>
   </article>`;
@@ -4881,7 +5041,7 @@ function cumpleFiltrosBusqueda(articulo, parsed) {
   if (filtros.masVendido && !articulo.masVendido) return false;
   if (filtros.accesoRapido && !articulo.accesoRapido) return false;
   if (filtros.ceramico && !articulo.ceramico) return false;
-  const stock = Number(articulo.stock || 0);
+  const stock = Number(obtenerStockInfo(articulo).stockNum || 0);
   if (filtros.stock === 'available' && !(Number.isFinite(stock) && stock > 0)) return false;
   if (filtros.stock === 'empty' && Number.isFinite(stock) && stock > 0) return false;
   if (filtros.rubro && !normalizarTexto(articulo.rubro || '').includes(filtros.rubro)) return false;
@@ -5768,7 +5928,7 @@ function abrirDetalleProducto(codigo) {
   document.getElementById('productDetailTags').innerHTML = tags.join('');
   document.getElementById('productDetailTitle').textContent = descripcion.principal;
   document.getElementById('productDetailCode').textContent = obtenerIdArticulo(articulo);
-  document.getElementById('productDetailStock').textContent = stockText;
+  document.getElementById('productDetailStock').innerHTML = renderProductDetailStockHtml(articulo);
   const detailPriceBase = document.getElementById('productDetailPriceBase');
   detailPriceBase.textContent = precioVisual.esCeramico && !articulo.ofertaVigente ? '' : (precioVisual.esCeramico ? precioVisual.precioBaseHtml : (articulo.ofertaVigente ? `Precio lista ${fmtPrecio(precioLista)}` : ''));
   detailPriceBase.classList.toggle('precio-caja', precioVisual.esCeramico);
@@ -5860,7 +6020,7 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
           ${descripcion.secundaria ? `<div class="lista-desc-sub">${detalleHtml}</div>` : ''}
           ${tagsHtml}
         </div>
-        <div class="lista-cell lista-stock"><div class="stock-pill ${stockClass}">${stockLista}</div></div>
+          <div class="lista-cell lista-stock">${renderStockPillsHtml(a)}</div>
         <div class="lista-cell lista-precio">
           <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}${a.ofertaVigente ? ' oferta-tachada' : ''}">${precioVisual.precioBaseHtml}</div>
           <div class="precio-vigente">${precioVisual.precioFinalCompactoHtml}</div>
@@ -5916,7 +6076,7 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
           <div class="card-nombre">${nombreHtml}</div>
           <div class="card-detalle">${detalleHtml}</div>
           <div class="card-meta">
-            <div class="stock-pill ${stockClass}">Stock: ${stockText}</div>
+            ${renderStockPillsHtml(a, { withDisponibles: true })}
             <div class="codigo-linea">Código: ${codigoHtml}</div>
           </div>
         </div>
