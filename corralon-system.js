@@ -16,6 +16,10 @@
   const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
   const IMAGE_GENERATOR_CATALOG_KEY = 'corralon_image_generator_catalog_v1';
   const IMAGE_GENERATOR_PAYLOAD_KEY = 'corralon_image_generator_payload_v1';
+  const BRANCHES = [
+    { id: 'progreso_ruta', label: 'Suc. Progreso y Ruta' },
+    { id: 'calle5_espana', label: 'Suc. Calle 5 y Espana' }
+  ];
 
   function headers(extra = {}) {
     return {
@@ -73,6 +77,13 @@
 
   function money(value) {
     return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function normalizeBranch(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const branch = BRANCHES.find((item) => item.id === raw || item.label === raw);
+    return branch ? branch.label : raw;
   }
 
   function imageGeneratorText(value) {
@@ -1792,6 +1803,7 @@
     SUPABASE_URL,
     SUPABASE_KEY,
     TABLES,
+    BRANCHES,
     PROVIDER_MANIFEST_PREFIX,
     headers,
     norm,
@@ -1801,6 +1813,7 @@
     nowTimestamp,
     money,
     percent,
+    normalizeBranch,
     providerFromObject,
     normalizeProviderPageLink,
     providerRemotePayload,
