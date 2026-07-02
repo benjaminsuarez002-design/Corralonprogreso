@@ -251,10 +251,97 @@
     });
   }
 
+  function formatPedidoCantidad(value) {
+    if (typeof value === 'string' && value.trim()) return value.trim().replace('.', ',');
+    const num = Number(value) || 0;
+    return Number.isInteger(num)
+      ? String(num)
+      : num.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+  }
+
+  function drawPedidoHeader(doc, data) {
+    const proveedor = String(data.proveedor || data.headerName || '-').trim() || '-';
+    const sucursal = String(data.sucursal || 'Sin sucursal').trim() || 'Sin sucursal';
+    if (data.logoDataUrl) doc.addImage(data.logoDataUrl, 'PNG', 15, 10, 34, 18);
+
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(11);
+    doc.text('PEDIDO PARA', 105, 17, { align: 'center' });
+    doc.setFontSize(17);
+    doc.text(proveedor.substring(0, 42), 105, 30, { align: 'center' });
+    doc.setFontSize(11);
+    doc.text(sucursal.substring(0, 50), 105, 40, { align: 'center' });
+
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.text(`Pedido Nro: ${data.numero || '-'}`, 195, 16, { align: 'right' });
+    doc.text(`Fecha: ${normalizarFecha(data.fecha)}`, 195, 23, { align: 'right' });
+    doc.line(15, 48, 195, 48);
+  }
+
+  function drawPedidoTableHeader(doc, y) {
+    doc.setFillColor(232, 244, 255);
+    doc.rect(15, y - 6, 180, 9, 'F');
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(10);
+    doc.text('CODPROV', 18, y);
+    doc.text('DETALLE', 48, y);
+    doc.text('CANTIDAD', 193, y, { align: 'right' });
+    doc.setDrawColor(170, 215, 255);
+    doc.line(15, y + 4, 195, y + 4);
+    return y + 8;
+  }
+
+  function generarPDFPedidoDoc(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const items = Array.isArray(data.items) ? data.items : [];
+    const pageH = doc.internal.pageSize.getHeight();
+    const bottomY = pageH - 18;
+
+    drawPedidoHeader(doc, data);
+    let y = drawPedidoTableHeader(doc, 61);
+
+    items.forEach((rawItem) => {
+      const codigo = String(rawItem.codigoProveedor || rawItem.codProv || rawItem.codigo || '').trim();
+      const detalle = String(rawItem.detalle || rawItem.articulo || rawItem.descripcion || '').trim();
+      const cantidad = formatPedidoCantidad(rawItem.cantidad);
+      const lines = doc.splitTextToSize(detalle || '-', 118);
+      const rowPitch = 4.8;
+      const lineHeightFactor = 1.36;
+      const rowH = Math.max(rowPitch, lines.length * rowPitch);
+
+      if (y + rowH > bottomY) {
+        doc.addPage();
+        drawPedidoHeader(doc, data);
+        y = drawPedidoTableHeader(doc, 61);
+      }
+
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(10);
+      const codeSize = codigo.length > 10 ? Math.max(6.8, 10 - ((codigo.length - 10) * 0.35)) : 10;
+      doc.setFontSize(codeSize);
+      doc.text(codigo, 18, y, { maxWidth: 24 });
+      doc.setFontSize(10);
+      doc.text(lines, 48, y, { lineHeightFactor });
+      doc.text(cantidad, 193, y, { align: 'right' });
+      y += rowH;
+    });
+
+    if (!items.length) {
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(10);
+      doc.text('Este pedido no tiene articulos.', 15, y);
+    }
+
+    return doc;
+  }
+
   window.PresupuestoShared = {
     ensureLogoDataUrl,
     openPdfPreview,
     generarPDFPresupuestoDoc,
-    generarPDFRemitoDoc
+    generarPDFRemitoDoc,
+    generarPDFPedidoDoc
   };
 })();
