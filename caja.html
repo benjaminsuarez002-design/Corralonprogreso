@@ -482,7 +482,7 @@
     .row-selector-btn::before { content: ''; }
     .selected-row .row-selector-btn::before,
     .row-selector-btn:focus::before {
-      content: '▶';
+      content: '?';
       font-size: 12px;
     }
     .row-selector-btn:focus {
@@ -1270,9 +1270,9 @@
         <div class="dolar-card"><div class="dolar-label">Promedio</div><div class="dolar-value" data-dolar-promedio>...</div></div>
       </div>
       <div class="date-nav" aria-label="Navegar dias de caja">
-        <button class="date-nav-btn" id="prevCajaDayBtn" type="button" aria-label="Dia anterior">‹</button>
+        <button class="date-nav-btn" id="prevCajaDayBtn" type="button" aria-label="Dia anterior">&lt;</button>
         <span class="date-nav-label" id="cajaDateLabel"></span>
-        <button class="date-nav-btn" id="nextCajaDayBtn" type="button" aria-label="Dia siguiente">›</button>
+        <button class="date-nav-btn" id="nextCajaDayBtn" type="button" aria-label="Dia siguiente">&gt;</button>
       </div>
       <a class="top-link" href="menu.html">Volver al menu</a>
     </header>
@@ -1543,6 +1543,7 @@
     };
     const FIREBASE_CAJA_CONFIG_COLLECTION = 'config';
     const FIREBASE_CAJA_CONFIG_DOC = 'cajaActual';
+    const FIREBASE_CAJA_ESTADOS_COLLECTION = 'control_caja_estados';
     const DEFAULT_SUMMARY_MANUAL = { mercadoPago: 0, lapos: 0, getnet: 0, providerTransfers: 0 };
     const UI_NOISE = new Set([
       'saltar al contenido', 'comentar sobre accesibilidad', 'mercado pago logo',
@@ -1643,7 +1644,7 @@
     function formatDateLabel(dateKey = selectedDateKey) {
       const date = dateFromKey(dateKey);
       const label = date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      if (dateKey === TODAY_DATE_KEY) return `${label} · Hoy`;
+      if (dateKey === TODAY_DATE_KEY) return `${label} - Hoy`;
       return label;
     }
 
@@ -2020,6 +2021,7 @@
     }
 
     async function loadRemoteState(dateKey = selectedDateKey) {
+      if (await loadFirebaseCajaState(dateKey)) return;
       if (remoteSaveBlocked) return;
       try {
         const url = `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE_CAJA}?id=eq.${encodeURIComponent(remoteRowIdForDate(dateKey))}&select=payload&limit=1`;
@@ -3358,6 +3360,24 @@
       return snap.exists ? snap.data() : null;
     }
 
+    async function loadFirebaseCajaState(dateKey = selectedDateKey) {
+      const db = firebaseDatabase();
+      if (!db) return false;
+      try {
+        const snap = await db.collection(FIREBASE_CAJA_ESTADOS_COLLECTION).doc(dateKey).get();
+        if (!snap.exists || dateKey !== selectedDateKey) return false;
+        const data = snap.data() || {};
+        const payload = data.payload || (data.payloadJson ? JSON.parse(data.payloadJson) : null);
+        if (!payload || typeof payload !== 'object') return false;
+        applySavedPayload(payload);
+        persistLocalState();
+        renderAll();
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
     function publicCajaSignature(config, movementsPayload, systemPayload) {
       return [
         config?.updatedAt || '',
@@ -3374,6 +3394,7 @@
     async function loadPublicCajaData(options = {}) {
       if (selectedDateKey !== TODAY_DATE_KEY) {
         setCajaPublicLoading(false);
+        await loadFirebaseCajaState(selectedDateKey);
         return;
       }
       const silent = Boolean(options.silent);
@@ -3861,7 +3882,7 @@
       await loadPublicCajaData({ force: true, showPublicLoading: true });
       updateTotals();
       saveState();
-      showToast('Caja y movimientos actualizados.', 5000);
+      showToast('Caja y movimientos actualizados y guardados.', 5000);
     });
     document.getElementById('closePasteModalBtn').addEventListener('click', closePasteModal);
     document.getElementById('closeDiffModalBtn').addEventListener('click', closeDiffModal);
@@ -4067,5 +4088,6 @@
   </script>
 </body>
 </html>
+
 
 
