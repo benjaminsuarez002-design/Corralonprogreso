@@ -296,6 +296,7 @@
       font-size: 16px;
     }
     .grid-box {
+      position: relative;
       height: 258px;
       border: 1px solid var(--borde);
       border-radius: 8px 8px 0 0;
@@ -304,6 +305,63 @@
       box-shadow: inset 0 0 0 1px rgba(255,255,255,.8);
     }
     .grid-box.tall { height: 324px; }
+    .system-loading,
+    .movements-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 22px;
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(1px);
+    }
+    .system-loading.open,
+    .movements-loading.open { display: flex; }
+    .system-loading-box,
+    .movements-loading-box {
+      width: min(360px, 92%);
+      display: grid;
+      gap: 9px;
+      padding: 13px 15px;
+      border: 1px solid var(--borde);
+      border-radius: 8px;
+      background: rgba(247,244,255,.96);
+      box-shadow: 0 8px 22px rgba(58,35,120,.12);
+    }
+    .system-loading-text,
+    .movements-loading-text {
+      color: var(--violeta-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: .2px;
+      text-transform: uppercase;
+    }
+    .system-loading-bar,
+    .movements-loading-bar {
+      position: relative;
+      height: 10px;
+      overflow: hidden;
+      border: 1px solid var(--borde);
+      border-radius: 999px;
+      background: #fff;
+    }
+    .system-loading-bar::before,
+    .movements-loading-bar::before {
+      content: '';
+      position: absolute;
+      inset: 1px auto 1px 1px;
+      width: 38%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--violeta), #a690ff);
+      animation: systemLoadingSlide 1s ease-in-out infinite;
+    }
+    @keyframes systemLoadingSlide {
+      0% { transform: translateX(-105%); }
+      55%, 100% { transform: translateX(265%); }
+    }
 
     table {
       width: 100%;
@@ -1315,6 +1373,12 @@
                 </thead>
                 <tbody id="systemRows"></tbody>
               </table>
+              <div class="system-loading" id="systemLoading" aria-live="polite">
+                <div class="system-loading-box">
+                  <div class="system-loading-text">Cargando transferencias</div>
+                  <div class="system-loading-bar"></div>
+                </div>
+              </div>
             </div>
             <div class="navigator">
               <span>Registro:</span><span class="nav-icons">|&lt; &lt; &gt; &gt;|</span>
@@ -1353,6 +1417,12 @@
                 </thead>
                 <tbody id="movementRows"></tbody>
               </table>
+              <div class="movements-loading" id="movementsLoading" aria-live="polite">
+                <div class="movements-loading-box">
+                  <div class="movements-loading-text">Cargando movimientos</div>
+                  <div class="movements-loading-bar"></div>
+                </div>
+              </div>
             </div>
             <div class="navigator">
               <span>Registro:</span><span class="nav-icons">|&lt; &lt; &gt; &gt;|</span>
@@ -1467,6 +1537,12 @@
     const DIFF_TOLERANCE = 10;
     const CASH_DENOMS = [100, 200, 500, 1000, 2000, 10000, 20000];
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
+    const CAJA_PUBLIC_JSON_FALLBACK = {
+      movements: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_tabla.json',
+      system: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_transferencias.json'
+    };
+    const FIREBASE_CAJA_CONFIG_COLLECTION = 'config';
+    const FIREBASE_CAJA_CONFIG_DOC = 'cajaActual';
     const DEFAULT_SUMMARY_MANUAL = { mercadoPago: 0, lapos: 0, getnet: 0, providerTransfers: 0 };
     const UI_NOISE = new Set([
       'saltar al contenido', 'comentar sobre accesibilidad', 'mercado pago logo',
@@ -1517,6 +1593,8 @@
       pasteText: document.getElementById('pasteText'),
       systemRowMenu: document.getElementById('systemRowMenu'),
       deleteSystemRowMenuBtn: document.getElementById('deleteSystemRowMenuBtn'),
+      systemLoading: document.getElementById('systemLoading'),
+      movementsLoading: document.getElementById('movementsLoading'),
       toast: document.getElementById('toast')
     };
     let pasteMode = 'transfers';
@@ -1535,6 +1613,7 @@
     let firebaseDb = null;
     let firebaseSaveTimer = null;
     let applyingFirebaseSummary = false;
+    let lastPublicCajaSignature = '';
 
     function storageKeyForDate(dateKey = selectedDateKey) {
       return `${STORAGE_KEY_BASE}_${dateKey}`;
@@ -2855,11 +2934,24 @@
       return true;
     }
 
-    function showToast(message) {
+    function showToast(message, duration = 2200) {
       el.toast.textContent = message;
       el.toast.classList.add('visible');
       clearTimeout(showToast.timer);
-      showToast.timer = setTimeout(() => el.toast.classList.remove('visible'), 2200);
+      showToast.timer = setTimeout(() => el.toast.classList.remove('visible'), duration);
+    }
+
+    function setSystemLoading(isLoading) {
+      el.systemLoading?.classList.toggle('open', Boolean(isLoading));
+    }
+
+    function setMovementsLoading(isLoading) {
+      el.movementsLoading?.classList.toggle('open', Boolean(isLoading));
+    }
+
+    function setCajaPublicLoading(isLoading) {
+      setSystemLoading(isLoading);
+      setMovementsLoading(isLoading);
     }
 
     function cleanClientName(value) {
@@ -2884,7 +2976,7 @@
     }
 
     function isTimeLine(line) {
-      return /^\d{1,2}:\d{2}\s*hs$/i.test(cleanLine(line));
+      return /^\d{1,2}:\d{2}(?:\s*hs)?$/i.test(cleanLine(line));
     }
 
     function isMoneyToken(line) {
@@ -3047,25 +3139,66 @@
       return records;
     }
 
+    function parseMercadoPagoSegmentAmount(segment, signIndex) {
+      const tokens = [];
+      for (let j = signIndex; j < segment.length; j++) {
+        const line = cleanLine(segment[j]);
+        const token = line.replace(/[+$]/g, '').trim();
+        if (!token || line === '$') continue;
+        if (isMoneyToken(token)) {
+          tokens.push(token);
+          continue;
+        }
+        if (tokens.length) break;
+      }
+      const raw = tokens.join('').replace(/\.(?=\d{3}(?:\D|$))/g, '').replace(',', '.');
+      return Number(raw) || 0;
+    }
+
     function parseMercadoPagoText(text) {
       const lines = String(text || '').split(/\r?\n/).map(cleanLine).filter(Boolean);
       const records = [];
       let currentDate = '';
       for (let i = 0; i < lines.length; i++) {
-        if (isDateHeader(lines[i])) currentDate = lines[i];
-        if (!isPlusLine(lines[i])) continue;
-        const client = findClientBefore(lines, i);
-        const amountInfo = parseAmountAfter(lines, i);
-        if (!(amountInfo.amount > 0)) continue;
-        const details = scanMovementDetails(lines, amountInfo.endIndex);
-        const normalizedClient = normalizarTexto(client);
-        const isBankIncome = normalizedClient === 'ingreso de dinero' && (details.hasBankEntity || details.hasBankTransfer);
-        if (!details.hasTransferReceived && !isBankIncome) continue;
+        const line = lines[i];
+        if (isDateHeader(line)) {
+          currentDate = line;
+          continue;
+        }
+        if (!isTimeLine(line)) continue;
+        const hour = line.replace(/\s*hs$/i, '');
+        const segment = [line];
+        let j = i + 1;
+        for (; j < lines.length; j++) {
+          const next = lines[j];
+          const n = normalizarTexto(next);
+          if (isDateHeader(next) || isTimeLine(next) || n === 'pagina') break;
+          segment.push(next);
+        }
+        i = j - 1;
+
+        const signIndex = segment.findIndex((item) => isPlusLine(item));
+        if (signIndex < 0) continue;
+        const beforeSign = segment.slice(1, signIndex);
+        const normalizedBefore = beforeSign.map(normalizarTexto);
+        const hasTransferReceived = normalizedBefore.includes('transferencia recibida');
+        const isBankIncome = normalizedBefore.includes('ingreso de dinero') &&
+          (normalizedBefore.includes('entidad bancaria') || normalizedBefore.includes('con transferencia'));
+        if (!hasTransferReceived && !isBankIncome) continue;
+
+        const amount = parseMercadoPagoSegmentAmount(segment, signIndex);
+        if (!(amount > 0)) continue;
+        const operationIndex = beforeSign.findIndex((item) => {
+          const n = normalizarTexto(item);
+          return n === 'transferencia recibida' || n === 'ingreso de dinero';
+        });
+        const clientSource = operationIndex > 0 ? beforeSign[operationIndex - 1] : beforeSign[0];
+        const client = cleanClientName(clientSource) || 'Ingreso de dinero';
         records.push({
-          id: `${currentDate}-${details.hour}-${client}-${amountInfo.amount}`.replace(/\s+/g, '-'),
-          hour: details.hour || '-',
+          id: `${currentDate}-${hour}-${client}-${amount}`.replace(/\s+/g, '-'),
+          hour,
           client,
-          amount: amountInfo.amount
+          amount
         });
       }
       const seen = new Set();
@@ -3165,6 +3298,121 @@
       const mercadoPagoRows = nextRows.filter((row) => movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago')).length;
       showToast(`Se agregaron ${nextRows.length} filas nuevas${skipped ? `, ${skipped} repetidas ignoradas` : ''}${mercadoPagoRows ? `, ${mercadoPagoRows} Mercado Pago en rojo` : ''}.`);
       return true;
+    }
+
+    function cajaPublicPayloadMatchesDate(payload) {
+      const fecha = String(payload?.fecha || '').slice(0, 10);
+      return !fecha || fecha === selectedDateKey;
+    }
+
+    function rowsFromPublicPayload(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.rows)) return payload.rows;
+      return [];
+    }
+
+    function applyPublicCajaMovements(payload) {
+      if (!cajaPublicPayloadMatchesDate(payload)) return false;
+      const rows = rowsFromPublicPayload(payload);
+      if (!rows.length) return false;
+      const amountsByType = new Map(rows.map((row) => [movementTypeKey(row.type || row.tipo || row.TipoPago), row]));
+      state.movements = MOVEMENT_TYPES.map((type) => {
+        const row = amountsByType.get(movementTypeKey(type)) || {};
+        return {
+          type,
+          initial: Number(row.initial ?? row.inicial ?? row.ImpAnt ?? 0) || 0,
+          day: Number(row.day ?? row.movDia ?? row.Importe ?? 0) || 0,
+          ie: Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0
+        };
+      });
+      return true;
+    }
+
+    function applyPublicCajaSystem(payload) {
+      if (!cajaPublicPayloadMatchesDate(payload)) return false;
+      const rows = rowsFromPublicPayload(payload);
+      state.system = rows
+        .map((row) => normalizeSystemRow({
+          typeComp: row.typeComp || row.Abreviatura || '',
+          invoice: row.invoice || row.NroFactura || '',
+          name: row.name || row.ApeYNom || '',
+          amount: row.amount ?? row.Total ?? 0,
+          paymentType: row.paymentType || row.TipoPago || 'Transf Bria.'
+        }))
+        .filter((row) => row.name || row.invoice || Number(row.amount || 0));
+      selectedSystemRows.clear();
+      systemSort = { field: '', direction: '' };
+      return true;
+    }
+
+    async function fetchPublicCajaJson(url) {
+      const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    }
+
+    async function loadCajaPublicConfig() {
+      const db = firebaseDatabase();
+      if (!db) return null;
+      const snap = await db.collection(FIREBASE_CAJA_CONFIG_COLLECTION).doc(FIREBASE_CAJA_CONFIG_DOC).get();
+      return snap.exists ? snap.data() : null;
+    }
+
+    function publicCajaSignature(config, movementsPayload, systemPayload) {
+      return [
+        config?.updatedAt || '',
+        config?.urlTabla || '',
+        config?.urlTransferencias || '',
+        movementsPayload?.generatedAt || '',
+        systemPayload?.generatedAt || '',
+        movementsPayload?.idRecibo || '',
+        rowsFromPublicPayload(movementsPayload).length,
+        rowsFromPublicPayload(systemPayload).length
+      ].join('|');
+    }
+
+    async function loadPublicCajaData(options = {}) {
+      if (selectedDateKey !== TODAY_DATE_KEY) {
+        setCajaPublicLoading(false);
+        return;
+      }
+      const silent = Boolean(options.silent);
+      const force = Boolean(options.force);
+      const showPublicLoading = !silent || Boolean(options.showSystemLoading) || Boolean(options.showPublicLoading);
+      if (showPublicLoading) setCajaPublicLoading(true);
+      try {
+        const config = await loadCajaPublicConfig();
+        const movementsUrl = config?.urlTabla || CAJA_PUBLIC_JSON_FALLBACK.movements;
+        const systemUrl = config?.urlTransferencias || CAJA_PUBLIC_JSON_FALLBACK.system;
+        if (!movementsUrl || !systemUrl) return;
+        const [movementsPayload, systemPayload] = await Promise.all([
+          fetchPublicCajaJson(movementsUrl),
+          fetchPublicCajaJson(systemUrl)
+        ]);
+        const signature = publicCajaSignature(config, movementsPayload, systemPayload);
+        if (!force && signature && signature === lastPublicCajaSignature) return;
+        const appliedMovements = applyPublicCajaMovements(movementsPayload);
+        const appliedSystem = applyPublicCajaSystem(systemPayload);
+        if (!appliedMovements && !appliedSystem) return;
+        const wasAlreadyLoaded = Boolean(lastPublicCajaSignature);
+        lastPublicCajaSignature = signature;
+        persistLocalState();
+        renderMovementRows();
+        renderSystemRows();
+        updateTotals();
+        if (wasAlreadyLoaded || !silent) showToast('Caja actualizada', 5000);
+      } catch (error) {
+        if (!silent) showToast('No pude cargar la caja publicada.');
+      } finally {
+        if (showPublicLoading) setCajaPublicLoading(false);
+      }
+    }
+
+    function startPublicCajaPolling() {
+      setInterval(() => {
+        if (document.hidden) return;
+        loadPublicCajaData({ silent: true });
+      }, 10000);
     }
 
     async function pasteMovementsFromClipboard() {
@@ -3609,10 +3857,11 @@
     document.getElementById('findDiffBtn').addEventListener('click', openDiffModal);
     el.prevCajaDayBtn.addEventListener('click', () => switchCajaDate(-1));
     el.nextCajaDayBtn.addEventListener('click', () => switchCajaDate(1));
-    document.getElementById('updateTotalsBtn').addEventListener('click', () => {
+    document.getElementById('updateTotalsBtn').addEventListener('click', async () => {
+      await loadPublicCajaData({ force: true, showPublicLoading: true });
       updateTotals();
       saveState();
-      showToast('Importes actualizados.');
+      showToast('Caja y movimientos actualizados.', 5000);
     });
     document.getElementById('closePasteModalBtn').addEventListener('click', closePasteModal);
     document.getElementById('closeDiffModalBtn').addEventListener('click', closeDiffModal);
@@ -3813,7 +4062,8 @@
     loadDolarCards();
     loadState(selectedDateKey);
     renderAll();
-    loadRemoteState(selectedDateKey).finally(() => loadSummaryManualState(selectedDateKey));
+    loadRemoteState(selectedDateKey).finally(() => loadPublicCajaData().finally(() => loadSummaryManualState(selectedDateKey)));
+    startPublicCajaPolling();
   </script>
 </body>
 </html>
