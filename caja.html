@@ -305,6 +305,7 @@
       box-shadow: inset 0 0 0 1px rgba(255,255,255,.8);
     }
     .grid-box.tall { height: 324px; }
+    .transfer-loading,
     .system-loading,
     .movements-loading {
       position: absolute;
@@ -317,8 +318,10 @@
       background: rgba(255,255,255,.82);
       backdrop-filter: blur(1px);
     }
+    .transfer-loading.open,
     .system-loading.open,
     .movements-loading.open { display: flex; }
+    .transfer-loading-box,
     .system-loading-box,
     .movements-loading-box {
       width: min(360px, 92%);
@@ -330,6 +333,7 @@
       background: rgba(247,244,255,.96);
       box-shadow: 0 8px 22px rgba(58,35,120,.12);
     }
+    .transfer-loading-text,
     .system-loading-text,
     .movements-loading-text {
       color: var(--violeta-oscuro);
@@ -339,6 +343,7 @@
       letter-spacing: .2px;
       text-transform: uppercase;
     }
+    .transfer-loading-bar,
     .system-loading-bar,
     .movements-loading-bar {
       position: relative;
@@ -348,6 +353,7 @@
       border-radius: 999px;
       background: #fff;
     }
+    .transfer-loading-bar::before,
     .system-loading-bar::before,
     .movements-loading-bar::before {
       content: '';
@@ -1336,6 +1342,12 @@
                 </thead>
                 <tbody id="transferRows"></tbody>
               </table>
+              <div class="transfer-loading" id="transferLoading" aria-live="polite">
+                <div class="transfer-loading-box">
+                  <div class="transfer-loading-text">Cargando Mercado Pago</div>
+                  <div class="transfer-loading-bar"></div>
+                </div>
+              </div>
             </div>
             <div class="navigator">
               <span>Registro:</span><span class="nav-icons">|&lt; &lt; &gt; &gt;|</span>
@@ -1539,7 +1551,8 @@
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
     const CAJA_PUBLIC_JSON_FALLBACK = {
       movements: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_tabla.json',
-      system: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_transferencias.json'
+      system: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_transferencias.json',
+      mercadoPago: ''
     };
     const FIREBASE_CAJA_CONFIG_COLLECTION = 'config';
     const FIREBASE_CAJA_CONFIG_DOC = 'cajaActual';
@@ -1593,6 +1606,7 @@
       pasteText: document.getElementById('pasteText'),
       systemRowMenu: document.getElementById('systemRowMenu'),
       deleteSystemRowMenuBtn: document.getElementById('deleteSystemRowMenuBtn'),
+      transferLoading: document.getElementById('transferLoading'),
       systemLoading: document.getElementById('systemLoading'),
       movementsLoading: document.getElementById('movementsLoading'),
       toast: document.getElementById('toast')
@@ -2945,11 +2959,16 @@
       el.systemLoading?.classList.toggle('open', Boolean(isLoading));
     }
 
+    function setTransferLoading(isLoading) {
+      el.transferLoading?.classList.toggle('open', Boolean(isLoading));
+    }
+
     function setMovementsLoading(isLoading) {
       el.movementsLoading?.classList.toggle('open', Boolean(isLoading));
     }
 
     function setCajaPublicLoading(isLoading) {
+      setTransferLoading(isLoading);
       setSystemLoading(isLoading);
       setMovementsLoading(isLoading);
     }
@@ -3345,6 +3364,25 @@
       return true;
     }
 
+    function applyPublicMercadoPago(payload) {
+      if (!payload || !cajaPublicPayloadMatchesDate(payload)) return false;
+      const rows = rowsFromPublicPayload(payload);
+      state.transfers = rows
+        .map((row, idx) => normalizeTransfer({
+          id: row.id || `mp-${idx}-${row.hour || ''}-${row.client || ''}-${row.amount || 0}`,
+          hour: row.hour || row.Hora || '',
+          client: row.client || row.Cliente || row.ApeYNom || 'Ingreso de dinero',
+          amount: row.amount ?? row.Importe ?? row.Total ?? 0,
+          source: 'mercadopago',
+          order: Number.isFinite(Number(row.order)) ? Number(row.order) : idx
+        }, idx))
+        .filter(Boolean);
+      selectedTransferId = '';
+      selectedTransferRows.clear();
+      resetTransferSort();
+      return true;
+    }
+
     async function fetchPublicCajaJson(url) {
       const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(await response.text());
@@ -3358,16 +3396,19 @@
       return snap.exists ? snap.data() : null;
     }
 
-    function publicCajaSignature(config, movementsPayload, systemPayload) {
+    function publicCajaSignature(config, movementsPayload, systemPayload, mercadoPagoPayload) {
       return [
         config?.updatedAt || '',
         config?.urlTabla || '',
         config?.urlTransferencias || '',
+        config?.urlMercadoPago || '',
         movementsPayload?.generatedAt || '',
         systemPayload?.generatedAt || '',
+        mercadoPagoPayload?.generatedAt || '',
         movementsPayload?.idRecibo || '',
         rowsFromPublicPayload(movementsPayload).length,
-        rowsFromPublicPayload(systemPayload).length
+        rowsFromPublicPayload(systemPayload).length,
+        rowsFromPublicPayload(mercadoPagoPayload).length
       ].join('|');
     }
 
@@ -3384,19 +3425,23 @@
         const config = await loadCajaPublicConfig();
         const movementsUrl = config?.urlTabla || CAJA_PUBLIC_JSON_FALLBACK.movements;
         const systemUrl = config?.urlTransferencias || CAJA_PUBLIC_JSON_FALLBACK.system;
+        const mercadoPagoUrl = config?.urlMercadoPago || CAJA_PUBLIC_JSON_FALLBACK.mercadoPago;
         if (!movementsUrl || !systemUrl) return;
-        const [movementsPayload, systemPayload] = await Promise.all([
+        const [movementsPayload, systemPayload, mercadoPagoPayload] = await Promise.all([
           fetchPublicCajaJson(movementsUrl),
-          fetchPublicCajaJson(systemUrl)
+          fetchPublicCajaJson(systemUrl),
+          mercadoPagoUrl ? fetchPublicCajaJson(mercadoPagoUrl) : Promise.resolve(null)
         ]);
-        const signature = publicCajaSignature(config, movementsPayload, systemPayload);
+        const signature = publicCajaSignature(config, movementsPayload, systemPayload, mercadoPagoPayload);
         if (!force && signature && signature === lastPublicCajaSignature) return;
         const appliedMovements = applyPublicCajaMovements(movementsPayload);
         const appliedSystem = applyPublicCajaSystem(systemPayload);
-        if (!appliedMovements && !appliedSystem) return;
+        const appliedMercadoPago = applyPublicMercadoPago(mercadoPagoPayload);
+        if (!appliedMovements && !appliedSystem && !appliedMercadoPago) return;
         const wasAlreadyLoaded = Boolean(lastPublicCajaSignature);
         lastPublicCajaSignature = signature;
         persistLocalState();
+        renderTransferRows();
         renderMovementRows();
         renderSystemRows();
         updateTotals();
