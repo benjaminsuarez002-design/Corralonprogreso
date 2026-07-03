@@ -6,6 +6,8 @@
   <title>Diferencias proveedores</title>
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;800;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
+  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="diferencias_proveedores"></script>
+  <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
     :root{--red:#df1731;--blue:#0b85d8;--cyan:#16c8ff;--purple:#6c4fc7;--bg:#eefbff;--panel:#fff;--line:#9fe0ff;--soft:#eaf8ff;--text:#18223a;--muted:#66708e;--ok:#00b86b;--bad:#ff3f6c;--warn:#ffb020;--shadow:0 14px 34px rgba(35,112,190,.14)}
@@ -24,6 +26,10 @@
     .stat{display:grid;gap:1px;min-width:140px;padding:7px 10px;border:1px solid #d5efff;border-radius:12px;background:#f8fdff}
     .stat span{font:800 12px "Barlow Condensed";color:var(--muted);text-transform:uppercase}
     .stat strong{font-size:17px}
+    .stat[hidden]{display:none}
+    .date-filter{min-width:240px}
+    .date-fields{display:flex;gap:6px}
+    .date-fields input{height:24px;border:1px solid #d5efff;border-radius:8px;background:#fff;padding:2px 6px;font:800 12px Barlow,Arial;color:var(--text)}
     .board{min-height:360px;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px;overflow:hidden}
     .table-card{min-width:0;min-height:0;display:grid;grid-template-rows:auto 1fr auto;border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden}
     .table-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:linear-gradient(90deg,var(--soft),#fff);border-bottom:1px solid var(--line)}
@@ -35,21 +41,26 @@
     th{position:sticky;top:0;z-index:2;background:#eaf8ff;color:#243057;font:900 15px "Barlow Condensed";text-align:left;padding:6px 8px;cursor:pointer;user-select:none}
     th.corner{left:0;width:28px;text-align:center;color:var(--red);z-index:3}
     td.rowmark{position:sticky;left:0;background:#f7fdff;color:var(--purple);text-align:center;font-weight:900;width:28px}
+    td.rowmark{cursor:pointer}
+    td.rowmark-selected{background:#b9dcff!important;color:#043a7a!important;box-shadow:inset 0 0 0 2px #168fff}
+    tr:has(td.rowmark-selected) td{box-shadow:inset 0 0 0 999px rgba(0,120,255,.18)}
+    tr:has(td.rowmark-selected) input{font-weight:900}
     input{width:100%;height:29px;border:0;outline:0;background:transparent;padding:4px 7px;font:14px Barlow,Arial;color:var(--text)}
     .money{text-align:right;font-variant-numeric:tabular-nums}
     .selected-col th,.selected-col td{background:#f0fbff}
     .selected-table th,.selected-table td{background:#eef9ff}
-    tr.row-ok td{background:#dff8eb!important}
+    tr.row-ok td{background:#40bf87!important}
     tr.row-fail td{background:#e73958!important;color:#fff}
     tr.row-fail input{color:#fff}
     td.field-match{background:#07b96f!important;color:#fff}
     td.field-match input{color:#fff;font-weight:900}
+    tr.row-ok td.field-match,tr.row-manual td.field-match{background:#009f5f!important;color:#fff}
     tr.row-fail td.field-match{background:#9f1028!important}
-    tr.row-manual td{background:#dff8eb!important}
+    tr.row-manual td{background:#40bf87!important}
     tr.row-muted td{background:#fff!important;color:var(--text)!important}
     tr.row-muted input{color:var(--text)!important}
     .multi-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-left:6px;border-radius:999px;background:#ffb020;color:#fff;font:900 12px Barlow}
-    .active-cell{outline:2px solid var(--purple);outline-offset:-2px;background:#fff7ff!important}
+    .active-cell{outline:3px solid var(--purple);outline-offset:-3px;background:transparent!important;box-shadow:inset 0 0 0 999px rgba(255,255,255,.12)}
     .table-foot{display:flex;gap:12px;align-items:center;padding:7px 10px;background:#fff;color:var(--muted);font-weight:800;font-size:13px}
     .diff-panel{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
     .diff-panel.result-popup{width:min(1100px,calc(100vw - 28px));height:min(720px,calc(100dvh - 44px));background:#fff}
@@ -89,6 +100,9 @@
     .match-option{display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;border:1px solid #d5efff;border-radius:12px;background:#fbfeff;padding:10px;font-weight:800}
     .match-option strong{color:var(--blue)}
     .match-option small{display:block;color:var(--muted);font-weight:800}
+    .context-menu{position:fixed;z-index:40;display:none;min-width:190px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 18px 42px rgba(18,28,48,.24);padding:8px}
+    .context-menu.open{display:block}
+    .context-menu button{width:100%;height:34px;text-align:left;box-shadow:none}
   </style>
 </head>
 <body>
@@ -96,16 +110,17 @@
     <header>
       <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
       <h1>Diferencias proveedores</h1>
-      <div class="hint">Pegá por columna, por celda o tocá la esquina superior izquierda para pegar todo</div>
+      <div class="hint">Pega por columna, por celda o toca la esquina superior izquierda para pegar todo</div>
     </header>
     <section class="toolbar">
       <button class="primary" id="compareBtn" type="button">Buscar diferencias</button>
-      <button id="clearSelectionBtn" type="button">Quitar selección</button>
       <button id="equivBtn" type="button">Equivalencias</button>
       <button class="danger" id="clearAllBtn" type="button">Limpiar todo</button>
       <div class="stat"><span>Tabla izquierda</span><strong id="leftCount">0 filas</strong></div>
       <div class="stat"><span>Tabla derecha</span><strong id="rightCount">0 filas</strong></div>
       <div class="stat"><span>Diferencias</span><strong id="diffCount">0</strong></div>
+      <div class="stat" id="selectionStat" hidden><span>Suma seleccion</span><strong id="selectionSum">$ 0,00</strong></div>
+      <div class="stat date-filter"><span>Entre fechas</span><div class="date-fields"><input id="dateFrom" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" autocomplete="off" title="Desde"><input id="dateTo" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" autocomplete="off" title="Hasta"></div></div>
     </section>
     <main class="board">
       <section class="table-card" data-side="left">
@@ -129,7 +144,7 @@
   </div>
   <div class="modal" id="equivModal" aria-hidden="true">
     <div class="modal-card">
-      <div class="modal-head"><div class="modal-title">Equivalencias</div><span class="hint">Tocá un tipo de cada lado para unirlos</span></div>
+      <div class="modal-head"><div class="modal-title">Equivalencias</div><span class="hint">Toca un tipo de cada lado para unirlos</span></div>
       <div class="equiv-body">
         <section class="equiv-col"><h3>Tabla izquierda</h3><div class="chip-list" id="leftChips"></div></section>
         <section class="equiv-col"><h3>Tabla derecha</h3><div class="chip-list" id="rightChips"></div></section>
@@ -146,10 +161,27 @@
       <div class="modal-head"><div class="modal-title">Elegir coincidencia</div><span class="hint">Doble click en una fila con varias coincidencias</span></div>
       <div class="match-list" id="matchList"></div>
       <div class="modal-actions">
-        <button id="clearMatchBtn" type="button">Quitar selección</button>
+        <button id="clearMatchBtn" type="button">Quitar seleccion</button>
         <button class="primary" id="closeMatchBtn" type="button">Cerrar</button>
       </div>
     </div>
+  </div>
+  <div class="modal" id="clearAllModal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head"><div class="modal-title">Limpiar todo</div><span class="hint">Esta accion borra las dos tablas y las equivalencias guardadas.</span></div>
+      <div style="padding:18px;font-weight:900;color:var(--text)">Confirmame una vez mas para limpiar todo.</div>
+      <div class="modal-actions">
+        <button id="cancelClearAllBtn" type="button">Cancelar</button>
+        <button class="danger" id="confirmClearAllBtn" type="button">Limpiar todo</button>
+      </div>
+    </div>
+  </div>
+  <div class="context-menu" id="rowContextMenu">
+    <button id="alignRowsBtn" type="button">Alinear</button>
+    <button id="matchRowsBtn" type="button">Marcar coincidencia</button>
+    <button id="unifyRowsBtn" type="button">Unificar seleccionadas</button>
+    <button id="splitRowsBtn" type="button">Separar seleccionadas</button>
+    <button id="clearRowsMatchBtn" type="button">Quitar coincidencia</button>
   </div>
   <script>
     const columns=[
@@ -160,14 +192,14 @@
       {key:'haber',label:'haber',money:true},
       {key:'saldo',label:'saldo',money:true}
     ];
-    const state={left:[],right:[],selection:null,equivalences:[],pendingEquiv:null,marks:{left:{},right:{}},multiCandidates:{},manualMatches:{},matchTarget:null,focusPair:null,ctrlPick:null};
+    const state={left:[],right:[],selection:null,equivalences:[],pendingEquiv:null,marks:{left:{},right:{}},multiCandidates:{},manualMatches:{},matchTarget:null,focusPair:null,ctrlPick:null,ctrlDown:false,freeScrollUntil:0,scrollSyncing:false,rowSelection:{left:[],right:[]},rowGroups:{left:[],right:[]},contextRow:null};
     const rows=90;
     const cacheKey='diferenciasProveedores.v1';
-    const els={leftTable:document.getElementById('leftTable'),rightTable:document.getElementById('rightTable'),leftInfo:document.getElementById('leftInfo'),rightInfo:document.getElementById('rightInfo'),leftCount:document.getElementById('leftCount'),rightCount:document.getElementById('rightCount'),diffCount:document.getElementById('diffCount'),diffList:document.getElementById('diffList')};
+    const els={leftTable:document.getElementById('leftTable'),rightTable:document.getElementById('rightTable'),leftInfo:document.getElementById('leftInfo'),rightInfo:document.getElementById('rightInfo'),leftCount:document.getElementById('leftCount'),rightCount:document.getElementById('rightCount'),diffCount:document.getElementById('diffCount'),selectionStat:document.getElementById('selectionStat'),selectionSum:document.getElementById('selectionSum'),dateFrom:document.getElementById('dateFrom'),dateTo:document.getElementById('dateTo'),diffList:document.getElementById('diffList')};
 
     function blankRow(){return Object.fromEntries(columns.map(col=>[col.key,'']))}
     function normalizeRows(rowsData){return Array.from({length:rows},(_,i)=>({...blankRow(),...(rowsData?.[i]||{})}))}
-    function saveCache(){localStorage.setItem(cacheKey,JSON.stringify({left:state.left,right:state.right,equivalences:state.equivalences,manualMatches:state.manualMatches}))}
+    function saveCache(){localStorage.setItem(cacheKey,JSON.stringify({left:state.left,right:state.right,equivalences:state.equivalences,manualMatches:state.manualMatches,rowGroups:state.rowGroups}))}
     function loadCache(){
       try{
         const data=JSON.parse(localStorage.getItem(cacheKey)||'{}');
@@ -175,19 +207,28 @@
         state.right=normalizeRows(data.right);
         state.equivalences=Array.isArray(data.equivalences)?data.equivalences:[];
         state.manualMatches=data.manualMatches&&typeof data.manualMatches==='object'?data.manualMatches:{};
+        state.rowGroups=data.rowGroups&&typeof data.rowGroups==='object'?{left:data.rowGroups.left||[],right:data.rowGroups.right||[]}:{left:[],right:[]};
       }catch{state.left=normalizeRows();state.right=normalizeRows();state.equivalences=[]}
     }
     function init(){loadCache();compare();renderAll()}
     function syncTableScrolls(){
       const wraps=[...document.querySelectorAll('.table-card .grid-wrap')];
-      let syncing=false;
       wraps.forEach(wrap=>{
+        if(wrap.dataset.lastTop===undefined){wrap.dataset.lastTop=String(wrap.scrollTop);wrap.dataset.lastLeft=String(wrap.scrollLeft)}
         wrap.onscroll=()=>{
-          if(syncing)return;
-          syncing=true;
+          const top=wrap.scrollTop,left=wrap.scrollLeft;
+          const dy=top-Number(wrap.dataset.lastTop||0),dx=left-Number(wrap.dataset.lastLeft||0);
+          wrap.dataset.lastTop=String(top);wrap.dataset.lastLeft=String(left);
+          if(state.scrollSyncing||state.ctrlDown||Date.now()<state.freeScrollUntil)return;
+          if(!dy&&!dx)return;
+          state.scrollSyncing=true;
           const currentWraps=[...document.querySelectorAll('.table-card .grid-wrap')];
-          currentWraps.forEach(other=>{if(other!==wrap){other.scrollTop=wrap.scrollTop;other.scrollLeft=wrap.scrollLeft}});
-          requestAnimationFrame(()=>{syncing=false});
+          currentWraps.forEach(other=>{
+            if(other===wrap)return;
+            other.scrollTop+=dy;other.scrollLeft+=dx;
+            other.dataset.lastTop=String(other.scrollTop);other.dataset.lastLeft=String(other.scrollLeft);
+          });
+          requestAnimationFrame(()=>{state.scrollSyncing=false});
         };
       });
     }
@@ -201,10 +242,57 @@
       const table=els[`${side}Table`];
       const selected=state.selection?.side===side?state.selection:null;
       table.className=selected?.mode==='table'?'selected-table':'';
-      table.innerHTML=`<thead><tr><th class="corner" data-corner="1">◢</th>${columns.map((col,i)=>`<th data-col="${i}" class="${selected?.mode==='col'&&selected.col===i?'selected-col':''}">${esc(col.label)}</th>`).join('')}</tr></thead><tbody>${state[side].map((row,r)=>{const focused=!state.focusPair||state.focusPair[side]===r;const mark=focused?state.marks?.[side]?.[r]:null;const manual=Object.entries(state.manualMatches).some(([right,left])=>side==='right'?Number(right)===r:Number(left)===r);const multi=side==='right'&&state.multiCandidates?.[r]?.length>1;return `<tr class="${!focused?'row-muted ':''}${manual?'row-manual ':''}${mark?.status==='ok'?'row-ok':mark?.status==='fail'?'row-fail':''}"><td class="rowmark">${r+1}${multi?`<span class="multi-badge">${state.multiCandidates[r].length}</span>`:''}</td>${columns.map((col,c)=>`<td class="${selected?.mode==='col'&&selected.col===c?'selected-col':''} ${mark?.fields?.includes(col.key)||mark?.fields?.includes('importe')&&(col.key==='debe'||col.key==='haber')?'field-match':''}"><input data-side="${side}" data-row="${r}" data-col="${c}" class="${col.money?'money':''} ${selected?.mode==='cell'&&selected.row===r&&selected.col===c?'active-cell':''}" value="${esc(row[col.key])}"></td>`).join('')}</tr>`}).join('')}</tbody>`;
+      table.innerHTML=`<thead><tr><th class="corner" data-corner="1">*</th>${columns.map((col,i)=>`<th data-col="${i}" class="${selected?.mode==='col'&&selected.col===i?'selected-col':''}">${esc(col.label)}</th>`).join('')}</tr></thead><tbody>${state[side].map((row,r)=>{const focused=!state.focusPair||state.focusPair[side]===r;const mark=focused?state.marks?.[side]?.[r]:null;const manual=Object.entries(state.manualMatches).some(([right,left])=>side==='right'?Number(right)===r:Number(left)===r);const multi=side==='right'&&state.multiCandidates?.[r]?.length>1;return `<tr class="${!focused?'row-muted ':''}${manual?'row-manual ':''}${mark?.status==='ok'?'row-ok':mark?.status==='fail'?'row-fail':''}"><td class="rowmark">${r+1}${multi?`<span class="multi-badge">${state.multiCandidates[r].length}</span>`:''}</td>${columns.map((col,c)=>`<td class="${selected?.mode==='col'&&selected.col===c?'selected-col':''} ${mark?.fields?.includes(col.key)||mark?.fields?.includes('importe')&&(col.key==='debe'||col.key==='haber')?'field-match':''}"><input data-side="${side}" data-row="${r}" data-col="${c}" class="${col.money?'money':''} ${selected?.mode==='cell'&&selected.row===r&&selected.col===c?'active-cell':''}" value="${esc(row[col.key])}"></td>`).join('')}</tr>`}).join('')}</tbody>`;
       els[`${side}Count`].textContent=`${filledRows(side).length} filas`;
     }
-    function renderAll(){renderTable('left');renderTable('right');syncTableScrolls()}
+    function renderTableUnified(side){
+      const table=els[`${side}Table`];
+      const selected=state.selection?.side===side?state.selection:null;
+      const groups=state.rowGroups?.[side]||[];
+      table.className=selected?.mode==='table'?'selected-table':'';
+      table.innerHTML=`<thead><tr><th class="corner" data-corner="1">*</th>${columns.map((col,i)=>`<th data-col="${i}" class="${selected?.mode==='col'&&selected.col===i?'selected-col':''}">${esc(col.label)}</th>`).join('')}</tr></thead><tbody>${state[side].map((row,r)=>{const focused=!state.focusPair||state.focusPair[side]===r||groupRowsFor(side,Number(state.focusPair[side])).includes(r);const mark=focused?state.marks?.[side]?.[r]:null;const manual=Object.entries(state.manualMatches).some(([right,left])=>side==='right'?Number(right)===r:Number(left)===r);const multi=side==='right'&&state.multiCandidates?.[r]?.length>1;const picked=state.rowSelection?.[side]?.includes(r);const grouped=groups.some(group=>group.rows?.includes(r));return `<tr class="${!focused?'row-muted ':''}${manual?'row-manual ':''}${mark?.status==='ok'?'row-ok':mark?.status==='fail'?'row-fail':''}"><td class="rowmark ${picked?'rowmark-selected':''}" data-rowmark="1" data-side="${side}" data-row="${r}">${r+1}${grouped?'<span class="multi-badge">U</span>':''}${multi?`<span class="multi-badge">${state.multiCandidates[r].length}</span>`:''}</td>${columns.map((col,c)=>`<td class="${selected?.mode==='col'&&selected.col===c?'selected-col':''} ${mark?.fields?.includes(col.key)||mark?.fields?.includes('importe')&&(col.key==='debe'||col.key==='haber')?'field-match':''}"><input data-side="${side}" data-row="${r}" data-col="${c}" class="${col.money?'money':''} ${selected?.mode==='cell'&&selected.row===r&&selected.col===c?'active-cell':''}" value="${esc(row[col.key])}"></td>`).join('')}</tr>`}).join('')}</tbody>`;
+      els[`${side}Count`].textContent=`${filledRows(side).length} filas`;
+    }
+    function rowSignedAmount(row){return parseNumber(row.debe||row.haber||0)}
+    function updateSelectionSum(){
+      const leftTotal=state.rowSelection.left.reduce((sum,row)=>sum+rowSignedAmount(state.left[row]||{}),0);
+      const rightTotal=state.rowSelection.right.reduce((sum,row)=>sum+rowSignedAmount(state.right[row]||{}),0);
+      const total=leftTotal-rightTotal;
+      const selectedCount=state.rowSelection.left.length+state.rowSelection.right.length;
+      els.selectionStat.hidden=selectedCount<2;
+      els.selectionSum.textContent=`$ ${total.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    }
+    function parseInputDate(value){
+      const text=String(value||'').trim();
+      if(!text)return NaN;
+      const iso=text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if(iso)return new Date(Number(iso[1]),Number(iso[2])-1,Number(iso[3])).getTime();
+      const parsed=window.CorralonFunciones?.parseFechaFlexible?.(text);
+      return parsed?.date ? parsed.date.getTime() : parseDateValue(text);
+    }
+    function normalizeDateInput(input){
+      const parsed=window.CorralonFunciones?.parseFechaFlexible?.(input.value);
+      if(parsed)input.value=parsed.text;
+      renderAll();
+    }
+    function rowPassesDateFilter(row){
+      const from=parseInputDate(els.dateFrom.value),to=parseInputDate(els.dateTo.value),value=parseDateValue(row.fecha);
+      if(!Number.isFinite(from)&&!Number.isFinite(to))return true;
+      if(!Number.isFinite(value))return false;
+      return (!Number.isFinite(from)||value>=from)&&(!Number.isFinite(to)||value<=to);
+    }
+    function applyDateFilter(){
+      ['left','right'].forEach(side=>{
+        let visible=0;
+        document.querySelectorAll(`#${side}Table tbody tr`).forEach((tr,index)=>{
+          const show=rowPassesDateFilter(state[side][index]||{});
+          tr.hidden=!show;
+          if(show&&rowHasData(state[side][index]||{}))visible++;
+        });
+        els[`${side}Count`].textContent=`${visible} filas`;
+      });
+    }
+    function renderAll(){renderTableUnified('left');renderTableUnified('right');updateSelectionSum();applyDateFilter();syncTableScrolls()}
     function parseClipboard(text){return String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(line=>line.length).map(line=>line.split('\t'))}
     function normalizeCell(value,col){const meta=columns[col];if(meta?.money)return formatMoney(value);if(meta?.type==='date')return normalizeDate(value);return String(value??'').trim()}
     function pasteMatrix(matrix){
@@ -226,9 +314,16 @@
       return pair?`eq:${norm(pair.left)}=${norm(pair.right)}`:clean;
     }
     function moneyKey(v){return Math.abs(Math.round(parseNumber(v)*100))}
-    function rowAmounts(row){return [moneyKey(row.debe),moneyKey(row.haber)].filter(Boolean)}
+    function formatCents(cents){return (cents/100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}
+    function rowAmounts(row){return row.__amounts||[moneyKey(row.debe),moneyKey(row.haber)].filter(Boolean)}
+    function rowNros(row){return row.__nros||[norm(row.nro).replace(/^0+/,'')].filter(Boolean)}
+    function rowTipos(row){return row.__tipos||[row.tipo].filter(Boolean)}
+    function rowDates(row){return row.__dates||[row.fecha].filter(Boolean)}
     function parseDateValue(v){const n=normalizeDate(v).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);return n?new Date(Number(n[3]),Number(n[2])-1,Number(n[1])).getTime():NaN}
     function datesNear(a,b){const da=parseDateValue(a),db=parseDateValue(b);return Number.isFinite(da)&&Number.isFinite(db)&&Math.abs(da-db)<=7*86400000}
+    function rowsDatesNear(leftRow,rightRow){return rowDates(leftRow).some(leftDate=>rowDates(rightRow).some(rightDate=>datesNear(leftDate,rightDate)))}
+    function rowsNroMatch(leftRow,rightRow){return rowNros(leftRow).some(leftNro=>rowNros(rightRow).some(rightNro=>leftNro&&leftNro===rightNro))}
+    function rowsTipoMatch(leftRow,rightRow){return rowTipos(leftRow).some(leftTipo=>rowTipos(rightRow).some(rightTipo=>canonicalTipo(leftTipo,'left')&&canonicalTipo(leftTipo,'left')===canonicalTipo(rightTipo,'right')))}
     function amountNear(a,b){if(!a||!b)return false;return Math.abs(a-b)<=Math.max(a,b)*.01}
     function amountsNear(leftRow,rightRow){
       const leftAmounts=rowAmounts(leftRow),rightAmounts=rowAmounts(rightRow);
@@ -237,18 +332,37 @@
     function rowMatchFields(leftRow,rightRow){
       const matches=[];
       const extras=[];
-      const leftNro=norm(leftRow.nro).replace(/^0+/,''),rightNro=norm(rightRow.nro).replace(/^0+/,'');
-      if(leftNro&&leftNro===rightNro)matches.push('nro');
+      if(rowsNroMatch(leftRow,rightRow))matches.push('nro');
       if(amountsNear(leftRow,rightRow))matches.push('importe');
-      if(datesNear(leftRow.fecha,rightRow.fecha)){matches.push('fecha');extras.push('fecha')}
-      const tipoOk=canonicalTipo(leftRow.tipo,'left')&&canonicalTipo(leftRow.tipo,'left')===canonicalTipo(rightRow.tipo,'right');
+      if(rowsDatesNear(leftRow,rightRow)){matches.push('fecha');extras.push('fecha')}
+      const tipoOk=rowsTipoMatch(leftRow,rightRow);
       if(tipoOk){matches.push('tipo');extras.push('tipo')}
       if(moneyKey(leftRow.saldo)&&moneyKey(rightRow.saldo)&&amountNear(moneyKey(leftRow.saldo),moneyKey(rightRow.saldo))){matches.push('saldo');extras.push('saldo')}
       if(!tipoOk||!matches.some(field=>field==='nro'||field==='importe')||!extras.length)return [];
       return matches;
     }
+    function aggregateRows(side,indexes){
+      const source=indexes.map(i=>state[side][i]).filter(rowHasData);
+      const amountSum=source.flatMap(rowAmounts).reduce((sum,value)=>sum+value,0);
+      const dates=source.flatMap(rowDates).filter(Boolean);
+      const nros=source.flatMap(rowNros).filter(Boolean);
+      const tipos=source.flatMap(rowTipos).filter(Boolean);
+      return {fecha:dates[0]||'',tipo:tipos[0]||'',nro:nros[0]||'',debe:amountSum?formatCents(amountSum):'',haber:'',saldo:'',__dates:dates,__nros:nros,__tipos:tipos,__amounts:amountSum?[amountSum]:[]};
+    }
+    function compareItems(side){
+      const grouped=new Set();
+      const items=[];
+      (state.rowGroups?.[side]||[]).forEach(group=>{
+        const groupRows=[...new Set(group.rows||[])].filter(index=>state[side][index]&&rowHasData(state[side][index]));
+        if(groupRows.length<2)return;
+        groupRows.forEach(index=>grouped.add(index));
+        items.push({row:aggregateRows(side,groupRows),index:groupRows[0],rows:groupRows,groupId:group.id});
+      });
+      state[side].forEach((row,index)=>{if(!grouped.has(index)&&rowHasData(row))items.push({row,index,rows:[index]})});
+      return items;
+    }
     function candidatesForRight(rightRow,leftRows){
-      return leftRows.map(item=>({row:item.row,index:item.index,fields:rowMatchFields(item.row,rightRow)})).filter(item=>item.fields.length);
+      return leftRows.map(item=>({...item,fields:rowMatchFields(item.row,rightRow)})).filter(item=>item.fields.length);
     }
     function bestMatchForRight(rightIndex,rightRow,leftRows){
       const manual=state.manualMatches[rightIndex];
@@ -266,50 +380,189 @@
       return `<div class="${matches.includes(key)?'match-cell':''}">${esc(value||'')}</div>`;
     }
     function compare(){
-      const left=state.left.map((row,index)=>({row,index})).filter(item=>rowHasData(item.row));
-      const right=state.right.map((row,index)=>({row,index})).filter(item=>rowHasData(item.row));
+      const left=compareItems('left');
+      const right=compareItems('right');
       state.marks={left:{},right:{}};state.multiCandidates={};
+      const matchedLeft=new Set();
       const results=right.map(item=>{
         const best=bestMatchForRight(item.index,item.row,left);
-        const status=state.manualMatches[item.index]!==undefined||best.fields.length>=2?'ok':'fail';
-        state.multiCandidates[item.index]=best.candidates||[];
-        state.marks.right[item.index]={status,fields:best.fields,leftIndex:best.index};
-        if(best.index!==null)state.marks.left[best.index]={status:'ok',fields:best.fields};
-        return {...best,row:item.row,rightIndex:item.index,status};
+        const manualRight=item.rows.find(rowIndex=>state.manualMatches[rowIndex]!==undefined);
+        const manualLeft=manualRight!==undefined?state.manualMatches[manualRight]:undefined;
+        const chosen=manualLeft!==undefined?{...(left.find(candidate=>candidate.rows.includes(Number(manualLeft))||candidate.index===Number(manualLeft))||best),fields:best.fields.length?best.fields:rowMatchFields((left.find(candidate=>candidate.rows.includes(Number(manualLeft))||candidate.index===Number(manualLeft))||{}).row||{},item.row)}:best;
+        const status=manualLeft!==undefined||chosen.fields.length>=2?'ok':'fail';
+        item.rows.forEach(rowIndex=>{state.multiCandidates[rowIndex]=best.candidates||[];state.marks.right[rowIndex]={status,fields:chosen.fields,leftIndex:chosen.index}});
+        if(status==='ok'&&chosen.index!==null){(chosen.rows||[chosen.index]).forEach(rowIndex=>{state.marks.left[rowIndex]={status:'ok',fields:chosen.fields};matchedLeft.add(rowIndex)})}
+        return {...chosen,row:item.row,rightIndex:item.index,status};
       });
+      left.forEach(item=>item.rows.forEach(rowIndex=>{if(!matchedLeft.has(rowIndex))state.marks.left[rowIndex]={status:'fail',fields:[]}}));
       const fails=results.filter(item=>item.status==='fail').length;
       els.diffCount.textContent=String(fails);
-      els.diffList.innerHTML=results.length?`<div class="diff-row head"><div>Estado</div><div>Fecha</div><div>Factura</div><div>Tipo</div><div>Importe</div><div>Saldo</div></div>${results.map(item=>`<div class="diff-row ${item.status}"><div><span class="badge ${item.status==='ok'?'warn':'bad'}">${item.status==='ok'?'Coincide':'Revisar'} ${item.fields.length}/5</span></div>${matchCell(item.row,'fecha',item.fields)}${matchCell(item.row,'nro',item.fields)}${matchCell(item.row,'tipo',item.fields)}${matchCell(item.row,'importe',item.fields)}${matchCell(item.row,'saldo',item.fields)}</div>`).join('')}`:'<div style="padding:16px;font-weight:800;color:var(--muted)">Pegá datos en la tabla derecha para comparar.</div>';
+      els.diffList.innerHTML=results.length?`<div class="diff-row head"><div>Estado</div><div>Fecha</div><div>Factura</div><div>Tipo</div><div>Importe</div><div>Saldo</div></div>${results.map(item=>`<div class="diff-row ${item.status}"><div><span class="badge ${item.status==='ok'?'warn':'bad'}">${item.status==='ok'?'Coincide':'Revisar'} ${item.fields.length}/5</span></div>${matchCell(item.row,'fecha',item.fields)}${matchCell(item.row,'nro',item.fields)}${matchCell(item.row,'tipo',item.fields)}${matchCell(item.row,'importe',item.fields)}${matchCell(item.row,'saldo',item.fields)}</div>`).join('')}`:'<div style="padding:16px;font-weight:800;color:var(--muted)">Pega datos en la tabla derecha para comparar.</div>';
+    }
+    function toggleRowSelection(side,row){
+      if(!rowHasData(state[side][row]))return;
+      const selected=state.rowSelection[side];
+      const found=selected.indexOf(row);
+      if(found>-1)selected.splice(found,1);else selected.push(row);
+      selected.sort((a,b)=>a-b);
+    }
+    function selectRow(side,row,add=false){
+      if(!rowHasData(state[side][row]))return;
+      if(add)toggleRowSelection(side,row);
+      else state.rowSelection={left:side==='left'?[row]:[],right:side==='right'?[row]:[]};
+      const left=state.rowSelection.left.at(-1),right=state.rowSelection.right.at(-1);
+      if(left!==undefined&&right!==undefined){state.manualMatches[right]=left;compare()}
+    }
+    function clearCurrentSelection(){
+      state.selection=null;
+      state.rowSelection={left:[],right:[]};
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      renderAll();
+    }
+    function clearManualMatchesForRows(side,rowsToClear){
+      const selected=new Set(rowsToClear);
+      Object.entries(state.manualMatches).forEach(([right,left])=>{
+        if(side==='right'&&selected.has(Number(right)))delete state.manualMatches[right];
+        if(side==='left'&&selected.has(Number(left)))delete state.manualMatches[right];
+      });
+    }
+    function removeRowsFromGroups(side,rowsToRemove){
+      const selected=new Set(rowsToRemove);
+      state.rowGroups[side]=(state.rowGroups[side]||[]).map(group=>({...group,rows:(group.rows||[]).filter(row=>!selected.has(row))})).filter(group=>group.rows.length>=2);
+    }
+    function createGroupId(){return `g${Date.now()}${Math.random().toString(36).slice(2,7)}`}
+    function canUnifyRows(){
+      const left=state.rowSelection.left.length,right=state.rowSelection.right.length;
+      return left>=2||right>=2;
+    }
+    function canMatchRows(){return state.rowSelection.left.length&&state.rowSelection.right.length}
+    function selectedGroupIds(side){
+      const selected=new Set(state.rowSelection[side]);
+      return new Set((state.rowGroups?.[side]||[]).filter(group=>(group.rows||[]).some(row=>selected.has(row))).map(group=>group.id));
+    }
+    function canSplitRows(){return selectedGroupIds('left').size>0||selectedGroupIds('right').size>0}
+    function canClearRowsMatch(){
+      const left=new Set(state.rowSelection.left),right=new Set(state.rowSelection.right);
+      return Object.entries(state.manualMatches).some(([rightRow,leftRow])=>right.has(Number(rightRow))||left.has(Number(leftRow)));
+    }
+    function groupRowsFor(side,row){
+      return (state.rowGroups?.[side]||[]).find(group=>group.rows?.includes(row))?.rows||[row];
+    }
+    function closestDateRow(side,dateValue){
+      const target=parseDateValue(dateValue);
+      if(!Number.isFinite(target))return -1;
+      let best=-1,bestDiff=Infinity;
+      state[side].forEach((row,index)=>{
+        const value=parseDateValue(row.fecha);
+        if(!Number.isFinite(value))return;
+        const diff=Math.abs(value-target);
+        if(diff<bestDiff){bestDiff=diff;best=index}
+      });
+      return best;
+    }
+    function tableWrap(side){return document.querySelector(`.table-card[data-side="${side}"] .grid-wrap`)}
+    function tableRow(side,row){return document.querySelector(`#${side}Table tbody tr:nth-child(${row+1})`)}
+    function alignOppositeTable(){
+      const ctx=state.contextRow;if(!ctx)return;
+      const other=ctx.side==='left'?'right':'left';
+      const sourceDate=state[ctx.side]?.[ctx.row]?.fecha;
+      const targetRow=closestDateRow(other,sourceDate);
+      if(targetRow<0)return;
+      const sourceWrap=tableWrap(ctx.side),targetWrap=tableWrap(other);
+      const sourceTr=tableRow(ctx.side,ctx.row),targetTr=tableRow(other,targetRow);
+      if(!sourceWrap||!targetWrap||!sourceTr||!targetTr)return;
+      state.freeScrollUntil=Date.now()+900;
+      const sourceY=sourceTr.offsetTop-sourceWrap.scrollTop;
+      targetWrap.scrollTop=Math.max(0,targetTr.offsetTop-sourceY);
+      targetWrap.dataset.lastTop=String(targetWrap.scrollTop);
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+    }
+    function markSelectedRowsMatch(){
+      if(!canMatchRows())return;
+      state.manualMatches[state.rowSelection.right[0]]=state.rowSelection.left[0];
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      compare();renderAll();saveCache();
+    }
+    function clearSelectedRowsMatch(){
+      const left=new Set(state.rowSelection.left),right=new Set(state.rowSelection.right);
+      Object.entries(state.manualMatches).forEach(([rightRow,leftRow])=>{if(right.has(Number(rightRow))||left.has(Number(leftRow)))delete state.manualMatches[rightRow]});
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      compare();renderAll();saveCache();
+    }
+    function splitSelectedRows(){
+      ['left','right'].forEach(side=>{
+        const ids=selectedGroupIds(side);
+        if(!ids.size)return;
+        const rowsToClear=new Set();
+        (state.rowGroups[side]||[]).forEach(group=>{if(ids.has(group.id))(group.rows||[]).forEach(row=>rowsToClear.add(row))});
+        clearManualMatchesForRows(side,[...rowsToClear]);
+        state.rowGroups[side]=(state.rowGroups[side]||[]).filter(group=>!ids.has(group.id));
+      });
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      compare();renderAll();saveCache();
+    }
+    function unifySelectedRows(){
+      const selected={left:[...new Set(state.rowSelection.left)].sort((a,b)=>a-b),right:[...new Set(state.rowSelection.right)].sort((a,b)=>a-b)};
+      ['left','right'].forEach(side=>{
+        if(!selected[side].length)return;
+        clearManualMatchesForRows(side,selected[side]);
+        removeRowsFromGroups(side,selected[side]);
+        if(selected[side].length>=2)state.rowGroups[side].push({id:createGroupId(),rows:selected[side]});
+      });
+      if(selected.left.length&&selected.right.length)state.manualMatches[selected.right[0]]=selected.left[0];
+      state.rowSelection={left:[],right:[]};
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      state.focusPair=null;
+      compare();renderAll();saveCache();
     }
     document.addEventListener('click',e=>{
+      if(!e.target.closest('#rowContextMenu'))document.getElementById('rowContextMenu')?.classList.remove('open');
+      const rowmark=e.target.closest('[data-rowmark]');
+      if(rowmark){
+        selectRow(rowmark.dataset.side,Number(rowmark.dataset.row),e.ctrlKey);
+        renderAll();saveCache();
+        return;
+      }
       const input=e.target.closest('input[data-side]');
       const th=e.target.closest('th[data-col]');
       const corner=e.target.closest('[data-corner]');
-      if(corner){const side=corner.closest('.table-card').dataset.side;state.selection={side,mode:'table'};els[`${side}Info`].textContent='Tabla completa seleccionada: pegá todo el Excel.';renderAll();return}
+      if(corner){const side=corner.closest('.table-card').dataset.side;state.selection={side,mode:'table'};els[`${side}Info`].textContent='Tabla completa seleccionada: pega todo el Excel.';renderAll();return}
       if(th){const side=th.closest('.table-card').dataset.side;state.selection={side,mode:'col',col:Number(th.dataset.col)};els[`${side}Info`].textContent=`Columna ${columns[th.dataset.col].label} seleccionada.`;renderAll();return}
       if(input){
         const side=input.dataset.side,row=Number(input.dataset.row);
-        if(e.ctrlKey){
-          if(!state.ctrlPick||state.ctrlPick.side===side){state.ctrlPick={side,row};return}
-          const right=side==='right'?row:state.ctrlPick.row,left=side==='left'?row:state.ctrlPick.row;
-          state.manualMatches[right]=left;state.ctrlPick=null;state.focusPair=null;compare();renderAll();saveCache();return;
-        }
+        if(e.ctrlKey){selectRow(side,row,true);state.ctrlPick=null;state.focusPair=null;renderAll();saveCache();return}
+        selectRow(side,row,false);
         state.selection={side,row,col:Number(input.dataset.col),mode:'cell'};
         document.querySelectorAll('.active-cell').forEach(cell=>cell.classList.remove('active-cell'));
         input.classList.add('active-cell');
       }
     });
-    document.addEventListener('dblclick',e=>{
+    document.addEventListener('focusin',e=>{
       const input=e.target.closest('input[data-side]');if(!input)return;
+      if(state.ctrlDown)return;
       const side=input.dataset.side,row=Number(input.dataset.row);
+      if(state.rowSelection[side].length===1&&state.rowSelection[side][0]===row)return;
+      selectRow(side,row,false);
+      renderAll();
+    });
+    document.addEventListener('dblclick',e=>{
+      const target=e.target.closest('input[data-side],[data-rowmark]');if(!target)return;
+      const side=target.dataset.side,row=Number(target.dataset.row);
       const right=side==='right'?row:Object.entries(state.manualMatches).find(([,left])=>Number(left)===row)?.[0]??Object.entries(state.marks.right).find(([,mark])=>mark.leftIndex===row)?.[0];
       if(right===undefined)return;
       if(e.ctrlKey){delete state.manualMatches[right];state.focusPair=null;compare();renderAll();saveCache();return}
-      if((state.multiCandidates[right]||[]).length>1&&state.manualMatches[right]===undefined)return openMatchModal(Number(right));
       const left=state.manualMatches[right]??state.marks.right[right]?.leftIndex;
-      if(left!==undefined&&left!==null){state.focusPair={right:Number(right),left:Number(left)};renderAll();return}
+      if(left!==undefined&&left!==null){state.rowSelection={left:groupRowsFor('left',Number(left)),right:groupRowsFor('right',Number(right))};state.focusPair={right:Number(right),left:Number(left)};renderAll();return}
+      if((state.multiCandidates[right]||[]).length>1)openMatchModal(Number(right));
     });
-    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.focusPair){state.focusPair=null;compare();renderAll()}});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')clearCurrentSelection()});
+    document.addEventListener('keydown',e=>{if(e.key==='Control')state.ctrlDown=true});
+    document.addEventListener('keyup',e=>{if(e.key==='Control'){state.ctrlDown=false;state.freeScrollUntil=Date.now()+900}});
+    document.querySelector('.board').addEventListener('wheel',e=>{if(e.ctrlKey)state.freeScrollUntil=Date.now()+900},{passive:true});
     document.addEventListener('input',e=>{
       const input=e.target.closest('input[data-side]');if(!input)return;
       const side=input.dataset.side,row=Number(input.dataset.row),col=Number(input.dataset.col);
@@ -337,8 +590,35 @@
     document.getElementById('compareBtn').addEventListener('click',runCompareWithProgress);
     document.getElementById('closeDiffBtn').addEventListener('click',()=>document.getElementById('diffModal').classList.remove('open'));
     document.getElementById('diffModal').addEventListener('click',e=>{if(e.target.id==='diffModal')e.currentTarget.classList.remove('open')});
-    document.getElementById('clearSelectionBtn').addEventListener('click',()=>{state.selection=null;renderAll()});
-    document.getElementById('clearAllBtn').addEventListener('click',()=>{state.left=normalizeRows();state.right=normalizeRows();state.equivalences=[];state.manualMatches={};state.selection=null;localStorage.removeItem(cacheKey);compare();renderAll()});
+    document.addEventListener('contextmenu',e=>{
+      const target=e.target.closest('input[data-side],[data-rowmark]');
+      if(!e.target.closest('.board')||!target)return;
+      e.preventDefault();
+      state.contextRow={side:target.dataset.side,row:Number(target.dataset.row)};
+      const menu=document.getElementById('rowContextMenu');
+      document.getElementById('matchRowsBtn').disabled=!canMatchRows();
+      document.getElementById('unifyRowsBtn').disabled=!canUnifyRows();
+      document.getElementById('splitRowsBtn').disabled=!canSplitRows();
+      document.getElementById('clearRowsMatchBtn').disabled=!canClearRowsMatch();
+      menu.style.left=`${Math.min(e.clientX,window.innerWidth-210)}px`;
+      menu.style.top=`${Math.min(e.clientY,window.innerHeight-56)}px`;
+      menu.classList.add('open');
+    });
+    document.getElementById('alignRowsBtn').addEventListener('click',alignOppositeTable);
+    document.getElementById('matchRowsBtn').addEventListener('click',markSelectedRowsMatch);
+    document.getElementById('unifyRowsBtn').addEventListener('click',unifySelectedRows);
+    document.getElementById('splitRowsBtn').addEventListener('click',splitSelectedRows);
+    document.getElementById('clearRowsMatchBtn').addEventListener('click',clearSelectedRowsMatch);
+    els.dateFrom.addEventListener('input',renderAll);
+    els.dateTo.addEventListener('input',renderAll);
+    els.dateFrom.addEventListener('change',()=>normalizeDateInput(els.dateFrom));
+    els.dateTo.addEventListener('change',()=>normalizeDateInput(els.dateTo));
+    els.dateFrom.addEventListener('blur',()=>normalizeDateInput(els.dateFrom));
+    els.dateTo.addEventListener('blur',()=>normalizeDateInput(els.dateTo));
+    document.getElementById('clearAllBtn').addEventListener('click',()=>document.getElementById('clearAllModal').classList.add('open'));
+    document.getElementById('cancelClearAllBtn').addEventListener('click',()=>document.getElementById('clearAllModal').classList.remove('open'));
+    document.getElementById('clearAllModal').addEventListener('click',e=>{if(e.target.id==='clearAllModal')e.currentTarget.classList.remove('open')});
+    document.getElementById('confirmClearAllBtn').addEventListener('click',()=>{state.left=normalizeRows();state.right=normalizeRows();state.equivalences=[];state.manualMatches={};state.rowGroups={left:[],right:[]};state.rowSelection={left:[],right:[]};state.marks={left:{},right:{}};state.multiCandidates={};state.focusPair=null;state.selection=null;localStorage.removeItem(cacheKey);document.getElementById('clearAllModal').classList.remove('open');compare();renderAll()});
     function openMatchModal(row){
       state.matchTarget=row;
       const items=state.multiCandidates[row]||[];
