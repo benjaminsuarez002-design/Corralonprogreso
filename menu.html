@@ -1189,6 +1189,13 @@
       return Number.isFinite(parsed) ? parsed : 0;
     }
 
+    function formatNotifDate(value) {
+      const ms = notifFechaMs(value);
+      if (!ms) return String(value || '');
+      const date = new Date(ms);
+      return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+    }
+
     function notifDesdeHoy(item) {
       const creada = notifTimestampMs(item);
       if (creada > HISTORIAL_NOTIFS_START_MS + 86400000) return true;
@@ -1215,7 +1222,7 @@
       const historial = historialNotifications
         .filter((item) => !item.resuelta)
         .map((item) => ({ kind: 'historial', id: String(item.id), tipo: item.tipo, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', date: item.fecha || '' }));
-      return [...pedidos, ...historial];
+      return [...pedidos, ...historial].sort((a, b) => (notifFechaMs(a.date) || notifTimestampMs(a)) - (notifFechaMs(b.date) || notifTimestampMs(b)));
     }
 
     function renderReviewNotifications() {
@@ -1229,7 +1236,7 @@
         <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
           <strong>${escapeHtml(item.title)}</strong>
           <span>${escapeHtml(item.detail)}</span>
-          <span>${escapeHtml(item.date || '')}</span>
+          <span>${escapeHtml(formatNotifDate(item.date))}</span>
           <label class="review-resolved" title="Marcar como resuelto" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
             <input type="checkbox" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
             Resuelto
