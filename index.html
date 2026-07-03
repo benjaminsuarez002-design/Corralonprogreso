@@ -3945,6 +3945,36 @@ function obtenerTextoTagsOcultos(articulo) {
   return obtenerTagsOcultosArticulo(articulo).join(' ');
 }
 
+function normalizarImagenesArticulo(raw = {}) {
+  const valores = [];
+  const agregar = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(agregar);
+      return;
+    }
+    const text = String(value || '').trim();
+    if (!text) return;
+    if (text.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(agregar);
+          return;
+        }
+      } catch (_) {}
+    }
+    text.split(/[\n\r|;]+/).map((url) => url.trim()).filter(Boolean).forEach((url) => valores.push(url));
+  };
+  agregar(raw?.imagenes);
+  agregar(raw?.fotos);
+  agregar(raw?.galeria);
+  agregar(raw?.fotoUrls);
+  agregar(raw?.fotoUrl);
+  agregar(raw?.imagen);
+  agregar(raw?.imageUrl);
+  return [...new Set(valores)];
+}
+
 async function cargarJsonRemoto(url) {
   if (!url) return [];
   const res = await fetch(url + "?t=" + Date.now());
@@ -3961,7 +3991,7 @@ function extraerMetadatosArticulo(raw = {}) {
     codigo,
     detalle: String(raw?.detalle ?? '').trim(),
     tagsOcultos: obtenerTagsOcultosArticulo(raw),
-    imagenes: [...new Set([...(Array.isArray(raw?.imagenes) ? raw.imagenes : []).map((url) => String(url || '').trim()), String(raw?.fotoUrl || '').trim()].filter(Boolean))],
+    imagenes: normalizarImagenesArticulo(raw),
     oferta: toBool(raw?.oferta ?? raw?.enOferta ?? raw?.tagOferta),
     destacado: toBool(raw?.destacado ?? raw?.tagDestacado),
     masVendido: toBool(raw?.masVendido ?? raw?.mas_vendido ?? raw?.tagMasVendido),
@@ -4050,6 +4080,7 @@ function precioOferta(precioLista, ofertaPct) {
 function normalizarArticulo(raw) {
   const precioLista = Number(raw?.precio || 0);
   const codigoArticulo = String(raw?.idart ?? raw?.codigo ?? raw?.idArt ?? raw?.id ?? '').trim();
+  const imagenes = normalizarImagenesArticulo(raw);
   const oferta = toBool(raw?.oferta ?? raw?.enOferta ?? raw?.tagOferta);
   const destacado = toBool(raw?.destacado ?? raw?.tagDestacado);
   const masVendido = toBool(raw?.masVendido ?? raw?.mas_vendido ?? raw?.tagMasVendido);
@@ -4065,6 +4096,8 @@ function normalizarArticulo(raw) {
     ...raw,
     codigoArticulo,
     tagsOcultos: obtenerTagsOcultosArticulo(raw),
+    fotoUrl: imagenes[0] || String(raw?.fotoUrl || '').trim(),
+    imagenes,
     precio: precioLista,
     oferta,
     destacado,
@@ -5355,7 +5388,7 @@ function abrirPopupImagen(src, alt) {
 }
 
 function imagenPrincipalArticulo(articulo = {}) {
-  const galeria = Array.isArray(articulo?.imagenes) ? articulo.imagenes : [];
+  const galeria = normalizarImagenesArticulo(articulo);
   return String(galeria.find((url) => String(url || '').trim()) || articulo?.fotoUrl || '').trim();
 }
 
@@ -5974,10 +6007,7 @@ function buscarArticuloPorCodigo(codigo) {
 }
 
 function imagenesArticuloPublico(articulo = {}) {
-  return [...new Set([
-    ...(Array.isArray(articulo?.imagenes) ? articulo.imagenes : []).map((url) => String(url || '').trim()),
-    String(articulo?.fotoUrl || '').trim()
-  ].filter(Boolean))];
+  return normalizarImagenesArticulo(articulo);
 }
 
 let productDetailImages = [];

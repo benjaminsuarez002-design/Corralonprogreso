@@ -93,6 +93,22 @@
     display: none;
   }
   .menu-bell.visible { display: inline-flex; align-items: center; justify-content: center; }
+  .menu-plus {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    width: 38px;
+    height: 34px;
+    background: #fff;
+    color: var(--purple-dark);
+    font-size: 22px;
+    font-weight: 900;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+  .menu-plus:hover { background: #f4f0ff; }
   .menu-bell-count {
     position: absolute;
     top: -7px;
@@ -165,6 +181,31 @@
     font-weight: 900;
   }
   .review-resolved input { accent-color: var(--purple); cursor: pointer; }
+  .pending-form { padding: 14px 16px 18px; display: grid; gap: 12px; }
+  .pending-counter {
+    width: fit-content;
+    min-width: 118px;
+    padding: 10px 12px;
+    border: 1px solid #d8cfee;
+    border-radius: 14px;
+    background: #f8f5ff;
+    color: var(--purple-dark);
+    font-weight: 900;
+  }
+  .pending-counter span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  .pending-input {
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 11px 12px;
+    font: inherit;
+    font-weight: 800;
+    color: var(--text);
+    outline: none;
+  }
+  .pending-input:focus { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(108,79,199,.12); }
+  .pending-help { color: var(--muted); font-size: 12px; font-weight: 800; }
   .menu-userbar {
     padding: 12px 16px 0;
     display: flex;
@@ -527,6 +568,7 @@
         <h1 class="menu-title">Menú principal</h1>
         <div class="menu-sub">Accesos rápidos</div>
         <button class="menu-bell" id="reviewBell" type="button" title="Pedidos en revisión">🔔<span class="menu-bell-count" id="reviewBellCount">0</span></button>
+        <button class="menu-plus" id="pendingBtn" type="button" title="Agregar pendiente">+</button>
         <button class="menu-logout" id="logoutBtn" type="button">Salir</button>
       </header>
       <div class="menu-userbar">
@@ -561,10 +603,20 @@
       <div class="review-list" id="reviewList"></div>
     </div>
   </div>
+  <div class="review-modal" id="pendingModal">
+    <div class="review-box">
+      <div class="review-head"><h2>Pendientes</h2><button id="closePendingModal" type="button">Cerrar</button></div>
+      <div class="pending-form">
+        <div class="pending-counter"><span>Pendiente</span><strong id="pendingNextNumber">-</strong></div>
+        <input class="pending-input" id="pendingTextInput" type="text" placeholder="Escribí un pendiente..." autocomplete="off">
+        <div class="pending-help" id="pendingHelp">Enter para guardar y enviarlo a notificaciones.</div>
+      </div>
+    </div>
+  </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, runTransaction, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -599,6 +651,12 @@
     const activeUserLabel = document.getElementById('activeUserLabel');
     const reviewBell = document.getElementById('reviewBell');
     const reviewBellCount = document.getElementById('reviewBellCount');
+    const pendingBtn = document.getElementById('pendingBtn');
+    const pendingModal = document.getElementById('pendingModal');
+    const closePendingModal = document.getElementById('closePendingModal');
+    const pendingTextInput = document.getElementById('pendingTextInput');
+    const pendingNextNumber = document.getElementById('pendingNextNumber');
+    const pendingHelp = document.getElementById('pendingHelp');
     const aliasObjectives = document.getElementById('aliasObjectives');
     const reviewToast = document.getElementById('reviewToast');
     const reviewModal = document.getElementById('reviewModal');
@@ -628,6 +686,8 @@
     let menuTouchStartX = 0;
     let menuTouchStartY = 0;
     let menuTouchDragging = false;
+    let pendingNextPreview = null;
+    let pendingSaving = false;
 
     function menuOrderKey(usuario = obtenerUsuarioActivo()) {
       const userId = String(usuario?.id || usuario?.usuario || 'default').trim() || 'default';
@@ -1166,7 +1226,19 @@
       if (tipo === 'remito') return 'Remito';
       if (tipo === 'presupuesto') return 'Presupuesto';
       if (tipo === 'garantia') return 'Garantía';
+      if (tipo === 'pendiente') return 'Pendiente';
       return 'Historial';
+    }
+
+    function notifNumero(item) {
+      const raw = String(item?.id || item?.numero || item?.title || '').match(/\d+/g);
+      return raw?.length ? Number(raw[raw.length - 1]) : 0;
+    }
+
+    function notifSort(a, b) {
+      const dateA = notifFechaMs(a.date) || notifTimestampMs(a);
+      const dateB = notifFechaMs(b.date) || notifTimestampMs(b);
+      return dateA - dateB || notifNumero(a) - notifNumero(b) || notifTimestampMs(a) - notifTimestampMs(b);
     }
 
     function notifTimestampMs(item) {
@@ -1218,12 +1290,12 @@
         .map((order) => {
           const docId = reviewOrderDocId(order);
           const visibleId = String(order.id || docId);
-          return { kind: 'pedido', id: visibleId, docId, title: `Pedido ${visibleId}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '' };
+          return { kind: 'pedido', id: visibleId, docId, title: `Pedido ${visibleId}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '', createdAt: order.createdAt, updatedAt: order.updatedAt };
         });
       const historial = historialNotifications
         .filter((item) => !item.resuelta)
-        .map((item) => ({ kind: 'historial', id: String(item.id), tipo: item.tipo, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', date: item.fecha || '' }));
-      return [...pedidos, ...historial].sort((a, b) => (notifFechaMs(a.date) || notifTimestampMs(a)) - (notifFechaMs(b.date) || notifTimestampMs(b)));
+        .map((item) => ({ kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', date: item.fecha || '', createdAt: item.createdAt, updatedAt: item.updatedAt }));
+      return [...pedidos, ...historial].sort(notifSort);
     }
 
     function renderReviewNotifications() {
@@ -1316,10 +1388,13 @@
       return Boolean(opened);
     }
 
-    function openReviewOrder(id) {
+    function openReviewOrder(id, docId = '') {
+      const targetId = String(docId || id || '').trim();
+      const visibleId = String(id || targetId).trim();
       reviewModal.classList.remove('visible');
-      localStorage.setItem('corralon_open_review_order_id', String(id));
-      openNotificationTarget(`pedidos.html?abrirPedido=${encodeURIComponent(String(id))}`);
+      localStorage.setItem('corralon_open_review_order_id', targetId);
+      const params = new URLSearchParams({ abrirPedidoDoc: targetId, abrirPedido: visibleId });
+      openNotificationTarget(`pedidos.html?${params.toString()}`);
     }
 
     function openHistorialNotification(tipo, id) {
@@ -1359,10 +1434,84 @@
       }, { merge: true }).catch((error) => console.warn('No se pudo marcar notificación como resuelta', error));
     }
 
+    async function cargarPreviewPendiente() {
+      pendingHelp.textContent = 'Enter para guardar y enviarlo a notificaciones.';
+      try {
+        const snap = await getDocFromServer(doc(db, 'config', 'pendientesMenuCounter'));
+        pendingNextPreview = Number(snap.data()?.ultimo || 0) + 1;
+      } catch (_) {
+        pendingNextPreview = pendingNextPreview || 1;
+      }
+      pendingNextNumber.textContent = String(pendingNextPreview);
+    }
+
+    async function guardarPendienteMenu() {
+      const texto = pendingTextInput.value.trim();
+      if (!texto || pendingSaving) return;
+      pendingSaving = true;
+      pendingHelp.textContent = 'Guardando pendiente...';
+      try {
+        const usuario = obtenerUsuarioActivo();
+        const hoy = todayIso();
+        const nuevoNumero = await runTransaction(db, async (tx) => {
+          const counterRef = doc(db, 'config', 'pendientesMenuCounter');
+          const counterSnap = await tx.get(counterRef);
+          const next = Number(counterSnap.data()?.ultimo || 0) + 1;
+          const pendingRef = doc(db, 'historialNotificaciones', `pendiente_${next}`);
+          tx.set(counterRef, { ultimo: next, updatedAt: serverTimestamp() }, { merge: true });
+          tx.set(pendingRef, {
+            id: String(next),
+            tipo: 'pendiente',
+            titulo: `Pendiente ${next}`,
+            detalle: texto,
+            fecha: hoy,
+            resuelta: false,
+            creadoPor: usuario?.nombre || usuario?.usuario || '',
+            creadoPorId: usuario?.id || usuario?.usuario || '',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+          return next;
+        });
+        pendingTextInput.value = '';
+        pendingNextPreview = nuevoNumero + 1;
+        pendingNextNumber.textContent = String(pendingNextPreview);
+        pendingHelp.textContent = `Pendiente ${nuevoNumero} guardado.`;
+      } catch (error) {
+        console.warn('No se pudo guardar pendiente', error);
+        pendingHelp.textContent = 'No se pudo guardar el pendiente.';
+      } finally {
+        pendingSaving = false;
+        pendingTextInput.focus();
+      }
+    }
+
+    function abrirPendientesModal() {
+      pendingModal.classList.add('visible');
+      cargarPreviewPendiente();
+      setTimeout(() => pendingTextInput.focus(), 30);
+    }
+
+    function cerrarPendientesModal() {
+      pendingModal.classList.remove('visible');
+      pendingTextInput.value = '';
+    }
+
     reviewBell.addEventListener('click', () => {
       reviewModalSnapshot = allVisibleNotifications();
       renderReviewNotifications();
       reviewModal.classList.add('visible');
+    });
+    pendingBtn.addEventListener('click', abrirPendientesModal);
+    closePendingModal.addEventListener('click', cerrarPendientesModal);
+    pendingModal.addEventListener('mousedown', (event) => {
+      if (event.target === pendingModal) cerrarPendientesModal();
+    });
+    pendingTextInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        guardarPendienteMenu();
+      }
     });
     closeReviewModal.addEventListener('click', () => {
       reviewModalSnapshot = null;
@@ -1386,7 +1535,7 @@
       const item = event.target.closest('[data-review-id]');
       if (!item) return;
       if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId);
-      else openReviewOrder(item.dataset.reviewId);
+      else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc);
     });
 
     document.getElementById('loginBtn').addEventListener('click', verificarPass);

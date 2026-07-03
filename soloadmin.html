@@ -1852,12 +1852,41 @@ function sanitizeHomeLandingConfig(raw) {
   };
 }
 
+function normalizarImagenesArticulo(raw = {}) {
+  const valores = [];
+  const agregar = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(agregar);
+      return;
+    }
+    const text = String(value || '').trim();
+    if (!text) return;
+    if (text.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(agregar);
+          return;
+        }
+      } catch (_) {}
+    }
+    text.split(/[\n\r|;]+/).map((url) => url.trim()).filter(Boolean).forEach((url) => valores.push(url));
+  };
+  agregar(raw?.imagenes);
+  agregar(raw?.fotos);
+  agregar(raw?.galeria);
+  agregar(raw?.fotoUrls);
+  agregar(raw?.fotoUrl);
+  agregar(raw?.imagen);
+  agregar(raw?.imageUrl);
+  return [...new Set(valores)];
+}
+
 function normalizarArticuloAdmin(articulo = {}) {
   const idArtProv = String(articulo?.idartprov ?? articulo?.idArtProv ?? articulo?.idart_prov ?? articulo?.codprov ?? articulo?.codProv ?? articulo?.codigoProveedor ?? '').trim();
   const idProveedor = String(articulo?.idProveedor ?? articulo?.id_proveedor ?? articulo?.IDProveedor ?? articulo?.idproveedor ?? '').trim();
-  const imagenesBase = Array.isArray(articulo?.imagenes) ? articulo.imagenes : (Array.isArray(articulo?.fotos) ? articulo.fotos : []);
-  const fotoUrl = String(articulo?.fotoUrl || '').trim();
-  const imagenes = [...new Set([fotoUrl, ...imagenesBase.map((url) => String(url || '').trim())].filter(Boolean))];
+  const imagenes = normalizarImagenesArticulo(articulo);
+  const fotoUrl = imagenes[0] || String(articulo?.fotoUrl || '').trim();
   return {
     ...articulo,
     codigo: String(articulo?.codigo ?? articulo?.idart ?? '').trim(),
