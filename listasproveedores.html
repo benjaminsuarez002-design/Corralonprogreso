@@ -729,6 +729,33 @@
       gap: 10px;
       margin-top: 14px;
     }
+    .branch-modal {
+      width: min(440px, calc(100vw - 28px));
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(20, 32, 51, .28);
+      padding: 18px;
+    }
+    .branch-title {
+      margin: 0 0 12px;
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 26px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .branch-options { display: grid; gap: 10px; }
+    .branch-option {
+      height: 50px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 12px;
+      background: var(--header);
+      color: var(--texto);
+      font: 900 20px 'Barlow Condensed', Arial, sans-serif;
+      cursor: pointer;
+    }
+    .branch-option:hover { background: #dff7ff; }
     body.popup-mode .topbar { display: none; }
     body.popup-mode .app { grid-template-rows: 1fr auto; }
   </style>
@@ -873,6 +900,12 @@
       </div>
     </div>
   </div>
+  <div class="modal-backdrop" id="missingBranchBackdrop">
+    <div class="branch-modal" role="dialog" aria-modal="true" aria-labelledby="missingBranchTitle">
+      <h2 class="branch-title" id="missingBranchTitle">Elegí sucursal</h2>
+      <div class="branch-options" id="missingBranchOptions"></div>
+    </div>
+  </div>
 
   <script>
     if (new URLSearchParams(location.search).get('popup') === '1') {
@@ -891,6 +924,7 @@
     const FULL_PROVIDER_MANIFEST_PREFIX = 'provider_full_manifest:';
     const LISTAS_COL_WIDTHS_KEY = 'listasproveedores_col_widths_v1';
     const listasColumnWidths = [116, 520, 130, 220];
+    const SUCURSALES = Array.isArray(CorralonSystem.BRANCHES) ? CorralonSystem.BRANCHES : [{ id: 'progreso_ruta', label: 'Suc. Progreso y Ruta' }, { id: 'calle5_espana', label: 'Suc. Calle 5 y Espana' }];
     const state = {
       db: null,
       worker: null,
@@ -903,6 +937,7 @@
       contextRowId: null,
       calcRow: null,
       slotContextIndex: -1,
+      pendingMissingRow: null,
       providerDates: new Map(),
       providerLinks: new Map(),
       filterTimer: null,
@@ -950,6 +985,8 @@
       calcApplyBtn: document.getElementById('calcApplyBtn'),
       slotContextMenu: document.getElementById('slotContextMenu'),
       sendSlotMissingBtn: document.getElementById('sendSlotMissingBtn'),
+      missingBranchBackdrop: document.getElementById('missingBranchBackdrop'),
+      missingBranchOptions: document.getElementById('missingBranchOptions'),
       toast: document.getElementById('toast'),
       updatesBtn: document.getElementById('updatesBtn'),
       updatesBackdrop: document.getElementById('updatesBackdrop'),
@@ -1967,11 +2004,28 @@
       state.slots.splice(index, 1);
       renderSlots();
     }
+    function openMissingBranchPicker(row) {
+      state.pendingMissingRow = row;
+      el.missingBranchOptions.innerHTML = SUCURSALES.map((s) => `<button class="branch-option" type="button" data-sucursal-id="${s.id}">${escapeHtml(s.label)}</button>`).join('');
+      el.missingBranchBackdrop.classList.add('visible');
+    }
+    function closeMissingBranchPicker() {
+      state.pendingMissingRow = null;
+      el.missingBranchBackdrop.classList.remove('visible');
+    }
+    async function confirmMissingBranch(id) {
+      const sucursal = SUCURSALES.find((s) => s.id === id);
+      const row = state.pendingMissingRow;
+      if (!row || !sucursal) return;
+      closeMissingBranchPicker();
+      showToast('Enviando a faltantes...');
+      await CorralonSystem.faltantes.addRow({ ...row, sucursalId: sucursal.id, sucursal: sucursal.label });
+      showToast('Enviado a faltantes.');
+    }
     async function sendSlotToMissing() {
       const row = state.slots[state.slotContextIndex];
       if (!row) return;
       hideSlotContextMenu();
-      showToast('Enviando a faltantes...');
       const missingRow = {
         idart: row.idart ? String(row.idart).padStart(6, '0') : '',
         idProveedor: String(row.id_proveedor || row.idProveedor || '').trim(),
@@ -1985,8 +2039,7 @@
         pedido: false,
         source: 'proveedores'
       };
-      await CorralonSystem.faltantes.addRow(missingRow);
-      showToast('Enviado a faltantes.');
+      openMissingBranchPicker(missingRow);
     }
     function slotDiff(row) {
       const base = parseMoney(el.basePrice.value) || Number(state.base?.precio_costo || 0);
@@ -2860,12 +2913,30 @@
         showToast('No pude enviar a faltantes.');
       });
     });
+    el.missingBranchOptions.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-sucursal-id]');
+      if (!btn) return;
+      confirmMissingBranch(btn.dataset.sucursalId).catch((error) => {
+        console.error(error);
+        showToast('No pude enviar a faltantes.');
+      });
+    });
+    el.missingBranchBackdrop.addEventListener('click', (event) => {
+      if (event.target === el.missingBranchBackdrop) closeMissingBranchPicker();
+    });
     document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && el.missingBranchBackdrop.classList.contains('visible')) {
+        event.preventDefault();
+        closeMissingBranchPicker();
+        return;
+      }
       if (handleCalcKeydown(event)) return;
       if (event.key === 'F1') {
         event.preventDefault();
-        el.filterCode.focus();
-        el.filterCode.select();
+        state.slots = [];
+        hideSlotContextMenu();
+        renderSlots();
+        showToast('Comparaciones limpiadas.');
         return;
       }
       if (event.key === 'F2') {

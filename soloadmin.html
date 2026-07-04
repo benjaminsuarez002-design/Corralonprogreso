@@ -1882,11 +1882,27 @@ function normalizarImagenesArticulo(raw = {}) {
   return [...new Set(valores)];
 }
 
+function normalizarStockSucursalesAdmin(articulo = {}, anterior = {}) {
+  const helper = window.CorralonSystem?.resolveBranchStocks;
+  if (helper) return helper(articulo, anterior);
+  return {
+    stock: articulo.stock ?? anterior.stock ?? '',
+    stockSucursalProgresoRuta: articulo.stockSucursalProgresoRuta ?? anterior.stockSucursalProgresoRuta ?? '',
+    stockSucursalCalle5Espana: articulo.stockSucursalCalle5Espana ?? anterior.stockSucursalCalle5Espana ?? ''
+  };
+}
+
+function unificarStocksSucursalesAdmin(lista = []) {
+  const helper = window.CorralonSystem?.mergeArticleBranchStocks;
+  return helper ? helper(lista || []) : (lista || []);
+}
+
 function normalizarArticuloAdmin(articulo = {}) {
   const idArtProv = String(articulo?.idartprov ?? articulo?.idArtProv ?? articulo?.idart_prov ?? articulo?.codprov ?? articulo?.codProv ?? articulo?.codigoProveedor ?? '').trim();
   const idProveedor = String(articulo?.idProveedor ?? articulo?.id_proveedor ?? articulo?.IDProveedor ?? articulo?.idproveedor ?? '').trim();
   const imagenes = normalizarImagenesArticulo(articulo);
   const fotoUrl = imagenes[0] || String(articulo?.fotoUrl || '').trim();
+  const stockInfo = normalizarStockSucursalesAdmin(articulo);
   return {
     ...articulo,
     codigo: String(articulo?.codigo ?? articulo?.idart ?? '').trim(),
@@ -1901,7 +1917,9 @@ function normalizarArticuloAdmin(articulo = {}) {
     precio: Number(articulo?.precio || 0),
     fotoUrl: fotoUrl || imagenes[0] || '',
     imagenes,
-    stock: articulo?.stock ?? '',
+    stock: stockInfo.stock ?? articulo?.stock ?? '',
+    stockSucursalProgresoRuta: stockInfo.stockSucursalProgresoRuta ?? '',
+    stockSucursalCalle5Espana: stockInfo.stockSucursalCalle5Espana ?? '',
     oferta: toBool(articulo?.oferta ?? articulo?.enOferta ?? articulo?.tagOferta),
     ofertaPct: clampPct(articulo?.ofertaPct ?? articulo?.oferta_pct ?? articulo?.ofertaPorcentaje ?? articulo?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(articulo?.ofertaHasta ?? articulo?.oferta_hasta ?? articulo?.fechaOfertaHasta ?? ''),
@@ -1916,6 +1934,7 @@ function normalizarArticuloAdmin(articulo = {}) {
 
 function serializarArticuloBase(articulo) {
   const normalizado = normalizarArticuloAdmin(articulo);
+  const stockInfo = normalizarStockSucursalesAdmin(normalizado);
   return {
     codigo: normalizado.codigo,
     idart: normalizado.codigo,
@@ -1927,7 +1946,9 @@ function serializarArticuloBase(articulo) {
     descripcion: normalizado.nombre,
     rubro: normalizado.rubro,
     precio: Number(normalizado.precio || 0),
-    stock: normalizado.stock ?? ''
+    stock: stockInfo.stock ?? normalizado.stock ?? '',
+    stockSucursalProgresoRuta: stockInfo.stockSucursalProgresoRuta ?? '',
+    stockSucursalCalle5Espana: stockInfo.stockSucursalCalle5Espana ?? ''
   };
 }
 
@@ -2069,7 +2090,8 @@ function sincronizarCatalogoGeneradorImagen(lista = todosArticulos) {
 
 function setTodosArticulos(lista, { render = true, adminListSnapshot = null } = {}) {
   const metaAnterior = articulosMetaMap;
-  todosArticulos = (lista || []).map((articulo) => {
+  const listaConStocks = unificarStocksSucursalesAdmin(lista || []);
+  todosArticulos = (listaConStocks || []).map((articulo) => {
     const codigo = String(articulo?.codigo ?? articulo?.idart ?? '').trim();
     return enriquecerArticuloAdminBusqueda(aplicarMetadatosPreviosSiFaltan(articulo, metaAnterior.get(codigo)));
   });
@@ -2333,7 +2355,7 @@ function setSyncIndicator(state = 'idle', message = '') {
 }
 
 async function subirListaBaseArticulos(lista) {
-  const payload = (lista || []).map(serializarArticuloBase);
+  const payload = unificarStocksSucursalesAdmin(lista || []).map(serializarArticuloBase);
   return subirJSONaCloudinary(payload);
 }
 
@@ -5083,6 +5105,7 @@ function normalizeRow(r) {
     else if (['rubros_descripcion','rubro_descripcion','rubros','rubro','category','categoria'].includes(key)) out.rubro = v;
     else if (['tagsocultos','tagoculto','tagsbusqueda','palabrasclave','palabras_clave','keywords','tags'].includes(key)) out.tagsOcultos = v;
     else if (['stock','stockact','stock_act','existencia','cantidad','stkact'].includes(key)) out.stock = v;
+    else if (['idsuc','id_suc','idsucursal','id_sucursal','sucursal_id'].includes(key)) out.idsuc = v;
     else if (['oferta','enoferta','tagoferta'].includes(key)) out.oferta = v;
     else if (['ofertapct','oferta_pct','ofertaporcentaje','descuentooferta'].includes(key)) out.ofertaPct = v;
     else if (['ofertahasta','oferta_hasta','fechaofertahasta'].includes(key)) out.ofertaHasta = v;
@@ -5124,14 +5147,19 @@ function buildImportArticle(r, viejo = {}) {
   const code = String(r.codigo || r.idart || '').trim();
   const parsedPrecio = parsePrecio(r);
   const metaExistente = articulosMetaMap.get(code) || extraerMetadatosPersistentes(viejo);
+  const stockInfo = normalizarStockSucursalesAdmin(r, viejo);
   const base = {
     codigo: code,
     idartprov: String(r.idartprov || r.codprov || viejo.idartprov || viejo.codprov || '').trim(),
     nombre: r.nombre || viejo.nombre || '',
     precio: parsedPrecio !== null ? parsedPrecio : Number(viejo.precio || 0),
     rubro: r.rubro || viejo.rubro || '',
+    idsuc: r.idsuc || '',
+    stockSucursalProgresoRuta: stockInfo.stockSucursalProgresoRuta,
+    stockSucursalCalle5Espana: stockInfo.stockSucursalCalle5Espana,
   };
-  if (r.stock !== undefined && r.stock !== '') base.stock = r.stock;
+  if (stockInfo.stock !== undefined && stockInfo.stock !== '') base.stock = stockInfo.stock;
+  else if (r.stock !== undefined && r.stock !== '') base.stock = r.stock;
   else if (viejo.stock !== undefined) base.stock = viejo.stock;
   return aplicarMetadatosArticulo(base, metaExistente);
 }

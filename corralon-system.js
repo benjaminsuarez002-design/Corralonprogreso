@@ -20,6 +20,10 @@
     { id: 'progreso_ruta', label: 'Suc. Progreso y Ruta' },
     { id: 'calle5_espana', label: 'Suc. Calle 5 y Espana' }
   ];
+  const BRANCH_STOCK_FIELDS = {
+    progreso_ruta: ['stockSucursalProgresoRuta', 'stock_sucursal_progreso_ruta', 'stock_progreso_ruta', 'stockSucProgresoRuta', 'stockSuc1'],
+    calle5_espana: ['stockSucursalCalle5Espana', 'stock_sucursal_calle5_espana', 'stock_calle5_espana', 'stockSucCalle5Espana', 'stockSuc2']
+  };
 
   function headers(extra = {}) {
     return {
@@ -39,6 +43,24 @@
     if (!text) return 0;
     if (text.includes(',')) text = text.replace(/\./g, '').replace(',', '.');
     return Number(text.replace(/[^0-9.-]/g, '')) || 0;
+  }
+
+  function parseFlexibleNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    let text = String(value).trim().replace(/[^0-9,.-]/g, '');
+    if (!text) return null;
+    const lastDot = text.lastIndexOf('.');
+    const lastComma = text.lastIndexOf(',');
+    if (lastDot > -1 && lastComma > -1) {
+      if (lastComma > lastDot) text = text.replace(/\./g, '').replace(/,/g, '.');
+      else text = text.replace(/,/g, '');
+    } else if (lastComma > -1) {
+      text = text.replace(/\./g, '').replace(/,/g, '.');
+    } else if ((text.match(/\./g) || []).length > 1) {
+      text = text.replace(/\./g, '');
+    }
+    const number = Number(text);
+    return Number.isFinite(number) ? Number(number.toFixed(2)) : null;
   }
 
   function cleanId(value) {
@@ -84,6 +106,71 @@
     if (!raw) return '';
     const branch = BRANCHES.find((item) => item.id === raw || item.label === raw);
     return branch ? branch.label : raw;
+  }
+
+  function branchIdFromIdsuc(value) {
+    const id = cleanId(value);
+    if (id === '1') return 'progreso_ruta';
+    if (id === '2') return 'calle5_espana';
+    return '';
+  }
+
+  function readFirstNumber(source = {}, keys = []) {
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(source || {}, key)) continue;
+      const parsed = parseFlexibleNumber(source[key]);
+      if (parsed !== null) return parsed;
+    }
+    return null;
+  }
+
+  function resolveBranchStocks(source = {}, old = {}) {
+    let progreso = readFirstNumber(source, BRANCH_STOCK_FIELDS.progreso_ruta);
+    let calle5 = readFirstNumber(source, BRANCH_STOCK_FIELDS.calle5_espana);
+    const idsucBranch = branchIdFromIdsuc(source.idsuc ?? source.id_suc ?? source.idsucursal ?? source.id_sucursal ?? source.sucursal_id);
+    const sourceStock = parseFlexibleNumber(source.stock ?? source.existencia ?? source.cantidad);
+
+    if (idsucBranch === 'progreso_ruta' && sourceStock !== null) progreso = sourceStock;
+    if (idsucBranch === 'calle5_espana' && sourceStock !== null) calle5 = sourceStock;
+
+    if (progreso === null) progreso = readFirstNumber(old, BRANCH_STOCK_FIELDS.progreso_ruta);
+    if (calle5 === null) calle5 = readFirstNumber(old, BRANCH_STOCK_FIELDS.calle5_espana);
+
+    const fallback = sourceStock ?? parseFlexibleNumber(old.stock ?? old.existencia ?? old.cantidad);
+    const hasBranch = progreso !== null || calle5 !== null;
+    return {
+      stockSucursalProgresoRuta: progreso === null ? '' : progreso,
+      stockSucursalCalle5Espana: calle5 === null ? '' : calle5,
+      stock: hasBranch ? Number(((progreso || 0) + (calle5 || 0)).toFixed(2)) : (fallback === null ? '' : fallback)
+    };
+  }
+
+  function firstFilled(...values) {
+    for (const value of values) {
+      if (value === null || value === undefined) continue;
+      if (typeof value === 'string' && !value.trim()) continue;
+      return value;
+    }
+    return '';
+  }
+
+  function mergeArticleBranchStocks(rows = []) {
+    const byCode = new Map();
+    (rows || []).forEach((row) => {
+      const codigo = cleanId(row?.codigo ?? row?.idart ?? row?.idArt ?? row?.id ?? '');
+      if (!codigo) return;
+      const current = byCode.get(codigo) || { ...row, codigo };
+      Object.keys(row || {}).forEach((key) => {
+        current[key] = firstFilled(current[key], row[key]);
+      });
+      const stockInfo = resolveBranchStocks(row, current);
+      current.stockSucursalProgresoRuta = stockInfo.stockSucursalProgresoRuta;
+      current.stockSucursalCalle5Espana = stockInfo.stockSucursalCalle5Espana;
+      current.stock = stockInfo.stock;
+      current.idsuc = '';
+      byCode.set(codigo, current);
+    });
+    return [...byCode.values()].map((row) => ({ ...row, ...resolveBranchStocks(row) }));
   }
 
   function imageGeneratorText(value) {
@@ -864,6 +951,8 @@
         idProveedor: '',
         codProv: '',
         filtro: columnFiltro,
+        sucursalId: '',
+        sucursal: '',
         proveedor: '',
         descripcion: '',
         cantidad: '',
@@ -992,6 +1081,8 @@
         idProveedor: item.id_proveedor || item.idProveedor || '',
         codProv: item.cod_proveedor || '',
         filtro: item.filtro || '',
+        sucursalId: item.sucursal_id || item.sucursalId || '',
+        sucursal: item.sucursal || normalizeBranch(item.sucursal_id || item.sucursalId || ''),
         proveedor: item.proveedor || '',
         descripcion: item.descripcion || '',
         cantidad: item.cantidad ?? '',
@@ -1010,6 +1101,8 @@
         id_proveedor: row.idProveedor || '',
         cod_proveedor: row.codProv || '',
         filtro: row.filtro || '',
+        sucursal_id: row.sucursalId || '',
+        sucursal: normalizeBranch(row.sucursal || row.sucursalId || ''),
         proveedor: row.proveedor || '',
         descripcion: row.descripcion || '',
         cantidad: Number(row.cantidad || 0),
@@ -1810,12 +1903,16 @@
     headers,
     norm,
     parseMoney,
+    parseFlexibleNumber,
     dateOnly,
     today,
     nowTimestamp,
     money,
     percent,
     normalizeBranch,
+    branchIdFromIdsuc,
+    resolveBranchStocks,
+    mergeArticleBranchStocks,
     providerFromObject,
     normalizeProviderPageLink,
     providerRemotePayload,
