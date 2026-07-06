@@ -1293,8 +1293,18 @@
       try {
         const database = await openListDb();
         return await new Promise((resolve, reject) => {
-          const request = database.transaction('articulos').objectStore('articulos').getAll();
-          request.onsuccess = () => resolve((request.result || []).map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart));
+          const out = [];
+          const request = database.transaction('articulos').objectStore('articulos').openCursor();
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) {
+              resolve(out);
+              return;
+            }
+            const item = normalizeProviderArticle(cursor.value);
+            if (item.descripcion || item.idart) out.push(item);
+            cursor.continue();
+          };
           request.onerror = () => reject(request.error);
         });
       } catch (error) {
@@ -1717,36 +1727,45 @@
 
     async function loadProviderCatalogWithProgress(cache, onProgress) {
       if (typeof onProgress === 'function') onProgress(2);
-      let rawItems = [];
+      const result = [];
       try {
         const database = await openListDb();
-        rawItems = await new Promise((resolve, reject) => {
-          const request = database.transaction('articulos').objectStore('articulos').getAll();
-          request.onsuccess = () => resolve(request.result || []);
+        const total = await new Promise((resolve, reject) => {
+          const request = database.transaction('articulos').objectStore('articulos').count();
+          request.onsuccess = () => resolve(Number(request.result || 0));
           request.onerror = () => reject(request.error);
+        });
+        if (!total) {
+          cache.proveedores = cache.proveedores || [];
+          if (typeof onProgress === 'function') onProgress(100);
+          return cache.proveedores;
+        }
+        if (typeof onProgress === 'function') onProgress(8);
+        await new Promise((resolve, reject) => {
+          const store = database.transaction('articulos', 'readonly').objectStore('articulos');
+          const request = store.openCursor();
+          let read = 0;
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) {
+              resolve();
+              return;
+            }
+            const item = normalizeProviderArticle(cursor.value);
+            if (item.descripcion || item.idart) result.push(item);
+            read++;
+            if (read % 1500 === 0) {
+              if (typeof onProgress === 'function') onProgress(8 + Math.round((read / total) * 88));
+            }
+            cursor.continue();
+          };
         });
       } catch (error) {
         console.warn(error);
         if (!cache.proveedores) cache.proveedores = [];
         if (typeof onProgress === 'function') onProgress(100);
         return cache.proveedores;
-      }
-      if (!rawItems.length) {
-        if (!cache.proveedores) cache.proveedores = [];
-        if (typeof onProgress === 'function') onProgress(100);
-        return cache.proveedores;
-      }
-      if (typeof onProgress === 'function') onProgress(8);
-      const CHUNK = 5000;
-      const result = [];
-      for (let i = 0; i < rawItems.length; i += CHUNK) {
-        const end = Math.min(i + CHUNK, rawItems.length);
-        for (let j = i; j < end; j++) {
-          const item = normalizeProviderArticle(rawItems[j]);
-          if (item.descripcion || item.idart) result.push(item);
-        }
-        if (typeof onProgress === 'function') onProgress(8 + Math.round((end / rawItems.length) * 80));
-        if (end < rawItems.length) await new Promise(r => setTimeout(r, 0));
       }
       cache.proveedores = result;
       if (typeof onProgress === 'function') onProgress(100);

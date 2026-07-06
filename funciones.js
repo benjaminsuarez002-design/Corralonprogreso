@@ -766,6 +766,30 @@
     });
   }
 
+  function bindShiftEnterNewLine(options = {}) {
+    const root = options.root || document;
+    const selector = options.selector || 'textarea, [data-shift-enter-newline]';
+
+    function insertNewLine(field) {
+      const value = String(field.value ?? '');
+      const start = field.selectionStart ?? value.length;
+      const end = field.selectionEnd ?? start;
+      field.value = `${value.slice(0, start)}\n${value.slice(end)}`;
+      const next = start + 1;
+      field.setSelectionRange?.(next, next);
+      dispatchInputChange(field);
+    }
+
+    root.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || !event.shiftKey) return;
+      const field = event.target?.closest?.(selector);
+      if (!field || !root.contains(field) || field.disabled || field.readOnly) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      insertNewLine(field);
+    });
+  }
+
   function createVirtualTableNavigator(options = {}) {
     const viewport = options.viewport;
     const rowsRoot = options.rowsRoot || options.root || document;
@@ -1329,6 +1353,7 @@
     formatCurrencyText,
     bindRawCurrencySelection,
     bindLabelSelect,
+    bindShiftEnterNewLine,
     menuSessionUser,
     isMenuSessionActive,
     presupuestoMediosPago,

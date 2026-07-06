@@ -207,7 +207,7 @@
     }
     .filters {
       display: grid;
-      grid-template-columns: 130px minmax(360px, 1fr) 250px;
+      grid-template-columns: 130px 140px minmax(360px, 1fr) 250px;
       gap: 0;
       border: 1px solid var(--borde-fuerte);
       background: rgba(255,255,255,.94);
@@ -219,6 +219,20 @@
       border-right: 1px solid var(--borde);
     }
     .filter-cell:last-child { border-right: 0; }
+    .filter-check {
+      height: 28px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      background: #fff;
+    }
+    .filter-check input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--acento);
+    }
     .filter-label {
       height: 26px;
       padding: 4px 6px;
@@ -795,6 +809,10 @@
             <input class="filter-input" id="filterCode" autocomplete="off">
           </div>
           <div class="filter-cell">
+            <div class="filter-label">Resultado exacto</div>
+            <label class="filter-check"><input type="checkbox" id="filterExact"></label>
+          </div>
+          <div class="filter-cell">
             <div class="filter-label">Filtrar Por Artículo</div>
             <input class="filter-input" id="filterArticle" autocomplete="off">
           </div>
@@ -957,6 +975,7 @@
       syncProgressFill: document.getElementById('syncProgressFill'),
       meta: document.getElementById('metaInfo'),
       filterCode: document.getElementById('filterCode'),
+      filterExact: document.getElementById('filterExact'),
       filterArticle: document.getElementById('filterArticle'),
       filterPrice: document.getElementById('filterPrice'),
       filterProvider: document.getElementById('filterProvider'),
@@ -1465,9 +1484,9 @@
         let matches = [];
         function norm(v){ return String(v ?? '').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/\\s+/g,' ').trim(); }
         function test(row, f) {
-          if (f.code && !row.cod_proveedor_norm.includes(f.code)) return false;
+          if (f.code && (f.exact ? row.cod_proveedor_norm !== f.code : !row.cod_proveedor_norm.includes(f.code))) return false;
           if (f.provider && !row.proveedor_norm.includes(f.provider)) return false;
-          if (f.articleWords.length && !f.articleWords.every(w => row.articulo_norm.includes(w))) return false;
+          if (f.articleWords.length && (f.exact && !f.code ? row.articulo_norm !== f.article : !f.articleWords.every(w => row.articulo_norm.includes(w)))) return false;
           if (f.excludeWords.length && f.excludeWords.some(w => row.articulo_norm.includes(w))) return false;
           if (f.price && !String(row.precio_costo || '').includes(f.price)) return false;
           return true;
@@ -1501,6 +1520,8 @@
             const article = norm(msg.filter.article || '');
             const f = {
               code: norm(msg.filter.code || ''),
+              exact: Boolean(msg.filter.exact),
+              article,
               provider: norm(msg.filter.provider || ''),
               price: String(msg.filter.price || '').replace(/[^0-9.,-]/g,'').trim(),
               articleWords: article.split(' ').filter(Boolean),
@@ -1591,6 +1612,7 @@
     function currentFilter() {
       return {
         code: el.filterCode.value,
+        exact: el.filterExact.checked,
         article: el.filterArticle.value,
         price: el.filterPrice.value,
         provider: el.filterProvider.value,
@@ -1640,6 +1662,7 @@
       el.filterArticle.value = '';
       el.filterPrice.value = '';
       el.filterProvider.value = '';
+      el.filterExact.checked = false;
       requestFilter();
     }
     function requestSlice() {
@@ -2758,6 +2781,7 @@
         input.select();
       });
     });
+    el.filterExact.addEventListener('change', requestFilter);
     document.querySelectorAll('[data-sort-col]').forEach((button) => {
       button.addEventListener('click', () => cycleSort(button.dataset.sortCol));
     });
@@ -2943,14 +2967,14 @@
         if (selectActiveField()) event.preventDefault();
         return;
       }
-      const filterOrder = [el.filterCode, el.filterArticle, el.filterProvider];
+      const filterOrder = [el.filterCode, el.filterExact, el.filterArticle, el.filterProvider];
       const filterIndex = filterOrder.indexOf(document.activeElement);
-      if (event.key === 'Enter' && filterIndex >= 0) {
+      if ((event.key === 'Enter' || event.key === 'Tab') && filterIndex >= 0) {
         event.preventDefault();
         const next = filterOrder[filterIndex + 1];
         if (next) {
           next.focus();
-          next.select();
+          next.select?.();
         } else {
           focusFirstTableCell();
         }
@@ -2958,9 +2982,10 @@
       }
       if (filterIndex >= 0 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
         const input = document.activeElement;
-        const allSelected = input.selectionStart === 0 && input.selectionEnd === input.value.length;
-        const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
-        const atEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+        const isTextFilter = input.matches?.('input:not([type="checkbox"])');
+        const allSelected = !isTextFilter || input.selectionStart === 0 && input.selectionEnd === input.value.length;
+        const atStart = !isTextFilter || input.selectionStart === 0 && input.selectionEnd === 0;
+        const atEnd = !isTextFilter || input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
         const shouldMoveLeft = event.key === 'ArrowLeft' && (allSelected || atStart);
         const shouldMoveRight = event.key === 'ArrowRight' && (allSelected || atEnd);
         if (shouldMoveLeft || shouldMoveRight) {
@@ -2968,7 +2993,7 @@
           const next = filterOrder[filterIndex + (shouldMoveRight ? 1 : -1)];
           if (next) {
             next.focus();
-            next.select();
+            next.select?.();
           }
         }
         return;

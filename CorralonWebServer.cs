@@ -937,6 +937,10 @@ internal sealed class ServerForm : Form
     {
         string target = @"C:\Update\Articulos.xls";
         Directory.CreateDirectory(Path.GetDirectoryName(target));
+        if (File.Exists(target))
+        {
+            File.Delete(target);
+        }
         using (var output = File.Create(target))
         {
             context.Request.InputStream.CopyTo(output);
