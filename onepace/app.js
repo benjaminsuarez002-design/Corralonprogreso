@@ -1,5 +1,5 @@
 const config = window.OP_CONFIG || {};
-const episodes = [...(window.OP_EPISODES || [])].sort((a, b) => a.order - b.order);
+let episodes = [...(window.OP_EPISODES || [])].sort((a, b) => a.order - b.order);
 
 const els = {
   authStatus: document.querySelector("#authStatus"),
@@ -10,24 +10,47 @@ const els = {
   nowTitle: document.querySelector("#nowTitle"),
   nowMeta: document.querySelector("#nowMeta"),
   playSelected: document.querySelector("#playSelected"),
+  nextEpisode: document.querySelector("#nextEpisode"),
+  markWatched: document.querySelector("#markWatched"),
   clearCache: document.querySelector("#clearCache"),
   connectDrive: document.querySelector("#connectDrive"),
   downloadText: document.querySelector("#downloadText"),
   downloadBar: document.querySelector("#downloadBar"),
+  downloadOverlay: document.querySelector("#downloadOverlay"),
+  downloadOverlayText: document.querySelector("#downloadOverlayText"),
+  downloadOverlayBar: document.querySelector("#downloadOverlayBar"),
   preloadText: document.querySelector("#preloadText"),
-  preloadBar: document.querySelector("#preloadBar")
+  preloadBar: document.querySelector("#preloadBar"),
+  episodeConfirm: document.querySelector("#episodeConfirm"),
+  episodeConfirmText: document.querySelector("#episodeConfirmText"),
+  cancelEpisodePlay: document.querySelector("#cancelEpisodePlay"),
+  confirmEpisodePlay: document.querySelector("#confirmEpisodePlay")
 };
 
 let app = null;
 let db = null;
 let uid = "local";
 let activeUser = null;
+let tokenClient = null;
+let driveToken = "";
+let driveTokenPromise = null;
+let pendingDriveTokenRequest = null;
+let exactProgressTimer = 0;
+let lastProgressRender = 0;
 let selectedEpisode = episodes[0] || null;
 let currentEpisode = null;
 let currentObjectUrl = "";
 let saveTimer = 0;
+let isLoadingEpisode = false;
 let progressById = new Map();
 let downloadJobs = new Map();
+let pendingEpisodeToPlay = null;
+let previewTimer = 0;
+let previewTracking = false;
+let previewLastTick = 0;
+let previewTime = 0;
+let previewSaveCount = 0;
+let catalogSyncTimer = 0;
 
 const KEEP_LOGIN_KEY = "historial_keep_logged_v1";
 const ACTIVE_USER_KEY = "corralon_menu_active_user_v1";
@@ -36,6 +59,9 @@ const ACTIVE_USER_SESSION_KEY = "corralon_menu_active_user_session_v1";
 const USERS_CACHE_KEY = "corralon_menu_users_cache_v1";
 const USERS_COLLECTION = "menuUsuarios";
 const PROGRESS_COLLECTION = "onePieceProgreso";
+const DRIVE_TOKEN_KEY = "one_piece_drive_token_v1";
+const DRIVE_CATALOG_KEY = "one_piece_drive_catalog_v1";
+const DRIVE_FOLDER_ID = config.drive?.folderId || "1N8awrcgHVDSajwKmHe7PLgGubTfdaQ7X";
 
 const loginEls = {
   bg: document.querySelector("#loginBg"),
@@ -55,27 +81,58 @@ const blobStore = "videos";
 init();
 
 async function init() {
+  loadCachedDriveCatalog();
   renderEpisodes();
   selectEpisode(selectedEpisode);
   setupFirebase();
+  setupGoogleDrive();
   await requestPersistentStorage();
   bindEvents();
   await setupMenuLogin();
+  syncDriveCatalog({ interactive: false }).catch(() => {});
+  startCatalogAutoSync();
   await refreshStorageEstimate();
 }
 
 function bindEvents() {
   els.playSelected.addEventListener("click", () => selectedEpisode && playEpisode(selectedEpisode));
+  els.nextEpisode.addEventListener("click", playNextEpisode);
   els.clearCache.addEventListener("click", async () => {
     await clearVideoCache();
     setDownloadProgress(0, "Caché limpia");
     setPreloadProgress(0, "Esperando");
   });
+  els.markWatched.addEventListener("click", async () => {
+    if (!currentEpisode) return;
+    await saveProgress(currentEpisode, true);
+    renderEpisodes();
+  });
   els.connectDrive.addEventListener("click", () => {
-    if (selectedEpisode?.driveUrl) window.open(selectedEpisode.driveUrl, "_blank", "noopener");
+    requestDriveToken().catch(error => {
+      console.error(error);
+      alert("No se pudo autorizar Google Drive. Abrí la app desde http://127.0.0.1:4173/ y revisá el origen autorizado.");
+    });
+  });
+  els.cancelEpisodePlay.addEventListener("click", closeEpisodeConfirm);
+  els.confirmEpisodePlay.addEventListener("click", confirmEpisodePlayback);
+  els.episodeConfirm.addEventListener("click", event => {
+    if (event.target === els.episodeConfirm) closeEpisodeConfirm();
   });
   els.video.addEventListener("timeupdate", onTimeUpdate);
   els.video.addEventListener("ended", onEnded);
+  els.video.addEventListener("play", () => {
+    stopPreviewTicker();
+    startExactProgressTimer();
+  });
+  els.video.addEventListener("pause", () => {
+    if (currentEpisode) saveProgress(currentEpisode).catch(() => {});
+  });
+  els.video.addEventListener("seeking", () => {
+    if (currentEpisode) saveProgress(currentEpisode).catch(() => {});
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && currentEpisode) saveProgress(currentEpisode).catch(() => {});
+  });
   loginEls.button.addEventListener("click", verifyMenuLogin);
   loginEls.pass.addEventListener("keydown", event => {
     if (event.key === "Enter") verifyMenuLogin();
@@ -90,6 +147,116 @@ function bindEvents() {
     loginEls.pass.focus();
     loginEls.pass.select();
   });
+}
+
+function setupGoogleDrive() {
+  if (!config.google?.clientId) {
+    els.connectDrive.textContent = "Drive falta";
+    return;
+  }
+
+  restoreStoredDriveToken();
+
+  if (location.protocol === "file:") {
+    els.nowMeta.textContent = "OAuth de Google no funciona abriendo el HTML como archivo. Usá http://127.0.0.1:4173/";
+  }
+
+  const waitForGoogle = () => {
+    if (!window.google?.accounts?.oauth2) {
+      window.setTimeout(waitForGoogle, 250);
+      return;
+    }
+
+    tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: config.google.clientId,
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      callback: response => {
+        if (response?.access_token) {
+          rememberDriveToken(response);
+          els.connectDrive.textContent = "Drive OK";
+          if (driveTokenPromise) driveTokenPromise.resolve(driveToken);
+          syncDriveCatalog({ interactive: false }).catch(error => console.warn("No se pudo sincronizar catalogo", error));
+        } else if (response?.error && driveTokenPromise) {
+          driveTokenPromise.reject(new Error(response.error));
+        } else if (driveTokenPromise) {
+          driveTokenPromise.reject(new Error("Google no devolvio token de Drive"));
+        }
+        driveTokenPromise = null;
+      }
+    });
+
+    els.connectDrive.textContent = "Autorizar Drive";
+    if (driveToken) els.connectDrive.textContent = "Drive OK";
+  };
+
+  waitForGoogle();
+}
+
+function restoreStoredDriveToken() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DRIVE_TOKEN_KEY) || "null");
+    if (saved?.accessToken && Number(saved.expiresAt || 0) > Date.now() + 60000) {
+      driveToken = saved.accessToken;
+      els.connectDrive.textContent = "Drive OK";
+      return driveToken;
+    }
+    localStorage.removeItem(DRIVE_TOKEN_KEY);
+  } catch (_) {
+    localStorage.removeItem(DRIVE_TOKEN_KEY);
+  }
+  return "";
+}
+
+function rememberDriveToken(response) {
+  driveToken = response.access_token || "";
+  const expiresIn = Number(response.expires_in || 3600);
+  const expiresAt = Date.now() + Math.max(60, expiresIn - 120) * 1000;
+  try {
+    localStorage.setItem(DRIVE_TOKEN_KEY, JSON.stringify({ accessToken: driveToken, expiresAt }));
+  } catch (_) {}
+}
+
+function clearDriveToken() {
+  driveToken = "";
+  try { localStorage.removeItem(DRIVE_TOKEN_KEY); } catch (_) {}
+  els.connectDrive.textContent = "Autorizar Drive";
+}
+
+function requestDriveToken(options = {}) {
+  const interactive = options.interactive !== false;
+  if (location.protocol === "file:") {
+    return Promise.reject(new Error("OAuth no funciona desde file://. Abri la app desde http://127.0.0.1:4173/"));
+  }
+  restoreStoredDriveToken();
+  if (driveToken) return Promise.resolve(driveToken);
+  if (!interactive) return Promise.reject(new Error("Drive token no disponible"));
+  if (!tokenClient) return Promise.reject(new Error("Google Identity Services todavia no cargo"));
+
+  if (pendingDriveTokenRequest) return pendingDriveTokenRequest;
+
+  pendingDriveTokenRequest = new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      driveTokenPromise = null;
+      pendingDriveTokenRequest = null;
+      reject(new Error("Google Drive no respondio a tiempo"));
+    }, 25000);
+
+    driveTokenPromise = {
+      resolve: token => {
+        window.clearTimeout(timer);
+        pendingDriveTokenRequest = null;
+        resolve(token);
+      },
+      reject: error => {
+        window.clearTimeout(timer);
+        pendingDriveTokenRequest = null;
+        reject(error);
+      }
+    };
+    tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+  });
+
+  return pendingDriveTokenRequest;
 }
 
 function setupFirebase() {
@@ -115,13 +282,60 @@ function setupFirebase() {
 }
 
 async function playEpisode(episode) {
+  if (isLoadingEpisode) {
+    els.nowMeta.textContent = "Espera a que termine la descarga actual antes de cargar otro capitulo.";
+    return;
+  }
+  isLoadingEpisode = true;
   currentEpisode = episode;
   selectEpisode(episode);
   els.nowTitle.textContent = episode.title;
-  playDirectFromDrive(episode, "Reproduciendo directo desde Drive. La cache local queda desactivada por bloqueo CORS de Google Drive.");
+  stopExactProgressTimer();
+  stopPreviewTicker();
+  els.driveFrame.hidden = true;
+  els.driveFrame.removeAttribute("src");
+  els.video.hidden = false;
+  els.nowMeta.textContent = "Preparando archivo local desde Drive...";
+  setDownloadProgress(0, "Preparando...");
+
+  let blob = null;
+  try {
+    blob = await getOrDownloadEpisode(episode, "current");
+  } catch (error) {
+    console.error(error);
+    els.nowMeta.textContent = "No se pudo descargar el MP4 bruto. Tocá Drive para autorizar de nuevo o abrilo desde http://127.0.0.1:4173/.";
+    setDownloadProgress(0, "Error Drive");
+    isLoadingEpisode = false;
+    return;
+  }
+  if (!blob) {
+    isLoadingEpisode = false;
+    return;
+  }
+
+  if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+  currentObjectUrl = URL.createObjectURL(blob);
+  els.video.onerror = () => {
+    els.nowMeta.textContent = "El archivo descargado no se pudo reproducir en este navegador.";
+    setDownloadProgress(0, "Video error");
+  };
+  els.video.src = currentObjectUrl;
+
+  const progress = progressById.get(episode.id);
+  els.video.onloadedmetadata = () => {
+    if (progress?.currentTime && progress.currentTime < els.video.duration - 20) {
+      els.video.currentTime = progress.currentTime;
+    }
+    els.video.play().catch(() => {});
+  };
+
+  els.nowMeta.textContent = `${formatBytes(blob.size)} guardados localmente.`;
+  setPreloadProgress(0, "Manual");
+  isLoadingEpisode = false;
 }
 
 function playDirectFromDrive(episode, message) {
+  stopPreviewTicker();
   if (currentObjectUrl) {
     URL.revokeObjectURL(currentObjectUrl);
     currentObjectUrl = "";
@@ -158,12 +372,101 @@ function showDrivePreview(episode) {
   els.video.hidden = true;
   els.driveFrame.hidden = false;
   els.driveFrame.src = `https://drive.google.com/file/d/${episode.driveFileId}/preview`;
-  els.nowMeta.textContent = "Drive bloqueo el MP4 directo. Reproduciendo con el visor de Drive; en este modo el minuto exacto no se puede guardar automaticamente.";
+  startPreviewTicker(episode);
+  els.nowMeta.textContent = previewStatusText(episode, "Drive bloqueo el MP4 directo. Guardando progreso aproximado mientras este reproductor esta abierto.");
   setDownloadProgress(100, "Drive preview");
   setPreloadProgress(0, "Sin cache");
 }
 
+function startPreviewTicker(episode) {
+  stopPreviewTicker();
+  const saved = progressById.get(episode.id);
+  previewTime = Number(saved?.currentTime || 0);
+  previewTracking = true;
+  previewLastTick = Date.now();
+  previewSaveCount = 0;
+  els.toggleProgress.textContent = "Pausar progreso";
+  updatePreviewProgressUi(episode);
+
+  previewTimer = window.setInterval(async () => {
+    if (!currentEpisode || currentEpisode.id !== episode.id) return;
+    const now = Date.now();
+    const elapsed = Math.max(0, (now - previewLastTick) / 1000);
+    previewLastTick = now;
+
+    if (previewTracking && !document.hidden) {
+      previewTime = Math.min(estimatedDuration(episode), previewTime + elapsed);
+      previewSaveCount += elapsed;
+      updatePreviewProgressUi(episode);
+      if (previewSaveCount >= 10) {
+        previewSaveCount = 0;
+        await saveProgress(episode);
+      }
+    }
+  }, 1000);
+}
+
+function stopPreviewTicker() {
+  if (previewTimer) window.clearInterval(previewTimer);
+  previewTimer = 0;
+  previewTracking = false;
+}
+
+function startExactProgressTimer() {
+  stopExactProgressTimer();
+  exactProgressTimer = window.setInterval(() => {
+    if (!currentEpisode || !els.video.duration || els.video.paused || els.video.ended) return;
+    saveProgress(currentEpisode).catch(error => console.warn("No se pudo guardar progreso", error));
+  }, 10000);
+}
+
+function stopExactProgressTimer() {
+  if (exactProgressTimer) window.clearInterval(exactProgressTimer);
+  exactProgressTimer = 0;
+}
+
+function togglePreviewTracking() {
+  if (!currentEpisode) return;
+  previewTracking = !previewTracking;
+  previewLastTick = Date.now();
+  els.toggleProgress.textContent = previewTracking ? "Pausar progreso" : "Seguir progreso";
+  updatePreviewProgressUi(currentEpisode);
+}
+
+function adjustPreviewProgress(seconds) {
+  if (!currentEpisode) return;
+  previewTime = Math.max(0, Math.min(estimatedDuration(currentEpisode), previewTime + seconds));
+  updatePreviewProgressUi(currentEpisode);
+  saveProgress(currentEpisode).catch(() => {});
+}
+
+function updatePreviewProgressUi(episode) {
+  const duration = estimatedDuration(episode);
+  const percent = duration ? Math.min(100, Math.round((previewTime / duration) * 100)) : 0;
+  setDownloadProgress(percent, `${percent}% aprox`);
+  els.nowMeta.textContent = previewStatusText(episode);
+  const existing = progressById.get(episode.id) || {};
+  progressById.set(episode.id, {
+    ...existing,
+    currentTime: previewTime,
+    duration,
+    percent,
+    watched: percent >= 90,
+    approximate: true,
+    updatedAt: Date.now()
+  });
+  renderEpisodes();
+}
+
+function previewStatusText(episode, prefix = "Progreso aproximado activo.") {
+  const duration = estimatedDuration(episode);
+  return `${prefix} Ibas por ${formatTime(previewTime)} de ${formatTime(duration)} aprox. En otro dispositivo adelanta manualmente hasta ese minuto.`;
+}
+
 async function preloadNextEpisode(episode) {
+  setPreloadProgress(0, "Manual");
+  return;
+
   const index = episodes.findIndex(item => item.id === episode.id);
   const next = episodes[index + 1];
   if (!next) {
@@ -204,8 +507,22 @@ async function getOrDownloadEpisode(episode, slot) {
 }
 
 async function downloadEpisode(episode, slot) {
+  const token = await requestDriveToken({ interactive: slot === "current" });
   const url = getDownloadUrl(episode);
-  const response = await fetch(url);
+  let response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (response.status === 401 || response.status === 403) {
+    clearDriveToken();
+    const freshToken = await requestDriveToken({ interactive: slot === "current" });
+    response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${freshToken}`
+      }
+    });
+  }
   if (!response.ok) throw new Error(`Drive respondio ${response.status}`);
   const responseType = response.headers.get("content-type") || "";
   if (responseType && !responseType.toLowerCase().includes("video") && !responseType.toLowerCase().includes("octet-stream")) {
@@ -216,7 +533,11 @@ async function downloadEpisode(episode, slot) {
   const reader = response.body?.getReader();
   if (!reader) {
     const blob = await response.blob();
+    if (!isPlayableVideoBlob(blob)) throw new Error("La descarga no parece un video valido");
     await putCachedVideo(episode, blob);
+    await keepOnlyCurrent(episode.id);
+    if (slot === "current") setDownloadProgress(100, "Listo");
+    if (slot === "preload") setPreloadProgress(100, "Listo");
     return blob;
   }
 
@@ -236,7 +557,9 @@ async function downloadEpisode(episode, slot) {
   const blob = new Blob(chunks, { type: episode.mimeType || "video/mp4" });
   if (!isPlayableVideoBlob(blob)) throw new Error("La descarga no parece un video valido");
   await putCachedVideo(episode, blob);
-  await keepOnlyCurrentAndNext(currentEpisode?.id || episode.id);
+  await keepOnlyCurrent(episode.id);
+  if (slot === "current") setDownloadProgress(100, "Listo");
+  if (slot === "preload") setPreloadProgress(100, "Listo");
   return blob;
 }
 
@@ -248,19 +571,27 @@ function isPlayableVideoBlob(blob) {
 }
 
 function getDownloadUrl(episode) {
-  return `https://drive.usercontent.google.com/download?id=${episode.driveFileId}&export=download&confirm=t`;
+  return `https://www.googleapis.com/drive/v3/files/${episode.driveFileId}?alt=media`;
 }
 
 async function onTimeUpdate() {
   if (!currentEpisode || !els.video.duration) return;
-  window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => saveProgress(currentEpisode), 700);
+  const data = buildProgressData(currentEpisode);
+  progressById.set(currentEpisode.id, data);
+  localStorage.setItem(`progress:${currentEpisode.id}`, JSON.stringify(data));
+  if (Date.now() - lastProgressRender > 5000) {
+    lastProgressRender = Date.now();
+    renderEpisodes();
+  }
 }
 
 async function onEnded() {
   if (!currentEpisode) return;
 
+  stopExactProgressTimer();
   await saveProgress(currentEpisode, true);
+  els.nowMeta.textContent = "Capitulo terminado. Toca Siguiente para borrar este capitulo y descargar el proximo.";
+  return;
   await deleteCachedVideo(currentEpisode.id);
 
   const index = episodes.findIndex(item => item.id === currentEpisode.id);
@@ -272,12 +603,41 @@ async function onEnded() {
   }
 }
 
+async function playNextEpisode() {
+  if (isLoadingEpisode) {
+    els.nowMeta.textContent = "Espera a que termine la descarga actual antes de pasar al siguiente.";
+    return;
+  }
+
+  const baseEpisode = currentEpisode || selectedEpisode;
+  if (!baseEpisode) return;
+
+  const index = episodes.findIndex(item => item.id === baseEpisode.id);
+  const next = episodes[index + 1];
+  if (!next) {
+    els.nowMeta.textContent = "No hay siguiente capitulo cargado.";
+    setPreloadProgress(0, "No hay siguiente");
+    return;
+  }
+
+  if (currentEpisode) {
+    await saveProgress(currentEpisode).catch(() => {});
+    await deleteCachedVideo(currentEpisode.id).catch(() => {});
+  }
+
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = "";
+  }
+
+  setPreloadProgress(0, "Manual");
+  selectEpisode(next);
+  await playEpisode(next);
+}
+
 async function saveProgress(episode, forceDone = false) {
-  const duration = els.video.duration || 0;
-  const currentTime = els.video.currentTime || 0;
-  const percent = duration ? Math.min(100, Math.round((currentTime / duration) * 100)) : 0;
-  const watched = forceDone || percent >= 90;
-  const data = { currentTime, duration, percent, watched, updatedAt: Date.now() };
+  const data = buildProgressData(episode, forceDone);
+  const { currentTime, duration, percent, watched, approximate } = data;
 
   progressById.set(episode.id, data);
   localStorage.setItem(`progress:${episode.id}`, JSON.stringify(data));
@@ -295,8 +655,24 @@ async function saveProgress(episode, forceDone = false) {
     duration,
     percent,
     watched,
+    approximate,
     updatedAt: window.firebase.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
+}
+
+function buildProgressData(episode, forceDone = false) {
+  const usingPreview = !els.driveFrame.hidden;
+  const duration = usingPreview ? estimatedDuration(episode) : (els.video.duration || 0);
+  const currentTime = usingPreview ? previewTime : (els.video.currentTime || 0);
+  const percent = duration ? Math.min(100, Math.round((currentTime / duration) * 100)) : 0;
+  return {
+    currentTime,
+    duration,
+    percent,
+    watched: forceDone || percent >= 90,
+    approximate: usingPreview,
+    updatedAt: Date.now()
+  };
 }
 
 async function loadAllProgress() {
@@ -321,6 +697,7 @@ async function setupMenuLogin() {
     renderEpisodes();
     hideLogin();
     updateUserStatus();
+    await autoLoadResumeEpisode();
     return;
   }
   showLogin();
@@ -394,6 +771,48 @@ async function verifyMenuLogin() {
   renderEpisodes();
   hideLogin();
   updateUserStatus();
+  await autoLoadResumeEpisode();
+}
+
+async function autoLoadResumeEpisode() {
+  const resumeEpisode = findResumeEpisode();
+  if (!resumeEpisode) return;
+
+  selectEpisode(resumeEpisode);
+  els.nowTitle.textContent = resumeEpisode.title;
+
+  const saved = progressById.get(resumeEpisode.id);
+  const savedText = saved?.currentTime ? `Quedaste en ${formatTime(saved.currentTime)} (${saved.percent || 0}%).` : "";
+  const hasCached = await hasCachedVideo(resumeEpisode.id);
+  const hasDrive = Boolean(restoreStoredDriveToken());
+
+  if (hasCached || hasDrive) {
+    els.nowMeta.textContent = `${savedText} Cargando automaticamente...`;
+    playEpisode(resumeEpisode).catch(error => {
+      console.warn("No se pudo auto reanudar", error);
+      els.nowMeta.textContent = `${savedText} Toca Autorizar Drive y Cargar y reproducir.`;
+    });
+    return;
+  }
+
+  els.nowMeta.textContent = `${savedText} Toca Autorizar Drive y despues Cargar y reproducir.`;
+}
+
+function findResumeEpisode() {
+  const candidates = episodes
+    .map(episode => ({ episode, progress: progressById.get(episode.id) }))
+    .filter(item => item.progress && !item.progress.watched && Number(item.progress.currentTime || 0) > 5)
+    .sort((a, b) => progressUpdatedAt(b.progress) - progressUpdatedAt(a.progress));
+
+  return candidates[0]?.episode || null;
+}
+
+function progressUpdatedAt(progress) {
+  if (!progress) return 0;
+  if (typeof progress.updatedAt === "number") return progress.updatedAt;
+  if (typeof progress.updatedAt?.toMillis === "function") return progress.updatedAt.toMillis();
+  if (typeof progress.updatedAt?.seconds === "number") return progress.updatedAt.seconds * 1000;
+  return 0;
 }
 
 function rememberUser(user, remember) {
@@ -439,6 +858,160 @@ function updateUserStatus() {
   els.authStatus.textContent = activeUser ? `${activeUser.nombre || activeUser.usuario}` : "Firebase activo";
 }
 
+function loadCachedDriveCatalog() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(DRIVE_CATALOG_KEY) || "null");
+    if (Array.isArray(cached?.episodes) && cached.episodes.length) {
+      episodes = cached.episodes.sort((a, b) => a.order - b.order);
+      selectedEpisode = episodes.find(item => item.id === selectedEpisode?.id) || episodes[0] || null;
+    }
+  } catch (_) {
+    localStorage.removeItem(DRIVE_CATALOG_KEY);
+  }
+}
+
+function startCatalogAutoSync() {
+  if (catalogSyncTimer) window.clearInterval(catalogSyncTimer);
+  catalogSyncTimer = window.setInterval(() => {
+    if (driveToken) syncDriveCatalog({ interactive: false }).catch(() => {});
+  }, 60000);
+}
+
+async function syncDriveCatalog(options = {}) {
+  if (!DRIVE_FOLDER_ID) return;
+  const token = await requestDriveToken({ interactive: options.interactive === true });
+  const files = await listDriveFolderVideos(token);
+  if (!files.length) return;
+
+  const nextEpisodes = files.map(fileToEpisode).filter(Boolean).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+  if (!nextEpisodes.length) return;
+
+  const currentId = selectedEpisode?.id;
+  episodes = nextEpisodes;
+  selectedEpisode = episodes.find(item => item.id === currentId) || findResumeEpisode() || episodes[0] || null;
+
+  try {
+    localStorage.setItem(DRIVE_CATALOG_KEY, JSON.stringify({ updatedAt: Date.now(), episodes }));
+  } catch (_) {}
+
+  renderEpisodes();
+  if (selectedEpisode && !currentEpisode) selectEpisode(selectedEpisode);
+}
+
+async function listDriveFolderVideos(token) {
+  const fields = "nextPageToken,files(id,name,mimeType,size,modifiedTime,webViewLink)";
+  const query = `'${DRIVE_FOLDER_ID}' in parents and trashed=false`;
+  const files = [];
+  let pageToken = "";
+
+  do {
+    const url = new URL("https://www.googleapis.com/drive/v3/files");
+    url.searchParams.set("q", query);
+    url.searchParams.set("fields", fields);
+    url.searchParams.set("pageSize", "1000");
+    url.searchParams.set("orderBy", "name_natural");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      clearDriveToken();
+      throw new Error(`Drive catalogo respondio ${response.status}`);
+    }
+    if (!response.ok) throw new Error(`Drive catalogo respondio ${response.status}`);
+
+    const data = await response.json();
+    files.push(...(data.files || []));
+    pageToken = data.nextPageToken || "";
+  } while (pageToken);
+
+  return files.filter(file => {
+    const name = String(file.name || "");
+    return (file.mimeType || "").startsWith("video/") || /\.(mp4|mkv|webm|mov|m4v)$/i.test(name);
+  });
+}
+
+function fileToEpisode(file) {
+  const filename = String(file.name || "").trim();
+  const parsed = parseEpisodeFilename(filename);
+  const order = parsed.order ?? Number.MAX_SAFE_INTEGER;
+  return {
+    id: `drive-${file.id}`,
+    order,
+    range: parsed.range || String(order),
+    arc: parsed.arc || "",
+    part: parsed.part || "",
+    title: parsed.title || filename.replace(/\.[^.]+$/, ""),
+    filename,
+    mimeType: file.mimeType || "video/mp4",
+    size: Number(file.size || 0),
+    modifiedTime: file.modifiedTime || "",
+    driveFileId: file.id,
+    driveUrl: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`
+  };
+}
+
+function parseEpisodeFilename(filename) {
+  const clean = filename.replace(/\.[^.]+$/, "");
+  const match = clean.match(/^\[One Pace\]\[([^\]]+)\]\s+(.+?)(?:\s+\[[^\]]+\].*)?$/i);
+  if (!match) {
+    const anyNumber = clean.match(/\d+/);
+    return {
+      order: anyNumber ? Number(anyNumber[0]) : Number.MAX_SAFE_INTEGER,
+      range: anyNumber?.[0] || "",
+      title: clean
+    };
+  }
+
+  const range = match[1].trim();
+  const title = match[2].trim();
+  const orderMatch = range.match(/\d+/);
+  const partMatch = title.match(/(\d+)\s*$/);
+  const arc = partMatch ? title.slice(0, partMatch.index).trim() : title;
+
+  return {
+    order: orderMatch ? Number(orderMatch[0]) : Number.MAX_SAFE_INTEGER,
+    range,
+    arc,
+    part: partMatch?.[1] || "",
+    title
+  };
+}
+
+function openEpisodeConfirm(episode) {
+  pendingEpisodeToPlay = episode;
+  els.episodeConfirmText.textContent = `Se limpiara la cache y se descargara "${episode.title}".`;
+  els.episodeConfirm.hidden = false;
+}
+
+function closeEpisodeConfirm() {
+  pendingEpisodeToPlay = null;
+  els.episodeConfirm.hidden = true;
+}
+
+async function confirmEpisodePlayback() {
+  const episode = pendingEpisodeToPlay;
+  if (!episode || isLoadingEpisode) return;
+
+  closeEpisodeConfirm();
+  if (currentEpisode) {
+    await saveProgress(currentEpisode).catch(() => {});
+  }
+  await clearVideoCache();
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = "";
+  }
+  setDownloadProgress(0, "Cache limpia");
+  setPreloadProgress(0, "Manual");
+  selectEpisode(episode);
+  await playEpisode(episode);
+}
+
 function renderEpisodes() {
   els.episodeList.innerHTML = "";
   episodes.forEach(episode => {
@@ -456,7 +1029,7 @@ function renderEpisodes() {
       </span>
       <small class="badge">${progress?.watched ? "Visto" : `${progress?.percent || 0}%`}</small>
     `;
-    button.addEventListener("click", () => selectEpisode(episode));
+    button.addEventListener("click", () => openEpisodeConfirm(episode));
     els.episodeList.appendChild(button);
   });
 }
@@ -464,19 +1037,51 @@ function renderEpisodes() {
 function selectEpisode(episode) {
   if (!episode) return;
   selectedEpisode = episode;
+  const progress = progressById.get(episode.id);
   els.nowTitle.textContent = episode.title;
-  els.nowMeta.textContent = `${episode.range} · ${formatBytes(episode.size)} · ${episode.filename}`;
+  const saved = progress?.currentTime ? ` · guardado ${formatTime(progress.currentTime)} (${progress.percent || 0}%)` : "";
+  els.nowMeta.textContent = `${episode.range} · ${formatBytes(episode.size)}${saved} · ${episode.filename}`;
   renderEpisodes();
 }
 
 function setDownloadProgress(percent, text) {
   els.downloadText.textContent = text;
   els.downloadBar.style.width = `${percent || 0}%`;
+  setDownloadOverlay(percent, text);
 }
 
 function setPreloadProgress(percent, text) {
   els.preloadText.textContent = text;
   els.preloadBar.style.width = `${percent || 0}%`;
+}
+
+function setDownloadOverlay(percent, text) {
+  if (!els.downloadOverlay) return;
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  const label = text || `${value}%`;
+  const shouldShow = currentEpisode && (value < 100 || /prepar|descarg|error/i.test(label));
+  els.downloadOverlay.hidden = !shouldShow;
+  els.downloadOverlayText.textContent = label;
+  els.downloadOverlayBar.style.width = `${value}%`;
+  if (value >= 100 && !/error/i.test(label)) {
+    window.setTimeout(() => {
+      if (els.downloadText.textContent === label) els.downloadOverlay.hidden = true;
+    }, 700);
+  }
+}
+
+function estimatedDuration(episode) {
+  const bytes = Number(episode?.size || 0);
+  if (!bytes) return 30 * 60;
+  const estimated = Math.round((bytes * 8) / 1650000);
+  return Math.max(18 * 60, Math.min(60 * 60, estimated));
+}
+
+function formatTime(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds) || 0));
+  const min = Math.floor(value / 60);
+  const sec = value % 60;
+  return `${min}:${String(sec).padStart(2, "0")}`;
 }
 
 function openDb() {
@@ -527,9 +1132,8 @@ async function clearVideoCache() {
   return tx(blobStore, "readwrite", store => store.clear());
 }
 
-async function keepOnlyCurrentAndNext(currentId) {
-  const currentIndex = episodes.findIndex(episode => episode.id === currentId);
-  const keep = new Set([currentId, episodes[currentIndex + 1]?.id].filter(Boolean));
+async function keepOnlyCurrent(currentId) {
+  const keep = new Set([currentId].filter(Boolean));
   const database = await openDb();
 
   return new Promise((resolve, reject) => {

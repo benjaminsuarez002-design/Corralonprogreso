@@ -6,5 +6,11 @@ window.OP_CONFIG = {
     storageBucket: "PEGAR_FIREBASE_STORAGE_BUCKET",
     messagingSenderId: "PEGAR_FIREBASE_MESSAGING_SENDER_ID",
     appId: "PEGAR_FIREBASE_APP_ID"
+  },
+  google: {
+    clientId: "PEGAR_GOOGLE_OAUTH_CLIENT_ID"
+  },
+  drive: {
+    folderId: "PEGAR_DRIVE_FOLDER_ID"
   }
 };
