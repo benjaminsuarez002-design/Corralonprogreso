@@ -12,5 +12,8 @@ window.OP_CONFIG = {
   },
   drive: {
     folderId: "PEGAR_DRIVE_FOLDER_ID"
+  },
+  player: {
+    videoProxyUrl: "https://corralonprogreso.com/onepace-video"
   }
 };

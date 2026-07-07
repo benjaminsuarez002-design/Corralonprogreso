@@ -1,0 +1,1342 @@
+// Cloudflare Worker — Mis Finanzas
+// Incluye:
+// - Recordatorios de vencimiento
+// - Gastos compartidos
+// - Reset de contraseña
+// - Registro pendiente con aprobación por email
+
+const FIREBASE_PROJECT_ID = "finanzas-51439";
+const FIREBASE_CLIENT_EMAIL = "firebase-adminsdk-fbsvc@finanzas-51439.iam.gserviceaccount.com";
+const FIREBASE_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC9NKQtTd65HrAn
+lirx7SwNsp1cdSPfv6q+84LY3pqwMZ2ajsk24XSl3v8SmZbmPOIES/a12HeVU3YF
+zEL9/skWpgk6TC/2UotSCjp34f7hReFlWHDmNzFvDFmuQDojQQgeYR+3VDxxHp93
+N5mtPB1CNl/9xY4z9BAruBHU62MYXoloxM/46qJa0bHyx+CLMPYXIje87oNE4hmK
+8Gz6ucL/jKZkWHf9BICE4An0TnvzLsMte9ErPnFjNRsvlb/KaVAo9UGyKLEo/AOw
+oW22eAvrsfSz3pxwOmPHG9qtn7xs3lb1tekKMwPV4dytoVcNGIDl+KVQVccJnzue
+0twNqwHJAgMBAAECggEAHW9n3kt3y7WAQrxcRIR5Hs1rqVNpCBl9sxTXxa0GBETH
+x+CQYbscBmUlqiteXEXbBL+bq2k4m3DfUuIXBwRhHOaqV1k8efYYCiSguX9dg4b3
+XKiwccRi6quRdSg1U0A+Btnl0QPoHlIdDXNHM3n/dEpYzzZxm9gLvv11Orp/EW55
+FyeAVMeBObmMYXJdVa/JUikZD7tvBVq2CUMMCTBJS2JicByoE6ufkjf0aaTkCt4v
+dLj/jov8HrcdZcklnaNRz3r/Xk8u9OZp3Ci1y59A2GwS1GDbmtJhjLu2Kx1vUBxF
+Kpx9cAzgvm2Pvw6hqAKwT8eTwb/fYQI70EGePYQc/QKBgQDp/TmsMbI2jGOLBMxB
+Op77QisvutpFdI6j4LKGvgWhlGJFsHlwCEIXdoJSuZbU0avvJm9Yz1jT1WRMU31q
+OCXTloBX3g7pZHlrNWUfnITGjPO4Ip0dkJoQflGAbZIcPu8nb7MQcu/tOZ6u/qvV
+M2J87zcKur6PsHd0E6BrJNX1nQKBgQDPAPfaiTNC3hKA3k8dE11/H6b5OTYQAjX1
+u0nTH6a6s6ScQpRMEtJiyHAxOqWiAJTxMYCG9VvqjoTiJUQx7DQyY0UkWUZfZVCE
+N43Ih0JILyIWNyMAcp45yKYfmeHwT+Q4BPfkKJnZgejfENQoZD0NsB3FHCTWZQ9t
+vlHVQi87HQKBgHmn2QZ4SCooT9EFy5TWf7YvLvj/82BNO6RkvS1lOtRJq9aD7H+d
+K4+7ZALSz2MTKIuMtjO8iniI6D7u4bQKQVCDXXNR1vrt7FsbRdprrHT27/h6tqma
+dx/ALWvSjDb3WaxtXPJeb/QtEx309y5AKyK91SZU9aMLou/NDIjoe/3ZAoGBAMW+
+KgakG8jbtRdPxomC70S56tqW8XMXeY51TA+XY8FkTHJNE7ccH8fnq20LliAMqDtD
+y4CgsB5/6KbTbLK37iDYPbt8YMJOWT0EiLevpfyoscpA/3m1BDs01qTHblMPLnbp
+IBjfRCDIfblhLRosrzn9LGMYAISh47w1G5057T5tAoGBAJY74Iefa3gbchvZ8QBw
+bQqRWFHARBVRQaOtrCg6L+iHzA8qgvmnmy+5tZChPd+y7VrrSlraiptauuQo/iKJ
+tobkOBpR+y0OAl865L1Ko2jumwL2r4SVQHDQVH5fKzgx3oG5JgloFDY3jfcE5o6G
+/9jqa/KfP783KnM92csTUiX/
+-----END PRIVATE KEY-----`;
+
+const FIREBASE_WEB_API_KEY = "AIzaSyCh6JqWC6X3y3PQONWT08phT9upIHQf8Lw";
+const RESEND_API_KEY = "re_Wrnuqeap_L6fLXm4QME8sVWcn1PrNrG1o";
+const FROM = "Mis Finanzas <noreply@misfinanzas.uk>";
+const SUPABASE_URL = "https://tizyjenayrcdkcodsjnc.supabase.co";
+const SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjIzMTgwNiwiZXhwIjoyMDg3ODA3ODA2fQ.5DvDJcIqL2SI-kHczPevh6rxmMd8XCHd2xSDOBlDFLo";
+const ADMIN_NOTIFICATION_EMAIL = "benjaminsuarez002@gmail.com";
+const ADMIN_EMAIL = normalizeEmail(ADMIN_NOTIFICATION_EMAIL);
+const ADMIN_PANEL_PIN = "2301";
+const APPROVAL_PAGE_URL = "https://misfinanzas.uk/autorizar.html";
+const PASSWORD_ENCRYPTION_SECRET = "CAMBIAR_ESTA_CLAVE_ULTRA_SECRETA_Y_LARGA_ANTES_DE_SUBIR";
+const AUTH_CONTINUE_URI = "https://misfinanzas.uk";
+const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+
+const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const JSON_HEADERS = {
+  'Content-Type': 'application/json',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-pin'
+};
+
+const ONEPACE_VIDEO_PATHS = new Set(['/onepace-video', '/onepace/video']);
+const VIDEO_CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,HEAD,OPTIONS',
+  'Access-Control-Allow-Headers': 'Range, Authorization, Content-Type',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type'
+};
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
+}
+
+function videoHeaders(extra = {}) {
+  return {
+    ...VIDEO_CORS_HEADERS,
+    ...extra
+  };
+}
+
+function videoError(message, status = 400) {
+  return new Response(JSON.stringify({ ok: false, error: message }), {
+    status,
+    headers: videoHeaders({
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    })
+  });
+}
+
+function getOnePaceAccessToken(request, url) {
+  const queryToken = url.searchParams.get('access_token') || url.searchParams.get('token') || '';
+  if (queryToken) return queryToken.trim();
+
+  const auth = request.headers.get('authorization') || request.headers.get('Authorization') || '';
+  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  return '';
+}
+
+function cleanDriveFileId(value) {
+  const fileId = String(value || '').trim();
+  return /^[A-Za-z0-9_-]{10,}$/.test(fileId) ? fileId : '';
+}
+
+async function handleOnePaceVideo(request) {
+  const url = new URL(request.url);
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: videoHeaders() });
+  }
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return videoError('Method not allowed', 405);
+  }
+
+  const fileId = cleanDriveFileId(url.searchParams.get('fileId') || url.searchParams.get('id'));
+  if (!fileId) return videoError('Falta fileId', 400);
+
+  const accessToken = getOnePaceAccessToken(request, url);
+  if (!accessToken) return videoError('Falta access_token de Google Drive', 401);
+
+  const driveHeaders = {
+    Authorization: `Bearer ${accessToken}`
+  };
+  const range = request.headers.get('range') || request.headers.get('Range');
+  if (range) driveHeaders.Range = range;
+
+  const driveResponse = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+    {
+      method: 'GET',
+      headers: driveHeaders,
+      cf: {
+        cacheTtl: 0,
+        cacheEverything: false
+      }
+    }
+  );
+
+  const outputHeaders = new Headers();
+  [
+    'content-type',
+    'content-length',
+    'content-range',
+    'accept-ranges',
+    'etag',
+    'last-modified'
+  ].forEach(name => {
+    const value = driveResponse.headers.get(name);
+    if (value) outputHeaders.set(name, value);
+  });
+
+  if (!outputHeaders.has('content-type')) {
+    outputHeaders.set('content-type', url.searchParams.get('mimeType') || 'video/mp4');
+  }
+  outputHeaders.set('accept-ranges', 'bytes');
+  outputHeaders.set('cache-control', 'no-store');
+  Object.entries(VIDEO_CORS_HEADERS).forEach(([key, value]) => outputHeaders.set(key, value));
+
+  if (!driveResponse.ok) {
+    const message = await driveResponse.text().catch(() => '');
+    return new Response(message || `Drive respondio ${driveResponse.status}`, {
+      status: driveResponse.status,
+      statusText: driveResponse.statusText,
+      headers: outputHeaders
+    });
+  }
+
+  return new Response(request.method === 'HEAD' ? null : driveResponse.body, {
+    status: driveResponse.status,
+    statusText: driveResponse.statusText,
+    headers: outputHeaders
+  });
+}
+
+function emailStyle() {
+  return `font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#f3ecff;border-radius:20px`;
+}
+
+function emailCard(content) {
+  return `<div style="background:#fff;border-radius:16px;padding:20px;border:1.5px solid #e3dcff;margin-bottom:20px">${content}</div>`;
+}
+
+function toBase64(bytes) {
+  let binary = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
+function fromBase64(base64) {
+  const binary = atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function validateEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function generateTokenHex(length = 32) {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+async function getAesKey(secret) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+async function encryptPassword(password) {
+  const key = await getAesKey(PASSWORD_ENCRYPTION_SECRET);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    new TextEncoder().encode(password)
+  );
+  return {
+    password_ciphertext: toBase64(new Uint8Array(ciphertext)),
+    password_iv: toBase64(iv),
+    password_version: 1
+  };
+}
+
+async function decryptPassword(ciphertextBase64, ivBase64) {
+  const key = await getAesKey(PASSWORD_ENCRYPTION_SECRET);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: fromBase64(ivBase64) },
+    key,
+    fromBase64(ciphertextBase64)
+  );
+  return new TextDecoder().decode(plaintext);
+}
+
+async function getFirebaseToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: FIREBASE_CLIENT_EMAIL,
+    sub: FIREBASE_CLIENT_EMAIL,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase https://www.googleapis.com/auth/identitytoolkit',
+  };
+  const encode = obj => btoa(JSON.stringify(obj)).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+  const signingInput = `${encode(header)}.${encode(payload)}`;
+  const pemBody = FIREBASE_PRIVATE_KEY
+    .replace(/-----BEGIN PRIVATE KEY-----/,'')
+    .replace(/-----END PRIVATE KEY-----/,'')
+    .replace(/\s/g,'');
+  const binaryKey = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    binaryKey.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    new TextEncoder().encode(signingInput)
+  );
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/=/g,'')
+    .replace(/\+/g,'-')
+    .replace(/\//g,'_');
+  const jwt = `${signingInput}.${sigB64}`;
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+  const data = await res.json();
+  if (!res.ok || !data.access_token) throw new Error(data.error || 'No se pudo obtener token de Firebase');
+  return data.access_token;
+}
+async function createFirebaseCustomToken(uid) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: FIREBASE_CLIENT_EMAIL,
+    sub: FIREBASE_CLIENT_EMAIL,
+    aud: 'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit',
+    iat: now,
+    exp: now + 3600,
+    uid: String(uid)
+  };
+  const encode = obj => btoa(JSON.stringify(obj)).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+  const signingInput = `${encode(header)}.${encode(payload)}`;
+  const pemBody = FIREBASE_PRIVATE_KEY
+    .replace(/-----BEGIN PRIVATE KEY-----/,'')
+    .replace(/-----END PRIVATE KEY-----/,'')
+    .replace(/\s/g,'');
+  const binaryKey = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    binaryKey.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    new TextEncoder().encode(signingInput)
+  );
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/=/g,'')
+    .replace(/\+/g,'-')
+    .replace(/\//g,'_');
+  return `${signingInput}.${sigB64}`;
+}
+
+
+async function firestoreQuery(token, query) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(query),
+  });
+  return res.json();
+}
+
+async function getUserEmail(token, uid) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/accounts:lookup`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ localId: [uid] }),
+    }
+  );
+  const data = await res.json();
+  return data.users?.[0]?.email || null;
+}
+
+async function sendEmail(to, subject, html) {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: FROM, to, subject, html }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Error enviando email');
+  return data;
+}
+
+async function supabaseRequest(path, { method = 'GET', body, prefer } = {}) {
+  const headers = {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+  };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (prefer) headers['Prefer'] = prefer;
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error(data?.message || data?.error || text || `Supabase ${res.status}`);
+  return data;
+}
+
+async function insertAdminAudit(entry) {
+  try {
+    await supabaseRequest('admin_audit_log', {
+      method: 'POST',
+      body: entry,
+      prefer: 'return=minimal'
+    });
+  } catch (e) {
+    console.warn('audit log error:', e.message);
+  }
+}
+
+function getBearerToken(request) {
+  const auth = request.headers.get('authorization') || request.headers.get('Authorization') || '';
+  if (!auth.startsWith('Bearer ')) return '';
+  return auth.slice(7).trim();
+}
+
+async function verifyFirebaseIdToken(idToken) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.users?.[0]) {
+    return null;
+  }
+  const user = data.users[0];
+  return {
+    uid: user.localId || '',
+    email: normalizeEmail(user.email || '')
+  };
+}
+
+async function requireAdmin(request, action = 'admin_access') {
+  const idToken = getBearerToken(request);
+  if (!idToken) {
+    return { ok: false, status: 401, error: 'Falta token de sesión' };
+  }
+
+  const user = await verifyFirebaseIdToken(idToken);
+  if (!user?.email) {
+    await insertAdminAudit({
+      admin_email: 'desconocido',
+      action,
+      status: 'denied',
+      detail: 'Token inválido o vencido'
+    });
+    return { ok: false, status: 401, error: 'Sesión inválida o vencida' };
+  }
+
+  if (user.email !== ADMIN_EMAIL) {
+    await insertAdminAudit({
+      admin_email: user.email,
+      target_uid: user.uid || null,
+      action,
+      status: 'denied',
+      detail: 'Email sin permisos de admin'
+    });
+    return { ok: false, status: 403, error: 'No tenés permisos para acceder al panel admin' };
+  }
+
+  const pin = String(request.headers.get('x-admin-pin') || '').trim();
+  if (!pin || pin !== ADMIN_PANEL_PIN) {
+    await insertAdminAudit({
+      admin_email: user.email,
+      target_uid: user.uid || null,
+      action,
+      status: 'denied',
+      detail: 'PIN admin inválido'
+    });
+    return { ok: false, status: 403, error: 'PIN admin incorrecto' };
+  }
+
+  return { ok: true, adminEmail: user.email, adminUid: user.uid, idToken };
+}
+
+async function adminProjectRequest(token, path, { method = 'GET', body } = {}) {
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error?.message || data.error || `Identity Toolkit ${res.status}`);
+  return data;
+}
+
+async function findPendingByEmail(email) {
+  const path = `registros_pendientes?select=*&email=eq.${encodeURIComponent(email)}&estado=eq.pendiente&order=created_at.desc&limit=1`;
+  const rows = await supabaseRequest(path);
+  return rows?.[0] || null;
+}
+
+async function findPendingByToken(token) {
+  const path = `registros_pendientes?select=*&approval_token=eq.${encodeURIComponent(token)}&limit=1`;
+  const rows = await supabaseRequest(path);
+  return rows?.[0] || null;
+}
+
+async function findPendingById(id) {
+  const path = `registros_pendientes?select=*&id=eq.${encodeURIComponent(id)}&limit=1`;
+  const rows = await supabaseRequest(path);
+  return rows?.[0] || null;
+}
+
+async function insertPendingRecord(payload) {
+  const rows = await supabaseRequest('registros_pendientes', {
+    method: 'POST',
+    body: payload,
+    prefer: 'return=representation'
+  });
+  return rows?.[0] || null;
+}
+
+async function updatePendingRecord(id, payload) {
+  const rows = await supabaseRequest(`registros_pendientes?id=eq.${encodeURIComponent(id)}&select=*`, {
+    method: 'PATCH',
+    body: payload,
+    prefer: 'return=representation'
+  });
+  return rows?.[0] || null;
+}
+
+function mapPendingRow(row) {
+  return {
+    ok: true,
+    id: row.id,
+    nombre: row.nombre,
+    email: row.email,
+    comprobanteUrl: row.comprobante_url,
+    estado: row.estado,
+    createdAt: row.created_at,
+    approvedAt: row.approved_at || null,
+    rejectedAt: row.rejected_at || null,
+    firebaseUid: row.firebase_uid || null
+  };
+}
+
+function mapAuditRow(row) {
+  return {
+    id: row.id,
+    adminEmail: row.admin_email || '',
+    action: row.action || '',
+    targetEmail: row.target_email || '',
+    targetUid: row.target_uid || '',
+    status: row.status || '',
+    detail: row.detail || '',
+    createdAt: row.created_at || ''
+  };
+}
+
+async function markExpiredIfNeeded(row) {
+  if (!row || row.estado !== 'pendiente' || !row.approval_token_expires_at) return row;
+  if (Date.now() <= new Date(row.approval_token_expires_at).getTime()) return row;
+  return updatePendingRecord(row.id, { estado: 'expirado' });
+}
+
+async function isFirebaseEmailRegistered(email) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${FIREBASE_WEB_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: email,
+        continueUri: AUTH_CONTINUE_URI
+      }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || 'No se pudo validar email en Firebase');
+  return !!data.registered;
+}
+
+async function createFirebaseUser(email, password) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_WEB_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        returnSecureToken: false
+      }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || 'No se pudo crear el usuario en Firebase');
+  return data.localId;
+}
+
+async function sendApprovalEmail(row, token) {
+  const approvalUrl = `${APPROVAL_PAGE_URL}?token=${encodeURIComponent(token)}`;
+  const html = `<div style="${emailStyle()}">
+    <h1 style="font-size:24px;color:#7c6cfa;margin-bottom:4px">🧾 Nuevo pago pendiente</h1>
+    <p style="color:#7a7a9a;font-size:14px;margin-bottom:24px">Mis Finanzas</p>
+    ${emailCard(`
+      <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Nombre</div>
+      <div style="font-size:20px;font-weight:800;color:#2c2c38;margin-bottom:12px">${escapeHtml(row.nombre)}</div>
+      <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Email</div>
+      <div style="font-size:16px;font-weight:700;color:#2c2c38;margin-bottom:12px">${escapeHtml(row.email)}</div>
+      <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Comprobante</div>
+      <div style="font-size:14px"><a href="${row.comprobante_url}" target="_blank" rel="noopener noreferrer">Ver comprobante</a></div>
+    `)}
+    <div style="text-align:center;margin-top:18px;margin-bottom:22px">
+      <a href="${approvalUrl}" style="display:inline-block;padding:14px 18px;background:#7c6cfa;color:#fff;text-decoration:none;border-radius:12px;font-weight:700">Revisar y autorizar</a>
+    </div>
+    <p style="color:#7a7a9a;font-size:12px;text-align:center">Este link es de un solo uso lógico y vence automáticamente.</p>
+  </div>`;
+
+  await sendEmail(ADMIN_NOTIFICATION_EMAIL, `🧾 Nuevo registro pendiente: ${row.email}`, html);
+}
+
+async function procesarRecordatorios(token) {
+  const target = new Date();
+  target.setDate(target.getDate() + 3);
+  const targetStr = target.toISOString().split('T')[0];
+  const [ty, tm, td] = targetStr.split('-').map(Number);
+  const fechaLegible = `${td} de ${MESES[tm - 1]} ${ty}`;
+
+  const query = {
+    structuredQuery: {
+      from: [{ collectionId: 'movimientos', allDescendants: true }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: [
+            { fieldFilter: { field: { fieldPath: 'recordatorio' }, op: 'EQUAL', value: { booleanValue: true } } },
+            { fieldFilter: { field: { fieldPath: 'fecha' }, op: 'EQUAL', value: { stringValue: targetStr } } },
+          ],
+        },
+      },
+    },
+  };
+
+  const results = await firestoreQuery(token, query);
+  if (!results || results[0]?.error) return;
+
+  for (const r of results) {
+    if (!r.document) continue;
+    const fields = r.document.fields;
+    const uid = r.document.name.split('/')[6];
+    const desc = fields.desc?.stringValue || 'Gasto';
+    const monto = fields.monto?.doubleValue || fields.monto?.integerValue || 0;
+    const email = await getUserEmail(token, uid);
+    if (!email) continue;
+
+    const html = `<div style="${emailStyle()}">
+      <h1 style="font-size:24px;color:#6c8cff;margin-bottom:4px">⏰ Recordatorio</h1>
+      <p style="color:#7a7a9a;font-size:14px;margin-bottom:24px">Mis Finanzas</p>
+      ${emailCard(`
+        <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Gasto</div>
+        <div style="font-size:20px;font-weight:800;color:#2c2c38;margin-bottom:12px">${desc}</div>
+        <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Monto</div>
+        <div style="font-size:28px;font-weight:800;color:#ff3bd4">$${Number(monto).toLocaleString('es-AR')}</div>
+      `)}
+      <div style="background:rgba(108,140,255,.1);border-radius:12px;padding:14px 18px;margin-bottom:24px">
+        <span style="color:#6c8cff;font-weight:700;font-size:15px">📅 Vence el ${fechaLegible}</span>
+      </div>
+      <p style="color:#7a7a9a;font-size:12px;text-align:center">Enviado automáticamente por Mis Finanzas</p>
+    </div>`;
+
+    await sendEmail(email, `⏰ "${desc}" vence en 3 días`, html);
+  }
+}
+
+async function procesarGastoCompartido(token, body) {
+  const {
+    destinatarioEmail,
+    remitenteEmail,
+    desc,
+    monto,
+    montoCompartido,
+    gastoId,
+    remitenteUid,
+    tipoOrigen,
+    fecha,
+    fechaMovimientoCompartido,
+    compartirCuotas,
+    cuotas,
+    cuotaNum,
+    montoTotal,
+    cuotasPendientesCount,
+    cuotasPendientesIds
+  } = body;
+
+  const gastoCompartido = {
+    fields: {
+      desc: { stringValue: desc },
+      monto: { doubleValue: Number(montoCompartido) },
+      montoOriginal: { doubleValue: Number(monto) },
+      destinatarioEmail: { stringValue: destinatarioEmail },
+      compartidoPor: { stringValue: remitenteEmail },
+      compartidoPorUid: { stringValue: remitenteUid },
+      gastoOrigenId: { stringValue: gastoId },
+      tipoOrigen: { stringValue: tipoOrigen || 'gasto' },
+      timestamp: { integerValue: Date.now().toString() },
+      estado: { stringValue: 'pendiente' },
+      fecha: { stringValue: fecha || '' },
+      fechaMovimientoCompartido: { stringValue: fechaMovimientoCompartido || fecha || '' },
+      compartirCuotas: { booleanValue: !!compartirCuotas },
+      cuotas: { integerValue: String(cuotas || 1) },
+      cuotaNum: { integerValue: String(cuotaNum || 1) },
+      montoTotal: { doubleValue: Number(montoTotal || monto || 0) },
+      cuotasPendientesCount: { integerValue: String(cuotasPendientesCount || 1) },
+      cuotasPendientesIds: {
+        arrayValue: {
+          values: Array.isArray(cuotasPendientesIds)
+            ? cuotasPendientesIds.map(id => ({ stringValue: String(id) }))
+            : []
+        }
+      }
+    }
+  };
+
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/gastosCompartidos`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(gastoCompartido),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'No se pudo crear el gasto compartido');
+  }
+
+  const montoFmt = `$${Number(montoCompartido).toLocaleString('es-AR')}`;
+  const html = `<div style="${emailStyle()}">
+    <h1 style="font-size:24px;color:#6c8cff;margin-bottom:4px">💸 Gasto compartido</h1>
+    <p style="color:#7a7a9a;font-size:14px;margin-bottom:24px">Mis Finanzas</p>
+    ${emailCard(`
+      <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">De</div>
+      <div style="font-size:16px;font-weight:700;color:#2c2c38;margin-bottom:16px">${remitenteEmail}</div>
+      <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Gasto</div>
+      <div style="font-size:20px;font-weight:800;color:#2c2c38;margin-bottom:12px">${desc}</div>
+      <div style="font-size:12px;color:#7a7a9a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Tu parte</div>
+      <div style="font-size:28px;font-weight:800;color:#ff3bd4">${montoFmt}</div>
+    `)}
+    <p style="color:#7a7a9a;font-size:13px;text-align:center;margin-bottom:8px">Abrí Mis Finanzas para aceptar o rechazar este gasto.</p>
+    <p style="color:#7a7a9a;font-size:12px;text-align:center">Enviado automáticamente por Mis Finanzas</p>
+  </div>`;
+
+  await sendEmail(destinatarioEmail, `💸 ${remitenteEmail} te compartió un gasto: ${desc}`, html);
+  return { ok: true };
+}
+
+async function solicitarReset(token, email) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/accounts:lookup`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: [email] }),
+    }
+  );
+  const data = await res.json();
+  const uid = data.users?.[0]?.localId;
+  if (!uid) return { ok: false, error: 'No existe una cuenta con ese email' };
+
+  const codigo = String(Math.floor(100000 + Math.random() * 900000));
+  const expira = Date.now() + 15 * 60 * 1000;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/resetCodigos/${uid}`;
+  await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: {
+      codigo: { stringValue: codigo },
+      email: { stringValue: email },
+      expira: { integerValue: expira.toString() },
+      usado: { booleanValue: false }
+    }}),
+  });
+
+  const html = `<div style="${emailStyle()}">
+    <h1 style="font-size:24px;color:#7c6cfa;margin-bottom:4px">🔑 Restablecer contraseña</h1>
+    <p style="color:#7a7a9a;font-size:14px;margin-bottom:24px">Mis Finanzas</p>
+    <div style="background:#fff;border-radius:16px;padding:20px;border:1.5px solid #e3dcff;margin-bottom:20px;text-align:center">
+      <p style="font-size:13px;color:#7a7a9a;margin-bottom:12px">Tu código de verificación es:</p>
+      <div style="font-family:monospace;font-size:42px;font-weight:800;color:#7c6cfa;letter-spacing:8px">${codigo}</div>
+      <p style="font-size:12px;color:#aaa;margin-top:12px">Válido por 15 minutos</p>
+    </div>
+    <p style="color:#7a7a9a;font-size:12px;text-align:center">Si no fuiste vos, ignorá este email.</p>
+  </div>`;
+
+  await sendEmail(email, '🔑 Código para restablecer tu contraseña — Mis Finanzas', html);
+  return { ok: true };
+}
+
+async function confirmarReset(token, email, codigo, nuevaPass) {
+  const resAuth = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/accounts:lookup`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: [email] }),
+    }
+  );
+  const dataAuth = await resAuth.json();
+  const uid = dataAuth.users?.[0]?.localId;
+  if (!uid) return { ok: false, error: 'Usuario no encontrado' };
+
+  const urlDoc = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/resetCodigos/${uid}`;
+  const resDoc = await fetch(urlDoc, { headers: { Authorization: `Bearer ${token}` } });
+  const doc = await resDoc.json();
+  if (!doc.fields) return { ok: false, error: 'Código no encontrado' };
+
+  const codigoGuardado = doc.fields.codigo?.stringValue;
+  const expira = parseInt(doc.fields.expira?.integerValue || '0', 10);
+  const usado = doc.fields.usado?.booleanValue;
+
+  if (usado) return { ok: false, error: 'Este código ya fue usado' };
+  if (Date.now() > expira) return { ok: false, error: 'El código expiró. Pedí uno nuevo' };
+  if (codigoGuardado !== codigo) return { ok: false, error: 'Código incorrecto' };
+
+  const resPass = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/accounts:update`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ localId: uid, password: nuevaPass }),
+    }
+  );
+  const dataPass = await resPass.json();
+  if (dataPass.error) return { ok: false, error: 'Error al cambiar la contraseña' };
+
+  await fetch(urlDoc, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { ...doc.fields, usado: { booleanValue: true } } }),
+  });
+
+  return { ok: true };
+}
+
+async function crearRegistroPendiente(body) {
+  const nombre = String(body.nombre || '').trim();
+  const email = normalizeEmail(body.email);
+  const password = String(body.password || '');
+  const comprobanteUrl = String(body.comprobanteUrl || '').trim();
+
+  if (!nombre || !email || !password || !comprobanteUrl) {
+    return { ok: false, error: 'Faltan datos obligatorios', status: 400 };
+  }
+  if (!validateEmail(email)) {
+    return { ok: false, error: 'Email inválido', status: 400 };
+  }
+  if (password.length < 6) {
+    return { ok: false, error: 'La contraseña debe tener al menos 6 caracteres', status: 400 };
+  }
+
+  const pending = await findPendingByEmail(email);
+  if (pending) {
+    return { ok: false, error: 'Ya existe una solicitud pendiente para este email', status: 409 };
+  }
+
+  const exists = await isFirebaseEmailRegistered(email);
+  if (exists) {
+    return { ok: false, error: 'Ya existe una cuenta creada con ese email', status: 409 };
+  }
+
+  const encrypted = await encryptPassword(password);
+  const approvalToken = generateTokenHex(32);
+  const row = await insertPendingRecord({
+    nombre,
+    email,
+    ...encrypted,
+    comprobante_url: comprobanteUrl,
+    estado: 'pendiente',
+    approval_token: approvalToken,
+    approval_token_expires_at: new Date(Date.now() + TOKEN_TTL_MS).toISOString()
+  });
+
+  await sendApprovalEmail(row, approvalToken);
+  return { ok: true, estado: 'pendiente', id: row.id, status: 200 };
+}
+
+async function obtenerRegistroPendiente(tokenValue) {
+  if (!tokenValue) return { ok: false, error: 'Falta token', status: 400 };
+  let row = await findPendingByToken(tokenValue);
+  if (!row) return { ok: false, error: 'Token inválido o inexistente', status: 404 };
+  row = await markExpiredIfNeeded(row);
+  return { ...mapPendingRow(row), status: 200 };
+}
+
+async function aprobarRegistroPendiente(tokenValue) {
+  if (!tokenValue) return { ok: false, error: 'Falta token', status: 400 };
+  let row = await findPendingByToken(tokenValue);
+  if (!row) return { ok: false, error: 'Token inválido o inexistente', status: 404 };
+  row = await markExpiredIfNeeded(row);
+  if (row.estado !== 'pendiente') {
+    return { ok: false, error: `La solicitud ya está ${row.estado}`, ...mapPendingRow(row), status: 409 };
+  }
+
+  const exists = await isFirebaseEmailRegistered(row.email);
+  if (exists) {
+    const updated = await updatePendingRecord(row.id, {
+      estado: 'rechazado',
+      rejected_at: new Date().toISOString()
+    });
+    return { ok: false, error: 'Ya existe una cuenta creada con ese email', ...mapPendingRow(updated), status: 409 };
+  }
+
+  const password = await decryptPassword(row.password_ciphertext, row.password_iv);
+  const firebaseUid = await createFirebaseUser(row.email, password);
+  const updated = await updatePendingRecord(row.id, {
+    estado: 'aprobado',
+    approved_at: new Date().toISOString(),
+    firebase_uid: firebaseUid
+  });
+  return { ...mapPendingRow(updated), status: 200 };
+}
+
+async function rechazarRegistroPendiente(tokenValue) {
+  if (!tokenValue) return { ok: false, error: 'Falta token', status: 400 };
+  let row = await findPendingByToken(tokenValue);
+  if (!row) return { ok: false, error: 'Token inválido o inexistente', status: 404 };
+  row = await markExpiredIfNeeded(row);
+  if (row.estado !== 'pendiente') {
+    return { ok: false, error: `La solicitud ya está ${row.estado}`, ...mapPendingRow(row), status: 409 };
+  }
+  const updated = await updatePendingRecord(row.id, {
+    estado: 'rechazado',
+    rejected_at: new Date().toISOString()
+  });
+  return { ...mapPendingRow(updated), status: 200 };
+}
+
+async function cargarPendientePorReferencia({ tokenValue = '', idValue = '' } = {}) {
+  if (tokenValue) return findPendingByToken(tokenValue);
+  if (idValue) return findPendingById(idValue);
+  return null;
+}
+
+async function aprobarRegistroPendienteInterno({ tokenValue = '', idValue = '', adminEmail = '' } = {}) {
+  const row = await cargarPendientePorReferencia({ tokenValue, idValue });
+  if (!row) return { ok: false, error: 'Solicitud no encontrada', status: 404 };
+
+  const result = tokenValue
+    ? await aprobarRegistroPendiente(tokenValue)
+    : await (async () => {
+        let current = await findPendingById(idValue);
+        if (!current) return { ok: false, error: 'Solicitud no encontrada', status: 404 };
+        current = await markExpiredIfNeeded(current);
+        if (current.estado !== 'pendiente') {
+          return { ok: false, error: `La solicitud ya está ${current.estado}`, ...mapPendingRow(current), status: 409 };
+        }
+        const exists = await isFirebaseEmailRegistered(current.email);
+        if (exists) {
+          const updated = await updatePendingRecord(current.id, {
+            estado: 'rechazado',
+            rejected_at: new Date().toISOString()
+          });
+          return { ok: false, error: 'Ya existe una cuenta creada con ese email', ...mapPendingRow(updated), status: 409 };
+        }
+        const password = await decryptPassword(current.password_ciphertext, current.password_iv);
+        const firebaseUid = await createFirebaseUser(current.email, password);
+        const updated = await updatePendingRecord(current.id, {
+          estado: 'aprobado',
+          approved_at: new Date().toISOString(),
+          firebase_uid: firebaseUid
+        });
+        return { ...mapPendingRow(updated), status: 200 };
+      })();
+
+  await insertAdminAudit({
+    admin_email: adminEmail || ADMIN_EMAIL,
+    action: 'approve_pending',
+    target_email: row.email || '',
+    target_uid: result.firebaseUid || row.firebase_uid || null,
+    status: result.ok === false ? 'error' : 'success',
+    detail: result.ok === false ? (result.error || 'Error al aprobar pendiente') : `Pendiente ${row.id} aprobado`
+  });
+
+  return result;
+}
+
+async function rechazarRegistroPendienteInterno({ tokenValue = '', idValue = '', adminEmail = '' } = {}) {
+  const row = await cargarPendientePorReferencia({ tokenValue, idValue });
+  if (!row) return { ok: false, error: 'Solicitud no encontrada', status: 404 };
+
+  const result = tokenValue
+    ? await rechazarRegistroPendiente(tokenValue)
+    : await (async () => {
+        let current = await findPendingById(idValue);
+        if (!current) return { ok: false, error: 'Solicitud no encontrada', status: 404 };
+        current = await markExpiredIfNeeded(current);
+        if (current.estado !== 'pendiente') {
+          return { ok: false, error: `La solicitud ya está ${current.estado}`, ...mapPendingRow(current), status: 409 };
+        }
+        const updated = await updatePendingRecord(current.id, {
+          estado: 'rechazado',
+          rejected_at: new Date().toISOString()
+        });
+        return { ...mapPendingRow(updated), status: 200 };
+      })();
+
+  await insertAdminAudit({
+    admin_email: adminEmail || ADMIN_EMAIL,
+    action: 'reject_pending',
+    target_email: row.email || '',
+    target_uid: row.firebase_uid || null,
+    status: result.ok === false ? 'error' : 'success',
+    detail: result.ok === false ? (result.error || 'Error al rechazar pendiente') : `Pendiente ${row.id} rechazado`
+  });
+
+  return result;
+}
+
+async function listarPendientesAdmin() {
+  const rows = await supabaseRequest(
+    'registros_pendientes?select=id,nombre,email,comprobante_url,estado,created_at,approved_at,rejected_at,firebase_uid&order=created_at.desc&limit=100'
+  );
+  return (rows || []).map(mapPendingRow);
+}
+
+async function listarAuditAdmin() {
+  const rows = await supabaseRequest(
+    'admin_audit_log?select=*&order=created_at.desc&limit=200'
+  );
+  return (rows || []).map(mapAuditRow);
+}
+
+async function listarUsuariosFirebase(adminToken) {
+  let nextPageToken = '';
+  let users = [];
+
+  do {
+    const qs = new URLSearchParams({ maxResults: '1000' });
+    if (nextPageToken) qs.set('nextPageToken', nextPageToken);
+    const data = await adminProjectRequest(adminToken, `accounts:batchGet?${qs.toString()}`, { method: 'GET' });
+    users = users.concat(data.users || []);
+    nextPageToken = data.nextPageToken || '';
+  } while (nextPageToken && users.length < 5000);
+
+  return users.map(u => ({
+    uid: u.localId || '',
+    email: u.email || '',
+    disabled: !!u.disabled,
+    createdAt: u.createdAt || '',
+    lastLoginAt: u.lastLoginAt || ''
+  }));
+}
+
+async function lookupFirebaseUser(adminToken, uid) {
+  const data = await adminProjectRequest(adminToken, 'accounts:lookup', {
+    method: 'POST',
+    body: { localId: [uid] }
+  });
+  return data.users?.[0] || null;
+}
+
+async function setFirebaseUserDisabled(adminToken, uid, disabled) {
+  return adminProjectRequest(adminToken, 'accounts:update', {
+    method: 'POST',
+    body: { localId: uid, disableUser: !!disabled }
+  });
+}
+
+async function deleteFirebaseUser(adminToken, uid) {
+  return adminProjectRequest(adminToken, 'accounts:delete', {
+    method: 'POST',
+    body: { localId: uid }
+  });
+}
+
+function htmlAttrSharePreview(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function cleanHttpUrlSharePreview(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function buildCorralonShareMeta(url) {
+  const codigo = String(url.searchParams.get('articulo') || '').trim();
+  const image = cleanHttpUrlSharePreview(url.searchParams.get('previewImg'));
+  if (!codigo || !image) return '';
+
+  const title = String(url.searchParams.get('previewTitulo') || 'Articulo Corralon Progreso').trim();
+  const price = String(url.searchParams.get('previewPrecio') || '').trim();
+  const description = price
+    ? `${price} - Codigo: ${codigo} - Corralon Progreso`
+    : `Codigo: ${codigo} - Corralon Progreso`;
+
+  return `
+<!-- corralon-share-preview-meta -->
+<meta property="og:type" content="product">
+<meta property="og:site_name" content="Corralon Progreso">
+<meta property="og:title" content="${htmlAttrSharePreview(title)}">
+<meta property="og:description" content="${htmlAttrSharePreview(description)}">
+<meta property="og:url" content="${htmlAttrSharePreview(url.toString())}">
+<meta property="og:image" content="${htmlAttrSharePreview(image)}">
+<meta property="og:image:secure_url" content="${htmlAttrSharePreview(image)}">
+<meta property="og:image:alt" content="${htmlAttrSharePreview(title)}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="1200">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${htmlAttrSharePreview(title)}">
+<meta name="twitter:description" content="${htmlAttrSharePreview(description)}">
+<meta name="twitter:image" content="${htmlAttrSharePreview(image)}">
+`;
+}
+
+async function tryCorralonSharePreview(request) {
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+  const host = url.hostname.toLowerCase();
+  const shouldInject =
+    request.method === 'GET' &&
+    (host === 'corralonprogreso.com' || host.endsWith('.corralonprogreso.com')) &&
+    (path === '/' || path.toLowerCase() === '/index.html') &&
+    url.searchParams.has('articulo') &&
+    url.searchParams.has('previewImg');
+
+  if (!shouldInject) return null;
+
+  const response = await fetch(request);
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('text/html')) return response;
+
+  const meta = buildCorralonShareMeta(url);
+  if (!meta) return response;
+
+  const html = await response.text();
+  const headers = new Headers(response.headers);
+  headers.set('content-type', 'text/html; charset=utf-8');
+  headers.set('cache-control', 'public, max-age=0, must-revalidate');
+  headers.delete('content-length');
+
+  const output = html.replace(/<\/head>/i, `${meta}</head>`);
+  return new Response(output, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+export default {
+  async scheduled() {
+    const token = await getFirebaseToken();
+    await procesarRecordatorios(token);
+  },
+
+  async fetch(request) {
+    const routeUrl = new URL(request.url);
+
+    if (ONEPACE_VIDEO_PATHS.has(routeUrl.pathname)) {
+      try {
+        return await handleOnePaceVideo(request);
+      } catch (e) {
+        return videoError(e.message || 'Error en proxy de video', 500);
+      }
+    }
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: JSON_HEADERS });
+    }
+
+    const previewResponse = await tryCorralonSharePreview(request);
+    if (previewResponse) return previewResponse;
+
+    try {
+      const url = routeUrl;
+
+      if (url.pathname.startsWith('/admin/')) {
+        const auth = await requireAdmin(request, url.pathname.replace('/admin/', '') || 'admin');
+        if (!auth.ok) {
+          return json({ ok: false, error: auth.error }, auth.status || 403);
+        }
+
+        const adminToken = await getFirebaseToken();
+
+        if (request.method === 'POST' && url.pathname === '/admin/auth/verify') {
+          await insertAdminAudit({
+            admin_email: auth.adminEmail,
+            target_uid: auth.adminUid,
+            action: 'admin_verify',
+            status: 'success',
+            detail: 'Acceso admin validado'
+          });
+          return json({ ok: true, adminEmail: auth.adminEmail });
+        }
+
+        if (request.method === 'GET' && url.pathname === '/admin/pending') {
+          const items = await listarPendientesAdmin();
+          return json({ ok: true, items });
+        }
+
+        if (request.method === 'POST' && url.pathname === '/admin/pending/aprobar') {
+          const body = await request.json();
+          const result = await aprobarRegistroPendienteInterno({ idValue: body.id || '', adminEmail: auth.adminEmail });
+          return json(result, result.status || 200);
+        }
+
+        if (request.method === 'POST' && url.pathname === '/admin/pending/rechazar') {
+          const body = await request.json();
+          const result = await rechazarRegistroPendienteInterno({ idValue: body.id || '', adminEmail: auth.adminEmail });
+          return json(result, result.status || 200);
+        }
+
+        if (request.method === 'GET' && url.pathname === '/admin/users') {
+          const users = await listarUsuariosFirebase(adminToken);
+          return json({ ok: true, items: users });
+        }
+
+        if (request.method === 'POST' && url.pathname === '/admin/users/disable') {
+          const body = await request.json();
+          const uid = String(body.uid || '').trim();
+          if (!uid) return json({ ok: false, error: 'Falta uid' }, 400);
+          const user = await lookupFirebaseUser(adminToken, uid);
+          if (!user) return json({ ok: false, error: 'Usuario no encontrado' }, 404);
+          await setFirebaseUserDisabled(adminToken, uid, true);
+          await insertAdminAudit({
+            admin_email: auth.adminEmail,
+            action: 'disable_user',
+            target_email: user.email || '',
+            target_uid: uid,
+            status: 'success',
+            detail: 'Usuario deshabilitado'
+          });
+          return json({ ok: true });
+        }
+
+        if (request.method === 'POST' && url.pathname === '/admin/users/enable') {
+          const body = await request.json();
+          const uid = String(body.uid || '').trim();
+          if (!uid) return json({ ok: false, error: 'Falta uid' }, 400);
+          const user = await lookupFirebaseUser(adminToken, uid);
+          if (!user) return json({ ok: false, error: 'Usuario no encontrado' }, 404);
+          await setFirebaseUserDisabled(adminToken, uid, false);
+          await insertAdminAudit({
+            admin_email: auth.adminEmail,
+            action: 'enable_user',
+            target_email: user.email || '',
+            target_uid: uid,
+            status: 'success',
+            detail: 'Usuario habilitado'
+          });
+          return json({ ok: true });
+        }
+
+        if (request.method === 'POST' && url.pathname === '/admin/users/delete') {
+          const body = await request.json();
+          const uid = String(body.uid || '').trim();
+          if (!uid) return json({ ok: false, error: 'Falta uid' }, 400);
+          const user = await lookupFirebaseUser(adminToken, uid);
+          if (!user) return json({ ok: false, error: 'Usuario no encontrado' }, 404);
+          await deleteFirebaseUser(adminToken, uid);
+          await insertAdminAudit({
+            admin_email: auth.adminEmail,
+            action: 'delete_user',
+            target_email: user.email || '',
+            target_uid: uid,
+            status: 'success',
+            detail: 'Usuario eliminado'
+          });
+          return json({ ok: true });
+        }
+                if (request.method === 'POST' && url.pathname === '/admin/users/login-as') {
+          const body = await request.json();
+          const uid = String(body.uid || '').trim();
+          if (!uid) return json({ ok: false, error: 'Falta uid' }, 400);
+          const user = await lookupFirebaseUser(adminToken, uid);
+          if (!user) return json({ ok: false, error: 'Usuario no encontrado' }, 404);
+          if (user.disabled) return json({ ok: false, error: 'El usuario está deshabilitado' }, 403);
+
+          const customToken = await createFirebaseCustomToken(uid);
+
+          await insertAdminAudit({
+            admin_email: auth.adminEmail,
+            action: 'login_as_user',
+            target_email: user.email || '',
+            target_uid: uid,
+            status: 'success',
+            detail: 'Admin inició sesión como usuario'
+          });
+
+          return json({ ok: true, customToken, email: user.email || '', uid });
+        }
+
+        if (request.method === 'GET' && url.pathname === '/admin/audit') {
+          const items = await listarAuditAdmin();
+          return json({ ok: true, items });
+        }
+
+        return json({ ok: false, error: 'Ruta admin no encontrada' }, 404);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/registro-pendiente') {
+        const result = await obtenerRegistroPendiente(url.searchParams.get('token') || '');
+        return json(result, result.status || 200);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/registro-pendiente') {
+        const body = await request.json();
+        const result = await crearRegistroPendiente(body);
+        return json(result, result.status || 200);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/registro-pendiente/aprobar') {
+        const body = await request.json();
+        const result = await aprobarRegistroPendiente(body.token || '');
+        return json(result, result.status || 200);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/registro-pendiente/rechazar') {
+        const body = await request.json();
+        const result = await rechazarRegistroPendiente(body.token || '');
+        return json(result, result.status || 200);
+      }
+
+      if (request.method !== 'POST') {
+        return json({ ok: false, error: 'Method not allowed' }, 405);
+      }
+
+      const body = await request.json();
+      const token = await getFirebaseToken();
+
+      if (body.tipo === 'gastoCompartido') {
+        const result = await procesarGastoCompartido(token, body);
+        return json(result);
+      }
+
+      if (body.tipo === 'solicitarReset') {
+        const result = await solicitarReset(token, body.email);
+        return json(result, result.ok ? 200 : 400);
+      }
+
+      if (body.tipo === 'confirmarReset') {
+        const result = await confirmarReset(token, body.email, body.codigo, body.nuevaPass);
+        return json(result, result.ok ? 200 : 400);
+      }
+
+      return json({ ok: false, error: 'Tipo no reconocido' }, 400);
+    } catch (e) {
+      return json({ ok: false, error: e.message || 'Error interno' }, 500);
+    }
+  }
+};
