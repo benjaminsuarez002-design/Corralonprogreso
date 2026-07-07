@@ -35,6 +35,7 @@ let tokenClient = null;
 let driveToken = "";
 let driveTokenPromise = null;
 let pendingDriveTokenRequest = null;
+let videoServiceWorkerReady = false;
 let exactProgressTimer = 0;
 let lastProgressRender = 0;
 let selectedEpisode = episodes[0] || null;
@@ -62,6 +63,8 @@ const PROGRESS_COLLECTION = "onePieceProgreso";
 const DRIVE_TOKEN_KEY = "one_piece_drive_token_v1";
 const DRIVE_CATALOG_KEY = "one_piece_drive_catalog_v1";
 const DRIVE_FOLDER_ID = config.drive?.folderId || "1N8awrcgHVDSajwKmHe7PLgGubTfdaQ7X";
+const VIDEO_PROXY_URL = String(config.player?.videoProxyUrl || "").trim();
+const CATALOG_PROXY_URL = String(config.player?.catalogProxyUrl || "").trim();
 
 const loginEls = {
   bg: document.querySelector("#loginBg"),
@@ -85,6 +88,7 @@ async function init() {
   renderEpisodes();
   selectEpisode(selectedEpisode);
   setupFirebase();
+  await setupVideoServiceWorker();
   setupGoogleDrive();
   await requestPersistentStorage();
   bindEvents();
@@ -108,6 +112,13 @@ function bindEvents() {
     renderEpisodes();
   });
   els.connectDrive.addEventListener("click", () => {
+    if (CATALOG_PROXY_URL || VIDEO_PROXY_URL) {
+      syncDriveCatalog({ interactive: false }).catch(error => {
+        console.error(error);
+        alert("No se pudo actualizar el catalogo desde Cloudflare. Revisa el Worker y que la carpeta este compartida.");
+      });
+      return;
+    }
     requestDriveToken().catch(error => {
       console.error(error);
       alert("No se pudo autorizar Google Drive. Abrí la app desde http://127.0.0.1:4173/ y revisá el origen autorizado.");
@@ -119,8 +130,11 @@ function bindEvents() {
     if (event.target === els.episodeConfirm) closeEpisodeConfirm();
   });
   els.video.addEventListener("timeupdate", onTimeUpdate);
+  els.video.addEventListener("canplay", hideDownloadOverlay);
+  els.video.addEventListener("playing", hideDownloadOverlay);
   els.video.addEventListener("ended", onEnded);
   els.video.addEventListener("play", () => {
+    hideDownloadOverlay();
     stopPreviewTicker();
     startExactProgressTimer();
   });
@@ -149,7 +163,81 @@ function bindEvents() {
   });
 }
 
+async function setupVideoServiceWorker() {
+  if (!("serviceWorker" in navigator) || location.protocol === "file:") {
+    videoServiceWorkerReady = false;
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register("./sw.js");
+    await registration.update().catch(() => {});
+    await navigator.serviceWorker.ready;
+    videoServiceWorkerReady = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      videoServiceWorkerReady = true;
+      sendDriveTokenToWorker();
+    });
+    navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
+    sendDriveTokenToWorker();
+  } catch (error) {
+    console.warn("No se pudo registrar el Service Worker de video", error);
+    videoServiceWorkerReady = false;
+  }
+}
+
+function sendDriveTokenToWorker() {
+  if (!videoServiceWorkerReady || !driveToken) return;
+  const message = {
+    type: "SET_DRIVE_TOKEN",
+    accessToken: driveToken
+  };
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage(message);
+    return;
+  }
+  navigator.serviceWorker.ready.then(registration => {
+    registration.active?.postMessage(message);
+  }).catch(() => {});
+}
+
+function clearDriveTokenFromWorker() {
+  const message = { type: "CLEAR_DRIVE_TOKEN" };
+  if (navigator.serviceWorker?.controller) {
+    navigator.serviceWorker.controller.postMessage(message);
+    return;
+  }
+  navigator.serviceWorker?.ready?.then(registration => {
+    registration.active?.postMessage(message);
+  }).catch(() => {});
+}
+
+function handleServiceWorkerMessage(event) {
+  const data = event.data || {};
+  if (!currentEpisode || data.episodeId !== currentEpisode.id) return;
+
+  if (data.type === "VIDEO_CACHE_PROGRESS") {
+    const percent = data.percent || 0;
+    const label = percent ? `${percent}%` : formatBytes(data.loaded || 0);
+    setDownloadProgress(percent, label);
+  }
+
+  if (data.type === "VIDEO_CACHE_DONE") {
+    setDownloadProgress(100, "Listo");
+    keepOnlyCurrent(currentEpisode.id).catch(() => {});
+  }
+
+  if (data.type === "VIDEO_CACHE_ERROR") {
+    console.warn("No se pudo guardar cache desde stream", data.message);
+  }
+}
+
 function setupGoogleDrive() {
+  if (VIDEO_PROXY_URL || CATALOG_PROXY_URL) {
+    els.connectDrive.textContent = "Cloudflare OK";
+    return;
+  }
+
   if (!config.google?.clientId) {
     els.connectDrive.textContent = "Drive falta";
     return;
@@ -198,6 +286,7 @@ function restoreStoredDriveToken() {
     if (saved?.accessToken && Number(saved.expiresAt || 0) > Date.now() + 60000) {
       driveToken = saved.accessToken;
       els.connectDrive.textContent = "Drive OK";
+      sendDriveTokenToWorker();
       return driveToken;
     }
     localStorage.removeItem(DRIVE_TOKEN_KEY);
@@ -214,11 +303,13 @@ function rememberDriveToken(response) {
   try {
     localStorage.setItem(DRIVE_TOKEN_KEY, JSON.stringify({ accessToken: driveToken, expiresAt }));
   } catch (_) {}
+  sendDriveTokenToWorker();
 }
 
 function clearDriveToken() {
   driveToken = "";
   try { localStorage.removeItem(DRIVE_TOKEN_KEY); } catch (_) {}
+  clearDriveTokenFromWorker();
   els.connectDrive.textContent = "Autorizar Drive";
 }
 
@@ -281,7 +372,7 @@ function setupFirebase() {
   els.authStatus.textContent = "Firebase activo";
 }
 
-async function playEpisode(episode) {
+async function legacyPlayEpisode(episode) {
   if (isLoadingEpisode) {
     els.nowMeta.textContent = "Espera a que termine la descarga actual antes de cargar otro capitulo.";
     return;
@@ -297,6 +388,16 @@ async function playEpisode(episode) {
   els.video.hidden = false;
   els.nowMeta.textContent = "Preparando archivo local desde Drive...";
   setDownloadProgress(0, "Preparando...");
+
+  if (videoServiceWorkerReady) {
+    try {
+      await playEpisodeFromStream(episode);
+      isLoadingEpisode = false;
+      return;
+    } catch (error) {
+      console.warn("No se pudo usar streaming; se intenta descarga completa", error);
+    }
+  }
 
   let blob = null;
   try {
@@ -332,6 +433,222 @@ async function playEpisode(episode) {
   els.nowMeta.textContent = `${formatBytes(blob.size)} guardados localmente.`;
   setPreloadProgress(0, "Manual");
   isLoadingEpisode = false;
+}
+
+async function legacyPlayEpisodeFromStream(episode) {
+  await requestDriveToken({ interactive: true });
+  sendDriveTokenToWorker();
+
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = "";
+  }
+
+  const progress = progressById.get(episode.id);
+  els.video.onerror = () => {
+    els.nowMeta.textContent = "No se pudo reproducir el stream local. Probá limpiar caché y cargar de nuevo.";
+    setDownloadProgress(0, "Stream error");
+  };
+  els.video.onloadedmetadata = () => {
+    if (progress?.currentTime && progress.currentTime < els.video.duration - 20) {
+      els.video.currentTime = progress.currentTime;
+    }
+    els.video.play().catch(() => {});
+  };
+
+  els.video.src = getStreamUrl(episode);
+  els.video.load();
+  els.nowMeta.textContent = "Reproduciendo mientras se descarga y se guarda en caché local.";
+  setDownloadProgress(1, "Iniciando stream...");
+  setPreloadProgress(0, "Manual");
+}
+
+async function playEpisode(episode) {
+  if (isLoadingEpisode) {
+    els.nowMeta.textContent = "Espera a que termine la descarga actual antes de cargar otro capitulo.";
+    return;
+  }
+
+  isLoadingEpisode = true;
+  currentEpisode = episode;
+  selectEpisode(episode);
+  els.nowTitle.textContent = episode.title;
+  stopExactProgressTimer();
+  stopPreviewTicker();
+  els.driveFrame.hidden = true;
+  els.driveFrame.removeAttribute("src");
+  els.video.hidden = false;
+  els.nowMeta.textContent = "Preparando archivo local desde Drive...";
+  setDownloadProgress(0, "Preparando...");
+
+  try {
+    if (VIDEO_PROXY_URL || videoServiceWorkerReady) {
+      try {
+        await playEpisodeFromStream(episode);
+        return;
+      } catch (error) {
+        console.warn("No se pudo usar streaming; se intenta descarga completa", error);
+        els.nowMeta.textContent = "El stream no arranco. Bajando el archivo completo a la cache...";
+      }
+    }
+
+    await playEpisodeFullDownload(episode);
+  } catch (error) {
+    console.error(error);
+    if (VIDEO_PROXY_URL) {
+      els.nowMeta.textContent = "No responde el proxy de Cloudflare. Revisa que el Worker tenga la ruta /onepace-video y este deployado.";
+      setDownloadProgress(0, "Error Cloudflare");
+    } else {
+      els.nowMeta.textContent = "No se pudo descargar el MP4 bruto. Toca Drive para autorizar de nuevo o abrilo desde http://127.0.0.1:4173/.";
+      setDownloadProgress(0, "Error Drive");
+    }
+  } finally {
+    isLoadingEpisode = false;
+  }
+}
+
+async function playEpisodeFromStream(episode) {
+  if (!VIDEO_PROXY_URL) {
+    await requestDriveToken({ interactive: true });
+    if (!navigator.serviceWorker?.controller) {
+      throw new Error("El Service Worker todavia no controla esta pestana");
+    }
+    sendDriveTokenToWorker();
+  }
+
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = "";
+  }
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      fail(new Error("El stream no respondio a tiempo"));
+    }, 22000);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      els.video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      els.video.removeEventListener("canplay", onReady);
+      els.video.removeEventListener("error", onInitialError);
+    };
+
+    const ok = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      markStreamReady();
+      resolve();
+    };
+
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      els.video.onerror = null;
+      els.video.pause();
+      els.video.removeAttribute("src");
+      els.video.load();
+      reject(error);
+    };
+
+    const onLoadedMetadata = () => {
+      applySavedProgressToVideo(episode);
+      els.video.play().catch(() => {});
+      ok();
+    };
+
+    const onReady = () => ok();
+    const onInitialError = () => fail(new Error("No se pudo iniciar el stream local"));
+
+    els.video.onerror = () => {
+      if (!settled) {
+        onInitialError();
+        return;
+      }
+
+      fallbackToFullDownload(episode).catch(error => {
+        console.warn("No se pudo recuperar el stream con descarga completa", error);
+      });
+    };
+
+    els.video.addEventListener("loadedmetadata", onLoadedMetadata);
+    els.video.addEventListener("canplay", onReady);
+    els.video.addEventListener("error", onInitialError);
+
+    els.video.src = getStreamUrl(episode);
+    els.video.load();
+    els.nowMeta.textContent = VIDEO_PROXY_URL
+      ? "Reproduciendo por Cloudflare mientras Drive envia el archivo."
+      : "Reproduciendo mientras se descarga y se guarda en cache local.";
+    setDownloadProgress(1, "Iniciando stream...");
+    setPreloadProgress(0, "Manual");
+  });
+}
+
+async function fallbackToFullDownload(episode) {
+  if (!episode || currentEpisode?.id !== episode.id || isLoadingEpisode) return;
+
+  isLoadingEpisode = true;
+  try {
+    els.nowMeta.textContent = "El stream se corto. Bajando el archivo completo a la cache...";
+    setDownloadProgress(0, "Descarga completa...");
+    await playEpisodeFullDownload(episode);
+  } catch (error) {
+    console.error(error);
+    els.nowMeta.textContent = "No se pudo reproducir ni descargar el capitulo. Proba Drive otra vez.";
+    setDownloadProgress(0, "Error Drive");
+  } finally {
+    isLoadingEpisode = false;
+  }
+}
+
+async function playEpisodeFullDownload(episode) {
+  const blob = await getOrDownloadEpisode(episode, "current");
+  if (!blob) throw new Error("No se obtuvo video desde Drive");
+
+  if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+  currentObjectUrl = URL.createObjectURL(blob);
+  els.video.onerror = () => {
+    els.nowMeta.textContent = "El archivo descargado no se pudo reproducir en este navegador.";
+    setDownloadProgress(0, "Video error");
+  };
+  els.video.onloadedmetadata = () => {
+    applySavedProgressToVideo(episode);
+    els.video.play().catch(() => {});
+  };
+  els.video.src = currentObjectUrl;
+  els.video.load();
+  els.nowMeta.textContent = `${formatBytes(blob.size)} guardados localmente.`;
+  setPreloadProgress(0, "Manual");
+}
+
+function applySavedProgressToVideo(episode) {
+  const progress = progressById.get(episode.id);
+  if (progress?.currentTime && els.video.duration && progress.currentTime < els.video.duration - 20) {
+    els.video.currentTime = progress.currentTime;
+  }
+}
+
+function getStreamUrl(episode) {
+  if (VIDEO_PROXY_URL) return getProxyVideoUrl(episode);
+
+  const params = new URLSearchParams({
+    episodeId: episode.id,
+    fileId: episode.driveFileId,
+    mimeType: episode.mimeType || "video/mp4",
+    title: episode.title || episode.filename || episode.id
+  });
+  return `./__onepace_video__?${params.toString()}`;
+}
+
+function getProxyVideoUrl(episode) {
+  const url = new URL(VIDEO_PROXY_URL, window.location.href);
+  url.searchParams.set("fileId", episode.driveFileId);
+  url.searchParams.set("mimeType", episode.mimeType || "video/mp4");
+  url.searchParams.set("title", episode.title || episode.filename || episode.id);
+  return url.toString();
 }
 
 function playDirectFromDrive(episode, message) {
@@ -507,14 +824,15 @@ async function getOrDownloadEpisode(episode, slot) {
 }
 
 async function downloadEpisode(episode, slot) {
-  const token = await requestDriveToken({ interactive: slot === "current" });
   const url = getDownloadUrl(episode);
-  let response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
-  if (response.status === 401 || response.status === 403) {
+  const headers = {};
+  if (!VIDEO_PROXY_URL) {
+    const token = await requestDriveToken({ interactive: slot === "current" });
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  let response = await fetch(url, { headers });
+  if (!VIDEO_PROXY_URL && (response.status === 401 || response.status === 403)) {
     clearDriveToken();
     const freshToken = await requestDriveToken({ interactive: slot === "current" });
     response = await fetch(url, {
@@ -523,7 +841,10 @@ async function downloadEpisode(episode, slot) {
       }
     });
   }
-  if (!response.ok) throw new Error(`Drive respondio ${response.status}`);
+  if (!response.ok) {
+    const source = VIDEO_PROXY_URL ? "Cloudflare" : "Drive";
+    throw new Error(`${source} respondio ${response.status}`);
+  }
   const responseType = response.headers.get("content-type") || "";
   if (responseType && !responseType.toLowerCase().includes("video") && !responseType.toLowerCase().includes("octet-stream")) {
     throw new Error(`Drive no devolvio video: ${responseType}`);
@@ -571,6 +892,7 @@ function isPlayableVideoBlob(blob) {
 }
 
 function getDownloadUrl(episode) {
+  if (VIDEO_PROXY_URL) return getProxyVideoUrl(episode);
   return `https://www.googleapis.com/drive/v3/files/${episode.driveFileId}?alt=media`;
 }
 
@@ -873,14 +1195,15 @@ function loadCachedDriveCatalog() {
 function startCatalogAutoSync() {
   if (catalogSyncTimer) window.clearInterval(catalogSyncTimer);
   catalogSyncTimer = window.setInterval(() => {
-    if (driveToken) syncDriveCatalog({ interactive: false }).catch(() => {});
+    if (CATALOG_PROXY_URL || driveToken) syncDriveCatalog({ interactive: false }).catch(() => {});
   }, 60000);
 }
 
 async function syncDriveCatalog(options = {}) {
   if (!DRIVE_FOLDER_ID) return;
-  const token = await requestDriveToken({ interactive: options.interactive === true });
-  const files = await listDriveFolderVideos(token);
+  const files = CATALOG_PROXY_URL
+    ? await listDriveFolderVideosFromProxy()
+    : await listDriveFolderVideos(await requestDriveToken({ interactive: options.interactive === true }));
   if (!files.length) return;
 
   const nextEpisodes = files.map(fileToEpisode).filter(Boolean).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
@@ -896,6 +1219,18 @@ async function syncDriveCatalog(options = {}) {
 
   renderEpisodes();
   if (selectedEpisode && !currentEpisode) selectEpisode(selectedEpisode);
+}
+
+async function listDriveFolderVideosFromProxy() {
+  const url = new URL(CATALOG_PROXY_URL, window.location.href);
+  if (DRIVE_FOLDER_ID) url.searchParams.set("folderId", DRIVE_FOLDER_ID);
+
+  const response = await fetch(url.toString());
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || `Catalogo proxy respondio ${response.status}`);
+  }
+  return Array.isArray(data.files) ? data.files : [];
 }
 
 async function listDriveFolderVideos(token) {
@@ -995,7 +1330,11 @@ function closeEpisodeConfirm() {
 
 async function confirmEpisodePlayback() {
   const episode = pendingEpisodeToPlay;
-  if (!episode || isLoadingEpisode) return;
+  if (!episode) return;
+  if (isLoadingEpisode) {
+    els.episodeConfirmText.textContent = "Espera a que termine la descarga actual antes de cambiar de capitulo.";
+    return;
+  }
 
   closeEpisodeConfirm();
   if (currentEpisode) {
@@ -1050,6 +1389,12 @@ function setDownloadProgress(percent, text) {
   setDownloadOverlay(percent, text);
 }
 
+function markStreamReady() {
+  els.downloadText.textContent = "Streaming";
+  els.downloadBar.style.width = "100%";
+  hideDownloadOverlay();
+}
+
 function setPreloadProgress(percent, text) {
   els.preloadText.textContent = text;
   els.preloadBar.style.width = `${percent || 0}%`;
@@ -1068,6 +1413,11 @@ function setDownloadOverlay(percent, text) {
       if (els.downloadText.textContent === label) els.downloadOverlay.hidden = true;
     }, 700);
   }
+}
+
+function hideDownloadOverlay() {
+  if (!els.downloadOverlay) return;
+  els.downloadOverlay.hidden = true;
 }
 
 function estimatedDuration(episode) {

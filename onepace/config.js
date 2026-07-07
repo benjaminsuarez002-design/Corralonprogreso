@@ -12,5 +12,9 @@ window.OP_CONFIG = {
   },
   drive: {
     folderId: "1N8awrcgHVDSajwKmHe7PLgGubTfdaQ7X"
+  },
+  player: {
+    videoProxyUrl: "https://corralonprogreso.com/onepace-video",
+    catalogProxyUrl: "https://corralonprogreso.com/onepace-catalog"
   }
 };
