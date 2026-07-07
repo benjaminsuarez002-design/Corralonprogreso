@@ -35,7 +35,6 @@ let tokenClient = null;
 let driveToken = "";
 let driveTokenPromise = null;
 let pendingDriveTokenRequest = null;
-let videoServiceWorkerReady = false;
 let exactProgressTimer = 0;
 let lastProgressRender = 0;
 let selectedEpisode = episodes[0] || null;
@@ -63,7 +62,6 @@ const PROGRESS_COLLECTION = "onePieceProgreso";
 const DRIVE_TOKEN_KEY = "one_piece_drive_token_v1";
 const DRIVE_CATALOG_KEY = "one_piece_drive_catalog_v1";
 const DRIVE_FOLDER_ID = config.drive?.folderId || "1N8awrcgHVDSajwKmHe7PLgGubTfdaQ7X";
-const VIDEO_PROXY_URL = String(config.player?.videoProxyUrl || "").trim();
 
 const loginEls = {
   bg: document.querySelector("#loginBg"),
@@ -87,7 +85,6 @@ async function init() {
   renderEpisodes();
   selectEpisode(selectedEpisode);
   setupFirebase();
-  await setupVideoServiceWorker();
   setupGoogleDrive();
   await requestPersistentStorage();
   bindEvents();
@@ -152,75 +149,6 @@ function bindEvents() {
   });
 }
 
-async function setupVideoServiceWorker() {
-  if (!("serviceWorker" in navigator) || location.protocol === "file:") {
-    videoServiceWorkerReady = false;
-    return;
-  }
-
-  try {
-    const registration = await navigator.serviceWorker.register("./sw.js");
-    await registration.update().catch(() => {});
-    await navigator.serviceWorker.ready;
-    videoServiceWorkerReady = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      videoServiceWorkerReady = true;
-      sendDriveTokenToWorker();
-    });
-    navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
-    sendDriveTokenToWorker();
-  } catch (error) {
-    console.warn("No se pudo registrar el Service Worker de video", error);
-    videoServiceWorkerReady = false;
-  }
-}
-
-function sendDriveTokenToWorker() {
-  if (!videoServiceWorkerReady || !driveToken) return;
-  const message = {
-    type: "SET_DRIVE_TOKEN",
-    accessToken: driveToken
-  };
-  if (navigator.serviceWorker.controller) {
-    navigator.serviceWorker.controller.postMessage(message);
-    return;
-  }
-  navigator.serviceWorker.ready.then(registration => {
-    registration.active?.postMessage(message);
-  }).catch(() => {});
-}
-
-function clearDriveTokenFromWorker() {
-  const message = { type: "CLEAR_DRIVE_TOKEN" };
-  if (navigator.serviceWorker?.controller) {
-    navigator.serviceWorker.controller.postMessage(message);
-    return;
-  }
-  navigator.serviceWorker?.ready?.then(registration => {
-    registration.active?.postMessage(message);
-  }).catch(() => {});
-}
-
-function handleServiceWorkerMessage(event) {
-  const data = event.data || {};
-  if (!currentEpisode || data.episodeId !== currentEpisode.id) return;
-
-  if (data.type === "VIDEO_CACHE_PROGRESS") {
-    const percent = data.percent || 0;
-    const label = percent ? `${percent}%` : formatBytes(data.loaded || 0);
-    setDownloadProgress(percent, label);
-  }
-
-  if (data.type === "VIDEO_CACHE_DONE") {
-    setDownloadProgress(100, "Listo");
-    keepOnlyCurrent(currentEpisode.id).catch(() => {});
-  }
-
-  if (data.type === "VIDEO_CACHE_ERROR") {
-    console.warn("No se pudo guardar cache desde stream", data.message);
-  }
-}
-
 function setupGoogleDrive() {
   if (!config.google?.clientId) {
     els.connectDrive.textContent = "Drive falta";
@@ -270,7 +198,6 @@ function restoreStoredDriveToken() {
     if (saved?.accessToken && Number(saved.expiresAt || 0) > Date.now() + 60000) {
       driveToken = saved.accessToken;
       els.connectDrive.textContent = "Drive OK";
-      sendDriveTokenToWorker();
       return driveToken;
     }
     localStorage.removeItem(DRIVE_TOKEN_KEY);
@@ -287,13 +214,11 @@ function rememberDriveToken(response) {
   try {
     localStorage.setItem(DRIVE_TOKEN_KEY, JSON.stringify({ accessToken: driveToken, expiresAt }));
   } catch (_) {}
-  sendDriveTokenToWorker();
 }
 
 function clearDriveToken() {
   driveToken = "";
   try { localStorage.removeItem(DRIVE_TOKEN_KEY); } catch (_) {}
-  clearDriveTokenFromWorker();
   els.connectDrive.textContent = "Autorizar Drive";
 }
 
@@ -356,7 +281,7 @@ function setupFirebase() {
   els.authStatus.textContent = "Firebase activo";
 }
 
-async function legacyPlayEpisode(episode) {
+async function playEpisode(episode) {
   if (isLoadingEpisode) {
     els.nowMeta.textContent = "Espera a que termine la descarga actual antes de cargar otro capitulo.";
     return;
@@ -372,16 +297,6 @@ async function legacyPlayEpisode(episode) {
   els.video.hidden = false;
   els.nowMeta.textContent = "Preparando archivo local desde Drive...";
   setDownloadProgress(0, "Preparando...");
-
-  if (videoServiceWorkerReady) {
-    try {
-      await playEpisodeFromStream(episode);
-      isLoadingEpisode = false;
-      return;
-    } catch (error) {
-      console.warn("No se pudo usar streaming; se intenta descarga completa", error);
-    }
-  }
 
   let blob = null;
   try {
@@ -417,213 +332,6 @@ async function legacyPlayEpisode(episode) {
   els.nowMeta.textContent = `${formatBytes(blob.size)} guardados localmente.`;
   setPreloadProgress(0, "Manual");
   isLoadingEpisode = false;
-}
-
-async function legacyPlayEpisodeFromStream(episode) {
-  await requestDriveToken({ interactive: true });
-  sendDriveTokenToWorker();
-
-  if (currentObjectUrl) {
-    URL.revokeObjectURL(currentObjectUrl);
-    currentObjectUrl = "";
-  }
-
-  const progress = progressById.get(episode.id);
-  els.video.onerror = () => {
-    els.nowMeta.textContent = "No se pudo reproducir el stream local. Probá limpiar caché y cargar de nuevo.";
-    setDownloadProgress(0, "Stream error");
-  };
-  els.video.onloadedmetadata = () => {
-    if (progress?.currentTime && progress.currentTime < els.video.duration - 20) {
-      els.video.currentTime = progress.currentTime;
-    }
-    els.video.play().catch(() => {});
-  };
-
-  els.video.src = getStreamUrl(episode);
-  els.video.load();
-  els.nowMeta.textContent = "Reproduciendo mientras se descarga y se guarda en caché local.";
-  setDownloadProgress(1, "Iniciando stream...");
-  setPreloadProgress(0, "Manual");
-}
-
-async function playEpisode(episode) {
-  if (isLoadingEpisode) {
-    els.nowMeta.textContent = "Espera a que termine la descarga actual antes de cargar otro capitulo.";
-    return;
-  }
-
-  isLoadingEpisode = true;
-  currentEpisode = episode;
-  selectEpisode(episode);
-  els.nowTitle.textContent = episode.title;
-  stopExactProgressTimer();
-  stopPreviewTicker();
-  els.driveFrame.hidden = true;
-  els.driveFrame.removeAttribute("src");
-  els.video.hidden = false;
-  els.nowMeta.textContent = "Preparando archivo local desde Drive...";
-  setDownloadProgress(0, "Preparando...");
-
-  try {
-    if (VIDEO_PROXY_URL || videoServiceWorkerReady) {
-      try {
-        await playEpisodeFromStream(episode);
-        return;
-      } catch (error) {
-        console.warn("No se pudo usar streaming; se intenta descarga completa", error);
-        els.nowMeta.textContent = "El stream no arranco. Bajando el archivo completo a la cache...";
-      }
-    }
-
-    await playEpisodeFullDownload(episode);
-  } catch (error) {
-    console.error(error);
-    els.nowMeta.textContent = "No se pudo descargar el MP4 bruto. Toca Drive para autorizar de nuevo o abrilo desde http://127.0.0.1:4173/.";
-    setDownloadProgress(0, "Error Drive");
-  } finally {
-    isLoadingEpisode = false;
-  }
-}
-
-async function playEpisodeFromStream(episode) {
-  await requestDriveToken({ interactive: true });
-  if (!VIDEO_PROXY_URL && !navigator.serviceWorker?.controller) {
-    throw new Error("El Service Worker todavia no controla esta pestana");
-  }
-  if (!VIDEO_PROXY_URL) sendDriveTokenToWorker();
-
-  if (currentObjectUrl) {
-    URL.revokeObjectURL(currentObjectUrl);
-    currentObjectUrl = "";
-  }
-
-  await new Promise((resolve, reject) => {
-    let settled = false;
-    const timeout = window.setTimeout(() => {
-      fail(new Error("El stream no respondio a tiempo"));
-    }, 22000);
-
-    const cleanup = () => {
-      window.clearTimeout(timeout);
-      els.video.removeEventListener("loadedmetadata", onLoadedMetadata);
-      els.video.removeEventListener("canplay", onReady);
-      els.video.removeEventListener("error", onInitialError);
-    };
-
-    const ok = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve();
-    };
-
-    const fail = error => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      els.video.onerror = null;
-      els.video.pause();
-      els.video.removeAttribute("src");
-      els.video.load();
-      reject(error);
-    };
-
-    const onLoadedMetadata = () => {
-      applySavedProgressToVideo(episode);
-      els.video.play().catch(() => {});
-      ok();
-    };
-
-    const onReady = () => ok();
-    const onInitialError = () => fail(new Error("No se pudo iniciar el stream local"));
-
-    els.video.onerror = () => {
-      if (!settled) {
-        onInitialError();
-        return;
-      }
-
-      fallbackToFullDownload(episode).catch(error => {
-        console.warn("No se pudo recuperar el stream con descarga completa", error);
-      });
-    };
-
-    els.video.addEventListener("loadedmetadata", onLoadedMetadata);
-    els.video.addEventListener("canplay", onReady);
-    els.video.addEventListener("error", onInitialError);
-
-    els.video.src = getStreamUrl(episode);
-    els.video.load();
-    els.nowMeta.textContent = VIDEO_PROXY_URL
-      ? "Reproduciendo por Cloudflare mientras Drive envia el archivo."
-      : "Reproduciendo mientras se descarga y se guarda en cache local.";
-    setDownloadProgress(1, "Iniciando stream...");
-    setPreloadProgress(0, "Manual");
-  });
-}
-
-async function fallbackToFullDownload(episode) {
-  if (!episode || currentEpisode?.id !== episode.id || isLoadingEpisode) return;
-
-  isLoadingEpisode = true;
-  try {
-    els.nowMeta.textContent = "El stream se corto. Bajando el archivo completo a la cache...";
-    setDownloadProgress(0, "Descarga completa...");
-    await playEpisodeFullDownload(episode);
-  } catch (error) {
-    console.error(error);
-    els.nowMeta.textContent = "No se pudo reproducir ni descargar el capitulo. Proba Drive otra vez.";
-    setDownloadProgress(0, "Error Drive");
-  } finally {
-    isLoadingEpisode = false;
-  }
-}
-
-async function playEpisodeFullDownload(episode) {
-  const blob = await getOrDownloadEpisode(episode, "current");
-  if (!blob) throw new Error("No se obtuvo video desde Drive");
-
-  if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
-  currentObjectUrl = URL.createObjectURL(blob);
-  els.video.onerror = () => {
-    els.nowMeta.textContent = "El archivo descargado no se pudo reproducir en este navegador.";
-    setDownloadProgress(0, "Video error");
-  };
-  els.video.onloadedmetadata = () => {
-    applySavedProgressToVideo(episode);
-    els.video.play().catch(() => {});
-  };
-  els.video.src = currentObjectUrl;
-  els.video.load();
-  els.nowMeta.textContent = `${formatBytes(blob.size)} guardados localmente.`;
-  setPreloadProgress(0, "Manual");
-}
-
-function applySavedProgressToVideo(episode) {
-  const progress = progressById.get(episode.id);
-  if (progress?.currentTime && els.video.duration && progress.currentTime < els.video.duration - 20) {
-    els.video.currentTime = progress.currentTime;
-  }
-}
-
-function getStreamUrl(episode) {
-  if (VIDEO_PROXY_URL) {
-    const url = new URL(VIDEO_PROXY_URL, window.location.href);
-    url.searchParams.set("fileId", episode.driveFileId);
-    url.searchParams.set("mimeType", episode.mimeType || "video/mp4");
-    url.searchParams.set("title", episode.title || episode.filename || episode.id);
-    url.searchParams.set("access_token", driveToken);
-    return url.toString();
-  }
-
-  const params = new URLSearchParams({
-    episodeId: episode.id,
-    fileId: episode.driveFileId,
-    mimeType: episode.mimeType || "video/mp4",
-    title: episode.title || episode.filename || episode.id
-  });
-  return `./__onepace_video__?${params.toString()}`;
 }
 
 function playDirectFromDrive(episode, message) {
@@ -1287,11 +995,7 @@ function closeEpisodeConfirm() {
 
 async function confirmEpisodePlayback() {
   const episode = pendingEpisodeToPlay;
-  if (!episode) return;
-  if (isLoadingEpisode) {
-    els.episodeConfirmText.textContent = "Espera a que termine la descarga actual antes de cambiar de capitulo.";
-    return;
-  }
+  if (!episode || isLoadingEpisode) return;
 
   closeEpisodeConfirm();
   if (currentEpisode) {

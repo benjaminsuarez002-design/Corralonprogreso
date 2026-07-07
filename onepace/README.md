@@ -5,8 +5,7 @@ Mini streaming privado para reproducir tus MP4 de Google Drive con cache local, 
 ## Archivos
 
 - `index.html`: app principal.
-- `app.js`: reproductor, login del menu, OAuth de Drive, streaming, cache local y progreso.
-- `sw.js`: Service Worker que trae el MP4 desde Drive con token, lo streamea al reproductor y lo guarda en cache.
+- `app.js`: reproductor, login del menu, OAuth de Drive, cache local y progreso.
 - `episodes.js`: catalogo inicial de respaldo.
 - `config.js`: claves publicas de Firebase y Google OAuth Client ID.
 - `config.example.js`: plantilla para copiar valores.
@@ -68,13 +67,12 @@ Cada documento guarda:
 
 1. Elegis un capitulo.
 2. La app pide permiso de Drive si todavia no lo tiene.
-3. El reproductor empieza a leer una URL local manejada por `sw.js`.
-4. El Service Worker descarga el MP4 bruto con Google Drive API.
-5. Reproduce con `<video>` mientras se descarga.
-6. Guarda el video temporalmente en IndexedDB al mismo tiempo.
-7. Guarda el progreso exacto en Firebase cada 10 segundos, al pausar y al cerrar/cambiar de pestana.
-8. Al terminar, marca visto y espera que toques `Siguiente`.
-9. Al tocar `Siguiente`, borra el capitulo anterior de la cache y descarga el proximo.
+3. Descarga el MP4 bruto con Google Drive API.
+4. Guarda el video temporalmente en IndexedDB.
+5. Reproduce con `<video>`.
+6. Guarda el progreso exacto en Firebase cada 10 segundos, al pausar y al cerrar/cambiar de pestana.
+7. Al terminar, marca visto y espera que toques `Siguiente`.
+8. Al tocar `Siguiente`, borra el capitulo anterior de la cache y descarga el proximo.
 
 La app baja un solo capitulo a la vez. No hace precarga automatica del siguiente.
 
