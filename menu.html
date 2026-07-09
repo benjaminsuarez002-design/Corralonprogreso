@@ -1255,6 +1255,12 @@
       return dateA - dateB || notifNumero(a) - notifNumero(b) || notifTimestampMs(a) - notifTimestampMs(b);
     }
 
+    function notifResolvedSort(a, b) {
+      const dateA = notifValueMs(a.resolvedAt) || notifTimestampMs(a) || notifFechaMs(a.date);
+      const dateB = notifValueMs(b.resolvedAt) || notifTimestampMs(b) || notifFechaMs(b.date);
+      return dateB - dateA || notifNumero(b) - notifNumero(a);
+    }
+
     function notifTimestampMs(item) {
       const stamp = item?.createdAt || item?.updatedAt;
       if (stamp?.seconds) return stamp.seconds * 1000;
@@ -1373,7 +1379,7 @@
           .map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
           .filter((item) => notifDesdeHoy(item))
           .map((item) => ({ kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', date: item.fecha || '', resolvedAt: item.resueltaAt || null, createdAt: item.resueltaAt || item.createdAt, updatedAt: item.resueltaAt || item.updatedAt }));
-        const resueltas = [...pedidos, ...historial].sort((a, b) => -notifSort(a, b));
+        const resueltas = [...pedidos, ...historial].sort(notifResolvedSort);
         resolvedReviewList.innerHTML = resueltas.length ? resueltas.map((item) => `
           <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
             <strong>${escapeHtml(item.title)}</strong>
