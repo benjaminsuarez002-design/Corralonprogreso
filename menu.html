@@ -165,7 +165,7 @@
   .review-history-btn { width: 38px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
   .review-history-btn svg { width: 19px; height: 19px; stroke: currentColor; }
   .review-list { max-height: 560px; overflow: auto; padding: 10px; }
-  .review-item { display: grid; grid-template-columns: 96px minmax(500px,1fr) 172px 112px; gap: 12px; align-items: center; min-height: 46px; padding: 8px 10px; border: 1px solid #e4dcfb; border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: pointer; font-weight: 800; }
+  .review-item { display: grid; grid-template-columns: 160px minmax(360px,1fr) 172px 112px; gap: 12px; align-items: center; min-height: 46px; padding: 8px 10px; border: 1px solid #e4dcfb; border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: pointer; font-weight: 800; }
   .review-item:hover { background: #f4f0ff; }
   .review-item strong { color: var(--purple-dark); }
   .review-item > strong,
@@ -1249,8 +1249,16 @@
       return 'Historial';
     }
 
+    function notificationNumberText(item = {}) {
+      const direct = String(item.numero || item.id || '').trim();
+      if (direct) return direct;
+      const matches = String(item.title || item.titulo || '').match(/\b\d{1,4}-\d+\b|\b\d+\b/g);
+      return matches?.length ? matches[matches.length - 1] : '';
+    }
+
     function cleanNotificationDetail(item = {}) {
-      const raw = String(item.cliente || item.proveedor || item.nombre || item.detail || item.detalle || '').trim();
+      const raw = String(item.cliente_nombre || item.detail || item.detalle || item.cliente || item.proveedor || item.nombre || '').trim();
+      if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(raw)) return '';
       return raw
         .replace(/\s+-\s+\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}.*$/i, '')
         .replace(/\s+-\s+\d{4,}.*$/i, '')
@@ -1259,7 +1267,7 @@
 
     function notificationTitleFor(item = {}) {
       if (item.kind === 'pedido') return `Pedido ${item.id || ''}`.trim();
-      if (item.tipo === 'presupuesto') return 'Pres. Web';
+      if (item.tipo === 'presupuesto') return `Pres. Web ${notificationNumberText(item)}`.trim();
       if (item.tipo === 'remito') return 'Remito';
       if (item.tipo === 'garantia') return 'Garantía';
       if (item.tipo === 'pendiente') return `Pendiente ${item.id || ''}`.trim();
@@ -1364,7 +1372,7 @@
       const historial = historialNotifications
         .filter((item) => !item.resuelta)
         .map((item) => {
-          const notif = { kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', cliente: item.cliente, proveedor: item.proveedor, nombre: item.nombre, date: item.fecha || '', createdAt: item.createdAt, updatedAt: item.updatedAt };
+          const notif = { kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', cliente: item.cliente, cliente_nombre: item.cliente_nombre, proveedor: item.proveedor, nombre: item.nombre, date: item.fecha || '', createdAt: item.createdAt, updatedAt: item.updatedAt };
           return { ...notif, title: notificationTitleFor(notif), detail: cleanNotificationDetail(notif) };
         });
       return [...pedidos, ...historial].sort(notifCreatedSort);
@@ -1372,9 +1380,8 @@
 
     function renderReviewNotifications() {
       const currentVisible = allVisibleNotifications();
-      const visible = reviewModal.classList.contains('visible') && reviewModalSnapshot
-        ? reviewModalSnapshot
-        : currentVisible;
+      const visible = currentVisible;
+      if (reviewModal.classList.contains('visible')) reviewModalSnapshot = currentVisible;
       reviewBell.classList.toggle('visible', currentVisible.length > 0);
       reviewBellCount.textContent = String(currentVisible.length);
       reviewList.innerHTML = visible.length ? visible.map((item) => `
@@ -1410,7 +1417,7 @@
           .map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
           .filter((item) => notifDesdeHoy(item))
           .map((item) => {
-            const notif = { kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', cliente: item.cliente, proveedor: item.proveedor, nombre: item.nombre, date: item.fecha || '', resolvedAt: item.resueltaAt || null, createdAt: item.resueltaAt || item.createdAt, updatedAt: item.resueltaAt || item.updatedAt };
+            const notif = { kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id}`, detail: item.detalle || '', cliente: item.cliente, cliente_nombre: item.cliente_nombre, proveedor: item.proveedor, nombre: item.nombre, date: item.fecha || '', resolvedAt: item.resueltaAt || null, createdAt: item.resueltaAt || item.createdAt, updatedAt: item.updatedAt };
             return { ...notif, title: notificationTitleFor(notif), detail: cleanNotificationDetail(notif) };
           });
         const resueltas = [...pedidos, ...historial].sort(notifResolvedSort);
