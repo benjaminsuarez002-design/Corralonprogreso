@@ -1,0 +1,1307 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Carga Stock</title>
+  <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
+  <script src="corralon-system.js"></script>
+  <script src="funciones.js?v=20260708-funciones"></script>
+  <script src="nav-helper.js"></script>
+  <script src="menu-auth-guard.js?v=20260708-guard3" data-menu-guard="carga_stock"></script>
+  <style>
+    *{box-sizing:border-box}
+    :root{--red:#e8183a;--purple:#6d5df7;--line:#8bc7ff;--soft:#eef8ff;--bg:#f6fcff;--row:#f7fbff;--text:#20223a;--muted:#6d7190;--ok:#d9f8e4;--ok2:#079a52;--bad:#ffe0e6;--bad2:#d7163c}
+    html,body{margin:0;height:100%;overflow:hidden}
+    body{font-family:Barlow,Arial,sans-serif;color:var(--text);background:linear-gradient(135deg,#f7feff,#f5f1ff 72%,#fff)}
+    .app{height:100dvh;display:grid;grid-template-rows:54px auto 1fr auto}
+    header{display:flex;align-items:center;gap:14px;padding:0 24px;background:rgba(255,255,255,.86);box-shadow:0 12px 34px rgba(81,129,255,.14);border-bottom:1px solid #d8ecff;backdrop-filter:blur(10px)}
+    header img{width:34px;background:#fff;border-radius:3px}
+    h1{font:900 32px 'Barlow Condensed';margin:0;color:var(--red);letter-spacing:.2px}
+    .header-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+    .status{font:800 14px Barlow;color:var(--muted);min-width:250px;text-align:right}
+    button{height:36px;border:1px solid var(--line);border-radius:9px;background:#fff;color:#19223b;font:900 18px 'Barlow Condensed';padding:5px 16px;cursor:pointer;box-shadow:0 2px 5px #0001}
+    button.primary{background:linear-gradient(135deg,#6d5df7,#19c7f5);border:0;color:#fff;box-shadow:0 8px 18px rgba(38,133,220,.26)}
+    button.danger{background:#f43f6b;border:0;color:#fff}
+    .toolbar{margin:14px 22px 0;padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.85);box-shadow:0 8px 22px #1e304c17;display:flex;flex-wrap:nowrap;gap:10px;align-items:end}
+    .toolbar label:first-child{flex:1 1 460px;min-width:300px}
+    .toolbar label:not(:first-child){flex:0 0 175px}
+    .toolbar label:nth-child(4){flex-basis:150px}
+    label{font:900 17px 'Barlow Condensed';color:var(--muted);display:grid;gap:4px}
+    input,select{width:100%;height:36px;border:1px solid #bde4ff;border-radius:8px;background:#fff;color:#111a33;padding:4px 9px;font:700 18px 'Barlow Condensed';outline:0}
+    .combo-field{position:relative;width:100%}
+    .combo-list{position:absolute;z-index:30;left:0;right:0;top:100%;max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 16px 34px #1e304c2e;display:none}
+    .combo-list.open{display:block}
+    .combo-option{padding:8px 10px;font:800 17px 'Barlow Condensed';cursor:pointer;border-bottom:1px solid #e6f1fb}
+    .combo-option:hover,.combo-option.active{background:#e4f7ff;color:#0075ca}
+    .provider-hidden{display:none}
+    .modal-backdrop{position:fixed;inset:0;background:#0005;display:none;align-items:center;justify-content:center;padding:20px;z-index:60}
+    .modal-backdrop.visible{display:flex}
+    .provider-modal{width:min(760px,100%);background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 70px #0004;overflow:hidden}
+    .provider-modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--soft);border-bottom:1px solid #cfe8ff;color:#4350c8;font:900 22px 'Barlow Condensed'}
+    .provider-modal-title{display:flex;align-items:center;gap:8px}
+    .provider-edit-btn{width:30px;height:26px;border:0;background:transparent;color:#4350c8;font-size:18px;line-height:1;cursor:pointer;padding:0;box-shadow:none}
+    .provider-modal-grid{display:grid;grid-template-columns:150px 1fr 150px 1fr;gap:10px;padding:16px}
+    .provider-modal-grid label{font:800 16px 'Barlow Condensed';color:var(--muted);align-self:center;cursor:pointer}
+    .provider-modal-grid input,.provider-modal-grid textarea{width:100%;border:1px solid #cfe8ff;border-radius:6px;height:32px;padding:4px 7px;font:17px 'Barlow Condensed';color:var(--text);background:#fff}
+    .provider-modal-grid input[type="checkbox"]{width:18px;height:18px;padding:0;justify-self:start}
+    .provider-modal-grid textarea{grid-column:2 / 5;height:64px;resize:none}
+    .provider-modal-actions{display:flex;justify-content:flex-end;gap:10px;padding:12px 16px;border-top:1px solid #cfe8ff}
+    .info-box{height:36px;border:1px solid #bde4ff;border-radius:8px;background:#f7fcff;color:#111a33;padding:7px 9px;font:900 18px 'Barlow Condensed';display:flex;align-items:center}
+    .info-check{height:36px;border:1px solid #bde4ff;border-radius:8px;background:#f7fcff;display:flex;align-items:center;justify-content:center}
+    .info-check input{width:18px;height:18px}
+    input:focus,select:focus,[contenteditable="true"]:focus{box-shadow:0 0 0 2px #7d6cff;border-color:#7d6cff}
+    .table-wrap{min-height:0;margin:14px 22px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 8px 22px #1e304c17;overflow:hidden;display:grid;grid-template-rows:34px 1fr 28px}
+    .head,.row{display:grid;grid-template-columns:34px 150px minmax(380px,1fr) 110px 130px 110px 135px}
+    .head{background:var(--soft);font:900 18px 'Barlow Condensed';color:#3b2fa3;padding-right:14px}
+    .head>div,.row>div{border-right:1px solid #d9edff;padding:6px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .corner{display:flex;align-items:center;justify-content:center;cursor:pointer;background:#e4f7ff}
+    .corner::before{content:"";width:0;height:0;border-top:11px solid var(--red);border-right:11px solid transparent}
+    .corner.active{background:#d1efff;box-shadow:inset 0 0 0 2px #7d6cff}
+    .rows{overflow:auto}
+    .row{min-height:32px;border-bottom:1px solid #e6f1fb;font:700 16px Barlow;background:#fff}
+    .row:nth-child(even){background:var(--row)}
+    .row.ok{background:var(--ok)}
+    .row.bad{background:var(--bad)}
+    .row.ok .state{color:#fff;background:var(--ok2)}
+    .row.bad .state{color:#fff;background:var(--bad2)}
+    .row .state{display:inline-flex;align-items:center;justify-content:center;min-width:84px;height:23px;border-radius:999px;font:900 14px 'Barlow Condensed'}
+    .row .num{text-align:right;font-variant-numeric:tabular-nums}
+    .row [contenteditable="true"]{outline:0;min-height:20px}
+    .head [data-col-select]{cursor:pointer;user-select:none}
+    .head [data-col-select].is-selected,.row [data-row-select].is-selected{background:rgba(109,93,247,.18);box-shadow:inset 0 0 0 2px rgba(109,93,247,.55)}
+    .head [data-sort-key].sort-asc::after{content:" ▲";font-size:12px}
+    .head [data-sort-key].sort-desc::after{content:" ▼";font-size:12px}
+    .row [data-row-select]{cursor:pointer;user-select:none;background:#eef8ff}
+    .row [data-field].is-selected{background:rgba(109,93,247,.13);box-shadow:inset 0 0 0 2px rgba(109,93,247,.65)}
+    .row [data-field].is-active-cell{background:rgba(109,93,247,.13);box-shadow:inset 0 0 0 2px rgba(109,93,247,.65)}
+    .row [data-field].currency-raw-selected{background:#fff;box-shadow:inset 0 0 0 2px #7d6cff}
+    .foot{display:flex;align-items:center;gap:14px;padding:4px 9px;background:#fff;border-top:1px solid #d9edff;font:800 13px Barlow;color:var(--muted)}
+    .foot-totals{margin-left:auto;display:flex;align-items:center;gap:16px;font:900 16px 'Barlow Condensed';color:#17315f}
+    .actions-bottom{display:flex;align-items:center;justify-content:center;gap:14px;padding:0 22px 18px}
+    .summary-pill{height:38px;min-width:150px;padding:6px 14px;border:1px solid #bde4ff;border-radius:9px;background:#f7fcff;font:900 18px 'Barlow Condensed';color:#17315f}
+    .empty{padding:34px;text-align:center;font:900 24px 'Barlow Condensed';color:#6d7190}
+    .toast{position:fixed;left:50%;bottom:24px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none;transition:.15s}
+    .toast.visible{opacity:1}
+    @media(max-width:900px){
+      .toolbar label:first-child,.toolbar label:not(:first-child){flex:1 1 100%}
+      .table-wrap{overflow-x:auto}
+      .head,.row{min-width:980px}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
+    <h1>Carga Stock</h1>
+    <div class="header-actions">
+      <div class="status" id="status">Inicializando...</div>
+      <button id="viewProviderBtn" type="button">Proveedor</button>
+      <button data-nav-url="menu.html" type="button">Menu</button>
+    </div>
+  </header>
+
+  <section class="toolbar">
+    <label>Proveedor
+      <div class="combo-field" id="providerCombo">
+        <input id="providerInput" type="text" autocomplete="off" placeholder="Buscar proveedor...">
+        <div class="combo-list" id="providerList"></div>
+      </div>
+    </label>
+    <label>Desc. factura
+      <input id="providerInvoiceDiscount" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
+    </label>
+    <label>Desc. final factura
+      <input id="providerFinalInvoiceDiscount" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
+    </label>
+    <label>Flete
+      <input id="providerFreight" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
+    </label>
+    <label>Iva incluido
+      <div class="info-check"><input id="providerIvaIncluded" type="checkbox"></div>
+    </label>
+    <label>Iva
+      <input id="providerIva" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
+    </label>
+  </section>
+
+  <section class="table-wrap">
+    <div class="head">
+      <div class="corner" id="corner" data-table-corner title="Doble clic para pegar toda la tabla"></div>
+      <div data-col-select="0" data-sort-key="codigo">Codigo</div>
+      <div data-col-select="1" data-sort-key="descripcion">Descripcion</div>
+      <div data-col-select="2" data-sort-key="cantidad">Cantidad</div>
+      <div data-col-select="3" data-sort-key="precio">Precio unit.</div>
+      <div data-col-select="4" data-sort-key="descuento">Desc. adicional</div>
+      <div data-col-select="5" data-sort-key="precioFinal">Precio final</div>
+    </div>
+    <div class="rows" id="rows"></div>
+    <div class="foot">
+      <span id="totalRows">0 filas</span>
+      <span>Doble clic en la esquina roja para pegar todo. Ctrl+Z deshace. Enter, Tab y flechas navegan. El copiado usa solo filas verdes.</span>
+      <div class="foot-totals">
+        <span id="totalUnitario">Unitario: $ 0,00</span>
+        <span id="totalFinal">Final: $ 0,00</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="actions-bottom">
+    <button class="primary" id="copyBtn" type="button">Copiar</button>
+    <div class="summary-pill" id="copySummary">0 listos para copiar</div>
+  </section>
+</div>
+<div class="modal-backdrop" id="providerModal">
+  <div class="provider-modal">
+    <div class="provider-modal-head">
+      <span class="provider-modal-title">Proveedor <button class="provider-edit-btn" type="button" id="editProviderModalBtn" title="Editar">✎</button></span>
+      <button type="button" id="closeProviderModalBtn">Cerrar</button>
+    </div>
+    <div class="provider-modal-grid">
+      <label>IDProveedor</label><input id="modalProviderId" readonly>
+      <label>Proveedor</label><input id="modalProviderName" readonly>
+      <label>Desc. factura</label><input id="modalDiscountInvoice" readonly>
+      <label>Desc. final factura</label><input id="modalDiscountFinalInvoice" readonly>
+      <label>Desc. lista</label><input id="modalDiscountList" readonly>
+      <label>Ultima act.</label><input id="modalDate" readonly>
+      <label>Vendedor</label><input id="modalSeller" readonly>
+      <label>Telefono</label><input id="modalPhone" readonly>
+      <label>Pagina</label><input id="modalPageLink" readonly>
+      <label>Porc. flete</label><input id="modalFreight" readonly>
+      <label>Porc. IVA</label><input id="modalIva" readonly>
+      <label>Iva incluido?</label><input id="modalIvaIncluded" type="checkbox" disabled>
+      <label>Nota</label><textarea id="modalNote" readonly></textarea>
+    </div>
+    <div class="provider-modal-actions">
+      <button class="provider-hidden" type="button" id="saveProviderModalBtn">Guardar</button>
+      <button type="button" id="closeProviderModalActionBtn">Cerrar</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, getDocFromServer, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
+  authDomain: "corralon-progreso.firebaseapp.com",
+  projectId: "corralon-progreso",
+  storageBucket: "corralon-progreso.firebasestorage.app",
+  messagingSenderId: "466583614632",
+  appId: "1:466583614632:web:42cb839f83e97475fabe9d"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const CACHE_KEY = 'corralon_carga_stock_rows_v1';
+const PROVIDER_KEY = 'corralon_carga_stock_provider_v1';
+const INDEX_CODES_CACHE_KEY = 'corralon_carga_stock_index_codes_v1';
+
+let providers = [];
+let provider = null;
+let rowsData = [];
+let indexCodes = new Set();
+let undoStack = null;
+let editSnapshot = null;
+let editHadChanges = false;
+let tableEditUndoPushed = false;
+let tableSelectionApi = null;
+let suppressFullSelectTarget = null;
+let mouseEditTarget = null;
+let activeToolbarField = null;
+let providerMouseEdit = false;
+const selectedRows = new Set();
+const selectedCols = new Set();
+let rowSelectionAnchor = null;
+let colSelectionAnchor = null;
+
+const FX = window.CorralonFunciones || {};
+
+const el = {
+  status: document.getElementById('status'),
+  providerInput: document.getElementById('providerInput'),
+  providerList: document.getElementById('providerList'),
+  providerInvoiceDiscount: document.getElementById('providerInvoiceDiscount'),
+  providerFinalInvoiceDiscount: document.getElementById('providerFinalInvoiceDiscount'),
+  providerFreight: document.getElementById('providerFreight'),
+  providerIvaIncluded: document.getElementById('providerIvaIncluded'),
+  providerIva: document.getElementById('providerIva'),
+  rows: document.getElementById('rows'),
+  corner: document.getElementById('corner'),
+  totalRows: document.getElementById('totalRows'),
+  totalUnitario: document.getElementById('totalUnitario'),
+  totalFinal: document.getElementById('totalFinal'),
+  copySummary: document.getElementById('copySummary'),
+  toast: document.getElementById('toast')
+};
+
+function norm(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+}
+function codeKey(value) {
+  const raw = norm(value).replace(/\s+/g, '');
+  if (!raw) return '';
+  return raw;
+}
+function codeVariants(value) {
+  const key = codeKey(value);
+  if (!key) return [];
+  const out = new Set([key]);
+  if (/^\d+$/.test(key)) out.add(key.replace(/^0+/, '') || '0');
+  return [...out];
+}
+function moneyNumber(value) {
+  return window.CorralonSystem?.parseMoney ? CorralonSystem.parseMoney(value) : Number(String(value || '').replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '')) || 0;
+}
+function money(value) {
+  return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function rawNumber(value) {
+  return Number(value || 0).toFixed(2).replace('.', ',');
+}
+function parsePercent(value) {
+  return moneyNumber(value) / 100;
+}
+function percent(value) {
+  return `${(Number(value || 0) * 100).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
+}
+function modalValue(id) {
+  return document.getElementById(id);
+}
+function parseModalPercent(id) {
+  return parsePercent(modalValue(id)?.value || '0');
+}
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function show(message) {
+  el.toast.textContent = message;
+  el.toast.classList.add('visible');
+  clearTimeout(show.timer);
+  show.timer = setTimeout(() => el.toast.classList.remove('visible'), 1800);
+}
+function saveRows() {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(rowsData)); } catch (_) {}
+}
+function loadRows() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
+    rowsData = Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    rowsData = [];
+  }
+}
+function rowsState() {
+  return rowsData.map((row) => ({ ...row }));
+}
+function restoreRowsState(state) {
+  rowsData = Array.isArray(state) ? state.map((row, index) => normalizeRow(row, index)) : [];
+  saveRows();
+  render();
+  show('Cambio deshecho');
+}
+function pushUndoSnapshot(state = rowsState()) {
+  if (undoStack && Array.isArray(state)) undoStack.push(state);
+}
+function startCellEditSnapshot() {
+  editSnapshot = rowsState();
+  editHadChanges = false;
+}
+function commitCellEditSnapshot() {
+  if (editHadChanges && editSnapshot) pushUndoSnapshot(editSnapshot);
+  editSnapshot = null;
+  editHadChanges = false;
+}
+function beginTableEditUndo() {
+  if (tableEditUndoPushed) return;
+  pushUndoSnapshot();
+  tableEditUndoPushed = true;
+}
+function finishTableEditUndo(message = '') {
+  tableEditUndoPushed = false;
+  saveRows();
+  render();
+  if (message) show(message);
+}
+function readField(source, names) {
+  for (const name of names) {
+    if (source && Object.prototype.hasOwnProperty.call(source, name)) return source[name];
+  }
+  const keys = Object.keys(source || {});
+  for (const name of names) {
+    const found = keys.find((key) => norm(key) === norm(name));
+    if (found) return source[found];
+  }
+  return '';
+}
+function articleProviderCodes(article = {}) {
+  const value = readField(article, [
+    'idartprov', 'idArtProv', 'idart_prov', 'id_art_prov',
+    'codprov', 'codProv', 'cod_prov', 'codigoProveedor',
+    'codigo_proveedor', 'codigo_prov', 'codProveedor',
+    'CodProveedor', 'CodProveed'
+  ]);
+  return codeVariants(value);
+}
+function isGreen(row) {
+  return codeVariants(row.codigo).some((key) => indexCodes.has(key));
+}
+function calcPrecioFinal(row) {
+  const precio = Number(row.precio) || 0;
+  const descuento = Number(row.descuento ?? providerDiscountValue()) || 0;
+  const flete = Number(provider?.porc_flete || 0) || 0;
+  const iva = Number(provider?.porc_iva || 0) || 0;
+  const ivaIncluido = boolInput(provider?.iva_incluido);
+  let base = precio * (1 - descuento) * (1 + flete);
+  base *= (1 - (Number(row.descuentoAdicional || 0) || 0));
+  base = ivaIncluido ? (base / (1 + iva)) : (base * (1 + iva));
+  return base;
+}
+function calcPrecioFinalTotal(row) {
+  const precio = Number(row.precio) || 0;
+  const descuento = Number(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0) || 0;
+  const flete = Number(provider?.porc_flete || 0) || 0;
+  const iva = Number(provider?.porc_iva || 0) || 0;
+  const ivaIncluido = boolInput(provider?.iva_incluido);
+  let base = precio * (1 - descuento) * (1 + flete);
+  base = ivaIncluido ? (base / (1 + iva)) : (base * (1 + iva));
+  return base;
+}
+function providerDiscountValue() {
+  return Number(provider?.descuento_factura || 0) || 0;
+}
+function boolInput(value) {
+  return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'si';
+}
+function renderProviderInfo() {
+  el.providerInvoiceDiscount.value = percent(provider?.descuento_factura || 0);
+  el.providerFinalInvoiceDiscount.value = percent(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0);
+  el.providerFreight.value = percent(provider?.porc_flete || 0);
+  el.providerIvaIncluded.checked = boolInput(provider?.iva_incluido);
+  el.providerIva.value = percent(provider?.porc_iva || 0);
+}
+function updateProviderOverrides() {
+  pushUndoSnapshot();
+  if (!provider) provider = {};
+  provider.descuento_factura = parsePercent(el.providerInvoiceDiscount.value);
+  provider.descuento_total_fc = parsePercent(el.providerFinalInvoiceDiscount.value);
+  provider.porc_flete = parsePercent(el.providerFreight.value);
+  provider.iva_incluido = el.providerIvaIncluded.checked;
+  provider.porc_iva = parsePercent(el.providerIva.value);
+  rowsData.forEach((row) => row.descuento = provider.descuento_factura);
+  saveRows();
+  render();
+}
+function providerLabel(item) {
+  return String(item?.proveedor || '').trim();
+}
+function filteredProviders() {
+  const terms = norm(el.providerInput.value).split(' ').filter(Boolean);
+  const source = terms.length
+    ? providers.filter((item) => {
+      const hay = norm(`${item.id_proveedor || ''} ${item.proveedor || ''}`);
+      return terms.every((term) => hay.includes(term));
+    })
+    : providers;
+  return source.slice(0, 40);
+}
+function setProvider(nextProvider, options = {}) {
+  pushUndoSnapshot();
+  provider = nextProvider || null;
+  if (provider && !options.keepText) el.providerInput.value = providerLabel(provider);
+  if (provider) localStorage.setItem(PROVIDER_KEY, String(provider.id_proveedor));
+  else localStorage.removeItem(PROVIDER_KEY);
+  renderProviderInfo();
+  const desc = providerDiscountValue();
+  rowsData.forEach((row) => row.descuento = desc);
+  saveRows();
+  render();
+}
+function applyProvider() {
+  const text = norm(el.providerInput.value);
+  const found = providers.find((item) => norm(providerLabel(item)) === text || String(item.id_proveedor) === String(el.providerInput.value).trim());
+  setProvider(found || null, { keepText: true });
+}
+function closeProviderList() {
+  el.providerList.classList.remove('open');
+}
+function openProviderList() {
+  const list = filteredProviders();
+  el.providerList.innerHTML = list.length
+    ? list.map((item, index) => `<div class="combo-option${index === 0 ? ' active' : ''}" data-id="${escapeHtml(item.id_proveedor)}">${escapeHtml(providerLabel(item))}</div>`).join('')
+    : '<div class="combo-option">Sin coincidencias</div>';
+  el.providerList.classList.add('open');
+}
+function pickProviderById(id) {
+  const found = providers.find((item) => String(item.id_proveedor) === String(id));
+  if (!found) return false;
+  setProvider(found);
+  closeProviderList();
+  return true;
+}
+function selectedProvider() {
+  return provider || providers.find((item) => norm(providerLabel(item)) === norm(el.providerInput.value) || String(item.id_proveedor || '') === String(el.providerInput.value).trim()) || null;
+}
+function setProviderModalEditing(enabled) {
+  ['modalProviderName','modalDiscountInvoice','modalDiscountFinalInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
+    const field = modalValue(id);
+    if (field) field.readOnly = !enabled;
+  });
+  modalValue('modalIvaIncluded').disabled = !enabled;
+  modalValue('saveProviderModalBtn')?.classList.toggle('provider-hidden', !enabled);
+}
+function openProviderModal() {
+  const current = selectedProvider();
+  if (!current) {
+    el.providerInput.focus();
+    show('Elegí un proveedor');
+    return;
+  }
+  setProviderModalEditing(false);
+  modalValue('modalProviderId').value = current.id_proveedor || '';
+  modalValue('modalProviderName').value = current.proveedor || '';
+  modalValue('modalDiscountInvoice').value = percent(current.descuento_factura);
+  modalValue('modalDiscountFinalInvoice').value = percent(current.descuento_total_fc ?? current.descuento_final_factura ?? 0);
+  modalValue('modalDiscountList').value = percent(current.descuento_lista);
+  modalValue('modalDate').value = current.ultima_actualizacion || '';
+  modalValue('modalSeller').value = current.vendedor || '';
+  modalValue('modalPhone').value = current.telefono || '';
+  modalValue('modalPageLink').value = current.pagina_link || current.pagina || '';
+  modalValue('modalFreight').value = percent(current.porc_flete);
+  modalValue('modalIva').value = percent(current.porc_iva);
+  modalValue('modalIvaIncluded').checked = boolInput(current.iva_incluido);
+  modalValue('modalNote').value = current.nota || '';
+  modalValue('providerModal').classList.add('visible');
+}
+function closeProviderModal() {
+  modalValue('providerModal').classList.remove('visible');
+  setProviderModalEditing(false);
+}
+async function saveProviderModal() {
+  const id = String(modalValue('modalProviderId').value || '').trim();
+  const current = providers.find((item) => String(item.id_proveedor) === id) || {};
+  const pageLink = String(modalValue('modalPageLink').value || '').trim();
+  const nextProvider = {
+    ...current,
+    id_proveedor: id,
+    proveedor: String(modalValue('modalProviderName').value || '').trim(),
+    descuento_factura: parseModalPercent('modalDiscountInvoice'),
+    descuento_total_fc: parseModalPercent('modalDiscountFinalInvoice'),
+    descuento_lista: parseModalPercent('modalDiscountList'),
+    ultima_actualizacion: modalValue('modalDate').value || null,
+    vendedor: String(modalValue('modalSeller').value || '').trim(),
+    telefono: String(modalValue('modalPhone').value || '').trim(),
+    pagina_link: pageLink,
+    reserva_texto_1: pageLink || null,
+    nota: String(modalValue('modalNote').value || '').trim(),
+    porc_flete: parseModalPercent('modalFreight'),
+    porc_iva: parseModalPercent('modalIva'),
+    iva_incluido: modalValue('modalIvaIncluded').checked
+  };
+  nextProvider.proveedor_norm = String(nextProvider.proveedor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  if (!nextProvider.id_proveedor || !nextProvider.proveedor) return;
+
+  const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?on_conflict=id_proveedor`, {
+    method: 'POST',
+    headers: CorralonSystem.headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify(CorralonSystem.providerRemotePayload(nextProvider))
+  });
+  if (!response.ok) throw new Error(await response.text());
+
+  const localProvider = CorralonSystem.normalizeProviderPageLink(nextProvider);
+  const index = providers.findIndex((item) => String(item.id_proveedor) === String(localProvider.id_proveedor));
+  if (index >= 0) providers[index] = localProvider;
+  else providers.push(localProvider);
+  providers.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
+  await CorralonSystem.setProvidersCache(providers);
+  setProvider(localProvider);
+  setProviderModalEditing(false);
+  show('Proveedor guardado');
+}
+function moveProviderActive(step) {
+  const items = Array.from(el.providerList.querySelectorAll('[data-id]'));
+  if (!items.length) return;
+  const current = Math.max(0, items.findIndex((item) => item.classList.contains('active')));
+  const next = Math.max(0, Math.min(items.length - 1, current + step));
+  items.forEach((item) => item.classList.remove('active'));
+  items[next].classList.add('active');
+  items[next].scrollIntoView({ block: 'nearest' });
+}
+function focusNextToolbarField(from, direction = 1) {
+  const fields = navigationFields();
+  const index = fields.indexOf(from);
+  const next = fields[Math.max(0, Math.min(fields.length - 1, index + direction))];
+  if (!next || next === from) return false;
+  return focusNavigationTarget(next);
+}
+function moveNavigation(from, direction = 1) {
+  return focusNextToolbarField(from, direction);
+}
+function navigationFields() {
+  return [
+    el.providerInput,
+    el.providerInvoiceDiscount,
+    el.providerFinalInvoiceDiscount,
+    el.providerFreight,
+    el.providerIvaIncluded,
+    el.providerIva,
+    ...Array.from(el.rows.querySelectorAll('[data-field][data-row][data-col]')),
+    document.getElementById('copyBtn')
+  ].filter(Boolean);
+}
+function isTextFullySelected(target) {
+  if (!target) return false;
+  if (target.dataset?.fullSelected === '1' && document.activeElement === target) return true;
+  if (target.matches?.('input, textarea')) {
+    const editableEnd = target.classList.contains('provider-percent-live')
+      ? String(target.value || '').replace(/\s*%$/, '').length
+      : target.value.length;
+    return editableEnd > 0 && target.selectionStart === 0 && target.selectionEnd >= editableEnd;
+  }
+  const text = target.textContent || '';
+  const selection = window.getSelection();
+  return text.length > 0 && document.activeElement === target && selection?.toString?.() === text;
+}
+function isPrintableTypingKey(event) {
+  return (FX.isPrintableTypingKey ? FX.isPrintableTypingKey(event) : event.key.length === 1)
+    && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+function scheduleFullSelect(target) {
+  selectEditableCellText(target);
+  setTimeout(() => {
+    requestAnimationFrame(() => {
+      if (document.activeElement === target) selectEditableCellText(target);
+    });
+  }, 0);
+}
+function focusNavigationTarget(target) {
+  if (!target) return false;
+  if (target === el.providerInput) providerMouseEdit = false;
+  if (target.matches?.('input[type="checkbox"]')) {
+    target.focus?.({ preventScroll: true });
+    activeToolbarField = target;
+    return true;
+  }
+  mouseEditTarget = null;
+  target.focus?.({ preventScroll: true });
+  if (target.matches?.('[data-field][data-row][data-col]')) {
+    activeToolbarField = null;
+    clearTableSelections();
+    tableSelectionApi?.selectCells([target]);
+    selectEditableCellText(target);
+    target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    return true;
+  }
+  if (!target.matches?.('input[type="checkbox"], button')) {
+    activeToolbarField = target.closest?.('.toolbar') ? target : null;
+    scheduleFullSelect(target);
+  }
+  return true;
+}
+function toolbarFieldPointerDown(event) {
+  const field = event.target.closest('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva');
+  if (!field) return;
+  if (field === el.providerInput) {
+    if (activeToolbarField === el.providerInput) {
+      providerMouseEdit = true;
+      el.providerInput.dataset.fullSelected = '0';
+      mouseEditTarget = el.providerInput;
+      return;
+    }
+    event.preventDefault();
+    providerMouseEdit = false;
+    activeToolbarField = el.providerInput;
+    mouseEditTarget = null;
+    el.providerInput.focus({ preventScroll: true });
+    scheduleFullSelect(el.providerInput);
+    return;
+  }
+  if (field === el.providerIvaIncluded) {
+    activeToolbarField = field;
+    return;
+  }
+  if (field === activeToolbarField) {
+    field.dataset.fullSelected = '0';
+    mouseEditTarget = field;
+    return;
+  }
+  event.preventDefault();
+  activeToolbarField = field;
+  mouseEditTarget = null;
+  field.focus({ preventScroll: true });
+  scheduleFullSelect(field);
+}
+function placeCaretOnMouseClick(target, event) {
+  if (!target || (!isTextFullySelected(target) && mouseEditTarget !== target)) return false;
+  target.dataset.fullSelected = '0';
+  suppressFullSelectTarget = target;
+  mouseEditTarget = target;
+  if (target.matches?.('[data-field][data-row][data-col]')) tableSelectionApi?.clearSelection?.();
+  target.focus?.({ preventScroll: true });
+  if (!target.matches?.('input, textarea') && document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(event.clientX, event.clientY);
+    if (range) {
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+  return true;
+}
+function moveTableNavigation(cell, rowDelta, colDelta) {
+  const position = editableCellPosition(cell);
+  const next = editableCellAt(position.row + rowDelta, position.col + colDelta);
+  return focusNavigationTarget(next);
+}
+function handleRuleNavigation(event) {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  const target = event.target?.closest?.('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva,#copyBtn,[data-field][data-row][data-col]');
+  if (!target) return;
+  const key = event.key;
+  if (isPrintableTypingKey(event)) target.dataset.fullSelected = '0';
+  if (target.matches?.('input[type="checkbox"]')) {
+    const navDir = key === 'ArrowLeft' || key === 'ArrowUp' || event.shiftKey ? -1 : 1;
+    if (key === 'Enter' || key === 'Tab' || key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown') {
+      const moved = moveNavigation(target, navDir);
+      if (moved) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+    return;
+  }
+  const isTable = target.matches('[data-field][data-row][data-col]');
+  const providerListOpen = target === el.providerInput && el.providerList.classList.contains('open');
+  if (providerListOpen && (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter')) return;
+
+  let moved = false;
+  if (key === 'Tab') {
+    moved = moveNavigation(target, event.shiftKey ? -1 : 1);
+  } else if (key === 'Enter') {
+    moved = isTable ? moveTableNavigation(target, event.shiftKey ? -1 : 1, 0) : moveNavigation(target, event.shiftKey ? -1 : 1);
+  } else if (key === 'ArrowDown' && isTextFullySelected(target)) {
+    moved = isTable ? moveTableNavigation(target, 1, 0) : moveNavigation(target, 1);
+  } else if (key === 'ArrowUp' && isTextFullySelected(target)) {
+    moved = isTable ? moveTableNavigation(target, -1, 0) : moveNavigation(target, -1);
+  } else if (key === 'ArrowRight' && isTextFullySelected(target)) {
+    moved = isTable ? moveTableNavigation(target, 0, 1) : moveNavigation(target, 1);
+  } else if (key === 'ArrowLeft' && isTextFullySelected(target)) {
+    moved = isTable ? moveTableNavigation(target, 0, -1) : moveNavigation(target, -1);
+  }
+  if (moved) {
+    mouseEditTarget = null;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}
+function normalizeRow(row = {}, index = 0) {
+  return {
+    id: row.id || `${Date.now()}_${index}_${Math.random().toString(16).slice(2)}`,
+    codigo: String(row.codigo ?? '').trim(),
+    descripcion: String(row.descripcion ?? '').trim(),
+    cantidad: String(row.cantidad ?? '').trim(),
+    precio: moneyNumber(row.precio ?? 0),
+    descuento: Number(row.descuento ?? providerDiscountValue() ?? 0) || 0,
+    descuentoAdicional: Number(row.descuentoAdicional ?? 0) || 0
+  };
+}
+function parsePasted(text) {
+  const table = FX.parseClipboardTable
+    ? FX.parseClipboardTable(text)
+    : String(text || '').split(/\r?\n/).filter((line) => line.trim()).map((line) => line.split('\t'));
+  return table
+    .filter((cols) => cols.some((value) => String(value || '').trim()))
+    .map((cols, index) => {
+      const codigo = String(cols[0] ?? '').trim();
+      const descripcion = String(cols[1] ?? '').trim();
+      const cantidad = String(cols[2] ?? '').trim();
+      const precio = moneyNumber(cols[3] ?? 0);
+      if (!codigo && !descripcion && !cantidad && !precio) return null;
+      return normalizeRow({ codigo, descripcion, cantidad, precio, descuento: providerDiscountValue() }, index);
+    })
+    .filter(Boolean);
+}
+function render() {
+  const view = rowsData;
+  if (!rowsData.length) {
+    el.rows.innerHTML = '<div class="empty">Pega una tabla con Codigo, Descripcion, Cantidad y Precio.</div>';
+  } else {
+    el.rows.innerHTML = view.map((row, rowIndex) => {
+      const ok = isGreen(row);
+      return `<div class="row ${ok ? 'ok' : 'bad'}" data-id="${escapeHtml(row.id)}" data-row="${rowIndex}">
+        <div data-row-select="${rowIndex}" class="${selectedRows.has(rowIndex) ? 'is-selected' : ''}"></div>
+        <div contenteditable="true" data-field="codigo" data-row="${rowIndex}" data-col="0">${escapeHtml(row.codigo)}</div>
+        <div contenteditable="true" data-field="descripcion" data-row="${rowIndex}" data-col="1" title="${escapeHtml(row.descripcion)}">${escapeHtml(row.descripcion)}</div>
+        <div class="num" contenteditable="true" data-field="cantidad" data-row="${rowIndex}" data-col="2">${escapeHtml(row.cantidad)}</div>
+        <div class="num" contenteditable="true" data-field="precio" data-row="${rowIndex}" data-col="3" data-currency-cell="1">${money(row.precio)}</div>
+        <div class="num" contenteditable="true" data-field="descuento" data-row="${rowIndex}" data-col="4">${row.descuentoAdicional ? percent(row.descuentoAdicional) : ''}</div>
+        <div class="num" tabindex="0" data-field="precioFinal" data-row="${rowIndex}" data-col="5" data-readonly-cell="1" data-currency-cell="1">${money(calcPrecioFinal(row))}</div>
+      </div>`;
+    }).join('');
+  }
+  const okCount = rowsData.filter(isGreen).length;
+  const totalUnitario = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
+  const totalFinal = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(calcPrecioFinalTotal(row)) || 0)), 0);
+  el.totalRows.textContent = `${rowsData.length.toLocaleString('es-AR')} filas`;
+  el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
+  el.totalFinal.textContent = `Final: ${money(totalFinal)}`;
+  el.copySummary.textContent = `${okCount.toLocaleString('es-AR')} listos para copiar`;
+  applyTableSelectionMarks();
+}
+function updateCalculatedCells() {
+  rowsData.forEach((row, index) => {
+    const finalCell = editableCellAt(index, 5);
+    if (finalCell && document.activeElement !== finalCell) finalCell.textContent = money(calcPrecioFinal(row));
+  });
+  const totalUnitario = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
+  const totalFinal = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(calcPrecioFinalTotal(row)) || 0)), 0);
+  el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
+  el.totalFinal.textContent = `Final: ${money(totalFinal)}`;
+}
+async function pasteAll() {
+  const text = await navigator.clipboard.readText();
+  const parsed = parsePasted(text);
+  if (!parsed.length) {
+    show('No encontre filas para pegar');
+    return;
+  }
+  pushUndoSnapshot();
+  rowsData = parsed;
+  saveRows();
+  render();
+  show(`${parsed.length} filas pegadas`);
+}
+async function copyGreen() {
+  const rows = rowsData
+    .filter(isGreen)
+    .map((row) => [row.codigo, row.cantidad]);
+  if (!rows.length) {
+    show('No hay filas verdes para copiar');
+    return;
+  }
+  const text = FX.formatClipboardTable ? FX.formatClipboardTable(rows) : rows.map((row) => row.join('\t')).join('\n');
+  await navigator.clipboard.writeText(text);
+  show(`${rows.length} filas copiadas`);
+}
+async function loadProviders() {
+  el.status.textContent = 'Cargando proveedores...';
+  try {
+    providers = await CorralonSystem.importProvidersCloud();
+  } catch (error) {
+    console.warn(error);
+    providers = [];
+  }
+  providers.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
+  const saved = localStorage.getItem(PROVIDER_KEY);
+  const savedProvider = providers.find((item) => String(item.id_proveedor) === saved);
+  setProvider(savedProvider || null);
+}
+async function fetchJson(url) {
+  const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+async function loadIndexCodes() {
+  el.status.textContent = 'Cargando lista de index...';
+  try {
+    const snap = await getDocFromServer(doc(db, 'config', 'listaActual')).catch(() => getDoc(doc(db, 'config', 'listaActual')));
+    const url = snap.exists() ? String(snap.data()?.url || '').trim() : '';
+    if (!url) throw new Error('No hay lista publicada');
+    const list = await fetchJson(url);
+    const keys = new Set();
+    list.forEach((article) => articleProviderCodes(article).forEach((key) => keys.add(key)));
+    indexCodes = keys;
+    localStorage.setItem(INDEX_CODES_CACHE_KEY, JSON.stringify([...keys]));
+    el.status.textContent = `${keys.size.toLocaleString('es-AR')} codigos de proveedor listos`;
+  } catch (error) {
+    console.warn(error);
+    try {
+      indexCodes = new Set(JSON.parse(localStorage.getItem(INDEX_CODES_CACHE_KEY) || '[]'));
+      el.status.textContent = `Usando cache: ${indexCodes.size.toLocaleString('es-AR')} codigos`;
+    } catch (_) {
+      indexCodes = new Set();
+      el.status.textContent = 'No pude cargar codigos de index';
+    }
+  }
+  render();
+}
+
+function editableCellPosition(cell) {
+  return {
+    row: Number(cell?.dataset?.row ?? cell?.closest?.('.row')?.dataset?.row),
+    col: Number(cell?.dataset?.col)
+  };
+}
+function editableCellAt(row, col) {
+  return el.rows.querySelector(`[data-field][data-row="${row}"][data-col="${col}"]`);
+}
+function selectEditableCellText(cell) {
+  if (!cell) return;
+  cell.dataset.fullSelected = '1';
+  if (typeof cell.select === 'function') {
+    if (cell.classList?.contains('provider-percent-live')) {
+      const end = String(cell.value || '').replace(/\s*%$/, '').length;
+      cell.setSelectionRange?.(0, end);
+      return;
+    }
+    cell.select();
+    return;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+function placeCaretEnd(cell) {
+  if (!cell) return;
+  cell.dataset.fullSelected = '0';
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+function rowFromCell(cell) {
+  const rowEl = cell?.closest?.('.row');
+  if (!rowEl) return null;
+  return rowsData.find((item) => item.id === rowEl.dataset.id) || null;
+}
+function getEditableCellValue(cell) {
+  const row = rowFromCell(cell);
+  if (!row) return '';
+  const field = cell.dataset.field;
+  if (field === 'precio') return rawNumber(row.precio);
+  if (field === 'precioFinal') return rawNumber(calcPrecioFinal(row));
+  if (field === 'descuento') return row.descuentoAdicional ? percent(row.descuentoAdicional) : '';
+  return String(row[field] ?? '');
+}
+function setEditableCellValue(cell, value) {
+  const row = rowFromCell(cell);
+  if (!row) return;
+  if (cell.dataset.readonlyCell === '1') return;
+  beginTableEditUndo();
+  const field = cell.dataset.field;
+  if (field === 'precio') row.precio = moneyNumber(value);
+  else if (field === 'cantidad') row.cantidad = rawNumber(moneyNumber(value));
+  else if (field === 'descuento') row.descuentoAdicional = parsePercent(value);
+  else row[field] = String(value ?? '').trim();
+  if (field === 'precio') cell.textContent = money(row.precio);
+  else if (field === 'cantidad') cell.textContent = row.cantidad;
+  else if (field === 'descuento') cell.textContent = row.descuentoAdicional ? percent(row.descuentoAdicional) : '';
+  else cell.textContent = String(row[field] ?? '');
+}
+function clearTableSelections() {
+  selectedRows.clear();
+  selectedCols.clear();
+  rowSelectionAnchor = null;
+  colSelectionAnchor = null;
+  applyTableSelectionMarks();
+}
+function rangeNumbers(from, to) {
+  const a = Math.min(Number(from), Number(to));
+  const b = Math.max(Number(from), Number(to));
+  const out = [];
+  for (let index = a; index <= b; index += 1) out.push(index);
+  return out;
+}
+function cellsForRows(rows) {
+  return [...rows].flatMap((row) => Array.from(el.rows.querySelectorAll(`[data-field][data-row="${row}"]`)));
+}
+function cellsForCols(cols) {
+  return [...cols].flatMap((col) => Array.from(el.rows.querySelectorAll(`[data-field][data-col="${col}"]`)));
+}
+function applyTableSelectionMarks() {
+  document.querySelectorAll('[data-row-select].is-selected,.head [data-col-select].is-selected').forEach((item) => item.classList.remove('is-selected'));
+  selectedRows.forEach((row) => el.rows.querySelector(`[data-row-select="${row}"]`)?.classList.add('is-selected'));
+  selectedCols.forEach((col) => document.querySelector(`.head [data-col-select="${col}"]`)?.classList.add('is-selected'));
+  if (tableSelectionApi) {
+    const cells = [...cellsForRows(selectedRows), ...cellsForCols(selectedCols)];
+    if (cells.length) tableSelectionApi.selectCells(cells);
+  }
+}
+function selectTableRow(row, event = {}) {
+  const index = Number(row);
+  if (!Number.isFinite(index)) return;
+  if (event.shiftKey && rowSelectionAnchor !== null) {
+    if (!event.ctrlKey && !event.metaKey) selectedRows.clear();
+    rangeNumbers(rowSelectionAnchor, index).forEach((item) => selectedRows.add(item));
+  } else {
+    rowSelectionAnchor = index;
+    if (event.ctrlKey || event.metaKey) {
+      if (selectedRows.has(index)) selectedRows.delete(index);
+      else selectedRows.add(index);
+    } else {
+      selectedRows.clear();
+      selectedRows.add(index);
+    }
+  }
+  selectedCols.clear();
+  applyTableSelectionMarks();
+}
+function selectTableCol(col, event = {}) {
+  const index = Number(col);
+  if (!Number.isFinite(index)) return;
+  if (event.shiftKey && colSelectionAnchor !== null) {
+    if (!event.ctrlKey && !event.metaKey) selectedCols.clear();
+    rangeNumbers(colSelectionAnchor, index).forEach((item) => selectedCols.add(item));
+  } else {
+    colSelectionAnchor = index;
+    if (event.ctrlKey || event.metaKey) {
+      if (selectedCols.has(index)) selectedCols.delete(index);
+      else selectedCols.add(index);
+    } else {
+      selectedCols.clear();
+      selectedCols.add(index);
+    }
+  }
+  selectedRows.clear();
+  applyTableSelectionMarks();
+}
+function deleteSelectedRows() {
+  if (!selectedRows.size) return false;
+  pushUndoSnapshot();
+  rowsData = rowsData.filter((_, index) => !selectedRows.has(index));
+  clearTableSelections();
+  saveRows();
+  render();
+  show('Filas borradas');
+  return true;
+}
+function pasteIntoSelectedColumns(text) {
+  if (!selectedCols.size) return false;
+  const table = FX.parseClipboardTable ? FX.parseClipboardTable(text) : String(text || '').split(/\r?\n/).map((line) => line.split('\t'));
+  const cols = [...selectedCols].sort((a, b) => a - b);
+  if (!table.length || !cols.length) return false;
+  pushUndoSnapshot();
+  table.forEach((line, rowIndex) => {
+    cols.forEach((col, selectedIndex) => {
+      const cell = editableCellAt(rowIndex, col);
+      if (cell) setEditableCellValue(cell, line[selectedIndex] ?? line[0] ?? '');
+    });
+  });
+  finishTableEditUndo('Columnas pegadas');
+  return true;
+}
+function sortRowsBy(key, dir) {
+  if (!key || !dir) return;
+  pushUndoSnapshot();
+  const numeric = key === 'cantidad' || key === 'precio' || key === 'descuento' || key === 'precioFinal';
+  const factor = dir === 'desc' ? -1 : 1;
+  rowsData.sort((a, b) => {
+    const av = key === 'precioFinal' ? calcPrecioFinal(a) : (key === 'descuento' ? Number(a.descuentoAdicional || 0) : (numeric ? moneyNumber(a[key]) : norm(a[key])));
+    const bv = key === 'precioFinal' ? calcPrecioFinal(b) : (key === 'descuento' ? Number(b.descuentoAdicional || 0) : (numeric ? moneyNumber(b[key]) : norm(b[key])));
+    if (numeric) return (av - bv) * factor;
+    return String(av).localeCompare(String(bv), 'es') * factor;
+  });
+  clearTableSelections();
+  saveRows();
+  render();
+}
+function initFuncionesJsBindings() {
+  undoStack = FX.createUndoStack ? FX.createUndoStack({
+    getState: rowsState,
+    restoreState: restoreRowsState,
+    onStatus: show
+  }) : null;
+
+  if (FX.bindLabelSelect) FX.bindLabelSelect({ root: document });
+
+  if (FX.bindLiveLocaleNumber) FX.bindLiveLocaleNumber({
+    root: document.querySelector('.toolbar'),
+    selector: '.provider-percent-live',
+    decimals: 2,
+    suffix: ' %'
+  });
+
+  if (FX.bindTableSelectPaste) tableSelectionApi = FX.bindTableSelectPaste({
+    root: document.querySelector('.table-wrap'),
+    cellSelector: '[data-field][data-row][data-col]',
+    columnSelector: '[data-col-select]',
+    cornerSelector: '[data-table-corner]',
+    selectedClass: 'is-selected',
+    activeClass: 'is-active-cell',
+    clearOnDelete: false,
+    getPosition: editableCellPosition,
+    findCell: editableCellAt,
+    getCellValue: getEditableCellValue,
+    setCellValue: setEditableCellValue,
+    pasteText: (text) => pasteIntoSelectedColumns(text),
+    afterPaste: (rows) => finishTableEditUndo(`${rows.length} fila${rows.length === 1 ? '' : 's'} pegada${rows.length === 1 ? '' : 's'}`),
+    afterClear: () => finishTableEditUndo('Celdas borradas'),
+    selectOnCellMouseDown: true,
+    afterSelect: (cells) => {
+      const cell = cells[cells.length - 1];
+      if (cell) {
+        cell.focus?.({ preventScroll: true });
+        selectEditableCellText(cell);
+      }
+    }
+  });
+
+  if (FX.bindTableSort) FX.bindTableSort({
+    root: document.querySelector('.head'),
+    headerSelector: '[data-sort-key]',
+    sort: sortRowsBy
+  });
+
+  if (FX.bindRawCurrencySelection) FX.bindRawCurrencySelection({
+    root: el.rows,
+    selector: '[data-currency-cell="1"]',
+    prefix: '$ ',
+    decimals: 2,
+    selectedClass: 'currency-raw-selected'
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (FX.isUndoShortcut ? FX.isUndoShortcut(event) : (event.ctrlKey && !event.shiftKey && String(event.key || '').toLowerCase() === 'z')) {
+      if (undoStack?.undo()) event.preventDefault();
+    }
+  });
+  document.addEventListener('keydown', handleRuleNavigation, true);
+}
+
+el.providerInput.addEventListener('input', () => {
+  el.providerInput.dataset.fullSelected = '0';
+  providerMouseEdit = true;
+  provider = null;
+  openProviderList();
+});
+el.providerInput.addEventListener('focus', () => {
+  activeToolbarField = el.providerInput;
+  if (providerMouseEdit) return;
+  if (suppressFullSelectTarget === el.providerInput) {
+    suppressFullSelectTarget = null;
+    return;
+  }
+  scheduleFullSelect(el.providerInput);
+});
+el.providerInput.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented) return;
+  if (event.key === 'F4') {
+    event.preventDefault();
+    openProviderList();
+    return;
+  }
+  if (event.key === 'ArrowDown') {
+    if (el.providerList.classList.contains('open')) {
+      event.preventDefault();
+      moveProviderActive(1);
+    }
+    return;
+  }
+  if (event.key === 'ArrowUp') {
+    if (el.providerList.classList.contains('open')) {
+      event.preventDefault();
+      moveProviderActive(-1);
+    }
+    return;
+  }
+  if (event.key === 'Enter') {
+    if (!el.providerInput.value.trim()) {
+      closeProviderList();
+      focusNextToolbarField(el.providerInput, 1);
+      event.preventDefault();
+      return;
+    }
+    const active = el.providerList.querySelector('.combo-option.active[data-id]');
+    if (active) {
+      event.preventDefault();
+      pickProviderById(active.dataset.id);
+      focusNextToolbarField(el.providerInput, 1);
+      return;
+    }
+    if (!el.providerList.classList.contains('open') && focusNextToolbarField(el.providerInput, 1)) event.preventDefault();
+  }
+});
+el.providerInput.addEventListener('blur', () => {
+  providerMouseEdit = false;
+});
+el.providerList.addEventListener('mousedown', (event) => {
+  const option = event.target.closest('[data-id]');
+  if (!option) return;
+  event.preventDefault();
+  pickProviderById(option.dataset.id);
+});
+document.addEventListener('mousedown', (event) => {
+  if (!event.target.closest('#providerCombo')) closeProviderList();
+});
+[el.providerInvoiceDiscount, el.providerFinalInvoiceDiscount, el.providerFreight, el.providerIva].forEach((input) => {
+  input.addEventListener('input', () => { input.dataset.fullSelected = '0'; });
+  input.addEventListener('focus', () => {
+    input.value = rawNumber(moneyNumber(input.value));
+    if (suppressFullSelectTarget === input) {
+      suppressFullSelectTarget = null;
+      return;
+    }
+    scheduleFullSelect(input);
+  });
+  input.addEventListener('change', updateProviderOverrides);
+  input.addEventListener('blur', () => { updateProviderOverrides(); renderProviderInfo(); });
+});
+el.providerIvaIncluded.addEventListener('keydown', (event) => {
+  if (event.key === ' ') {
+    event.preventDefault();
+    el.providerIvaIncluded.checked = !el.providerIvaIncluded.checked;
+    updateProviderOverrides();
+  }
+});
+el.providerIvaIncluded.addEventListener('change', updateProviderOverrides);
+document.querySelector('.toolbar').addEventListener('pointerdown', toolbarFieldPointerDown, true);
+document.addEventListener('focusin', (event) => {
+  if (!event.target.closest?.('.toolbar')) {
+    activeToolbarField = null;
+    providerMouseEdit = false;
+  }
+});
+document.getElementById('viewProviderBtn').addEventListener('click', openProviderModal);
+document.getElementById('editProviderModalBtn').addEventListener('click', () => setProviderModalEditing(true));
+document.getElementById('saveProviderModalBtn').addEventListener('click', async () => {
+  try {
+    await saveProviderModal();
+  } catch (error) {
+    console.error(error);
+    show('No se pudo guardar el proveedor');
+  }
+});
+document.getElementById('closeProviderModalBtn').addEventListener('click', closeProviderModal);
+document.getElementById('closeProviderModalActionBtn').addEventListener('click', closeProviderModal);
+document.getElementById('providerModal').addEventListener('mousedown', (event) => {
+  if (event.target === document.getElementById('providerModal')) closeProviderModal();
+});
+document.getElementById('copyBtn').addEventListener('click', () => copyGreen().catch((error) => { console.error(error); show('No pude copiar'); }));
+el.corner.addEventListener('click', () => el.corner.classList.toggle('active'));
+el.corner.addEventListener('dblclick', (event) => {
+  event.preventDefault();
+  pasteAll().catch((error) => { console.error(error); show('No pude pegar'); });
+});
+el.rows.addEventListener('focusin', (event) => {
+  const cell = event.target.closest('[data-field]');
+  if (!cell) return;
+  startCellEditSnapshot();
+  if (cell.dataset.field === 'precio') cell.textContent = getEditableCellValue(cell);
+  if (suppressFullSelectTarget === cell) {
+    suppressFullSelectTarget = null;
+    return;
+  }
+  selectEditableCellText(cell);
+});
+document.querySelector('.table-wrap').addEventListener('mousedown', (event) => {
+  const rowSelect = event.target.closest('[data-row-select]');
+  if (rowSelect) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    selectTableRow(rowSelect.dataset.rowSelect, event);
+    return;
+  }
+  const colSelect = event.target.closest('[data-col-select]');
+  if (colSelect) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    selectTableCol(colSelect.dataset.colSelect, event);
+    return;
+  }
+  const cell = event.target.closest('[data-field][data-row][data-col]');
+  if (cell) {
+    if (placeCaretOnMouseClick(cell, event)) {
+      event.stopImmediatePropagation();
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    focusNavigationTarget(cell);
+  }
+});
+el.rows.addEventListener('input', (event) => {
+  const cell = event.target.closest('[data-field]');
+  const rowEl = event.target.closest('.row');
+  if (!cell || !rowEl) return;
+  cell.dataset.fullSelected = '0';
+  const row = rowsData.find((item) => item.id === rowEl.dataset.id);
+  if (!row) return;
+  const field = cell.dataset.field;
+  if (field === 'precio') row.precio = moneyNumber(cell.textContent);
+  else if (field === 'cantidad') row.cantidad = rawNumber(moneyNumber(cell.textContent));
+  else if (field === 'descuento') row.descuentoAdicional = parsePercent(cell.textContent);
+  else row[field] = String(cell.textContent || '').trim();
+  editHadChanges = true;
+  saveRows();
+  if (field === 'descuento' || field === 'precio' || field === 'cantidad') updateCalculatedCells();
+});
+el.rows.addEventListener('blur', (event) => {
+  const cell = event.target.closest('[data-field]');
+  if (!cell) return;
+  commitCellEditSnapshot();
+  if (cell.dataset.field === 'precio') cell.textContent = money(rowFromCell(cell)?.precio || 0);
+  if (cell.dataset.field === 'descuento') {
+    const row = rowFromCell(cell);
+    cell.textContent = row?.descuentoAdicional ? percent(row.descuentoAdicional) : '';
+  }
+  if (!el.rows.contains(event.relatedTarget)) render();
+}, true);
+el.rows.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented) return;
+  const cell = event.target.closest('[contenteditable="true"]');
+  if (!cell) return;
+  if (isPrintableTypingKey(event)) cell.dataset.fullSelected = '0';
+  if (isPrintableTypingKey(event) || event.key === 'F2') mouseEditTarget = cell;
+  if (event.key === 'F2') {
+    event.preventDefault();
+    const text = cell.textContent || '';
+    const selection = window.getSelection();
+    const allSelected = selection?.toString?.() === text && text.length > 0;
+    if (allSelected) placeCaretEnd(cell);
+    else selectEditableCellText(cell);
+    return;
+  }
+  if (event.code === 'NumpadDecimal') {
+    event.preventDefault();
+    document.execCommand('insertText', false, ',');
+  }
+});
+document.addEventListener('keydown', (event) => {
+  const key = event.key.toLowerCase();
+  if (event.code === 'NumpadDecimal' && event.target?.matches?.('input[inputmode="decimal"]')) {
+    event.preventDefault();
+    const input = event.target;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    input.value = `${input.value.slice(0, start)},${input.value.slice(end)}`;
+    input.setSelectionRange(start + 1, start + 1);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (event.ctrlKey && key === 'v' && el.corner.classList.contains('active')) {
+    event.preventDefault();
+    pasteAll().catch((error) => { console.error(error); show('No pude pegar'); });
+  }
+  if (event.key === 'Delete' && selectedRows.size) {
+    event.preventDefault();
+    deleteSelectedRows();
+  }
+});
+document.querySelector('.table-wrap').addEventListener('keydown', (event) => {
+  if (event.key !== 'Delete') return;
+  const selectedCells = tableSelectionApi?.getSelectedCells?.() || [];
+  if (!selectedRows.size && !selectedCells.length) return;
+  event.preventDefault();
+  if (selectedRows.size) {
+    deleteSelectedRows();
+    return;
+  }
+  selectedCells.forEach((cell) => setEditableCellValue(cell, ''));
+  finishTableEditUndo('Celdas borradas');
+});
+
+initFuncionesJsBindings();
+loadRows();
+render();
+Promise.all([loadProviders(), loadIndexCodes()]).then(() => render());
+</script>
+</body>
+</html>

@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diferencias proveedores</title>
+  <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;800;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
+  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="diferencias_proveedores"></script>
+  <script src="funciones.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    :root{--red:#df1731;--blue:#0b85d8;--cyan:#16c8ff;--purple:#6c4fc7;--bg:#eefbff;--panel:#fff;--line:#9fe0ff;--soft:#eaf8ff;--text:#18223a;--muted:#66708e;--ok:#00b86b;--bad:#ff3f6c;--warn:#ffb020;--shadow:0 14px 34px rgba(35,112,190,.14)}
+    html,body{margin:0;height:100%;overflow:hidden}
+    body{font-family:Barlow,Arial,sans-serif;color:var(--text);background:linear-gradient(135deg,#f8feff,#e9f9ff 58%,#f4f1ff)}
+    .app{height:100dvh;display:grid;grid-template-rows:auto auto minmax(360px,1fr) auto;gap:12px;padding:12px;overflow:hidden}
+    header,.toolbar,.board,.diff-panel{border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.94);box-shadow:var(--shadow)}
+    header{display:flex;align-items:center;gap:14px;padding:10px 14px}
+    header img{width:44px;background:#fff;border-radius:8px}
+    h1{margin:0;font:900 34px/1 "Barlow Condensed";color:var(--red);text-transform:uppercase}
+    .hint{margin-left:auto;color:var(--muted);font-weight:800;font-size:13px}
+    .toolbar{display:flex;align-items:center;gap:10px;padding:10px 12px}
+    button{height:38px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--text);font:900 17px "Barlow Condensed";padding:7px 16px;cursor:pointer;box-shadow:0 8px 18px rgba(35,112,190,.12)}
+    button.primary{background:linear-gradient(135deg,var(--blue),var(--cyan));color:#fff}
+    button.danger{background:linear-gradient(135deg,var(--red),#ff6b91);color:#fff;border-color:#ff9cb2}
+    .stat{display:grid;gap:1px;min-width:140px;padding:7px 10px;border:1px solid #d5efff;border-radius:12px;background:#f8fdff}
+    .stat span{font:800 12px "Barlow Condensed";color:var(--muted);text-transform:uppercase}
+    .stat strong{font-size:17px}
+    .stat[hidden]{display:none}
+    .date-filter{min-width:240px}
+    .date-fields{display:flex;gap:6px}
+    .date-fields input{height:24px;border:1px solid #d5efff;border-radius:8px;background:#fff;padding:2px 6px;font:800 12px Barlow,Arial;color:var(--text)}
+    .board{min-height:360px;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px;overflow:hidden}
+    .table-card{min-width:0;min-height:0;display:grid;grid-template-rows:auto 1fr auto;border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden}
+    .table-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:linear-gradient(90deg,var(--soft),#fff);border-bottom:1px solid var(--line)}
+    .table-title{font:900 23px/1 "Barlow Condensed";color:var(--blue);text-transform:uppercase}
+    .table-tip{font-size:12px;color:var(--muted);font-weight:800}
+    .grid-wrap{overflow:auto}
+    table{border-collapse:separate;border-spacing:0;width:100%;min-width:760px;font-size:14px}
+    th,td{border-right:1px solid #d8eeff;border-bottom:1px solid #edf6ff;height:30px;white-space:nowrap}
+    th{position:sticky;top:0;z-index:2;background:#eaf8ff;color:#243057;font:900 15px "Barlow Condensed";text-align:left;padding:6px 8px;cursor:pointer;user-select:none}
+    th.corner{left:0;width:28px;text-align:center;color:var(--red);z-index:3}
+    td.rowmark{position:sticky;left:0;background:#f7fdff;color:var(--purple);text-align:center;font-weight:900;width:28px}
+    td.rowmark{cursor:pointer}
+    td.rowmark-selected{background:#b9dcff!important;color:#043a7a!important;box-shadow:inset 0 0 0 2px #168fff}
+    tr:has(td.rowmark-selected) td{box-shadow:inset 0 0 0 999px rgba(0,120,255,.18)}
+    tr:has(td.rowmark-selected) input{font-weight:900}
+    input{width:100%;height:29px;border:0;outline:0;background:transparent;padding:4px 7px;font:14px Barlow,Arial;color:var(--text)}
+    .money{text-align:right;font-variant-numeric:tabular-nums}
+    .selected-col th,.selected-col td{background:#f0fbff}
+    .selected-table th,.selected-table td{background:#eef9ff}
+    tr.row-ok td{background:#40bf87!important}
+    tr.row-fail td{background:#e73958!important;color:#fff}
+    tr.row-fail input{color:#fff}
+    td.field-match{background:#07b96f!important;color:#fff}
+    td.field-match input{color:#fff;font-weight:900}
+    tr.row-ok td.field-match,tr.row-manual td.field-match{background:#009f5f!important;color:#fff}
+    tr.row-fail td.field-match{background:#9f1028!important}
+    tr.row-manual td{background:#40bf87!important}
+    tr.row-muted td{background:#fff!important;color:var(--text)!important}
+    tr.row-muted input{color:var(--text)!important}
+    .multi-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-left:6px;border-radius:999px;background:#ffb020;color:#fff;font:900 12px Barlow}
+    .active-cell{outline:3px solid var(--purple);outline-offset:-3px;background:transparent!important;box-shadow:inset 0 0 0 999px rgba(255,255,255,.12)}
+    .table-foot{display:flex;gap:12px;align-items:center;padding:7px 10px;background:#fff;color:var(--muted);font-weight:800;font-size:13px}
+    .diff-panel{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+    .diff-panel.result-popup{width:min(1100px,calc(100vw - 28px));height:min(720px,calc(100dvh - 44px));background:#fff}
+    .diff-head{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
+    .diff-title{font:900 24px/1 "Barlow Condensed";color:var(--red);text-transform:uppercase}
+    .diff-list{overflow:auto;padding:8px 12px;background:#fbfeff}
+    .progress-wrap{height:8px;margin:0 12px 8px;border-radius:999px;background:#dff4ff;overflow:hidden}
+    .progress-bar{width:0;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--blue),var(--cyan));transition:width .25s ease}
+    .diff-row{display:grid;grid-template-columns:110px 90px 110px 150px 1fr 120px;gap:8px;align-items:center;min-height:32px;border-bottom:1px solid #edf6ff;font-size:14px}
+    .diff-row.head{position:sticky;top:0;background:#eaf8ff;font:900 15px "Barlow Condensed";color:#243057}
+    .diff-row.ok{background:#e9fff4;color:#064b30}
+    .diff-row.fail{background:#e73958;color:#fff}
+    .diff-row.fail .badge{background:#fff;color:#e73958;border-color:#fff}
+    .match-cell{border-radius:8px;padding:4px 7px;background:#00b86b;color:#fff;font-weight:900}
+    .diff-row.fail .match-cell{background:#9f1028}
+    .badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 9px;font-weight:900;font-size:12px}
+    .badge.bad{background:#ffe7ee;color:var(--bad);border:1px solid #ff9cb2}
+    .badge.warn{background:#fff5dc;color:#a66a00;border:1px solid #ffd16a}
+    .modal{position:fixed;inset:0;z-index:20;display:none;place-items:center;background:rgba(18,28,48,.42);backdrop-filter:blur(4px)}
+    .modal.open{display:grid}
+    .modal-card{width:min(760px,calc(100vw - 28px));max-height:82dvh;display:grid;grid-template-rows:auto 1fr auto;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 24px 60px rgba(18,28,48,.28);overflow:hidden;transform:scale(.75);transform-origin:center}
+    .modal-head,.modal-actions{display:flex;align-items:center;gap:10px;padding:13px 16px;background:#f8fdff;border-bottom:1px solid var(--line)}
+    .modal-actions{justify-content:flex-end;border-top:1px solid var(--line);border-bottom:0}
+    .modal-title{font:900 28px/1 "Barlow Condensed";color:var(--red);text-transform:uppercase}
+    .equiv-body{min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;overflow:auto}
+    .equiv-col{min-height:260px;border:1px solid #d5efff;border-radius:14px;background:#fbfeff;padding:12px}
+    .equiv-col h3{margin:0 0 10px;font:900 20px/1 "Barlow Condensed";color:var(--blue);text-transform:uppercase}
+    .chip-list{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+    .pay-chip{min-width:120px;text-align:left;border:1px solid #ccecff;border-radius:999px;background:#fff;color:var(--text);font-weight:900;padding:7px 12px;cursor:pointer}
+    .pay-chip.pending{outline:3px solid rgba(11,133,216,.28)}
+    .pay-chip.pair-0{background:#e4f4ff;border-color:#0b85d8;color:#064f90}
+    .pay-chip.pair-1{background:#fff5d8;border-color:#ffb020;color:#815300}
+    .pay-chip.pair-2{background:#e9fff4;border-color:#00b86b;color:#007445}
+    .pay-chip.pair-3{background:#f0e9ff;border-color:#6c4fc7;color:#49319d}
+    .equiv-note{padding:0 16px 10px;color:var(--muted);font-size:13px;font-weight:800;white-space:pre-line}
+    .match-list{display:grid;gap:10px;padding:14px;overflow:auto}
+    .match-option{display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;border:1px solid #d5efff;border-radius:12px;background:#fbfeff;padding:10px;font-weight:800}
+    .match-option strong{color:var(--blue)}
+    .match-option small{display:block;color:var(--muted);font-weight:800}
+    .context-menu{position:fixed;z-index:40;display:none;min-width:190px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 18px 42px rgba(18,28,48,.24);padding:8px}
+    .context-menu.open{display:block}
+    .context-menu button{width:100%;height:34px;text-align:left;box-shadow:none}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
+      <h1>Diferencias proveedores</h1>
+      <div class="hint">Pega por columna, por celda o toca la esquina superior izquierda para pegar todo</div>
+      <button type="button" onclick="location.href='menu.html'">Volver al menu</button>
+    </header>
+    <section class="toolbar">
+      <button class="primary" id="compareBtn" type="button">Buscar diferencias</button>
+      <button id="equivBtn" type="button">Equivalencias</button>
+      <button class="danger" id="clearAllBtn" type="button">Limpiar todo</button>
+      <div class="stat"><span>Tabla izquierda</span><strong id="leftCount">0 filas</strong></div>
+      <div class="stat"><span>Tabla derecha</span><strong id="rightCount">0 filas</strong></div>
+      <div class="stat"><span>Diferencias</span><strong id="diffCount">0</strong></div>
+      <div class="stat" id="selectionStat" hidden><span>Suma seleccion</span><strong id="selectionSum">$ 0,00</strong></div>
+      <div class="stat date-filter"><span>Entre fechas</span><div class="date-fields"><input id="dateFrom" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" autocomplete="off" title="Desde"><input id="dateTo" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" autocomplete="off" title="Hasta"></div></div>
+    </section>
+    <main class="board">
+      <section class="table-card" data-side="left">
+        <div class="table-head"><div class="table-title">Proveedor / Excel 1</div><div class="table-tip">Formato tipo InfProvSaldos</div></div>
+        <div class="grid-wrap"><table id="leftTable"></table></div>
+        <div class="table-foot"><span id="leftInfo">Seleccioná una celda o encabezado.</span></div>
+      </section>
+      <section class="table-card" data-side="right">
+        <div class="table-head"><div class="table-title">Sistema / Excel 2</div><div class="table-tip">Misma estructura para comparar</div></div>
+        <div class="grid-wrap"><table id="rightTable"></table></div>
+        <div class="table-foot"><span id="rightInfo">Seleccioná una celda o encabezado.</span></div>
+      </section>
+    </main>
+  </div>
+  <div class="modal" id="diffModal" aria-hidden="true">
+    <section class="diff-panel result-popup">
+      <div class="diff-head"><div class="diff-title">Resultado</div><span class="hint">Compara por Tipo + Nro factura + Debe/Haber</span><button id="closeDiffBtn" type="button">Cerrar</button></div>
+      <div class="progress-wrap" id="compareProgressWrap" hidden><div class="progress-bar" id="compareProgress"></div></div>
+      <div class="diff-list" id="diffList"></div>
+    </section>
+  </div>
+  <div class="modal" id="equivModal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head"><div class="modal-title">Equivalencias</div><span class="hint">Toca un tipo de cada lado para unirlos</span></div>
+      <div class="equiv-body">
+        <section class="equiv-col"><h3>Tabla izquierda</h3><div class="chip-list" id="leftChips"></div></section>
+        <section class="equiv-col"><h3>Tabla derecha</h3><div class="chip-list" id="rightChips"></div></section>
+      </div>
+      <div class="equiv-note" id="equivNote">Las equivalencias se usan para comparar el tipo de pago.</div>
+      <div class="modal-actions">
+        <button id="clearEquivBtn" type="button">Limpiar equivalencias</button>
+        <button class="primary" id="closeEquivBtn" type="button">Aplicar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="matchModal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head"><div class="modal-title">Elegir coincidencia</div><span class="hint">Doble click en una fila con varias coincidencias</span></div>
+      <div class="match-list" id="matchList"></div>
+      <div class="modal-actions">
+        <button id="clearMatchBtn" type="button">Quitar seleccion</button>
+        <button class="primary" id="closeMatchBtn" type="button">Cerrar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="clearAllModal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head"><div class="modal-title">Limpiar todo</div><span class="hint">Esta accion borra las dos tablas y las equivalencias guardadas.</span></div>
+      <div style="padding:18px;font-weight:900;color:var(--text)">Confirmame una vez mas para limpiar todo.</div>
+      <div class="modal-actions">
+        <button id="cancelClearAllBtn" type="button">Cancelar</button>
+        <button class="danger" id="confirmClearAllBtn" type="button">Limpiar todo</button>
+      </div>
+    </div>
+  </div>
+  <div class="context-menu" id="rowContextMenu">
+    <button id="alignRowsBtn" type="button">Alinear</button>
+    <button id="showMatchesBtn" type="button">Ver coincidencias</button>
+    <button id="matchRowsBtn" type="button">Marcar coincidencia</button>
+    <button id="unifyRowsBtn" type="button">Unificar seleccionadas</button>
+    <button id="splitRowsBtn" type="button">Separar seleccionadas</button>
+    <button id="clearRowsMatchBtn" type="button">Quitar coincidencia</button>
+  </div>
+  <script>
+    const columns=[
+      {key:'fecha',label:'fecha',type:'date'},
+      {key:'tipo',label:'Tipo pago'},
+      {key:'nro',label:'Nro Fact'},
+      {key:'debe',label:'debe',money:true},
+      {key:'haber',label:'haber',money:true},
+      {key:'saldo',label:'saldo',money:true}
+    ];
+    const state={left:[],right:[],selection:null,equivalences:[],pendingEquiv:null,marks:{left:{},right:{}},multiCandidates:{},manualMatches:{},matchTarget:null,focusPair:null,ctrlPick:null,ctrlDown:false,freeScrollUntil:0,scrollSyncing:false,rowSelection:{left:[],right:[]},colSelection:{left:[],right:[]},lastRowSelection:{left:null,right:null},lastColSelection:{left:null,right:null},rowGroups:{left:[],right:[]},contextRow:null,openingContextMenu:false};
+    const rows=90;
+    const cacheKey='diferenciasProveedores.v1';
+    const SUPABASE_URL='https://tizyjenayrcdkcodsjnc.supabase.co';
+    const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+    const SUPABASE_STATE_TABLE='diferencias_proveedores_estados';
+    const SUPABASE_STATE_ID='principal';
+    let remoteSaveTimer=null;
+    const els={leftTable:document.getElementById('leftTable'),rightTable:document.getElementById('rightTable'),leftInfo:document.getElementById('leftInfo'),rightInfo:document.getElementById('rightInfo'),leftCount:document.getElementById('leftCount'),rightCount:document.getElementById('rightCount'),diffCount:document.getElementById('diffCount'),selectionStat:document.getElementById('selectionStat'),selectionSum:document.getElementById('selectionSum'),dateFrom:document.getElementById('dateFrom'),dateTo:document.getElementById('dateTo'),diffList:document.getElementById('diffList')};
+
+    function blankRow(){return Object.fromEntries(columns.map(col=>[col.key,'']))}
+    function normalizeRows(rowsData){return Array.from({length:rows},(_,i)=>({...blankRow(),...(rowsData?.[i]||{})}))}
+    function supabaseHeaders(extra={}){return {apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json',...extra}}
+    function statePayload(){
+      return {
+        left:state.left,
+        right:state.right,
+        equivalences:state.equivalences,
+        manualMatches:state.manualMatches,
+        rowGroups:state.rowGroups,
+        dateFrom:els.dateFrom.value,
+        dateTo:els.dateTo.value,
+        updatedAt:new Date().toISOString()
+      };
+    }
+    function applyStatePayload(data={}){
+      state.left=normalizeRows(data.left);
+      state.right=normalizeRows(data.right);
+      state.equivalences=Array.isArray(data.equivalences)?data.equivalences:[];
+      state.manualMatches=data.manualMatches&&typeof data.manualMatches==='object'?data.manualMatches:{};
+      state.rowGroups=data.rowGroups&&typeof data.rowGroups==='object'?{left:data.rowGroups.left||[],right:data.rowGroups.right||[]}:{left:[],right:[]};
+      els.dateFrom.value=data.dateFrom||'';
+      els.dateTo.value=data.dateTo||'';
+    }
+    function saveCache(){
+      const payload=statePayload();
+      localStorage.setItem(cacheKey,JSON.stringify(payload));
+      queueRemoteSave(payload);
+    }
+    function loadLocalCache(){
+      try{
+        const data=JSON.parse(localStorage.getItem(cacheKey)||'{}');
+        applyStatePayload(data);
+      }catch{state.left=normalizeRows();state.right=normalizeRows();state.equivalences=[]}
+    }
+    async function loadRemoteCache(){
+      const url=`${SUPABASE_URL}/rest/v1/${SUPABASE_STATE_TABLE}?id=eq.${encodeURIComponent(SUPABASE_STATE_ID)}&select=payload&limit=1`;
+      const response=await fetch(url,{headers:supabaseHeaders()});
+      if(!response.ok)throw new Error(await response.text());
+      const rows=await response.json();
+      const payload=rows?.[0]?.payload;
+      if(payload&&typeof payload==='object'){
+        applyStatePayload(payload);
+        localStorage.setItem(cacheKey,JSON.stringify(payload));
+        return true;
+      }
+      return false;
+    }
+    function queueRemoteSave(payload=statePayload()){
+      clearTimeout(remoteSaveTimer);
+      remoteSaveTimer=setTimeout(()=>saveRemoteCache(payload).catch(console.error),450);
+    }
+    async function saveRemoteCache(payload=statePayload()){
+      const response=await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_STATE_TABLE}?on_conflict=id`,{
+        method:'POST',
+        headers:supabaseHeaders({Prefer:'resolution=merge-duplicates,return=minimal'}),
+        body:JSON.stringify({id:SUPABASE_STATE_ID,payload,updated_at:new Date().toISOString()})
+      });
+      if(!response.ok)throw new Error(await response.text());
+    }
+    async function init(){
+      loadLocalCache();
+      let remoteLoaded=false;
+      try{remoteLoaded=await loadRemoteCache()}catch(error){console.error(error)}
+      compare();renderAll();
+      if(!remoteLoaded)saveCache();
+    }
+    function syncTableScrolls(){
+      const wraps=[...document.querySelectorAll('.table-card .grid-wrap')];
+      wraps.forEach(wrap=>{
+        if(wrap.dataset.lastTop===undefined){wrap.dataset.lastTop=String(wrap.scrollTop);wrap.dataset.lastLeft=String(wrap.scrollLeft)}
+        wrap.onscroll=()=>{
+          const top=wrap.scrollTop,left=wrap.scrollLeft;
+          const dy=top-Number(wrap.dataset.lastTop||0),dx=left-Number(wrap.dataset.lastLeft||0);
+          wrap.dataset.lastTop=String(top);wrap.dataset.lastLeft=String(left);
+          if(state.scrollSyncing||state.ctrlDown||Date.now()<state.freeScrollUntil)return;
+          if(!dy&&!dx)return;
+          state.scrollSyncing=true;
+          const currentWraps=[...document.querySelectorAll('.table-card .grid-wrap')];
+          currentWraps.forEach(other=>{
+            if(other===wrap)return;
+            other.scrollTop+=dy;other.scrollLeft+=dx;
+            other.dataset.lastTop=String(other.scrollTop);other.dataset.lastLeft=String(other.scrollLeft);
+          });
+          requestAnimationFrame(()=>{state.scrollSyncing=false});
+        };
+      });
+    }
+    function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+    function parseNumber(v){const text=String(v??'').replace(/\$/g,'').replace(/\s/g,'').trim();if(!text)return 0;return Number(text.replace(/\.(?=\d{3}(?:\D|$))/g,'').replace(',','.'))||0}
+    function formatMoney(v){const n=parseNumber(v);return n?n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):''}
+    function normalizeDate(v){const s=String(v??'').trim();let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return`${m[3].padStart(2,'0')}/${m[2].padStart(2,'0')}/${m[1]}`;m=s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);if(m)return`${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/${m[3].length===2?'20'+m[3]:m[3]}`;return s}
+    function rowHasData(row){return columns.some(col=>String(row[col.key]??'').trim())}
+    function filledRows(side){return state[side].filter(rowHasData)}
+    function renderTable(side){
+      const table=els[`${side}Table`];
+      const selected=state.selection?.side===side?state.selection:null;
+      const pickedCols=state.colSelection?.[side]||[];
+      table.className=selected?.mode==='table'?'selected-table':'';
+      table.innerHTML=`<thead><tr><th class="corner" data-corner="1">*</th>${columns.map((col,i)=>`<th data-col="${i}" class="${pickedCols.includes(i)||selected?.mode==='col'&&selected.col===i?'selected-col':''}">${esc(col.label)}</th>`).join('')}</tr></thead><tbody>${state[side].map((row,r)=>{const focused=!state.focusPair||state.focusPair[side]===r;const mark=focused?state.marks?.[side]?.[r]:null;const manual=isManualMatchedRow(side,r);const multi=side==='right'&&state.multiCandidates?.[r]?.length>1;return `<tr class="${!focused?'row-muted ':''}${manual?'row-manual ':''}${mark?.status==='ok'?'row-ok':mark?.status==='fail'?'row-fail':''}"><td class="rowmark">${r+1}${multi?`<span class="multi-badge">${state.multiCandidates[r].length}</span>`:''}</td>${columns.map((col,c)=>`<td class="${pickedCols.includes(c)||selected?.mode==='col'&&selected.col===c?'selected-col':''} ${mark?.fields?.includes(col.key)||mark?.fields?.includes('importe')&&(col.key==='debe'||col.key==='haber')?'field-match':''}"><input data-side="${side}" data-row="${r}" data-col="${c}" class="${col.money?'money':''} ${selected?.mode==='cell'&&selected.row===r&&selected.col===c?'active-cell':''}" value="${esc(row[col.key])}"></td>`).join('')}</tr>`}).join('')}</tbody>`;
+      els[`${side}Count`].textContent=`${filledRows(side).length} filas`;
+    }
+    function renderTableUnified(side){
+      const table=els[`${side}Table`];
+      const selected=state.selection?.side===side?state.selection:null;
+      const groups=state.rowGroups?.[side]||[];
+      const pickedCols=state.colSelection?.[side]||[];
+      table.className=selected?.mode==='table'?'selected-table':'';
+      table.innerHTML=`<thead><tr><th class="corner" data-corner="1">*</th>${columns.map((col,i)=>`<th data-col="${i}" class="${pickedCols.includes(i)||selected?.mode==='col'&&selected.col===i?'selected-col':''}">${esc(col.label)}</th>`).join('')}</tr></thead><tbody>${state[side].map((row,r)=>{const focused=!state.focusPair||state.focusPair[side]===r||groupRowsFor(side,Number(state.focusPair[side])).includes(r);const mark=focused?state.marks?.[side]?.[r]:null;const manual=isManualMatchedRow(side,r);const multi=side==='right'&&state.multiCandidates?.[r]?.length>1;const picked=state.rowSelection?.[side]?.includes(r);const grouped=groups.some(group=>group.rows?.includes(r));return `<tr class="${!focused?'row-muted ':''}${manual?'row-manual ':''}${mark?.status==='ok'?'row-ok':mark?.status==='fail'?'row-fail':''}"><td class="rowmark ${picked?'rowmark-selected':''}" data-rowmark="1" data-side="${side}" data-row="${r}">${r+1}${grouped?'<span class="multi-badge">U</span>':''}${multi?`<span class="multi-badge">${state.multiCandidates[r].length}</span>`:''}</td>${columns.map((col,c)=>`<td class="${pickedCols.includes(c)||selected?.mode==='col'&&selected.col===c?'selected-col':''} ${mark?.fields?.includes(col.key)||mark?.fields?.includes('importe')&&(col.key==='debe'||col.key==='haber')?'field-match':''}"><input data-side="${side}" data-row="${r}" data-col="${c}" class="${col.money?'money':''} ${selected?.mode==='cell'&&selected.row===r&&selected.col===c?'active-cell':''}" value="${esc(row[col.key])}"></td>`).join('')}</tr>`}).join('')}</tbody>`;
+      els[`${side}Count`].textContent=`${filledRows(side).length} filas`;
+    }
+    function rowSignedAmount(row){return parseNumber(row.debe||row.haber||0)}
+    function updateSelectionSum(){
+      const leftTotal=state.rowSelection.left.reduce((sum,row)=>sum+rowSignedAmount(state.left[row]||{}),0);
+      const rightTotal=state.rowSelection.right.reduce((sum,row)=>sum+rowSignedAmount(state.right[row]||{}),0);
+      const total=leftTotal-rightTotal;
+      const selectedCount=state.rowSelection.left.length+state.rowSelection.right.length;
+      els.selectionStat.hidden=selectedCount<2;
+      els.selectionSum.textContent=`$ ${total.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    }
+    function isManualMatchedRow(side,row){
+      return Object.entries(state.manualMatches).some(([right,left])=>{
+        if(side==='left'){
+          if(String(right).startsWith('left:'))return Number(String(right).split(':')[1])===row||Number(left)===row;
+          return Number(left)===row;
+        }
+        if(String(left).startsWith('right:'))return Number(right)===row||Number(String(left).split(':')[1])===row;
+        return Number(right)===row;
+      });
+    }
+    function sameSideManualMatchRows(side,row){
+      const matches=[];
+      Object.entries(state.manualMatches).forEach(([right,left])=>{
+        if(side==='left'&&String(right).startsWith('left:')){
+          const a=Number(String(right).split(':')[1]),b=Number(left);
+          if(a===row)matches.push(b);
+          if(b===row)matches.push(a);
+        }
+        if(side==='right'&&String(left).startsWith('right:')){
+          const a=Number(right),b=Number(String(left).split(':')[1]);
+          if(a===row)matches.push(b);
+          if(b===row)matches.push(a);
+        }
+      });
+      return [...new Set(matches)].filter(Number.isFinite);
+    }
+    function parseInputDate(value){
+      const text=String(value||'').trim();
+      if(!text)return NaN;
+      const iso=text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if(iso)return new Date(Number(iso[1]),Number(iso[2])-1,Number(iso[3])).getTime();
+      const parsed=window.CorralonFunciones?.parseFechaFlexible?.(text);
+      return parsed?.date ? parsed.date.getTime() : parseDateValue(text);
+    }
+    function normalizeDateInput(input){
+      const parsed=window.CorralonFunciones?.parseFechaFlexible?.(input.value);
+      if(parsed)input.value=parsed.text;
+      renderAll();
+    }
+    function rowPassesDateFilter(row){
+      const from=parseInputDate(els.dateFrom.value),to=parseInputDate(els.dateTo.value),value=parseDateValue(row.fecha);
+      if(!Number.isFinite(from)&&!Number.isFinite(to))return true;
+      if(!Number.isFinite(value))return false;
+      return (!Number.isFinite(from)||value>=from)&&(!Number.isFinite(to)||value<=to);
+    }
+    function applyDateFilter(){
+      ['left','right'].forEach(side=>{
+        let visible=0;
+        document.querySelectorAll(`#${side}Table tbody tr`).forEach((tr,index)=>{
+          const show=rowPassesDateFilter(state[side][index]||{});
+          tr.hidden=!show;
+          if(show&&rowHasData(state[side][index]||{}))visible++;
+        });
+        els[`${side}Count`].textContent=`${visible} filas`;
+      });
+    }
+    function renderAll(){renderTableUnified('left');renderTableUnified('right');updateSelectionSum();applyDateFilter();syncTableScrolls()}
+    function parseClipboard(text){return String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(line=>line.length).map(line=>line.split('\t'))}
+    function normalizeCell(value,col){const meta=columns[col];if(meta?.money)return formatMoney(value);if(meta?.type==='date')return normalizeDate(value);return String(value??'').trim()}
+    function pasteMatrix(matrix){
+      const sel=state.selection;if(!sel||!matrix.length)return;
+      const target=state[sel.side];
+      if(sel.mode==='table'){
+        matrix.forEach((line,r)=>line.forEach((value,c)=>{if(target[r]&&columns[c])target[r][columns[c].key]=normalizeCell(value,c)}));
+      }else if(sel.mode==='col'){
+        matrix.forEach((line,r)=>{if(target[r])target[r][columns[sel.col].key]=normalizeCell(line[0],sel.col)});
+      }else if(sel.mode==='cols'){
+        const cols=state.colSelection[sel.side]||[];
+        matrix.forEach((line,r)=>cols.forEach((col,index)=>{if(target[r]&&columns[col])target[r][columns[col].key]=normalizeCell(line[index]??line[0],col)}));
+      }else{
+        matrix.forEach((line,ri)=>line.forEach((value,ci)=>{const row=target[sel.row+ri],col=sel.col+ci;if(row&&columns[col])row[columns[col].key]=normalizeCell(value,col)}));
+      }
+      compare();renderAll();saveCache();
+    }
+    function norm(v){return String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim()}
+    function canonicalTipo(tipo,side){
+      const clean=norm(tipo);
+      const pair=state.equivalences.find(eq=>norm(eq[side])===clean);
+      return pair?`eq:${norm(pair.left)}=${norm(pair.right)}`:clean;
+    }
+    function moneyKey(v){return Math.abs(Math.round(parseNumber(v)*100))}
+    function formatCents(cents){return (cents/100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}
+    function rowAmounts(row){return row.__amounts||[moneyKey(row.debe),moneyKey(row.haber)].filter(Boolean)}
+    function rowNros(row){return row.__nros||[norm(row.nro).replace(/^0+/,'')].filter(Boolean)}
+    function rowTipos(row){return row.__tipos||[row.tipo].filter(Boolean)}
+    function rowDates(row){return row.__dates||[row.fecha].filter(Boolean)}
+    function parseDateValue(v){const n=normalizeDate(v).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);return n?new Date(Number(n[3]),Number(n[2])-1,Number(n[1])).getTime():NaN}
+    function datesNear(a,b){const da=parseDateValue(a),db=parseDateValue(b);return Number.isFinite(da)&&Number.isFinite(db)&&Math.abs(da-db)<=7*86400000}
+    function rowsDatesNear(leftRow,rightRow){return rowDates(leftRow).some(leftDate=>rowDates(rightRow).some(rightDate=>datesNear(leftDate,rightDate)))}
+    function rowsNroMatch(leftRow,rightRow){return rowNros(leftRow).some(leftNro=>rowNros(rightRow).some(rightNro=>leftNro&&leftNro===rightNro))}
+    function rowsTipoMatch(leftRow,rightRow){return rowTipos(leftRow).some(leftTipo=>rowTipos(rightRow).some(rightTipo=>canonicalTipo(leftTipo,'left')&&canonicalTipo(leftTipo,'left')===canonicalTipo(rightTipo,'right')))}
+    function amountNear(a,b){if(!a||!b)return false;return Math.abs(a-b)<=Math.max(a,b)*.01}
+    function amountsNear(leftRow,rightRow){
+      const leftAmounts=rowAmounts(leftRow),rightAmounts=rowAmounts(rightRow);
+      return rightAmounts.some(rv=>leftAmounts.some(lv=>amountNear(lv,rv)));
+    }
+    function rowMatchFields(leftRow,rightRow){
+      const matches=[];
+      const extras=[];
+      if(rowsNroMatch(leftRow,rightRow))matches.push('nro');
+      if(amountsNear(leftRow,rightRow))matches.push('importe');
+      if(rowsDatesNear(leftRow,rightRow)){matches.push('fecha');extras.push('fecha')}
+      const tipoOk=rowsTipoMatch(leftRow,rightRow);
+      if(tipoOk){matches.push('tipo');extras.push('tipo')}
+      if(moneyKey(leftRow.saldo)&&moneyKey(rightRow.saldo)&&amountNear(moneyKey(leftRow.saldo),moneyKey(rightRow.saldo))){matches.push('saldo');extras.push('saldo')}
+      if(!tipoOk||!matches.some(field=>field==='nro'||field==='importe')||!extras.length)return [];
+      return matches;
+    }
+    function aggregateRows(side,indexes){
+      const source=indexes.map(i=>state[side][i]).filter(rowHasData);
+      const amountSum=source.flatMap(rowAmounts).reduce((sum,value)=>sum+value,0);
+      const dates=source.flatMap(rowDates).filter(Boolean);
+      const nros=source.flatMap(rowNros).filter(Boolean);
+      const tipos=source.flatMap(rowTipos).filter(Boolean);
+      return {fecha:dates[0]||'',tipo:tipos[0]||'',nro:nros[0]||'',debe:amountSum?formatCents(amountSum):'',haber:'',saldo:'',__dates:dates,__nros:nros,__tipos:tipos,__amounts:amountSum?[amountSum]:[]};
+    }
+    function compareItems(side){
+      const grouped=new Set();
+      const items=[];
+      (state.rowGroups?.[side]||[]).forEach(group=>{
+        const groupRows=[...new Set(group.rows||[])].filter(index=>state[side][index]&&rowHasData(state[side][index]));
+        if(groupRows.length<2)return;
+        groupRows.forEach(index=>grouped.add(index));
+        items.push({row:aggregateRows(side,groupRows),index:groupRows[0],rows:groupRows,groupId:group.id});
+      });
+      state[side].forEach((row,index)=>{if(!grouped.has(index)&&rowHasData(row))items.push({row,index,rows:[index]})});
+      return items;
+    }
+    function candidatesForRight(rightRow,leftRows){
+      return leftRows
+        .filter(item=>rowsDatesNear(item.row,rightRow))
+        .map(item=>({...item,fields:rowMatchFields(item.row,rightRow)}))
+        .filter(item=>item.fields.length);
+    }
+    function bestMatchForRight(rightIndex,rightRow,leftRows){
+      const manual=state.manualMatches[rightIndex];
+      const candidates=candidatesForRight(rightRow,leftRows);
+      if(manual!==undefined){
+        const chosen=candidates.find(item=>String(item.index)===String(manual))||leftRows.find(item=>String(item.index)===String(manual));
+        if(chosen&&!chosen.fields)chosen.fields=rowMatchFields(chosen.row,rightRow);
+        if(chosen)return {...chosen,candidates};
+      }
+      const best=candidates.reduce((current,item)=>item.fields.length>current.fields.length?item:current,{row:null,index:null,fields:[]});
+      return {...best,candidates};
+    }
+    function matchCell(row,key,matches){
+      const value=key==='importe'?(row.debe||row.haber):row[key];
+      return `<div class="${matches.includes(key)?'match-cell':''}">${esc(value||'')}</div>`;
+    }
+    function compare(){
+      const left=compareItems('left');
+      const right=compareItems('right');
+      state.marks={left:{},right:{}};state.multiCandidates={};
+      const matchedLeft=new Set();
+      const results=right.map(item=>{
+        const best=bestMatchForRight(item.index,item.row,left);
+        const manualRight=item.rows.find(rowIndex=>state.manualMatches[rowIndex]!==undefined);
+        const manualLeft=manualRight!==undefined?state.manualMatches[manualRight]:undefined;
+        const chosen=manualLeft!==undefined?{...(left.find(candidate=>candidate.rows.includes(Number(manualLeft))||candidate.index===Number(manualLeft))||best),fields:best.fields.length?best.fields:rowMatchFields((left.find(candidate=>candidate.rows.includes(Number(manualLeft))||candidate.index===Number(manualLeft))||{}).row||{},item.row)}:best;
+        const fechaOk=chosen?.row&&rowsDatesNear(chosen.row,item.row);
+        const status=fechaOk&&(manualLeft!==undefined||chosen.fields.length>=2)?'ok':'fail';
+        const visibleCandidates=manualLeft!==undefined&&chosen.index!==null?[chosen]:best.candidates||[];
+        item.rows.forEach(rowIndex=>{state.multiCandidates[rowIndex]=visibleCandidates;state.marks.right[rowIndex]={status,fields:chosen.fields,leftIndex:chosen.index}});
+        if(status==='ok'&&chosen.index!==null){(chosen.rows||[chosen.index]).forEach(rowIndex=>{state.marks.left[rowIndex]={status:'ok',fields:chosen.fields};matchedLeft.add(rowIndex)})}
+        return {...chosen,row:item.row,rightIndex:item.index,status};
+      });
+      left.forEach(item=>item.rows.forEach(rowIndex=>{if(!matchedLeft.has(rowIndex))state.marks.left[rowIndex]={status:'fail',fields:[]}}));
+      Object.entries(state.manualMatches).forEach(([right,left])=>{
+        if(String(right).startsWith('left:')){
+          const a=Number(String(right).split(':')[1]),b=Number(left);
+          if(Number.isFinite(a))state.marks.left[a]={status:'ok',fields:[]};
+          if(Number.isFinite(b))state.marks.left[b]={status:'ok',fields:[]};
+        }else if(String(left).startsWith('right:')){
+          const a=Number(right),b=Number(String(left).split(':')[1]);
+          if(Number.isFinite(a))state.marks.right[a]={status:'ok',fields:[]};
+          if(Number.isFinite(b))state.marks.right[b]={status:'ok',fields:[]};
+        }
+      });
+      const fails=results.filter(item=>item.status==='fail').length;
+      els.diffCount.textContent=String(fails);
+      els.diffList.innerHTML=results.length?`<div class="diff-row head"><div>Estado</div><div>Fecha</div><div>Factura</div><div>Tipo</div><div>Importe</div><div>Saldo</div></div>${results.map(item=>`<div class="diff-row ${item.status}"><div><span class="badge ${item.status==='ok'?'warn':'bad'}">${item.status==='ok'?'Coincide':'Revisar'} ${item.fields.length}/5</span></div>${matchCell(item.row,'fecha',item.fields)}${matchCell(item.row,'nro',item.fields)}${matchCell(item.row,'tipo',item.fields)}${matchCell(item.row,'importe',item.fields)}${matchCell(item.row,'saldo',item.fields)}</div>`).join('')}`:'<div style="padding:16px;font-weight:800;color:var(--muted)">Pega datos en la tabla derecha para comparar.</div>';
+    }
+    function toggleRowSelection(side,row){
+      if(!rowHasData(state[side][row]))return;
+      const selected=state.rowSelection[side];
+      const found=selected.indexOf(row);
+      if(found>-1)selected.splice(found,1);else selected.push(row);
+      selected.sort((a,b)=>a-b);
+    }
+    function selectTableRows(side,row,event={}){
+      if(!rowHasData(state[side][row]))return;
+      state.colSelection={left:[],right:[]};
+      state.selection={side,mode:'rows'};
+      if(event.shiftKey&&state.lastRowSelection[side]!==null){
+        const start=Math.min(state.lastRowSelection[side],row),end=Math.max(state.lastRowSelection[side],row);
+        const range=[];
+        for(let i=start;i<=end;i++)if(rowHasData(state[side][i]))range.push(i);
+        state.rowSelection[side]=event.ctrlKey?[...new Set([...state.rowSelection[side],...range])].sort((a,b)=>a-b):range;
+      }else if(event.ctrlKey){
+        toggleRowSelection(side,row);
+        state.lastRowSelection[side]=row;
+      }else{
+        state.rowSelection={left:side==='left'?[row]:[],right:side==='right'?[row]:[]};
+        state.lastRowSelection[side]=row;
+      }
+    }
+    function selectTableCols(side,col,event={}){
+      state.rowSelection={left:[],right:[]};
+      state.selection={side,mode:'cols'};
+      if(event.shiftKey&&state.lastColSelection[side]!==null){
+        const start=Math.min(state.lastColSelection[side],col),end=Math.max(state.lastColSelection[side],col);
+        const range=[];
+        for(let i=start;i<=end;i++)range.push(i);
+        state.colSelection[side]=event.ctrlKey?[...new Set([...state.colSelection[side],...range])].sort((a,b)=>a-b):range;
+      }else if(event.ctrlKey){
+        const selected=state.colSelection[side];
+        const found=selected.indexOf(col);
+        if(found>-1)selected.splice(found,1);else selected.push(col);
+        selected.sort((a,b)=>a-b);
+        state.lastColSelection[side]=col;
+      }else{
+        state.colSelection={left:side==='left'?[col]:[],right:side==='right'?[col]:[]};
+        state.lastColSelection[side]=col;
+      }
+    }
+    function selectRow(side,row,add=false){
+      if(!rowHasData(state[side][row]))return;
+      if(add)toggleRowSelection(side,row);
+      else state.rowSelection={left:side==='left'?[row]:[],right:side==='right'?[row]:[]};
+      const left=state.rowSelection.left.at(-1),right=state.rowSelection.right.at(-1);
+      if(left!==undefined&&right!==undefined){state.manualMatches[right]=left;compare()}
+    }
+    function clearCurrentSelection(){
+      state.selection=null;
+      state.rowSelection={left:[],right:[]};
+      state.colSelection={left:[],right:[]};
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      renderAll();
+    }
+    function clearTableSelectionWithDelete(){
+      const sel=state.selection;
+      if(!sel)return false;
+      if(sel.mode==='table'){
+        state[sel.side]=normalizeRows();
+        state.rowSelection[sel.side]=[];
+        state.colSelection[sel.side]=[];
+        state.equivalences=[];
+        state.manualMatches={};
+        state.rowGroups={left:[],right:[]};
+        state.marks={left:{},right:{}};
+        state.multiCandidates={};
+      }else if(sel.mode==='rows'){
+        const rowsToClear=[...new Set(state.rowSelection[sel.side]||[])];
+        if(!rowsToClear.length)return false;
+        clearManualMatchesForRows(sel.side,rowsToClear);
+        removeRowsFromGroups(sel.side,rowsToClear);
+        rowsToClear.forEach(row=>{if(state[sel.side][row])state[sel.side][row]=blankRow()});
+        state.rowSelection[sel.side]=[];
+      }else if(sel.mode==='cols'){
+        const colsToClear=[...new Set(state.colSelection[sel.side]||[])];
+        if(!colsToClear.length)return false;
+        state[sel.side].forEach(row=>colsToClear.forEach(col=>{if(columns[col])row[columns[col].key]=''}));
+        state.colSelection[sel.side]=[];
+      }else{
+        return false;
+      }
+      state.selection=null;
+      state.focusPair=null;
+      compare();renderAll();saveCache();
+      return true;
+    }
+    function clearManualMatchesForRows(side,rowsToClear){
+      const selected=new Set(rowsToClear);
+      Object.entries(state.manualMatches).forEach(([right,left])=>{
+        if(side==='right'&&selected.has(Number(right)))delete state.manualMatches[right];
+        if(side==='left'&&selected.has(Number(left)))delete state.manualMatches[right];
+      });
+    }
+    function removeRowsFromGroups(side,rowsToRemove){
+      const selected=new Set(rowsToRemove);
+      state.rowGroups[side]=(state.rowGroups[side]||[]).map(group=>({...group,rows:(group.rows||[]).filter(row=>!selected.has(row))})).filter(group=>group.rows.length>=2);
+    }
+    function createGroupId(){return `g${Date.now()}${Math.random().toString(36).slice(2,7)}`}
+    function canUnifyRows(){
+      const left=state.rowSelection.left.length,right=state.rowSelection.right.length;
+      return left>=2||right>=2;
+    }
+    function canMatchRows(){return (state.rowSelection.left.length&&state.rowSelection.right.length)||state.rowSelection.left.length>=2||state.rowSelection.right.length>=2}
+    function selectedGroupIds(side){
+      const selected=new Set(state.rowSelection[side]);
+      return new Set((state.rowGroups?.[side]||[]).filter(group=>(group.rows||[]).some(row=>selected.has(row))).map(group=>group.id));
+    }
+    function canSplitRows(){return selectedGroupIds('left').size>0||selectedGroupIds('right').size>0}
+    function canClearRowsMatch(){
+      const left=new Set(state.rowSelection.left),right=new Set(state.rowSelection.right);
+      return Object.entries(state.manualMatches).some(([rightRow,leftRow])=>right.has(Number(rightRow))||left.has(Number(leftRow)));
+    }
+    function groupRowsFor(side,row){
+      return (state.rowGroups?.[side]||[]).find(group=>group.rows?.includes(row))?.rows||[row];
+    }
+    function closestDateRow(side,dateValue){
+      const target=parseDateValue(dateValue);
+      if(!Number.isFinite(target))return -1;
+      let best=-1,bestDiff=Infinity;
+      state[side].forEach((row,index)=>{
+        const value=parseDateValue(row.fecha);
+        if(!Number.isFinite(value))return;
+        const diff=Math.abs(value-target);
+        if(diff<bestDiff){bestDiff=diff;best=index}
+      });
+      return best;
+    }
+    function tableWrap(side){return document.querySelector(`.table-card[data-side="${side}"] .grid-wrap`)}
+    function tableRow(side,row){return document.querySelector(`#${side}Table tbody tr:nth-child(${row+1})`)}
+    function contextRightRowForMatches(){
+      const ctx=state.contextRow;
+      if(!ctx)return null;
+      if(ctx.side==='right')return ctx.row;
+      const found=Object.entries(state.marks.right).find(([,mark])=>Number(mark.leftIndex)===Number(ctx.row));
+      return found?Number(found[0]):null;
+    }
+    function canShowMatchOptions(){
+      const right=contextRightRowForMatches();
+      return right!==null&&(state.multiCandidates[right]||[]).length>1;
+    }
+    function openContextMatchModal(){
+      const right=contextRightRowForMatches();
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      if(right===null)return;
+      openMatchModal(Number(right));
+    }
+    function alignOppositeTable(){
+      const ctx=state.contextRow;if(!ctx)return;
+      const other=ctx.side==='left'?'right':'left';
+      const sourceDate=state[ctx.side]?.[ctx.row]?.fecha;
+      const targetRow=closestDateRow(other,sourceDate);
+      if(targetRow<0)return;
+      const sourceWrap=tableWrap(ctx.side),targetWrap=tableWrap(other);
+      const sourceTr=tableRow(ctx.side,ctx.row),targetTr=tableRow(other,targetRow);
+      if(!sourceWrap||!targetWrap||!sourceTr||!targetTr)return;
+      state.freeScrollUntil=Date.now()+900;
+      const sourceY=sourceTr.offsetTop-sourceWrap.scrollTop;
+      targetWrap.scrollTop=Math.max(0,targetTr.offsetTop-sourceY);
+      targetWrap.dataset.lastTop=String(targetWrap.scrollTop);
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+    }
+    function markSelectedRowsMatch(){
+      if(!canMatchRows())return;
+      if(state.rowSelection.left.length&&state.rowSelection.right.length){
+        state.manualMatches[state.rowSelection.right[0]]=state.rowSelection.left[0];
+      }else if(state.rowSelection.left.length>=2){
+        const selected=[...new Set(state.rowSelection.left)].sort((a,b)=>a-b);
+        selected.slice(1).forEach(row=>{state.manualMatches[`left:${row}`]=selected[0]});
+      }else if(state.rowSelection.right.length>=2){
+        const selected=[...new Set(state.rowSelection.right)].sort((a,b)=>a-b);
+        selected.slice(1).forEach(row=>{state.manualMatches[row]=`right:${selected[0]}`});
+      }
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      compare();renderAll();saveCache();
+    }
+    function clearSelectedRowsMatch(){
+      const left=new Set(state.rowSelection.left),right=new Set(state.rowSelection.right);
+      Object.entries(state.manualMatches).forEach(([rightRow,leftRow])=>{if(right.has(Number(rightRow))||left.has(Number(leftRow)))delete state.manualMatches[rightRow]});
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      compare();renderAll();saveCache();
+    }
+    function splitSelectedRows(){
+      ['left','right'].forEach(side=>{
+        const ids=selectedGroupIds(side);
+        if(!ids.size)return;
+        const rowsToClear=new Set();
+        (state.rowGroups[side]||[]).forEach(group=>{if(ids.has(group.id))(group.rows||[]).forEach(row=>rowsToClear.add(row))});
+        clearManualMatchesForRows(side,[...rowsToClear]);
+        state.rowGroups[side]=(state.rowGroups[side]||[]).filter(group=>!ids.has(group.id));
+      });
+      state.focusPair=null;
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      compare();renderAll();saveCache();
+    }
+    function unifySelectedRows(){
+      const selected={left:[...new Set(state.rowSelection.left)].sort((a,b)=>a-b),right:[...new Set(state.rowSelection.right)].sort((a,b)=>a-b)};
+      ['left','right'].forEach(side=>{
+        if(!selected[side].length)return;
+        clearManualMatchesForRows(side,selected[side]);
+        removeRowsFromGroups(side,selected[side]);
+        if(selected[side].length>=2)state.rowGroups[side].push({id:createGroupId(),rows:selected[side]});
+      });
+      if(selected.left.length&&selected.right.length)state.manualMatches[selected.right[0]]=selected.left[0];
+      state.rowSelection={left:[],right:[]};
+      document.getElementById('rowContextMenu')?.classList.remove('open');
+      state.focusPair=null;
+      compare();renderAll();saveCache();
+    }
+    document.addEventListener('click',e=>{
+      if(state.openingContextMenu)return;
+      if(!e.target.closest('#rowContextMenu'))document.getElementById('rowContextMenu')?.classList.remove('open');
+      const rowmark=e.target.closest('[data-rowmark]');
+      if(rowmark){
+        selectTableRows(rowmark.dataset.side,Number(rowmark.dataset.row),e);
+        renderAll();saveCache();
+        return;
+      }
+      const input=e.target.closest('input[data-side]');
+      const th=e.target.closest('th[data-col]');
+      const corner=e.target.closest('[data-corner]');
+      if(corner){const side=corner.closest('.table-card').dataset.side;state.selection={side,mode:'table'};state.rowSelection={left:[],right:[]};state.colSelection={left:[],right:[]};els[`${side}Info`].textContent='Tabla completa seleccionada: pega todo el Excel.';renderAll();return}
+      if(th){const side=th.closest('.table-card').dataset.side;selectTableCols(side,Number(th.dataset.col),e);els[`${side}Info`].textContent=`Columna ${columns[th.dataset.col].label} seleccionada.`;renderAll();return}
+      if(input){
+        const side=input.dataset.side,row=Number(input.dataset.row);
+        if(e.ctrlKey){selectRow(side,row,true);state.ctrlPick=null;state.focusPair=null;renderAll();saveCache();return}
+        selectRow(side,row,false);
+        state.selection={side,row,col:Number(input.dataset.col),mode:'cell'};
+        document.querySelectorAll('.active-cell').forEach(cell=>cell.classList.remove('active-cell'));
+        input.classList.add('active-cell');
+      }
+    });
+    document.addEventListener('focusin',e=>{
+      const input=e.target.closest('input[data-side]');if(!input)return;
+      if(state.openingContextMenu)return;
+      if(state.ctrlDown)return;
+      const side=input.dataset.side,row=Number(input.dataset.row);
+      if(state.rowSelection[side].length===1&&state.rowSelection[side][0]===row)return;
+      selectRow(side,row,false);
+      renderAll();
+    });
+    document.addEventListener('dblclick',e=>{
+      const target=e.target.closest('input[data-side],[data-rowmark]');if(!target)return;
+      const side=target.dataset.side,row=Number(target.dataset.row);
+      const sameSide=sameSideManualMatchRows(side,row);
+      if(sameSide.length){
+        state.rowSelection={left:side==='left'?[row,...sameSide]:[],right:side==='right'?[row,...sameSide]:[]};
+        state.focusPair={left:side==='left'?row:null,right:side==='right'?row:null};
+        renderAll();
+        return;
+      }
+      const right=side==='right'?row:Object.entries(state.manualMatches).find(([,left])=>Number(left)===row)?.[0]??Object.entries(state.marks.right).find(([,mark])=>mark.leftIndex===row)?.[0];
+      if(right===undefined)return;
+      if(e.ctrlKey){delete state.manualMatches[right];state.focusPair=null;compare();renderAll();saveCache();return}
+      const left=state.manualMatches[right]??state.marks.right[right]?.leftIndex;
+      if(left!==undefined&&left!==null){state.rowSelection={left:groupRowsFor('left',Number(left)),right:groupRowsFor('right',Number(right))};state.focusPair={right:Number(right),left:Number(left)};renderAll();return}
+    });
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')clearCurrentSelection()});
+    document.addEventListener('keydown',e=>{
+      if(e.key!=='Delete'&&e.key!=='Supr')return;
+      if(clearTableSelectionWithDelete())e.preventDefault();
+    });
+    document.addEventListener('keydown',e=>{if(e.key==='Control')state.ctrlDown=true});
+    document.addEventListener('keyup',e=>{if(e.key==='Control'){state.ctrlDown=false;state.freeScrollUntil=Date.now()+900}});
+    document.querySelector('.board').addEventListener('wheel',e=>{if(e.ctrlKey)state.freeScrollUntil=Date.now()+900},{passive:true});
+    document.addEventListener('input',e=>{
+      const input=e.target.closest('input[data-side]');if(!input)return;
+      const side=input.dataset.side,row=Number(input.dataset.row),col=Number(input.dataset.col);
+      state[side][row][columns[col].key]=input.value;
+      els[`${side}Count`].textContent=`${filledRows(side).length} filas`;
+      saveCache();
+    });
+    document.addEventListener('change',e=>{
+      const input=e.target.closest('input[data-side]');if(!input)return;
+      const side=input.dataset.side,row=Number(input.dataset.row),col=Number(input.dataset.col);
+      state[side][row][columns[col].key]=normalizeCell(input.value,col);
+      compare();renderAll();saveCache();
+    });
+    document.addEventListener('paste',e=>{
+      const text=e.clipboardData?.getData('text/plain')||'';if(!text||!state.selection)return;
+      e.preventDefault();pasteMatrix(parseClipboard(text));
+    });
+    function runCompareWithProgress(){
+      const wrap=document.getElementById('compareProgressWrap'),bar=document.getElementById('compareProgress');
+      document.getElementById('diffModal').classList.add('open');
+      wrap.hidden=false;bar.style.width='12%';
+      els.diffList.innerHTML='<div style="padding:16px;font-weight:900;color:var(--muted)">Buscando coincidencias...</div>';
+      setTimeout(()=>{bar.style.width='65%';compare();renderAll();bar.style.width='100%';setTimeout(()=>{wrap.hidden=true;bar.style.width='0'},350)},60);
+    }
+    document.getElementById('compareBtn').addEventListener('click',runCompareWithProgress);
+    document.getElementById('closeDiffBtn').addEventListener('click',()=>document.getElementById('diffModal').classList.remove('open'));
+    document.getElementById('diffModal').addEventListener('click',e=>{if(e.target.id==='diffModal')e.currentTarget.classList.remove('open')});
+    document.addEventListener('contextmenu',e=>{
+      const target=e.target.closest('input[data-side],[data-rowmark]');
+      if(!e.target.closest('.board')||!target)return;
+      e.preventDefault();
+      const side=target.dataset.side,row=Number(target.dataset.row);
+      if(!state.rowSelection[side].includes(row)){
+        state.rowSelection={left:side==='left'?[row]:state.rowSelection.left,right:side==='right'?[row]:state.rowSelection.right};
+        renderAll();saveCache();
+      }
+      state.contextRow={side,row};
+      const menu=document.getElementById('rowContextMenu');
+      document.getElementById('showMatchesBtn').disabled=!canShowMatchOptions();
+      document.getElementById('matchRowsBtn').disabled=!canMatchRows();
+      document.getElementById('unifyRowsBtn').disabled=!canUnifyRows();
+      document.getElementById('splitRowsBtn').disabled=!canSplitRows();
+      document.getElementById('clearRowsMatchBtn').disabled=!canClearRowsMatch();
+      menu.style.left=`${Math.min(e.clientX,window.innerWidth-210)}px`;
+      menu.style.top=`${Math.min(e.clientY,window.innerHeight-56)}px`;
+      menu.classList.add('open');
+      setTimeout(()=>{state.openingContextMenu=false},0);
+    });
+    document.addEventListener('pointerdown',e=>{
+      const target=e.target.closest('input[data-side],[data-rowmark]');
+      if(e.button!==2||!target||!e.target.closest('.board'))return;
+      state.openingContextMenu=true;
+    },true);
+    document.getElementById('alignRowsBtn').addEventListener('click',alignOppositeTable);
+    document.getElementById('showMatchesBtn').addEventListener('click',openContextMatchModal);
+    document.getElementById('matchRowsBtn').addEventListener('click',markSelectedRowsMatch);
+    document.getElementById('unifyRowsBtn').addEventListener('click',unifySelectedRows);
+    document.getElementById('splitRowsBtn').addEventListener('click',splitSelectedRows);
+    document.getElementById('clearRowsMatchBtn').addEventListener('click',clearSelectedRowsMatch);
+    els.dateFrom.addEventListener('input',renderAll);
+    els.dateTo.addEventListener('input',renderAll);
+    els.dateFrom.addEventListener('change',()=>normalizeDateInput(els.dateFrom));
+    els.dateTo.addEventListener('change',()=>normalizeDateInput(els.dateTo));
+    els.dateFrom.addEventListener('blur',()=>normalizeDateInput(els.dateFrom));
+    els.dateTo.addEventListener('blur',()=>normalizeDateInput(els.dateTo));
+    document.getElementById('clearAllBtn').addEventListener('click',()=>document.getElementById('clearAllModal').classList.add('open'));
+    document.getElementById('cancelClearAllBtn').addEventListener('click',()=>document.getElementById('clearAllModal').classList.remove('open'));
+    document.getElementById('clearAllModal').addEventListener('click',e=>{if(e.target.id==='clearAllModal')e.currentTarget.classList.remove('open')});
+    document.getElementById('confirmClearAllBtn').addEventListener('click',()=>{state.left=normalizeRows();state.right=normalizeRows();state.equivalences=[];state.manualMatches={};state.rowGroups={left:[],right:[]};state.rowSelection={left:[],right:[]};state.marks={left:{},right:{}};state.multiCandidates={};state.focusPair=null;state.selection=null;localStorage.removeItem(cacheKey);document.getElementById('clearAllModal').classList.remove('open');compare();renderAll()});
+    function openMatchModal(row){
+      state.matchTarget=row;
+      const items=state.multiCandidates[row]||[];
+      document.getElementById('matchList').innerHTML=items.map(item=>`<div class="match-option"><strong>Fila ${item.index+1}</strong><div>${esc(item.row.fecha||'')} · ${esc(item.row.tipo||'')} · ${esc(item.row.nro||'')}<small>${esc(item.row.debe||item.row.haber||'')} · ${esc(item.fields.join(', '))}</small></div><button type="button" data-left-index="${item.index}">Usar</button></div>`).join('');
+      document.getElementById('matchModal').classList.add('open');
+    }
+    function closeMatchModal(){document.getElementById('matchModal').classList.remove('open');state.matchTarget=null}
+    document.getElementById('closeMatchBtn').addEventListener('click',closeMatchModal);
+    document.getElementById('clearMatchBtn').addEventListener('click',()=>{if(state.matchTarget!==null)delete state.manualMatches[state.matchTarget];compare();renderAll();saveCache();closeMatchModal()});
+    document.getElementById('matchModal').addEventListener('click',e=>{
+      if(e.target.id==='matchModal')return closeMatchModal();
+      const btn=e.target.closest('[data-left-index]');if(!btn||state.matchTarget===null)return;
+      state.manualMatches[state.matchTarget]=Number(btn.dataset.leftIndex);
+      compare();renderAll();saveCache();closeMatchModal();
+    });
+    function uniqueTipos(side){return [...new Set(filledRows(side).map(row=>String(row.tipo||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'))}
+    function renderEquivModal(){
+      ['left','right'].forEach(side=>{
+        document.getElementById(`${side}Chips`).innerHTML=uniqueTipos(side).map(tipo=>{
+          const pairIndex=state.equivalences.findIndex(eq=>norm(eq[side])===norm(tipo));
+          const pending=(Array.isArray(state.pendingEquiv)?state.pendingEquiv:[state.pendingEquiv]).some(item=>item?.side===side&&norm(item.tipo)===norm(tipo));
+          return `<button class="pay-chip ${pairIndex>-1?`pair-${pairIndex%4}`:''} ${pending?'pending':''}" data-side="${side}" data-tipo="${esc(tipo)}" type="button">${esc(tipo)}</button>`;
+        }).join('')||'<span class="hint">Sin tipos cargados.</span>';
+      });
+      const text=state.equivalences.map((eq,i)=>`${i+1}. ${eq.left} = ${eq.right}`).join('\n');
+      document.getElementById('equivNote').textContent=text||'Las equivalencias se usan para comparar el tipo de pago.';
+    }
+    function openEquivModal(){state.pendingEquiv=null;renderEquivModal();document.getElementById('equivModal').classList.add('open')}
+    function closeEquivModal(){document.getElementById('equivModal').classList.remove('open');compare();renderAll()}
+    document.getElementById('equivBtn').addEventListener('click',openEquivModal);
+    document.getElementById('closeEquivBtn').addEventListener('click',closeEquivModal);
+    document.getElementById('clearEquivBtn').addEventListener('click',()=>{state.equivalences=[];state.pendingEquiv=null;renderEquivModal();compare();renderAll();saveCache()});
+    document.getElementById('equivModal').addEventListener('click',e=>{
+      if(e.target.id==='equivModal')return closeEquivModal();
+      const chip=e.target.closest('.pay-chip');if(!chip)return;
+      const side=chip.dataset.side,tipo=chip.dataset.tipo;
+      if(e.ctrlKey){
+        const list=Array.isArray(state.pendingEquiv)?state.pendingEquiv.slice():(state.pendingEquiv?[state.pendingEquiv]:[]);
+        const found=list.findIndex(item=>item.side===side&&norm(item.tipo)===norm(tipo));
+        if(found>-1)list.splice(found,1);else list.push({side,tipo});
+        state.pendingEquiv=list;
+        renderEquivModal();
+        return;
+      }
+      const list=Array.isArray(state.pendingEquiv)?state.pendingEquiv.slice():(state.pendingEquiv?[state.pendingEquiv]:[]);
+      if(!list.length){state.pendingEquiv={side,tipo};renderEquivModal();return}
+      list.push({side,tipo});
+      const lefts=list.filter(item=>item.side==='left').map(item=>item.tipo);
+      const rights=list.filter(item=>item.side==='right').map(item=>item.tipo);
+      if(!lefts.length||!rights.length){state.pendingEquiv=list;renderEquivModal();return}
+      const pairs=[];
+      lefts.forEach(left=>rights.forEach(right=>pairs.push({left,right})));
+      state.equivalences=state.equivalences.filter(eq=>!pairs.some(pair=>norm(eq.left)===norm(pair.left)||norm(eq.right)===norm(pair.right)));
+      state.equivalences.push(...pairs);
+      state.pendingEquiv=null;
+      renderEquivModal();compare();renderAll();saveCache();
+    });
+    init();
+  </script>
+</body>
+</html>

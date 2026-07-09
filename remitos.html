@@ -1,0 +1,1259 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Corralón Progreso — Remitos</title>
+<link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="presupuesto-shared.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --rojo: #e50000; --rojo2: #c0392b; --violeta: #6c4fc7;
+  --borde: #c8c0e8; --fila-header: #d0c8f0; --fila-body: #e8e4f8;
+  --texto-dark: #1a1a2e; --sombra: 0 2px 12px rgba(108,79,199,0.13);
+}
+html, body { height: 100%; overflow: hidden; }
+body { font-family: 'Barlow', sans-serif; display: flex; flex-direction: column; height: 100dvh; background-color: #f0ece8; position: relative; }
+body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8; background-image: radial-gradient(ellipse at 15% 25%, rgba(255,255,255,0.92) 0%, transparent 55%); z-index: 0; }
+
+/* HEADER */
+.header { position: relative; z-index: 5; background: #fff; border-bottom: 2px solid var(--borde); padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; box-shadow: var(--sombra); }
+.header img { height: 38px; width: auto; }
+.header-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; color: var(--rojo); text-transform: uppercase; letter-spacing: 1px; flex: 1; }
+.header-sub { font-size: 11px; color: #888; }
+
+/* DATOS */
+.remito-datos { position: relative; z-index: 5; background: #fff; border-bottom: 1px solid var(--borde); padding: 10px 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
+.dato-field { display: flex; flex-direction: column; gap: 3px; }
+.dato-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 1px; }
+.dato-input { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; color: var(--texto-dark); border: none; background: #f5f3ff; border-radius: 8px; padding: 6px 10px; outline: none; width: 100%; border: 1.5px solid transparent; transition: border-color .2s; }
+.dato-input:focus { border-color: var(--violeta); }
+
+/* DATE PICKER */
+.dp-popup { position: fixed; z-index: 9999; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(108,79,199,0.18); border: 1.5px solid var(--borde); padding: 16px; width: 280px; display: none; }
+.dp-popup.open { display: block; }
+.dp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.dp-mes { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; color: var(--violeta); }
+.dp-nav { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--violeta); padding: 2px 8px; border-radius: 6px; }
+.dp-nav:hover { background: var(--fila-header); }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-day-name { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; color: #aaa; text-align: center; padding: 4px 0; }
+.dp-day { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; text-align: center; padding: 6px 2px; border-radius: 6px; cursor: pointer; color: var(--texto-dark); }
+.dp-day:hover { background: var(--fila-header); }
+.dp-day.hoy { background: var(--fila-body); font-weight: 700; color: var(--violeta); }
+.dp-day.seleccionado { background: var(--violeta); color: #fff; font-weight: 700; }
+
+/* TABLA */
+.tabla-header { position: relative; z-index: 5; background: var(--fila-header); border-bottom: 2px solid var(--borde); padding: 7px 10px; display: grid; grid-template-columns: 50px 1fr 80px 80px 32px; gap: 6px; align-items: center; flex-shrink: 0; }
+.th { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; color: var(--violeta); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* LISTA */
+.items-list { flex: 1; overflow-y: auto; position: relative; z-index: 1; padding-bottom: 120px; }
+.item-row { background: #fff; border-bottom: 1px solid var(--borde); padding: 6px 10px; display: grid; grid-template-columns: 50px 1fr 80px 80px 32px; gap: 6px; align-items: center; }
+.item-row:nth-child(even) { background: var(--fila-body); }
+.item-input { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; color: var(--texto-dark); border: none; background: transparent; outline: none; width: 100%; padding: 2px 4px; border-radius: 4px; transition: background .15s; }
+.item-input:focus { background: rgba(108,79,199,.08); }
+.item-input[readonly], .inp[readonly] { color:#aaa; pointer-events:none; }
+.item-input.num { text-align: right; }
+.item-subtotal { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; color: var(--violeta); text-align: right; }
+.btn-del-item { background: none; border: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 2px; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+.btn-del-item:hover { color: var(--rojo); }
+
+/* FILA AGREGAR */
+.fila-agregar { background: rgba(108,79,199,.05); border-bottom: 1px dashed var(--borde); padding: 6px 10px; display: grid; grid-template-columns: 50px 1fr 80px 80px 32px; gap: 6px; align-items: center; }
+.inp { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; color: var(--texto-dark); border: none; background: transparent; outline: none; width: 100%; padding: 2px 4px; border-radius: 4px; }
+.inp:focus { background: rgba(108,79,199,.08); }
+.inp::placeholder { color: #ccc; font-style: italic; }
+.inp.num { text-align: right; }
+.sub-preview { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; color: #bbb; text-align: right; }
+.btn-add { background: var(--violeta); border: none; color: #fff; font-size: 18px; cursor: pointer; border-radius: 6px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; }
+.btn-add:hover { opacity: .8; }
+
+/* TOTAL */
+.total-bar { position: fixed; bottom: 56px; left: 0; right: 0; z-index: 8; background: #fff; border-top: 2px solid var(--borde); padding: 8px 14px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 -2px 12px rgba(108,79,199,.1); }
+.total-label { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+.total-valor { font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 900; color: var(--violeta); }
+
+/* FRANJA */
+.franja-roja { position: fixed; bottom: 0; left: 0; right: 0; height: 56px; background: linear-gradient(135deg, var(--rojo) 0%, var(--rojo2) 100%); z-index: 10; border-radius: 26px 26px 0 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 10px; }
+.btn-f { background: rgba(255,255,255,.18); border: none; color: #fff; font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; cursor: pointer; padding: 7px 12px; border-radius: 20px; display: flex; align-items: center; gap: 4px; }
+.btn-f:hover { background: rgba(255,255,255,.28); }
+.btn-f.prim { background: rgba(255,255,255,.95); color: var(--rojo2); }
+
+/* TOAST */
+.toast { position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%); background: var(--texto-dark); color: #fff; padding: 10px 20px; border-radius: 20px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; z-index: 500; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .3s; }
+.toast.show { opacity: 1; pointer-events: auto; }
+
+/* CONFIRM POPUP */
+.confirm-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 350; display: none; align-items: center; justify-content: center; padding: 20px; }
+.confirm-bg.open { display: flex; }
+.confirm-box { background: #fff; border-radius: 18px; padding: 24px; width: 100%; max-width: 320px; text-align: center; box-shadow: var(--sombra); }
+.confirm-icon { font-size: 36px; margin-bottom: 10px; }
+.confirm-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; color: var(--texto-dark); text-transform: uppercase; margin-bottom: 8px; }
+.confirm-sub { font-size: 13px; color: #888; margin-bottom: 20px; line-height: 1.5; }
+.confirm-btns { display: flex; gap: 10px; }
+.btn-confirm-cancel { flex: 1; padding: 12px; border: 1.5px solid var(--borde); border-radius: 10px; background: transparent; color: #888; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; }
+.btn-confirm-ok { flex: 2; padding: 12px; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; color: #fff; }
+
+/* POPUP REMITO CONFIRMADO */
+.remito-actions-bg { position: fixed; inset: 0; background: rgba(20,14,42,.58); z-index: 360; display: none; align-items: center; justify-content: center; padding: 20px; }
+.remito-actions-bg.open { display: flex; }
+.remito-actions-box { width: 100%; max-width: 420px; background: #fff; border: 1px solid var(--borde); border-radius: 18px; padding: 22px; box-shadow: var(--sombra); }
+.remito-actions-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.remito-actions-title { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; line-height: 1; font-weight: 900; color: var(--violeta); text-transform: uppercase; }
+.remito-actions-sub { margin-top: 6px; font-size: 13px; color: #777; line-height: 1.35; }
+.remito-actions-close { width: 34px; height: 34px; border: none; border-radius: 50%; background: rgba(108,79,199,.12); color: var(--violeta); font-size: 20px; font-weight: 900; cursor: pointer; }
+.remito-actions-info { border: 1px solid var(--borde); background: rgba(108,79,199,.05); border-radius: 12px; padding: 12px; margin-bottom: 14px; font-size: 14px; color: var(--texto-dark); line-height: 1.45; }
+.remito-actions-grid { display: grid; gap: 10px; }
+.remito-action-btn { width: 100%; border: none; border-radius: 12px; padding: 13px 14px; font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900; text-transform: uppercase; cursor: pointer; color: #fff; background: var(--violeta); box-shadow: 0 8px 18px rgba(108,79,199,.22); }
+.remito-action-btn.print { background: #2f8edc; }
+.remito-action-btn.whatsapp { background: #25d366; }
+.remito-action-btn:hover { filter: brightness(.96); transform: translateY(-1px); }
+
+/* LOADING */
+.loading-overlay { position: fixed; inset: 0; background: #f0ece8; display: flex; align-items: center; justify-content: center; flex-direction: column; z-index: 600; display: none; }
+.loading-overlay.show { display: flex; }
+.spinner { width: 40px; height: 40px; border: 4px solid #d0c8f0; border-top-color: var(--violeta); border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 16px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-txt { color: var(--violeta); font-size: 16px; letter-spacing: 1px; text-transform: uppercase; font-family: 'Barlow Condensed', sans-serif; }
+
+/* PRINT */
+@media print {
+  body { background: #fff; }
+  body::before { display: none; }
+  .franja-roja, .total-bar, .fila-agregar, .btn-del-item { display: none !important; }
+  .items-list { overflow: visible; padding-bottom: 0; }
+  .dato-input { background: transparent; border: none; }
+  .item-input { background: transparent; }
+  .print-total { display: flex !important; position: fixed; bottom: 20mm; left: 0; right: 0; }
+}
+.print-total { display: none; border-top: 2px solid #333; padding-top: 8px; justify-content: flex-end; gap: 16px; align-items: center; padding-right: 10px; }
+.print-lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700; color: #333; }
+.print-val { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 900; color: var(--violeta); }
+</style>
+  <script src="nav-helper.js"></script>
+  <script src="funciones.js"></script>
+  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="remitos"></script>
+</head>
+<body>
+<!-- Trampa para el autocompletado del browser -->
+<input type="text" style="display:none" autocomplete="username" tabindex="-1">
+<input type="password" style="display:none" autocomplete="current-password" tabindex="-1">
+
+<div class="header">
+  <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Logo">
+  <div>
+    <div class="header-title">Corralón Progreso</div>
+    <div class="header-sub">Remito de venta</div>
+  </div>
+</div>
+
+<div class="remito-datos">
+  <div class="dato-field" style="grid-column:1/3">
+    <div class="dato-label">Nombre de proveedor</div>
+    <input type="text" class="dato-input" id="cliente" placeholder="Ingrese nombre del proveedor..." enterkeyhint="next">
+  </div>
+  <div class="dato-field">
+    <div class="dato-label">Fecha</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <input type="text" class="dato-input" id="fechaInput" placeholder="Ej: 4 6" style="flex:1"
+        onblur="parseFecha(this.value)">
+      <button onclick="toggleDp()" style="background:var(--violeta);border:none;color:#fff;border-radius:8px;width:34px;height:34px;font-size:13px;font-weight:900;cursor:pointer;font-family:'Barlow Condensed',sans-serif;">▦</button>
+    </div>
+  </div>
+  <div class="dato-field">
+    <div class="dato-label">N° Remito</div>
+    <div style="display:flex;align-items:center;gap:4px">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;color:#aaa;">0001 —</span>
+      <span id="nroRemito" style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--violeta);">...</span>
+    </div>
+  </div>
+</div>
+
+<div class="tabla-header">
+  <div class="th" style="text-align:center">Cant.</div>
+  <div class="th">Descripción</div>
+  <div class="th" style="text-align:right">Precio</div>
+  <div class="th" style="text-align:right">Subtotal</div>
+  <div></div>
+</div>
+
+<div class="items-list" id="itemsList">
+  <div class="fila-agregar" id="filaAgregar">
+    <input type="text" class="inp num" id="nCant" placeholder="1" inputmode="decimal" enterkeyhint="next" autocomplete="off"
+      oninput="updatePreview('cant')">
+    <input type="text" class="inp" id="nDesc" placeholder="Descripción..." enterkeyhint="next" autocomplete="off">
+    <input type="text" class="inp num money-live" id="nPrecio" placeholder="0" inputmode="decimal" enterkeyhint="next" autocomplete="off"
+      oninput="updatePreview('precio')">
+    <input type="text" class="inp num money-live" id="nSub" placeholder="0" inputmode="decimal" enterkeyhint="next" autocomplete="off"
+      onchange="updatePreview('subtotal')">
+    <button class="btn-add" onclick="agregarItem()">+</button>
+  </div>
+</div>
+
+<div class="print-total">
+  <div class="print-lbl">TOTAL</div>
+  <div class="print-val" id="printTotal">$ 0</div>
+</div>
+
+<div class="total-bar">
+  <div class="total-label">Total</div>
+  <div class="total-valor" id="totalValor">$ 0</div>
+</div>
+
+<div class="franja-roja">
+  <button class="btn-f" onclick="limpiarTodo()">🗑 Nuevo</button>
+  <button class="btn-f" data-nav-url="historial.html">📋 Historial</button>
+  <button class="btn-f prim" onclick="confirmarRemitoFinal()">Confirmar</button>
+</div>
+
+<!-- CONFIRM POPUP -->
+<div class="confirm-bg" id="confirmBg">
+  <div class="confirm-box">
+    <div class="confirm-icon" id="confirmIcon">⚠️</div>
+    <div class="confirm-title" id="confirmTitle">¿Confirmar?</div>
+    <div class="confirm-sub" id="confirmSub">Esta acción dará el remito como terminado.</div>
+    <div class="confirm-btns">
+      <button class="btn-confirm-cancel" onclick="cerrarConfirm()">Cancelar</button>
+      <button class="btn-confirm-ok" id="confirmOkBtn" onclick="ejecutarConfirm()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- REMITO CONFIRMADO -->
+<div class="remito-actions-bg" id="remitoActionsBg">
+  <div class="remito-actions-box">
+    <div class="remito-actions-head">
+      <div>
+        <div class="remito-actions-title">Remito confirmado</div>
+        <div class="remito-actions-sub">Eleg&iacute; qu&eacute; quer&eacute;s hacer con el remito ya guardado.</div>
+      </div>
+      <button class="remito-actions-close" onclick="cerrarRemitoActions()" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="remito-actions-info" id="remitoActionsInfo"></div>
+    <div class="remito-actions-grid">
+      <button class="remito-action-btn" onclick="descargarRemitoConfirmado()">Descargar PDF</button>
+      <button class="remito-action-btn print" type="button" onclick="imprimirRemitoConfirmado()">Imprimir</button>
+      <button class="remito-action-btn whatsapp" onclick="whatsappRemitoConfirmado()">WhatsApp</button>
+    </div>
+  </div>
+</div>
+
+<!-- DATE PICKER -->
+<div class="dp-popup" id="dpPopup">
+  <div class="dp-header">
+    <button class="dp-nav" onclick="dpNav(-1)">◀</button>
+    <span class="dp-mes" id="dpMes"></span>
+    <button class="dp-nav" onclick="dpNav(1)">▶</button>
+  </div>
+  <div class="dp-grid" id="dpGrid"></div>
+</div>
+
+<!-- LOADING -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-txt">Generando remito...</div>
+</div>
+
+<div class="toast" id="toastEl"></div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────────
+const SUPABASE_URL     = 'https://tizyjenayrcdkcodsjnc.supabase.co';
+const SUPABASE_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+const SUPABASE_BUCKET  = 'Archivos';
+const WA_NUM           = '542645533544';
+const ADMIN_PASS       = 'Akashiya2301';
+const HISTORIAL_NOTIFS_COLLECTION = 'historialNotificaciones';
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
+  authDomain: "corralon-progreso.firebaseapp.com",
+  projectId: "corralon-progreso",
+  storageBucket: "corralon-progreso.firebasestorage.app",
+  messagingSenderId: "466583614632",
+  appId: "1:466583614632:web:42cb839f83e97475fabe9d"
+};
+if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+const remitosDb = firebase.firestore();
+
+// ── ESTADO ──────────────────────────────────────────────────────
+let items = [];
+let logoCacheData = null;
+let remitoConfirmadoActual = null;
+let remitoNumberRefreshTimer = null;
+const REMITO_DRAFT_KEY = 'corralon_remito_borrador_v1';
+let remitoDraftReady = false;
+
+// ── UTILS ──────────────────────────────────────────────────────
+function fmt(n) {
+  return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function parseMonto(valor) {
+  let texto = String(valor ?? '').trim();
+  if(!texto) return 0;
+  texto = texto.replace(/\$/g, '').replace(/\s+/g, '');
+  const tieneComa = texto.includes(',');
+  const tienePunto = texto.includes('.');
+  if(tieneComa) {
+    texto = texto.replace(/\./g, '').replace(',', '.');
+  } else if(tienePunto) {
+    const partes = texto.split('.');
+    if(partes.length > 2 || partes[partes.length - 1].length === 3) texto = texto.replace(/\./g, '');
+  }
+  return Number.parseFloat(texto.replace(/[^0-9.-]/g, '')) || 0;
+}
+function rawMoneyTextFromValue(value) {
+  const n = parseMonto(value);
+  if(!n) return '';
+  return String(n).replace('.', ',').replace(/,00$/, '');
+}
+function formatMoneyLiveRaw(raw, final = false) {
+  raw = String(raw || '').replace(/\./g, ',').replace(/[^0-9,]/g, '');
+  const parts = raw.split(',');
+  const intDigits = (parts[0] || '').replace(/^0+(?=\d)/, '') || '0';
+  const decimals = parts.length > 1 ? parts.slice(1).join('').replace(/\D/g, '').slice(0, 2) : '';
+  if(final) return fmt(parseMonto(`${intDigits}${decimals ? ',' + decimals : ''}`));
+  return `$ ${Number(intDigits || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}${parts.length > 1 ? ',' + decimals : ''}`;
+}
+function setMoneyLiveValue(input, raw, final = false) {
+  input.dataset.moneyRaw = raw;
+  input.value = raw ? formatMoneyLiveRaw(raw, final) : '';
+}
+function handleMoneyLiveKey(event) {
+  const input = event.target.closest?.('.money-live');
+  if(!input || event.ctrlKey || event.altKey || event.metaKey) return false;
+  if(['Tab','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','F2','Escape'].includes(event.key)) return false;
+  let raw = input.dataset.moneyRaw ?? rawMoneyTextFromValue(input.value);
+  const selected = input.selectionStart === 0 && input.selectionEnd === String(input.value || '').length;
+  if(/^\d$/.test(event.key)) {
+    event.preventDefault();
+    if(selected) raw = '';
+    if(raw.includes(',')) {
+      const [intPart, decPart = ''] = raw.split(',');
+      raw = `${intPart},${(decPart + event.key).slice(0, 2)}`;
+    } else {
+      raw += event.key;
+    }
+    setMoneyLiveValue(input, raw);
+    return true;
+  }
+  if(event.key === ',' || event.key === '.') {
+    event.preventDefault();
+    if(selected) raw = '';
+    if(!raw.includes(',')) raw = `${raw || '0'},`;
+    setMoneyLiveValue(input, raw);
+    return true;
+  }
+  if(event.key === 'Backspace') {
+    event.preventDefault();
+    raw = selected ? '' : raw.slice(0, -1);
+    setMoneyLiveValue(input, raw);
+    return true;
+  }
+  if(event.key === 'Delete') {
+    event.preventDefault();
+    setMoneyLiveValue(input, '');
+    return true;
+  }
+  return false;
+}
+function finalizeMoneyLive(input) {
+  if(!input?.classList?.contains('money-live')) return;
+  if(!String(input.value || '').trim()) {
+    setMoneyLiveValue(input, '');
+    return;
+  }
+  const raw = input.dataset.moneyRaw ?? rawMoneyTextFromValue(input.value);
+  setMoneyLiveValue(input, raw, true);
+}
+function toast(msg) {
+  const el = document.getElementById('toastEl');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+function loading(show) {
+  document.getElementById('loadingOverlay').classList.toggle('show', show);
+}
+function getRemitoDraft() {
+  return {
+    cliente: document.getElementById('cliente')?.value || '',
+    fecha: document.getElementById('fechaInput')?.value || '',
+    items,
+    pendiente: {
+      cant: document.getElementById('nCant')?.value || '',
+      desc: document.getElementById('nDesc')?.value || '',
+      precio: document.getElementById('nPrecio')?.value || '',
+      sub: document.getElementById('nSub')?.value || ''
+    },
+    updated_at: new Date().toISOString()
+  };
+}
+function saveRemitoDraft() {
+  if(!remitoDraftReady) return;
+  try {
+    const draft = getRemitoDraft();
+    const hasDraft = draft.cliente.trim() || draft.fecha.trim() || draft.items.length ||
+      draft.pendiente.cant.trim() || draft.pendiente.desc.trim() || draft.pendiente.precio.trim() || draft.pendiente.sub.trim();
+    if(hasDraft) localStorage.setItem(REMITO_DRAFT_KEY, JSON.stringify(draft));
+    else localStorage.removeItem(REMITO_DRAFT_KEY);
+  } catch(_) {}
+}
+function clearRemitoDraft() {
+  try { localStorage.removeItem(REMITO_DRAFT_KEY); } catch(_) {}
+}
+function restoreRemitoDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(REMITO_DRAFT_KEY) || 'null');
+    if(!draft) return false;
+    items = Array.isArray(draft.items) ? draft.items.map(it => ({
+      cant: Number(it.cant) || 0,
+      desc: it.desc || it.descripcion || '',
+      precio: Number(it.precio) || 0
+    })).filter(it => it.desc || it.precio || it.cant) : [];
+    document.getElementById('cliente').value = draft.cliente || '';
+    if(draft.fecha) document.getElementById('fechaInput').value = draft.fecha;
+    document.getElementById('nCant').value = draft.pendiente?.cant || '';
+    document.getElementById('nDesc').value = draft.pendiente?.desc || '';
+    document.getElementById('nPrecio').value = draft.pendiente?.precio || '';
+    document.getElementById('nSub').value = draft.pendiente?.sub || '';
+    renderItems();
+    updatePreview('precio');
+    toast('Borrador recuperado');
+    return true;
+  } catch(_) {
+    clearRemitoDraft();
+    return false;
+  }
+}
+
+function historialNotifId(tipo, id) {
+  return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
+}
+
+async function guardarNotificacionRemito(remito) {
+  if(!remito?.id) return;
+  try {
+    await remitosDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(historialNotifId('remito', remito.id)).set({
+      tipo: 'remito',
+      id: String(remito.id),
+      titulo: `Remito ${remitoFull(remito.nro)}`,
+      detalle: `${remito.cliente || 'Proveedor'} - ${remito.fecha || ''}`,
+      fecha: remito.fecha || '',
+      total: Number(remito.total || 0),
+      resuelta: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch(error) {
+    console.warn('No se pudo crear notificación de remito', error);
+  }
+}
+
+async function resolverNotificacionRemito(remito) {
+  if(!remito?.id) return;
+  try {
+    await remitosDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(historialNotifId('remito', remito.id)).set({
+      resuelta: true,
+      resueltaAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch(error) {
+    console.warn('No se pudo resolver notificación de remito', error);
+  }
+}
+
+// ── ITEMS ──────────────────────────────────────────────────────
+function renderItems() {
+  const lista = document.getElementById('itemsList');
+  const fila  = document.getElementById('filaAgregar');
+  lista.querySelectorAll('.item-row').forEach(r => r.remove());
+  items.forEach((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'item-row';
+    row.innerHTML = `
+      <input type="text" class="item-input num" value="${it.cant}" inputmode="decimal" autocomplete="off"
+        onchange="actualizarItemDesdeCampo(${i}, 'cant', this)">
+      <input type="text" class="item-input" value="${it.desc}" autocomplete="off"
+        onchange="items[${i}].desc=this.value">
+      <input type="text" class="item-input num money-live" value="${fmt(it.precio)}" inputmode="decimal" autocomplete="off"
+        onchange="actualizarItemDesdeCampo(${i}, 'precio', this)">
+      <input type="text" class="item-input num money-live" value="${fmt(it.precio*it.cant)}" inputmode="decimal" autocomplete="off" ${it.cant && it.precio ? 'readonly tabindex="-1"' : ''}
+        onchange="actualizarItemDesdeCampo(${i}, 'subtotal', this)">
+      <button class="btn-del-item" onclick="items.splice(${i},1);renderItems()">✕</button>`;
+    lista.insertBefore(row, fila);
+  });
+  recalc();
+  saveRemitoDraft();
+}
+
+// ── NAVEGACIÓN CON ENTER Y FLECHAS ──────────────────────────────
+function remitoCamposNavegables() {
+  return [
+    document.getElementById('cliente'),
+    document.getElementById('fechaInput'),
+    ...document.querySelectorAll('.item-row .item-input:not([readonly])'),
+    document.getElementById('nCant'),
+    document.getElementById('nDesc'),
+    document.getElementById('nPrecio'),
+    document.getElementById('nSub')
+  ].filter(Boolean);
+}
+
+function esCampoNavegable(el) {
+  return el?.matches?.('.dato-input, .item-input, .inp');
+}
+
+function seleccionarCampo(el) {
+  if(!el) return false;
+  el.focus();
+  requestAnimationFrame(() => {
+    if(typeof el.select === 'function') el.select();
+  });
+  return true;
+}
+
+function campoTodoSeleccionado(el) {
+  return !!el && el.selectionStart === 0 && el.selectionEnd === String(el.value || '').length;
+}
+
+function moverCampo(actual, delta) {
+  const campos = remitoCamposNavegables();
+  const idx = campos.indexOf(actual);
+  if(idx < 0) return false;
+  const target = campos[Math.max(0, Math.min(campos.length - 1, idx + delta))];
+  if(!target || target === actual) return false;
+  seleccionarCampo(target);
+  return true;
+}
+
+function moverCampoVertical(actual, delta) {
+  const cols = 4;
+  const agInputs = [document.getElementById('nCant'), document.getElementById('nDesc'), document.getElementById('nPrecio'), document.getElementById('nSub')];
+  const rows = [...document.querySelectorAll('.item-row')];
+  const agIdx = agInputs.indexOf(actual);
+  if(agIdx >= 0) {
+    if(delta < 0 && rows.length) {
+      const ins = [...rows[rows.length - 1].querySelectorAll('.item-input')];
+      return seleccionarCampo(ins[agIdx]);
+    }
+    return false;
+  }
+  const row = actual.closest('.item-row');
+  if(!row) return false;
+  const rowIdx = rows.indexOf(row);
+  const colIdx = [...row.querySelectorAll('.item-input')].indexOf(actual);
+  const nextRow = rowIdx + delta;
+  if(nextRow >= 0 && nextRow < rows.length) {
+    return seleccionarCampo(rows[nextRow].querySelectorAll('.item-input')[colIdx]);
+  }
+  if(nextRow === rows.length) return seleccionarCampo(agInputs[Math.min(cols - 1, colIdx)]);
+  return false;
+}
+
+function moverDesdePrecioRemito(precioInput) {
+  const row = precioInput?.closest?.('.item-row');
+  if(!row) return false;
+  const rowsAntes = [...document.querySelectorAll('.item-row')];
+  const rowIndex = rowsAntes.indexOf(row);
+  const rowInputs = [...row.querySelectorAll('.item-input')];
+  const cantidadInput = rowInputs[0];
+  const cantidad = parseMonto(cantidadInput?.value);
+  const precio = parseMonto(precioInput.value);
+  actualizarItemDesdeCampo(rowIndex, 'precio', precioInput);
+  const rowsActuales = [...document.querySelectorAll('.item-row')];
+  if(cantidad && precio) {
+    const nextRow = rowsActuales[rowIndex + 1] || null;
+    const nextCantidad = nextRow ? nextRow.querySelectorAll('.item-input')[0] : document.getElementById('nCant');
+    return seleccionarCampo(nextCantidad);
+  }
+  const subtotalActual = rowsActuales[rowIndex]?.querySelectorAll('.item-input')[3];
+  return seleccionarCampo(subtotalActual);
+}
+
+function moverDesdeSubtotalRemito(subtotalInput) {
+  const row = subtotalInput?.closest?.('.item-row');
+  if(!row) return false;
+  const rowsAntes = [...document.querySelectorAll('.item-row')];
+  const rowIndex = rowsAntes.indexOf(row);
+  actualizarItemDesdeCampo(rowIndex, 'subtotal', subtotalInput);
+  const rowsActuales = [...document.querySelectorAll('.item-row')];
+  const nextRow = rowsActuales[rowIndex + 1] || null;
+  const nextCantidad = nextRow ? nextRow.querySelectorAll('.item-input')[0] : document.getElementById('nCant');
+  return seleccionarCampo(nextCantidad);
+}
+
+function esEnterRemito(event) {
+  return event.key === 'Enter' || event.code === 'Enter' || event.keyCode === 13 || event.which === 13;
+}
+
+function manejarEnterRemito(event, target) {
+  const esEnter = esEnterRemito(event);
+  if((!esEnter && event.key !== 'Tab') || event.isComposing || !esCampoNavegable(target)) return false;
+  event.preventDefault();
+  if(target.id === 'cliente') return seleccionarCampo(document.getElementById('fechaInput'));
+  if(target.id === 'fechaInput') {
+    parseFecha(target.value);
+    return seleccionarCampo(document.getElementById('nCant'));
+  }
+  if(target.id === 'nCant') return seleccionarCampo(document.getElementById('nDesc'));
+  if(target.id === 'nDesc') return seleccionarCampo(document.getElementById('nPrecio'));
+  if(target.id === 'nPrecio' && !event.shiftKey) {
+    updatePreview('precio');
+    const cantidad = parseMonto(document.getElementById('nCant')?.value);
+    const precio = parseMonto(target.value);
+    if(cantidad && precio) {
+      agregarItem();
+      return seleccionarCampo(document.getElementById('nCant'));
+    }
+    return seleccionarCampo(document.getElementById('nSub'));
+  }
+  if(target.matches('.item-row .item-input') && [...target.closest('.item-row').querySelectorAll('.item-input')].indexOf(target) === 2 && !event.shiftKey) {
+    return moverDesdePrecioRemito(target);
+  }
+  if(target.matches('.item-row .item-input') && [...target.closest('.item-row').querySelectorAll('.item-input')].indexOf(target) === 3 && !event.shiftKey) {
+    return moverDesdeSubtotalRemito(target);
+  }
+  if(target.id === 'nSub' && !event.shiftKey) {
+    updatePreview('subtotal');
+    agregarItem();
+    return seleccionarCampo(document.getElementById('nCant'));
+  }
+  moverCampo(target, event.shiftKey ? -1 : 1);
+  return true;
+}
+
+function manejarFlechasRemito(event, target) {
+  if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key) || !esCampoNavegable(target)) return false;
+  const allSelected = campoTodoSeleccionado(target);
+  if(event.key === 'ArrowLeft') {
+    if(!allSelected) return false;
+    event.preventDefault();
+    return moverCampo(target, -1);
+  }
+  if(event.key === 'ArrowRight') {
+    if(!allSelected) return false;
+    event.preventDefault();
+    return moverCampo(target, 1);
+  }
+  if(!allSelected) return false;
+  event.preventDefault();
+  return moverCampoVertical(target, event.key === 'ArrowDown' ? 1 : -1);
+}
+
+let ultimoEnterRemitoTarget = null;
+let ultimoEnterRemitoAt = 0;
+
+document.addEventListener('keydown', e => {
+  const target = esCampoNavegable(e.target) ? e.target : document.activeElement;
+  if(!target) return;
+  if(handleMoneyLiveKey(e)) {
+    if(target.id === 'nPrecio') updatePreview('precio');
+    return;
+  }
+  if(e.key === 'F2' && esCampoNavegable(target)) {
+    e.preventDefault();
+    if(campoTodoSeleccionado(target)) {
+      const pos = String(target.value || '').length;
+      try { target.setSelectionRange(pos, pos); } catch(_) {}
+    } else {
+      seleccionarCampo(target);
+    }
+    return;
+  }
+  if(manejarEnterRemito(e, target)) {
+    if(esEnterRemito(e)) {
+      ultimoEnterRemitoTarget = target;
+      ultimoEnterRemitoAt = Date.now();
+    }
+    return;
+  }
+  manejarFlechasRemito(e, target);
+});
+document.addEventListener('keyup', e => {
+  if(!esEnterRemito(e) || e.isComposing) return;
+  const target = esCampoNavegable(e.target) ? e.target : document.activeElement;
+  if(!target || Date.now() - ultimoEnterRemitoAt < 600) return;
+  if(manejarEnterRemito(e, target)) {
+    ultimoEnterRemitoTarget = target;
+    ultimoEnterRemitoAt = Date.now();
+  }
+});
+document.addEventListener('beforeinput', e => {
+  if(e.defaultPrevented) return;
+  const input = e.target;
+  if(!input?.matches?.('.money-live') || input.readOnly) return;
+  let raw = input.dataset.moneyRaw ?? rawMoneyTextFromValue(input.value);
+  const seleccionado = input.selectionStart === 0 && input.selectionEnd === String(input.value || '').length;
+  if(e.inputType === 'deleteContentBackward') {
+    e.preventDefault();
+    raw = seleccionado ? '' : raw.slice(0, -1);
+    setMoneyLiveValue(input, raw);
+  } else if(e.inputType === 'insertText' && /^\d$/.test(e.data || '')) {
+    e.preventDefault();
+    if(seleccionado) raw = '';
+    if(raw.includes(',')) {
+      const [entero, decimales = ''] = raw.split(',');
+      raw = `${entero},${(decimales + e.data).slice(0, 2)}`;
+    } else {
+      raw += e.data;
+    }
+    setMoneyLiveValue(input, raw);
+  } else if(e.inputType === 'insertText' && (e.data === ',' || e.data === '.')) {
+    e.preventDefault();
+    if(seleccionado) raw = '';
+    if(!raw.includes(',')) raw = `${raw || '0'},`;
+    setMoneyLiveValue(input, raw);
+  } else {
+    return;
+  }
+  if(input.id === 'nPrecio') updatePreview('precio');
+});
+document.addEventListener('input', e => {
+  const input = e.target;
+  if(!input?.matches?.('#nCant, .item-input.num, .money-live')) return;
+  if(input.classList.contains('money-live')) {
+    if(String(input.value || '').includes('$')) return;
+    const raw = String(input.value || '').replace(/\./g, ',').replace(/[^0-9,]/g, '');
+    setMoneyLiveValue(input, raw);
+    return;
+  }
+  const inicio = input.selectionStart;
+  input.value = String(input.value || '').replace(/\./g, ',');
+  try { input.setSelectionRange(inicio, inicio); } catch(_) {}
+});
+document.addEventListener('focusin', e => {
+  if(e.target.matches?.('.money-live')) e.target.dataset.moneyRaw = rawMoneyTextFromValue(e.target.value);
+});
+document.addEventListener('focusout', e => {
+  if(e.target.matches?.('.money-live')) finalizeMoneyLive(e.target);
+});
+
+function recalc() {
+  const total = items.reduce((s,it) => s + it.precio * it.cant, 0);
+  document.getElementById('totalValor').textContent  = fmt(total);
+  document.getElementById('printTotal').textContent  = fmt(total);
+  document.querySelectorAll('.item-row').forEach((row, i) => {
+    const sub = row.querySelectorAll('.item-input')[3];
+    if(sub && items[i] && document.activeElement !== sub) sub.value = fmt(items[i].precio * items[i].cant);
+  });
+  saveRemitoDraft();
+}
+
+function actualizarItemDesdeCampo(i, campo, input) {
+  const it = items[i];
+  if(!it) return;
+  const row = input.closest('.item-row');
+  const inputs = row ? [...row.querySelectorAll('.item-input')] : [];
+  if(campo === 'cant') it.cant = parseMonto(input.value) || 0;
+  if(campo === 'precio') it.precio = parseMonto(input.value);
+  if(campo === 'subtotal') {
+    const subtotal = parseMonto(input.value);
+    if(subtotal && it.cant && !it.precio) it.precio = subtotal / it.cant;
+    else if(subtotal && !it.cant && it.precio) it.cant = subtotal / it.precio;
+  } else {
+    const subtotalInput = inputs[3];
+    if(subtotalInput && it.cant && it.precio) subtotalInput.value = fmt(it.cant * it.precio);
+  }
+  input.value = campo === 'cant' ? (it.cant || '') : fmt(campo === 'subtotal' ? ((it.cant || 0) * (it.precio || 0)) : it.precio);
+  if(campo === 'precio') input.dataset.moneyRaw = rawMoneyTextFromValue(input.value);
+  renderItems();
+}
+
+function updatePreview(campo = 'precio') {
+  const cantEl = document.getElementById('nCant');
+  const precioEl = document.getElementById('nPrecio');
+  const subEl = document.getElementById('nSub');
+  let c = parseMonto(cantEl.value);
+  let p = parseMonto(precioEl.value);
+  let s = parseMonto(subEl.value);
+  if(campo === 'subtotal') {
+    if(s && c && !p) p = s / c;
+    else if(s && !c && p) c = s / p;
+    if(c && p) s = c * p;
+  } else if(c && p) {
+    s = c * p;
+  }
+  if(campo !== 'cant' && c) cantEl.value = c;
+  if(campo !== 'precio' && p) {
+    precioEl.value = fmt(p);
+    precioEl.dataset.moneyRaw = rawMoneyTextFromValue(precioEl.value);
+  }
+  if(campo !== 'subtotal') {
+    subEl.value = c && p ? fmt(s) : '';
+  }
+  const bloquearSubtotal = Boolean(c && p);
+  subEl.readOnly = bloquearSubtotal;
+  subEl.tabIndex = bloquearSubtotal ? -1 : 0;
+}
+
+function hayArticuloPendiente() {
+  const cant = document.getElementById('nCant').value.trim();
+  const desc = document.getElementById('nDesc').value.trim();
+  const precio = document.getElementById('nPrecio').value.trim();
+  const subtotal = document.getElementById('nSub').value.trim();
+  return Boolean(cant || desc || precio || subtotal);
+}
+
+function confirmarArticuloPendiente() {
+  if (!hayArticuloPendiente()) return false;
+  if(document.getElementById('nSub')?.value.trim()) updatePreview('subtotal');
+  agregarItem();
+  return true;
+}
+
+function limpiarFilaAgregar() {
+  const cantEl = document.getElementById('nCant');
+  const descEl = document.getElementById('nDesc');
+  const precioEl = document.getElementById('nPrecio');
+  const subEl = document.getElementById('nSub');
+  cantEl.value = '';
+  descEl.value = '';
+  precioEl.value = '';
+  subEl.value = '';
+  delete precioEl.dataset.moneyRaw;
+  subEl.readOnly = false;
+  subEl.tabIndex = 0;
+}
+
+function agregarItem() {
+  const subEl = document.getElementById('nSub');
+  if(subEl.value.trim() && !subEl.readOnly) updatePreview('subtotal');
+  const cant  = parseMonto(document.getElementById('nCant').value)  || 1;
+  const desc  = document.getElementById('nDesc').value.trim();
+  let precio= parseMonto(document.getElementById('nPrecio').value);
+  const subtotal = parseMonto(document.getElementById('nSub').value);
+  if(!precio && subtotal) precio = subtotal / cant;
+  if(!desc && !precio) return;
+  items.push({cant, desc, precio});
+  limpiarFilaAgregar();
+  renderItems();
+  setTimeout(() => document.getElementById('nCant').focus(), 30);
+}
+
+function navAgregar(e, campo) {
+  if(e.key !== 'Enter' && e.key !== 'Tab') return;
+  e.preventDefault();
+  if(campo === 'nCant')   document.getElementById('nDesc').focus();
+  else if(campo === 'nDesc')  document.getElementById('nPrecio').focus();
+  else if(campo === 'nPrecio') { updatePreview(); agregarItem(); }
+}
+
+// ── DATE PICKER ──────────────────────────────────────────────────
+const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DIAS  = ['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
+let dpY, dpM, dpSel = null;
+
+function initDp() {
+  const hoy = new Date();
+  dpY = hoy.getFullYear(); dpM = hoy.getMonth();
+  document.getElementById('fechaInput').value = '';
+  renderDp();
+}
+
+function parseFecha(val) {
+  const parsed = window.CorralonFunciones?.parseFechaFlexible?.(val);
+  if(!parsed) return;
+  dpSel = parsed.date; dpY = parsed.year; dpM = parsed.month - 1;
+  document.getElementById('fechaInput').value = parsed.text;
+}
+
+function toggleDp() {
+  const popup = document.getElementById('dpPopup');
+  const open  = popup.classList.toggle('open');
+  if(open) {
+    renderDp();
+    const btn  = document.querySelector('[onclick="toggleDp()"]');
+    const rect = btn.getBoundingClientRect();
+    popup.style.top  = (rect.bottom + 4) + 'px';
+    popup.style.left = Math.max(4, rect.right - 280) + 'px';
+  }
+}
+
+function dpNav(dir) {
+  dpM += dir;
+  if(dpM < 0)  { dpM = 11; dpY--; }
+  if(dpM > 11) { dpM = 0;  dpY++; }
+  renderDp();
+}
+
+function renderDp() {
+  document.getElementById('dpMes').textContent = MESES[dpM] + ' ' + dpY;
+  const grid = document.getElementById('dpGrid');
+  grid.innerHTML = DIAS.map(d => `<div class="dp-day-name">${d}</div>`).join('');
+  let inicio = new Date(dpY, dpM, 1).getDay() - 1;
+  if(inicio < 0) inicio = 6;
+  for(let i=0; i<inicio; i++) grid.innerHTML += `<div></div>`;
+  const diasMes = new Date(dpY, dpM+1, 0).getDate();
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  for(let d=1; d<=diasMes; d++) {
+    const f = new Date(dpY, dpM, d);
+    const esHoy = f.getTime() === hoy.getTime();
+    const esSel = dpSel && f.getTime() === new Date(dpSel.getFullYear(), dpSel.getMonth(), dpSel.getDate()).getTime();
+    grid.innerHTML += `<div class="dp-day${esHoy?' hoy':''}${esSel?' seleccionado':''}" onclick="selDia(${d})">${d}</div>`;
+  }
+}
+
+function selDia(d) {
+  dpSel = new Date(dpY, dpM, d);
+  document.getElementById('fechaInput').value =
+    String(d).padStart(2,'0') + '/' + String(dpM+1).padStart(2,'0') + '/' + dpY;
+  document.getElementById('dpPopup').classList.remove('open');
+}
+
+document.addEventListener('click', e => {
+  const popup = document.getElementById('dpPopup');
+  const btn   = document.querySelector('[onclick="toggleDp()"]');
+  if(!popup.contains(e.target) && e.target !== btn) popup.classList.remove('open');
+});
+
+const REMITO_DIGITS = 8;
+function remitoShort(value) {
+  const raw = String(value ?? '').split('-').pop() || '';
+  const n = parseInt(raw.replace(/\D/g, ''), 10) || 0;
+  return String(n).padStart(REMITO_DIGITS, '0');
+}
+function remitoFull(value) {
+  return '0001-' + remitoShort(value);
+}
+async function contarRemitosGuardados() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=nro`, {
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'apikey': SUPABASE_KEY
+    }
+  });
+  if(!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []).reduce((max, row) => {
+    const n = parseInt(String(row.nro || '').split('-').pop().replace(/\D/g, ''), 10) || 0;
+    return n > 0 && n < 10000 ? Math.max(max, n) : max;
+  }, 0);
+}
+
+// ── NÚMERO DE REMITO DESDE SUPABASE ─────────────────────────────
+async function cargarNroRemito() {
+  try {
+    const nro = (await contarRemitosGuardados()) + 1;
+    document.getElementById('nroRemito').textContent = remitoShort(nro);
+    return nro;
+  } catch(e) {
+    const local = parseInt(localStorage.getItem('nroRemito')||'0') + 1;
+    document.getElementById('nroRemito').textContent = remitoShort(local);
+    return local;
+  }
+}
+
+function remitoActualVacio() {
+  return !items.length && !document.getElementById('cliente').value.trim() &&
+    !document.getElementById('nCant').value.trim() &&
+    !document.getElementById('nDesc').value.trim() &&
+    !document.getElementById('nPrecio').value.trim();
+}
+
+async function refrescarNroRemitoSiCorresponde(force = false) {
+  if (!force && !remitoActualVacio()) return;
+  const actual = document.getElementById('nroRemito').textContent;
+  const siguiente = remitoShort((await contarRemitosGuardados()) + 1);
+  if (siguiente !== actual) document.getElementById('nroRemito').textContent = siguiente;
+}
+
+function iniciarAutoRefreshNroRemito() {
+  clearInterval(remitoNumberRefreshTimer);
+  remitoNumberRefreshTimer = setInterval(() => {
+    refrescarNroRemitoSiCorresponde(false).catch(() => {});
+  }, 5000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refrescarNroRemitoSiCorresponde(false).catch(() => {});
+  });
+  window.addEventListener('focus', () => refrescarNroRemitoSiCorresponde(false).catch(() => {}));
+}
+
+// ── GUARDAR EN SUPABASE (remito + ítems) ─────────────────────────
+async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar) {
+  const nroShort = remitoShort(nro);
+  // 1. Guardar remito
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'apikey': SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify({ nro: remitoFull(nroShort), cliente, fecha, total, link_pdf: linkPdf || null })
+  });
+  const data = await res.json();
+  const remitoId = Array.isArray(data) && data[0] ? data[0].id : null;
+
+  // 2. Guardar ítems si tenemos el id del remito
+  if(remitoId && itemsAGuardar && itemsAGuardar.length) {
+    const itemsPayload = itemsAGuardar.map(it => ({
+      remito_id: remitoId,
+      cant: it.cant,
+      descripcion: it.desc,
+      precio: it.precio
+    }));
+    await fetch(`${SUPABASE_URL}/rest/v1/items_remito`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(itemsPayload)
+    });
+  }
+
+  localStorage.setItem('nroRemito', parseInt(nroShort, 10));
+  return remitoId;
+}
+
+// ── GENERAR PDF ──────────────────────────────────────────────────
+function generarPDFDoc(cliente, fecha, nro, total, itsOverride) {
+  const lista = (itsOverride || items).map(it => ({
+    cantidad: Number(it.cant ?? it.cantidad) || 0,
+    nombre: it.desc || it.nombre || it.descripcion || '',
+    codigo: it.codigo || '',
+    precio: Number(it.precio) || 0
+  }));
+  return window.PresupuestoShared.generarPDFRemitoDoc({
+    numero: remitoFull(nro),
+    fecha,
+    total,
+    items: lista,
+    logoDataUrl: logoCacheData,
+    headerName: cliente || 'Proveedor'
+  });
+}
+
+// ── CONFIRM POPUP ──────────────────────────────────────────────
+let _confirmCallback = null;
+
+function pedirConfirm(opts) {
+  document.getElementById('confirmIcon').textContent  = opts.icon  || '⚠️';
+  document.getElementById('confirmTitle').textContent = opts.titulo || '¿Confirmar?';
+  document.getElementById('confirmSub').textContent   = opts.sub   || 'Esta acción dará el remito como terminado.';
+  document.getElementById('confirmOkBtn').style.background = opts.color || 'var(--violeta)';
+  document.getElementById('confirmOkBtn').textContent = opts.btnTxt || 'Confirmar';
+  _confirmCallback = opts.callback;
+  document.getElementById('confirmBg').classList.add('open');
+}
+function cerrarConfirm() {
+  document.getElementById('confirmBg').classList.remove('open');
+  _confirmCallback = null;
+}
+function ejecutarConfirm() {
+  const cb = _confirmCallback;
+  cerrarConfirm();
+  if(cb) cb();
+}
+
+// ── ACCIONES ──────────────────────────────────────────────────
+function _hacerLimpiar(msg) {
+  const wasDraftReady = remitoDraftReady;
+  remitoDraftReady = false;
+  items = [];
+  document.getElementById('cliente').value = '';
+  limpiarFilaAgregar();
+  clearRemitoDraft();
+  initDp();
+  renderItems();
+  remitoDraftReady = wasDraftReady;
+  cargarNroRemito();
+  refrescarNroRemitoSiCorresponde(true).catch(() => {});
+  toast(msg || '🗑 Remito eliminado');
+}
+function limpiarTodo() {
+  if(!items.length && !document.getElementById('cliente').value.trim()) { _hacerLimpiar(); return; }
+  pedirConfirm({ icon:'🗑', titulo:'Nuevo remito', sub:'Esta acción eliminará el remito actual. ¿Continuar?', color:'var(--rojo)', btnTxt:'Eliminar y crear nuevo', callback: _hacerLimpiar });
+}
+
+function nombreArchivoRemito(remito) {
+  const cliente = (remito.cliente || 'Proveedor').replace(/[\\/:*?"<>|]+/g, '').trim() || 'Proveedor';
+  const nro = remitoFull(remito.nro).replace(/[\\/:*?"<>|]+/g, '-');
+  return `${cliente} - ${nro}`;
+}
+
+function escapeHtml(txt) {
+  return String(txt ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
+}
+
+function generarDocRemitoConfirmado(remito) {
+  return generarPDFDoc(remito.cliente, remito.fecha, remito.nro, remito.total, remito.items);
+}
+
+function prepararRemitoDesdeFormulario() {
+  confirmarArticuloPendiente();
+  const cliente = document.getElementById('cliente').value.trim();
+  if(!cliente) { toast('⚠️ Ingresá el nombre del proveedor'); return null; }
+  if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return null; }
+  const fecha = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
+  const nro = document.getElementById('nroRemito').textContent || remitoShort(1);
+  const itemsSnapshot = items.map(it => ({
+    cant: Number(it.cant) || 0,
+    desc: it.desc || '',
+    precio: Number(it.precio) || 0
+  }));
+  const total = itemsSnapshot.reduce((s,it) => s + it.precio * it.cant, 0);
+  return { cliente, fecha, nro, total, items: itemsSnapshot };
+}
+
+function abrirRemitoActions(remito) {
+  const info = document.getElementById('remitoActionsInfo');
+  info.innerHTML = `
+    <strong>Remito:</strong> ${remitoFull(remito.nro)}<br>
+    <strong>Proveedor:</strong> ${escapeHtml(remito.cliente)}<br>
+    <strong>Total:</strong> ${fmt(remito.total)}
+  `;
+  document.getElementById('remitoActionsBg').classList.add('open');
+}
+
+function cerrarRemitoActions() {
+  document.getElementById('remitoActionsBg').classList.remove('open');
+}
+
+async function confirmarRemitoFinal() {
+  await refrescarNroRemitoSiCorresponde(true).catch(() => {});
+  const remito = prepararRemitoDesdeFormulario();
+  if(!remito) return;
+  loading(true);
+  try {
+    const remitoId = await guardarRemito(remito.nro, remito.cliente, remito.fecha, remito.total, null, remito.items);
+    remitoConfirmadoActual = { ...remito, id: remitoId };
+    await guardarNotificacionRemito(remitoConfirmadoActual);
+    clearRemitoDraft();
+    _hacerLimpiar('Remito guardado');
+    abrirRemitoActions(remitoConfirmadoActual);
+  } catch(e) {
+    toast('Error guardando: ' + e.message);
+  } finally {
+    loading(false);
+  }
+}
+
+function descargarRemitoConfirmado() {
+  if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
+  const doc = generarDocRemitoConfirmado(remitoConfirmadoActual);
+  doc.save(nombreArchivoRemito(remitoConfirmadoActual) + '.pdf');
+}
+
+function imprimirRemitoConfirmado() {
+  if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
+  resolverNotificacionRemito(remitoConfirmadoActual);
+  const doc = generarDocRemitoConfirmado(remitoConfirmadoActual);
+  const pdfBlob = doc.output('blob', { type: 'application/pdf' });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+  const popup = window.open(pdfUrl, '_blank');
+  if(!popup) {
+    toast('Permití las ventanas emergentes para abrir el PDF');
+    URL.revokeObjectURL(pdfUrl);
+    return;
+  }
+  setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+}
+
+function whatsappRemitoConfirmado() {
+  if(!remitoConfirmadoActual) { toast('No hay remito confirmado'); return; }
+  const msg = 'Realice el siguiente remito: ' + remitoFull(remitoConfirmadoActual.nro) + '.';
+  window.open('https://wa.me/' + WA_NUM + '?text=' + encodeURIComponent(msg), '_blank');
+}
+
+async function _hacerVerPDF() {
+  const cliente = document.getElementById('cliente').value.trim();
+  const fecha   = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
+  const nro     = document.getElementById('nroRemito').textContent || remitoShort(1);
+  const total   = items.reduce((s,it) => s + it.precio*it.cant, 0);
+  loading(true);
+  try {
+    const doc = generarPDFDoc(cliente, fecha, nro, total);
+    window.PresupuestoShared.openPdfPreview(
+      doc,
+      `${cliente || 'Proveedor'} - ${remitoFull(nro)} - ${fecha}`,
+      `${cliente || 'Proveedor'}-${remitoFull(nro)}-${fecha}`
+    );
+    await guardarRemito(nro, cliente, fecha, total, null, items);
+  } catch(e) { toast('❌ Error guardando: ' + e.message); }
+  loading(false);
+  setTimeout(_hacerLimpiar, 400);
+}
+async function verPDF() {
+  const cliente = document.getElementById('cliente').value.trim();
+  if(!cliente) { toast('⚠️ Ingresá el nombre del proveedor'); return; }
+  if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return; }
+  pedirConfirm({ icon:'📄', titulo:'Ver PDF', sub:'Esta acción dará el remito como terminado. ¿Abrimos el PDF?', color:'var(--rojo)', btnTxt:'Ver PDF', callback: _hacerVerPDF });
+}
+
+async function _hacerEnviarWhatsapp() {
+  const cliente = document.getElementById('cliente').value.trim();
+  const fecha   = document.getElementById('fechaInput').value || new Date().toLocaleDateString('es-AR');
+  const nro     = document.getElementById('nroRemito').textContent || remitoShort(1);
+  loading(true);
+  try {
+    const total = items.reduce((s,it) => s + it.precio*it.cant, 0);
+    await guardarRemito(nro, cliente, fecha, total, null, items);
+    const msg = 'Realice el siguiente remito: ' + remitoFull(nro) + '.';
+    loading(false);
+    window.open('https://wa.me/' + WA_NUM + '?text=' + encodeURIComponent(msg), '_blank');
+    setTimeout(() => { _hacerLimpiar('✅ Remito guardado'); }, 600);
+  } catch(e) {
+    loading(false);
+    toast('❌ Error: ' + e.message);
+  }
+}
+
+async function enviarWhatsapp() {
+  const cliente = document.getElementById('cliente').value.trim();
+  if(!cliente) { toast('⚠️ Ingresá el nombre del proveedor'); return; }
+  if(!items.length) { toast('⚠️ Agregá al menos un artículo'); return; }
+  pedirConfirm({ icon:'💬', titulo:'Enviar por WhatsApp', sub:'Esta acción dará el remito como terminado y avisará el número por WhatsApp.', color:'#25d366', btnTxt:'Enviar', callback: _hacerEnviarWhatsapp });
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+initDp();
+renderItems();
+restoreRemitoDraft();
+remitoDraftReady = true;
+saveRemitoDraft();
+cargarNroRemito();
+iniciarAutoRefreshNroRemito();
+
+// Precargar logo
+window.PresupuestoShared.ensureLogoDataUrl(document.querySelector('.header img').src).then(dataUrl => {
+  logoCacheData = dataUrl;
+});
+
+document.addEventListener('focusin', e => {
+  const filaAgregar = document.getElementById('filaAgregar');
+  if(!filaAgregar || filaAgregar.contains(e.target)) return;
+  confirmarArticuloPendiente();
+});
+document.addEventListener('input', e => {
+  if(e.target.matches?.('#cliente,#fechaInput,#nCant,#nDesc,#nPrecio,#nSub,.item-input')) saveRemitoDraft();
+});
+
+document.addEventListener('pointerdown', e => {
+  const filaAgregar = document.getElementById('filaAgregar');
+  if(!filaAgregar || filaAgregar.contains(e.target)) return;
+  confirmarArticuloPendiente();
+}, true);
+</script>
+<a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:9999;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>
+</body>
+</html>
+
+
+
+

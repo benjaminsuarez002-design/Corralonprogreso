@@ -1,0 +1,388 @@
+﻿<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Actualizar Articulos</title>
+  <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="corralon-system.js"></script>
+  <script src="funciones.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    :root{--red:#8b7cff;--red2:#5d55c8;--line:#8bc7ff;--soft:#eef8ff;--bg:#f6fcff;--row:#f7fbff;--text:#20223a;--muted:#6d7190}
+    html,body{margin:0;height:100%;overflow:hidden}
+    body{font-family:Barlow,Arial,sans-serif;color:var(--text);background:linear-gradient(135deg,#f7feff,#f5f1ff 72%,#fff)}
+    .app{height:100dvh;display:grid;grid-template-rows:52px 1fr}
+    header{display:flex;align-items:center;gap:14px;padding:0 24px;background:rgba(255,255,255,.84);color:var(--text);box-shadow:0 12px 34px rgba(81,129,255,.14);border-bottom:1px solid #d8ecff;backdrop-filter:blur(10px)}
+    header img{width:34px;background:#fff;border-radius:3px}
+    h1{font:900 30px 'Barlow Condensed';margin:0}
+    .actions{margin-left:auto;display:flex;gap:10px;align-items:center}.status-wrap{min-width:250px;display:grid;gap:4px}.status{font-weight:800;font-size:13px;opacity:.9;text-align:right;white-space:nowrap}.sync-progress{height:5px;border:1px solid #cce8ff;border-radius:999px;background:#eef8ff;overflow:hidden;opacity:0;transform:translateY(-2px);transition:opacity .14s ease,transform .14s ease}.sync-progress.active{opacity:1;transform:translateY(0)}.sync-progress-fill{height:100%;width:0%;border-radius:inherit;background:linear-gradient(90deg,var(--red),#17c7ff);transition:width .18s ease}
+    button{height:34px;border:1px solid var(--red2);border-radius:7px;background:#fff;color:var(--red2);font:800 17px 'Barlow Condensed';padding:5px 14px;cursor:pointer;box-shadow:0 2px 5px #0002}
+    button.primary{background:linear-gradient(#a8ddff,var(--red));color:#fff}
+    main{display:grid;grid-template-columns:minmax(850px,1fr) 250px;gap:18px;padding:16px 24px;min-height:0}
+    .left{display:grid;grid-template-rows:auto auto 1fr auto;gap:12px;min-height:0}.right{display:grid;grid-template-rows:auto 1fr;gap:12px;min-height:0}
+    .bar,.provider,.filter-card,.note{border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 8px 22px #1e304c17}
+    .provider,.filter-card,.note{overflow:hidden}
+    .bar{display:grid;grid-template-columns:140px minmax(260px,1fr) auto auto auto;align-items:center;gap:8px;padding:8px 10px}
+    .bar label{font:800 18px 'Barlow Condensed';color:var(--red2)} select,input,textarea{font:17px 'Barlow Condensed';color:var(--text);outline:0}
+    select,.bar input{height:32px;border:1px solid #cce8ff;border-radius:5px;padding:3px 7px;background:#fff}
+    .combo{position:relative;display:grid;grid-template-columns:1fr 34px;min-width:0}
+    .combo input{border-radius:5px 0 0 5px;border-right:0}
+    .combo button{height:32px;border:1px solid #cce8ff;border-radius:0 5px 5px 0;background:#fff;color:#172033;box-shadow:none;padding:0;font-size:17px;line-height:1}
+    .combo-list{position:absolute;z-index:1000;top:34px;left:0;right:0;max-height:260px;overflow:auto;border:1px solid #8bc7ff;background:#fff;border-radius:0 0 7px 7px;box-shadow:0 14px 30px #0002;display:none}
+    .combo.open .combo-list{display:block}
+    .combo-option{display:grid;grid-template-columns:90px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid #d9edff;font:17px 'Barlow Condensed';cursor:pointer}
+    .combo-option:hover,.combo-option.active{background:#dff7ff;color:var(--red2)}
+    .combo-code{font-weight:800;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+    .combo-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .provider{display:grid;grid-template-columns:140px 1fr 140px 180px}
+    .p-label{height:28px;background:var(--soft);padding:4px 7px;border-right:1px solid #cce8ff;border-bottom:1px solid #cce8ff;color:var(--muted);font:700 18px 'Barlow Condensed'}
+    .p-value{height:30px;padding:4px 7px;border-right:1px solid #cce8ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .provider-link,input.provider-link{color:#2366d1!important;text-decoration:underline;cursor:pointer}
+    .table{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;display:grid;grid-template-rows:30px 1fr 24px;min-height:0;box-shadow:0 8px 22px #1e304c17}
+    .head,.row{display:grid;grid-template-columns:28px 130px minmax(360px,1fr) 140px 140px 120px}
+    .head{background:var(--soft);font:800 17px 'Barlow Condensed';color:var(--red2);padding-right:14px}
+    .head div,.row div{padding:4px 7px;border-right:1px solid #d9edff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .selector-cell{display:flex;align-items:center;justify-content:center;padding:0!important;color:var(--muted);cursor:pointer;user-select:none}
+    .corner-selector{position:relative;background:#eaf8ff}
+    .corner-selector::before{content:"";width:0;height:0;border-top:9px solid #8b7cff;border-right:9px solid transparent}
+    .head .selectable-head{cursor:pointer;user-select:none}
+    .head .selectable-head:hover,.head .selectable-head.active{background:#dff7ff;color:var(--red2)}
+    .body{overflow:auto}.row{height:26px;border-bottom:1px solid #eee;font-size:15px}.row:nth-child(even){background:var(--row)}.row.selected,.table.all-selected .row{background:#dff7ff}.row .col-selected{background:#eaf8ff}.money{text-align:right;font-variant-numeric:tabular-nums}
+    .nav-cell{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;outline:0;padding:0 6px;line-height:26px}
+    .nav-cell:focus{background:#fce8ef;box-shadow:inset 0 0 0 2px #8b6cff;color:#10203b}
+    .foot{display:flex;align-items:center;gap:8px;background:#fff;padding:2px 7px;border-top:1px solid #d9edff;font-size:12px;color:var(--muted)}
+    .note{display:grid;grid-template-columns:80px 1fr;height:72px}.note div{padding:6px;background:var(--soft);border-right:1px solid #d9edff;color:var(--muted)}.note textarea{border:0;padding:6px;resize:none}
+    .filter-card{display:grid;grid-template-rows:28px 32px}.filter-card div{background:var(--soft);padding:4px 7px;color:var(--muted);font:700 18px 'Barlow Condensed'}.filter-card input{border:0;border-top:1px solid #d9edff;padding:4px 7px}
+    .merge-check{height:36px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;background:#f4fbff;padding:0 10px;color:var(--muted);font:800 16px 'Barlow Condensed';white-space:nowrap}
+    .merge-check input{width:16px;height:16px;accent-color:var(--purple)}
+    .context-menu{position:fixed;z-index:3000;display:none;min-width:190px;border:1px solid #9bcfff;border-radius:8px;background:#fff;box-shadow:0 16px 38px #10203b2b;overflow:hidden}
+    .context-menu.visible{display:block}.context-menu button{width:100%;height:34px;border:0;border-radius:0;box-shadow:none;background:#fff;color:#172033;text-align:left;padding:6px 12px}.context-menu button:hover{background:#e8f6ff;color:var(--red2)}
+    .modal-backdrop{position:fixed;inset:0;z-index:3100;display:none;align-items:center;justify-content:center;background:rgba(23,32,51,.45)}.modal-backdrop.visible{display:flex}
+    .calc-modal{width:min(94vw,540px);background:#fff;border:2px solid #9bcfff;border-radius:14px;padding:22px;box-shadow:0 20px 50px #10203b45}.calc-title{margin:0 0 14px;font:900 34px 'Barlow Condensed';color:var(--red2)}
+    .calc-grid{display:grid;grid-template-columns:190px 1fr;border:1px solid #9bcfff}.calc-label,.calc-field{min-height:38px;border-bottom:1px solid #d9edff;padding:6px 10px;font:700 21px 'Barlow Condensed'}.calc-label{background:#eef8ff;color:var(--muted);cursor:pointer}.calc-field{padding:0}.calc-field input{width:100%;height:100%;border:0;padding:0 10px;text-align:right}.calc-label.last,.calc-field.last{border-bottom:0}.calc-result{font:800 21px 'Barlow Condensed';color:#172033;background:#fff}
+    .calc-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}.calc-actions button{height:38px}
+    .provider-modal{width:min(94vw,760px);background:#fff;border:2px solid #9bcfff;border-radius:14px;box-shadow:0 20px 50px #10203b45;overflow:hidden}.provider-modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#eef8ff;color:var(--red2);font:900 28px 'Barlow Condensed';border-bottom:1px solid #cce8ff}.provider-admin-note{font:800 14px Barlow;color:var(--muted)}.provider-edit-grid{display:grid;grid-template-columns:150px 1fr 150px 1fr;gap:10px;padding:16px}.provider-edit-grid label{font:800 16px 'Barlow Condensed';color:var(--muted);align-self:center;cursor:pointer}.provider-edit-grid input,.provider-edit-grid textarea{border:1px solid #cce8ff;border-radius:6px;height:32px;padding:4px 7px;background:#fff}.provider-edit-grid input[readonly],.provider-edit-grid textarea[readonly]{background:#f4fbff;color:#667}.provider-edit-grid input[type="checkbox"]{width:18px;height:18px;padding:0;justify-self:start}.provider-edit-grid textarea{grid-column:2 / 5;height:70px;resize:vertical}.provider-modal-actions{display:flex;justify-content:flex-end;gap:10px;padding:12px 16px;border-top:1px solid #cce8ff}
+    .hidden{display:none}.toast{position:fixed;left:50%;bottom:26px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none}.toast.visible{opacity:1}
+  </style>
+  <script src="nav-helper.js"></script>
+  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="actualizar_articulos"></script>
+</head>
+<body>
+<div class="app">
+  <header>
+    <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
+    <h1>Actualizar Articulos</h1>
+    <div class="actions"><div class="status-wrap"><span class="status" id="status">Inicializando...</span><div class="sync-progress" id="syncProgress"><div class="sync-progress-fill" id="syncProgressFill"></div></div></div><button id="viewProviderBtn" type="button">Ver Proveedor</button><button data-nav-url="listasproveedores.html">Comparar</button><button data-nav-url="menu.html">Menu</button></div>
+  </header>
+  <main>
+    <section class="left">
+      <div class="bar">
+        <label>Buscar Proveedor</label>
+        <div class="combo" id="providerCombo">
+          <input id="providerSearch" autocomplete="off" value="Independiente">
+          <button id="providerComboBtn" type="button" tabindex="-1">▼</button>
+          <div class="combo-list" id="providerDropdown"></div>
+        </div>
+        <button class="primary" id="exportBtn">Exportar</button>
+        <button id="clearBtn">Borrar</button>
+        <label class="merge-check" title="Publica el JSON sumando/reemplazando articulos sobre la lista existente del proveedor">
+          <input type="checkbox" id="mergeExistingList">
+          Aplicar a lista existente
+        </label>
+      </div>
+      <div class="provider">
+        <div class="p-label">IDProveedor</div><div class="p-label">Proveedor</div><div class="p-label">Descuento</div><div class="p-label">Ultima Actualizacion</div>
+        <div class="p-value" id="provId"></div><div class="p-value" id="provName"></div><div class="p-value money" id="provDiscount">0,00%</div><div class="p-value" id="provDate"></div>
+      </div>
+      <section class="table">
+        <div class="head">
+          <div class="selector-cell corner-selector" id="tableSelector" title="Seleccionar tabla"></div>
+          <div class="selectable-head" data-select-col="cod">CodProveedor</div>
+          <div class="selectable-head" data-select-col="art">Descripcion</div>
+          <div class="selectable-head" data-select-col="lista">Precio de Lista</div>
+          <div>Precio Costo</div>
+          <div>ID</div>
+        </div>
+        <div class="body" id="rows"></div>
+        <div class="foot"><span>Registro:</span><span id="count">0</span><span id="saveHint"></span></div>
+      </section>
+      <div class="note"><div>Nota:</div><textarea id="note"></textarea></div>
+    </section>
+    <aside class="right">
+      <section class="filter-card"><div>Filtrar</div><input id="filterInput"></section>
+      <section class="filter-card"><div>Estado</div><input id="stateBox" readonly></section>
+    </aside>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<div class="context-menu" id="rowContextMenu"><button type="button" id="calcContextBtn">Dividir / multiplicar</button></div>
+<div class="modal-backdrop" id="providerEditBackdrop">
+  <form class="provider-modal" id="providerEditForm">
+    <div class="provider-modal-head"><span id="providerEditTitle">Proveedor</span><span class="provider-admin-note" id="providerEditMode"></span><button type="button" id="providerEditCloseBtn">x</button></div>
+    <div class="provider-edit-grid">
+      <label for="providerEditId">IDProveedor</label><input id="providerEditId" required>
+      <label for="providerEditName">Proveedor</label><input id="providerEditName" required>
+      <label for="providerEditDiscountInvoice">Desc. factura</label><input id="providerEditDiscountInvoice" class="provider-percent-live" inputmode="decimal" placeholder="0,00 %">
+      <label for="providerEditDiscountList">Desc. lista</label><input id="providerEditDiscountList" class="provider-percent-live" inputmode="decimal" placeholder="0,00 %">
+      <label for="providerEditDate">Ultima act.</label><input id="providerEditDate" type="date">
+      <label for="providerEditSeller">Vendedor</label><input id="providerEditSeller">
+      <label for="providerEditPhone">Telefono</label><input id="providerEditPhone" inputmode="tel">
+      <label for="providerEditPageLink">Pagina</label><input id="providerEditPageLink" inputmode="url" placeholder="https://...">
+      <label for="providerEditFreightPercent">Porc. flete</label><input id="providerEditFreightPercent" class="provider-percent-live" inputmode="decimal" placeholder="0,00 %">
+      <label for="providerEditIvaPercent">Porc. IVA</label><input id="providerEditIvaPercent" class="provider-percent-live" inputmode="decimal" placeholder="0,00 %">
+      <label for="providerEditIvaIncluded">Iva incluido?</label><input id="providerEditIvaIncluded" type="checkbox">
+      <label for="providerEditNote">Nota</label><textarea id="providerEditNote"></textarea>
+    </div>
+    <div class="provider-modal-actions">
+      <button type="button" id="providerEditCancelBtn">Cerrar</button>
+      <button class="primary" type="submit" id="providerEditSaveBtn">Guardar</button>
+    </div>
+  </form>
+</div>
+<div class="modal-backdrop" id="calcBackdrop">
+  <div class="calc-modal" role="dialog" aria-modal="true" aria-labelledby="calcTitle">
+    <h2 class="calc-title" id="calcTitle">Dividir / multiplicar</h2>
+    <div class="calc-grid">
+      <label class="calc-label" for="calcOriginalPrice">Precio inicial</label><div class="calc-field"><input id="calcOriginalPrice" class="calc-result" readonly></div>
+      <label class="calc-label" for="calcDivide">Dividir por</label><div class="calc-field"><input id="calcDivide" inputmode="decimal" autocomplete="off"></div>
+      <label class="calc-label" for="calcMultiply">Multiplicar por</label><div class="calc-field"><input id="calcMultiply" inputmode="decimal" autocomplete="off"></div>
+      <label class="calc-label last" for="calcTotal">Precio calculado</label><div class="calc-field last"><input id="calcTotal" class="calc-result" readonly value="$ 0,00"></div>
+    </div>
+    <div class="calc-actions">
+      <button type="button" id="calcCancelBtn">Cancelar</button>
+      <button type="button" id="calcUndoBtn">Volver a original</button>
+      <button class="primary" type="button" id="calcApplyBtn">Guardar</button>
+    </div>
+  </div>
+</div>
+<script>
+const SUPABASE_URL='https://tizyjenayrcdkcodsjnc.supabase.co';
+const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
+const P_TABLE='proveedores', A_TABLE='lista_precios', DB='actualizar_articulos_v1', PROVIDERS_DB='proveedores_cache_v1';
+let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, selectionMode={type:null,cols:[]}, comboMatches=[], comboActive=0, tablePasteReady=false, contextArticle=null, calcArticle=null;
+const statusEl = document.getElementById('status');
+const syncProgress = document.getElementById('syncProgress');
+const syncProgressFill = document.getElementById('syncProgressFill');
+const mergeExistingList = document.getElementById('mergeExistingList');
+function h(extra={}){return CorralonSystem.headers(extra)}
+function norm(v){return CorralonSystem.norm(v)}
+function money(v){return `$ ${Number(v||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`}
+function pct(v){return `${(Number(v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}%`}
+function parseMoney(v){return CorralonSystem.parseMoney(v)}
+function today(){return CorralonSystem.today()}
+function show(msg){toast.textContent=msg;toast.classList.add('visible');clearTimeout(show.t);show.t=setTimeout(()=>toast.classList.remove('visible'),2200)}
+function setSyncProgress(value=0,visible=true){const pct=Math.max(0,Math.min(100,Number(value)||0));if(!syncProgress||!syncProgressFill)return;syncProgress.classList.toggle('active',Boolean(visible));syncProgressFill.style.width=`${pct}%`}
+function hideSyncProgress(delay=450){clearTimeout(hideSyncProgress.t);hideSyncProgress.t=setTimeout(()=>{if(syncProgress)syncProgress.classList.remove('active');if(syncProgressFill)syncProgressFill.style.width='0%'},delay)}
+function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function providerPageValue(p){return String(p?.pagina_link||p?.pagina||p?.web||'').trim()}
+function providerUrl(value){const text=String(value||'').trim();return text?/^https?:\/\//i.test(text)?text:`https://${text}`:''}
+function currentProviderUrl(){return providerUrl(providerPageValue(provider))}
+function setProviderLinkState(){const hasLink=Boolean(currentProviderUrl());providerSearch.classList.toggle('provider-link',hasLink);provName.classList.toggle('provider-link',hasLink);providerSearch.title=hasLink?'Doble clic para abrir la pagina':'';provName.title=hasLink?'Doble clic para abrir la pagina':''}
+function openCurrentProviderPage(){const url=currentProviderUrl();if(!url)return false;window.open(url,'_blank','noopener');return true}
+function providerEditIsAdmin(){return norm(window.CorralonFunciones?.menuSessionUser?.()?.nivel)==='administrador'}
+function providerEditPercent(value){return CorralonFunciones.formatLocaleNumber(Number(value||0)*100,{decimals:2,suffix:' %'})}
+function parseProviderEditPercent(value){const n=CorralonFunciones.parseLocaleNumber(value);return Math.abs(n)>1?n/100:n}
+function boolInput(value){if(typeof value==='boolean')return value;return ['-1','1','true','si','sí','yes','x'].includes(norm(value))}
+function currentProviderForEdit(){if(provider)return provider;const found=providerMatches(providerSearch.value)[0]||null;if(found)selectProvider(found);return found}
+function setProviderEditMode(){const admin=providerEditIsAdmin();providerEditMode.textContent=admin?'Modo edicion':'Solo administradores pueden editar';providerEditSaveBtn.classList.toggle('hidden',!admin);providerEditForm.querySelectorAll('input,textarea').forEach(field=>{if(field===providerEditId){field.readOnly=true;return}if(field.type==='checkbox')field.disabled=!admin;else field.readOnly=!admin})}
+function openProviderEditModal(){const p=currentProviderForEdit();if(!p){show('Selecciona un proveedor');providerSearch.focus();return}providerEditTitle.textContent=p.proveedor||'Proveedor';providerEditId.value=p.id_proveedor||'';providerEditName.value=p.proveedor||'';providerEditDiscountInvoice.value=providerEditPercent(p.descuento_factura);providerEditDiscountList.value=providerEditPercent(p.descuento_lista);providerEditDate.value=CorralonSystem.dateOnly(p.ultima_actualizacion)||'';providerEditSeller.value=p.vendedor||'';providerEditPhone.value=p.telefono||'';providerEditPageLink.value=p.pagina_link||p.pagina||'';providerEditFreightPercent.value=providerEditPercent(p.porc_flete);providerEditIvaPercent.value=providerEditPercent(p.porc_iva);providerEditIvaIncluded.checked=boolInput(p.iva_incluido);providerEditNote.value=p.nota||'';setProviderEditMode();providerEditBackdrop.classList.add('visible');setTimeout(()=>providerEditIsAdmin()?providerEditName.focus():providerEditCancelBtn.focus(),0)}
+function closeProviderEditModal(){providerEditBackdrop.classList.remove('visible')}
+async function saveProviderEdit(){if(!providerEditIsAdmin()){show('Solo administradores pueden editar proveedores');return}const current=currentProviderForEdit();if(!current)return;const updated=CorralonSystem.normalizeProviderPageLink({...current,id_proveedor:String(providerEditId.value).trim(),proveedor:String(providerEditName.value).trim(),descuento_factura:parseProviderEditPercent(providerEditDiscountInvoice.value),descuento_lista:parseProviderEditPercent(providerEditDiscountList.value),ultima_actualizacion:providerEditDate.value||null,vendedor:String(providerEditSeller.value).trim(),telefono:String(providerEditPhone.value).trim(),pagina_link:String(providerEditPageLink.value).trim(),reserva_texto_1:String(providerEditPageLink.value).trim()||null,nota:String(providerEditNote.value).trim(),porc_flete:parseProviderEditPercent(providerEditFreightPercent.value),porc_iva:parseProviderEditPercent(providerEditIvaPercent.value),iva_incluido:providerEditIvaIncluded.checked,proveedor_norm:norm(providerEditName.value)});if(!updated.id_proveedor||!updated.proveedor)return;statusEl.textContent='Guardando proveedor...';const response=await fetch(`${SUPABASE_URL}/rest/v1/${P_TABLE}?on_conflict=id_proveedor`,{method:'POST',headers:h({Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(CorralonSystem.providerRemotePayload(updated))});if(!response.ok)throw new Error(await response.text());const index=providers.findIndex(p=>String(p.id_proveedor)===String(updated.id_proveedor));if(index>=0)providers[index]=updated;else providers.push(updated);await Promise.all([putStoreItem('providers',updated),setProvidersCache(providers.map(CorralonSystem.normalizeProviderPageLink))]);renderProviders();selectProvider(updated);closeProviderEditModal();show('Proveedor guardado')}
+function openDb(){return new Promise((res,rej)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>{r.result.createObjectStore('providers',{keyPath:'id_proveedor'});r.result.createObjectStore('settings',{keyPath:'id'})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function setStore(store,data){return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).clear();data.forEach(x=>tx.objectStore(store).put(x));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
+function putStoreItem(store,item){return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).put(item);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
+function getStore(store){return new Promise((res,rej)=>{const r=db.transaction(store).objectStore(store).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
+function putSetting(id,value){return putStoreItem('settings',{id,value,updated_at:new Date().toISOString()})}
+function getSetting(id){return new Promise((res,rej)=>{const r=db.transaction('settings').objectStore('settings').get(id);r.onsuccess=()=>res(r.result?.value);r.onerror=()=>rej(r.error)})}
+function openProvidersDb(){return new Promise((res,rej)=>{const r=indexedDB.open(PROVIDERS_DB,1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('data'))r.result.createObjectStore('data',{keyPath:'id_proveedor'})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function getProvidersCache(){try{const pdb=await openProvidersDb();return await new Promise((res,rej)=>{const r=pdb.transaction('data').objectStore('data').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}catch(error){console.warn(error);return[]}}
+async function setProvidersCache(data){try{const pdb=await openProvidersDb();await new Promise((res,rej)=>{const tx=pdb.transaction('data','readwrite');const store=tx.objectStore('data');store.clear();data.forEach(x=>store.put(x));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(error){console.warn(error)}}
+async function putProvidersCacheItem(item){try{const pdb=await openProvidersDb();await new Promise((res,rej)=>{const tx=pdb.transaction('data','readwrite');tx.objectStore('data').put(item);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(error){console.warn(error)}}
+function renderProviders(){providers.sort((a,b)=>String(a.proveedor||'').localeCompare(String(b.proveedor||''),'es'));renderProviderCombo(false)}
+function providerMatches(text){const q=norm(text);return providers.filter(p=>norm(p.proveedor).includes(q)||norm(p.id_proveedor).includes(q))}
+function selectProviderByText(text){const q=norm(text);const found=providers.find(p=>norm(p.proveedor)===q||norm(p.id_proveedor)===q)||providerMatches(text)[0]||null;selectProvider(found);closeProviderCombo()}
+function selectProvider(found){provider=found||null;providerSearch.value=provider?.proveedor||'Independiente';provId.textContent=provider?.id_proveedor||'';provName.textContent=provider?.proveedor||'';provDiscount.textContent=pct(provider?.descuento_lista||0);provDate.textContent=provider?.ultima_actualizacion||'';note.value=provider?.nota||'';setProviderLinkState();recalcArticles();render()}
+function renderProviderCombo(open=true){comboMatches=providerMatches(providerSearch.value).slice(0,80);if(!comboMatches.length&&providers.length)comboMatches=providers.slice(0,80);comboActive=Math.min(comboActive,Math.max(0,comboMatches.length-1));providerDropdown.innerHTML=comboMatches.map((p,i)=>`<div class="combo-option ${i===comboActive?'active':''}" data-index="${i}"><span class="combo-code">${escapeHtml(p.id_proveedor)}</span><span class="combo-name ${providerPageValue(p)?'provider-link':''}">${escapeHtml(p.proveedor)}</span></div>`).join('');providerCombo.classList.toggle('open',open&&comboMatches.length>0)}
+function openProviderCombo(){renderProviderCombo(true)}
+function closeProviderCombo(){providerCombo.classList.remove('open')}
+function moveProviderCombo(delta){if(!providerCombo.classList.contains('open'))openProviderCombo();if(!comboMatches.length)return;comboActive=(comboActive+delta+comboMatches.length)%comboMatches.length;renderProviderCombo(true);providerDropdown.querySelector('.active')?.scrollIntoView({block:'nearest'})}
+function chooseProviderCombo(){const found=comboMatches[comboActive]||providerMatches(providerSearch.value)[0]||null;selectProvider(found);closeProviderCombo()}
+function providerDiscount(){return Number(provider?.descuento_lista||0)||0}
+function netListPrice(list,desc=providerDiscount()){return Number((Number(list||0)*(1-Number(desc||0))).toFixed(2))}
+function applyProviderData(article){if(!article||!provider)return article;article.id_proveedor=provider.id_proveedor;article.proveedor=provider.proveedor;article.descuento_lista=providerDiscount();article.ultima_actualizacion=provider.ultima_actualizacion||'';article.proveedor_norm=norm(provider.proveedor);return article}
+function recalcArticles(){if(!provider)return;const desc=providerDiscount();for(const a of articles){applyProviderData(a);if(!a.precio_costo_original)a.precio_costo=netListPrice(a.precio_lista,desc)}}
+function rowHtml(a,i){const cols=selectionMode.cols||[];return `<div class="row" data-i="${i}"><div class="selector-cell"> </div><div class="nav-cell ${cols.includes('cod')?'col-selected':''}" tabindex="0" data-row="${i}" data-col="0">${a.cod_proveedor}</div><div class="nav-cell ${cols.includes('art')?'col-selected':''}" tabindex="0" data-row="${i}" data-col="1" title="${a.articulo}">${a.articulo}</div><div class="nav-cell money ${cols.includes('lista')?'col-selected':''}" tabindex="0" data-row="${i}" data-col="2">${money(a.precio_lista)}</div><div class="nav-cell money" tabindex="0" data-row="${i}" data-col="3">${money(a.precio_costo)}</div><div class="nav-cell" tabindex="0" data-row="${i}" data-col="4">${a.id_proveedor||''}</div></div>`}
+function paintRows(reset=true){const limit=Math.min(renderedCount,view.length);const html=[];for(let i=0;i<limit;i++)html.push(rowHtml(view[i],i));rows.innerHTML=html.join('');count.textContent=`${limit.toLocaleString('es-AR')} de ${view.length.toLocaleString('es-AR')}`;stateBox.value=`${articles.length.toLocaleString('es-AR')} articulos cargados`}
+function render(){const words=norm(filterInput.value).split(' ').filter(Boolean);view=articles.filter(a=>!words.length||words.every(w=>a.articulo_norm.includes(w)||a.cod_proveedor_norm.includes(w)));renderedCount=100;paintRows()}
+function loadMoreRows(){if(renderedCount>=view.length)return;renderedCount=Math.min(renderedCount+100,view.length);paintRows(false)}
+function selectCellText(cell){if(!cell)return;const range=document.createRange();range.selectNodeContents(cell);const sel=window.getSelection();sel.removeAllRanges();sel.addRange(range)}
+function focusTableCell(row=0,col=3){if(row>=renderedCount&&row<view.length){renderedCount=Math.min(view.length,row+1);paintRows(false)}const cell=rows.querySelector(`.nav-cell[data-row="${row}"][data-col="${col}"]`);if(!cell)return false;cell.focus();selectCellText(cell);cell.scrollIntoView({block:'nearest',inline:'nearest'});return true}
+function moveTableCell(cell,rowDelta=0,colDelta=0){const row=Number(cell?.dataset?.row);const col=Number(cell?.dataset?.col);if(!Number.isFinite(row)||!Number.isFinite(col))return false;const nextRow=Math.max(0,Math.min(view.length-1,row+rowDelta));const nextCol=Math.max(0,Math.min(4,col+colDelta));return focusTableCell(nextRow,nextCol)}
+function articleFromObject(o,i){const keys=Object.keys(o);const get=(...names)=>{for(const n of names){const k=keys.find(x=>norm(x)===norm(n)); if(k)return o[k]} return ''};const list=parseMoney(get('Precio de Lista','Preciolista','precio lista','preciolista'));const art=String(get('Descripcion','Articulo','articulo','descripcion')).trim();const cod=String(get('CodProveedor','Cod Proveedor','codigo')).trim();if(!art&&!cod)return null;const explicitCost=parseMoney(get('Precio Costo','PrecioCosto'));const article={cod_proveedor:cod,articulo:art,precio_lista:list,precio_costo:explicitCost||netListPrice(list),id_proveedor:String(get('ID Proveedor','IDProveedor','idproveedor')).trim(),proveedor:provider?.proveedor||'',cod_proveedor_norm:norm(cod),articulo_norm:norm(art),proveedor_norm:norm(provider?.proveedor||''),idorden:Date.now()*1000+i};return applyProviderData(article)}
+async function readExcel(file){const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}).map(articleFromObject).filter(Boolean)}
+function dateOnly(v){return CorralonSystem.dateOnly(v)}
+function providerFromObject(o){return CorralonSystem.providerFromObject(o)}
+async function loadProvidersFromBundledExcel(){try{statusEl.textContent='Cargando Proveedores.xlsx...';const response=await fetch('Proveedores.xlsx');if(!response.ok)throw new Error('No encontre Proveedores.xlsx');const wb=XLSX.read(await response.arrayBuffer(),{type:'array',cellDates:true});const data=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});providers=data.map(providerFromObject).filter(Boolean);await Promise.all([setStore('providers',providers),setProvidersCache(providers)]);renderProviders();statusEl.textContent=`${providers.length.toLocaleString('es-AR')} proveedores cargados`;return true}catch(error){console.warn(error);return false}}
+function parsePasted(text){
+  const lines=String(text||'').split(/\r?\n/).filter(line=>line.trim());
+  const parsed=lines.map((line,i)=>{
+    const cols=line.split('\t');
+    const cod=String(cols[0]??'').trim();
+    const art=String(cols[1]??'').trim();
+    const list=parseMoney(cols[2]??'');
+    if(!cod&&!art&&!list)return null;
+    return {
+      cod_proveedor:cod,
+      articulo:art,
+      precio_lista:list,
+      precio_costo:netListPrice(list),
+      id_proveedor:provider?.id_proveedor||'',
+      proveedor:provider?.proveedor||'',
+      cod_proveedor_norm:norm(cod),
+      articulo_norm:norm(art),
+      proveedor_norm:norm(provider?.proveedor||''),
+      idorden:Date.now()*1000+i
+    };
+  }).filter(Boolean);
+  if(parsed.length)return parsed.map(applyProviderData);
+  const wb=XLSX.read(text,{type:'string'});
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}).map(articleFromObject).filter(Boolean);
+}
+async function importProvidersCloud(){const out=await CorralonSystem.importProvidersCloud();if(out.length){providers=out;await setStore('providers',providers);renderProviders();statusEl.textContent=`${providers.length.toLocaleString('es-AR')} proveedores sincronizados`}}
+async function loadProviders(){providers=await getProvidersCache();if(!providers.length)providers=await getStore('providers');if(providers.length){renderProviders();statusEl.textContent=`${providers.length.toLocaleString('es-AR')} proveedores listos`}else{await loadProvidersFromBundledExcel()}importProvidersCloud().catch(error=>{console.warn(error);if(!providers.length)statusEl.textContent='No pude sincronizar proveedores'})}
+async function deleteProviderArticles(id){const r=await fetch(`${SUPABASE_URL}/rest/v1/${A_TABLE}?id_proveedor=eq.${encodeURIComponent(id)}`,{method:'DELETE',headers:h()});if(!r.ok)throw new Error(await r.text())}
+async function insertArticles(data){for(let i=0;i<data.length;i+=1000){const chunk=data.slice(i,i+1000).map((a,n)=>({...a,idorden:Date.now()*1000+i+n,articulo_source:'actualizar_articulos'}));const r=await fetch(`${SUPABASE_URL}/rest/v1/${A_TABLE}?on_conflict=idorden`,{method:'POST',headers:h({Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(chunk)});if(!r.ok)throw new Error(await r.text())}}
+function currentProviderTimestamp(){return CorralonSystem.nowTimestamp ? CorralonSystem.nowTimestamp() : `${today()} ${new Date().toLocaleTimeString('es-AR',{hour12:false})}`}
+function applyProviderTimestamp(value){if(!provider)return null;provider.ultima_actualizacion=value;const stored=providers.find(p=>String(p.id_proveedor)===String(provider.id_proveedor));if(stored)stored.ultima_actualizacion=value;provDate.textContent=value;articles.forEach(article=>{article.ultima_actualizacion=value});return stored||provider}
+async function updateProviderDate(value=currentProviderTimestamp()){if(!provider)return;const updated=applyProviderTimestamp(value);await Promise.all([putStoreItem('providers',updated),CorralonSystem.updateProviderDateOnly(updated,value)])}
+async function syncProviderArticles(){
+  await CorralonSystem.replaceProviderArticles(provider.id_proveedor,articles,(done,total)=>{
+    const pct=total?done/total:1;
+    setSyncProgress(45+pct*40);
+    statusEl.textContent=`Sincronizando artículos ${done.toLocaleString('es-AR')} / ${total.toLocaleString('es-AR')}`;
+  },{mergeExisting:Boolean(mergeExistingList?.checked)})
+}
+function isLocalAccessMode(){
+  return location.protocol==='file:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'||/^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(location.hostname);
+}
+function runAccessPriceUpdate(){
+  const link=document.createElement('a');
+  link.href='corralon-access-update://actualizar-precios';
+  link.style.display='none';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(()=>link.remove(),1000);
+}
+async function saveAccessXlsBlob(blob){
+  const response=await fetch('/save-articulos-xls',{method:'POST',body:blob});
+  if(!response.ok)throw new Error(await response.text()||'No pude guardar C:\\Update\\Articulos.xls');
+}
+async function exportAndUpdate(){
+  if(!provider)throw new Error('Selecciona proveedor');
+  if(!articles.length)throw new Error('No hay articulos');
+  setSyncProgress(4);
+  statusEl.textContent='Exportando Articulos.xls...';
+  const stamp=currentProviderTimestamp();
+  applyProviderTimestamp(stamp);
+  const blob=CorralonSystem.buildArticlesXlsBlob(articles);
+  setSyncProgress(22);
+  if(isLocalAccessMode()){
+    await saveAccessXlsBlob(blob);
+    runAccessPriceUpdate();
+    show('Articulos.xls generado y actualización de Access enviada');
+  }else{
+    await CorralonSystem.saveBlobAs(blob,'Articulos.xls');
+    show('Articulos.xls generado');
+  }
+  setSyncProgress(38);
+  statusEl.textContent=isLocalAccessMode()?'XLS generado. Actualizando Access y publicando lista...':'XLS generado. Publicando lista...';
+  try{
+    setSyncProgress(45);
+    await syncProviderArticles();
+    setSyncProgress(88);
+    await updateProviderDate(stamp);
+    setSyncProgress(100);
+  }catch(error){
+    statusEl.textContent='XLS generado, pero fallo la sincronizacion.';
+    hideSyncProgress(1200);
+    throw error;
+  }
+  statusEl.textContent='XLS generado y proveedor actualizado.';
+  hideSyncProgress();
+}
+async function saveArticlesCache(){await putSetting('articles_cache',articles)}
+async function loadArticlesCache(){const cached=await getSetting('articles_cache');if(Array.isArray(cached)){articles=cached;render()}}
+async function pasteArticlesFromClipboard(){const text=await navigator.clipboard.readText();articles=parsePasted(text);await saveArticlesCache();render()}
+function orderedSelectedCols(){const order=['cod','art','lista'];return order.filter(col=>(selectionMode.cols||[]).includes(col))}
+function setSelection(type,col=null,event=null){if(type==='table'){selectionMode=selectionMode.type==='table'?{type:null,cols:[]}:{type:'table',cols:[]}}else if(type==='column'){let cols=event?.ctrlKey&&selectionMode.type==='column'?[...selectionMode.cols]:[];if(event?.ctrlKey){cols=cols.includes(col)?cols.filter(x=>x!==col):[...cols,col]}else{cols=selectionMode.type==='column'&&selectionMode.cols.length===1&&selectionMode.cols[0]===col?[]:[col]}selectionMode=cols.length?{type:'column',cols}:{type:null,cols:[]}}document.querySelector('.table').classList.toggle('all-selected',selectionMode.type==='table');document.querySelectorAll('.selectable-head').forEach(head=>head.classList.toggle('active',selectionMode.type==='column'&&(selectionMode.cols||[]).includes(head.dataset.selectCol)));paintRows()}
+function clearTableSelection(){if(!selectionMode.type&&!tablePasteReady)return;selectionMode={type:null,cols:[]};tablePasteReady=false;document.querySelector('.table').classList.remove('all-selected');document.querySelectorAll('.selectable-head').forEach(head=>head.classList.remove('active'));paintRows()}
+function focusTablePasteCorner(){tablePasteReady=true;tableSelector.tabIndex=0;tableSelector.focus();if(!articles.length){selectionMode={type:'table',cols:[]};document.querySelector('.table').classList.add('all-selected');paintRows()}}
+function selectedText(){const source=view.length?view:articles;if(selectionMode.type==='table')return source.map(a=>[a.cod_proveedor,a.articulo,a.precio_lista].join('\t')).join('\n');if(selectionMode.type==='column'){const keys={cod:'cod_proveedor',art:'articulo',lista:'precio_lista'};const cols=orderedSelectedCols();return source.map(a=>cols.map(col=>a[keys[col]]??'').join('\t')).join('\n')}return''}
+async function copySelection(){const text=selectedText();if(!text)return;await navigator.clipboard.writeText(text);show('Seleccion copiada')}
+function makeBlankArticle(i){return applyProviderData({cod_proveedor:'',articulo:'',precio_lista:0,precio_costo:0,id_proveedor:provider?.id_proveedor||'',proveedor:provider?.proveedor||'',cod_proveedor_norm:'',articulo_norm:'',proveedor_norm:norm(provider?.proveedor||''),idorden:Date.now()*1000+i})}
+function applyColumnValue(article,col,value){if(col==='cod'){article.cod_proveedor=String(value??'').trim();article.cod_proveedor_norm=norm(article.cod_proveedor)}else if(col==='art'){article.articulo=String(value??'').trim();article.articulo_norm=norm(article.articulo)}else if(col==='lista'){const list=parseMoney(value);article.precio_lista=list;const desc=Number(provider?.descuento_lista||article.descuento_lista||0);article.precio_costo=Number((list*(1-desc)).toFixed(2))}if(provider){article.id_proveedor=provider.id_proveedor;article.proveedor=provider.proveedor;article.descuento_lista=Number(provider.descuento_lista||0);article.ultima_actualizacion=provider.ultima_actualizacion||'';article.proveedor_norm=norm(provider.proveedor)}}
+async function pasteSelectedColumnsFromClipboard(){const cols=orderedSelectedCols();if(!cols.length){await pasteArticlesFromClipboard();return}const text=await navigator.clipboard.readText();const lines=String(text||'').split(/\r?\n/).filter(line=>line.trim().length);const target=view.length?view:articles;lines.forEach((line,i)=>{const values=line.split('\t');let article=target[i];if(!article){article=makeBlankArticle(articles.length+i);articles.push(article);if(target!==articles)target.push(article)}cols.forEach((col,n)=>applyColumnValue(article,col,values[n]??''))});await saveArticlesCache();render();show('Columnas pegadas')}
+async function pasteClipboardToFilter(){const text=await navigator.clipboard.readText();filterInput.value=String(text||'').split(/\r?\n/)[0]||'';render();filterInput.focus();requestAnimationFrame(()=>filterInput.select())}
+function parseFactor(v,fallback=1){const text=String(v??'').trim();const n=window.CorralonFunciones?.evaluateNumericExpression?window.CorralonFunciones.evaluateNumericExpression(text):parseMoney(text);return Number.isFinite(n)&&n!==0?n:fallback}
+function calcBasePrice(a){if(!a)return 0;if(a.precio_costo_original)return Number(a.precio_costo_original||0);const cost=Number(a.precio_costo||0);const list=Number(a.precio_lista||0);const desc=Number(provider?.descuento_lista||a.descuento_lista||0)||0;if(desc>0&&list>0&&Math.abs(cost-list)<=0.009)return netListPrice(list,desc);return cost}
+function calcCurrentPrice(){return calcBasePrice(calcArticle)/parseFactor(calcDivide.value,1)*parseFactor(calcMultiply.value,1)}
+function updateCalcResult(){calcTotal.value=money(calcCurrentPrice())}
+function openCalcModal(article){if(!article)return;calcArticle=article;calcOriginalPrice.value=money(calcBasePrice(article));calcDivide.value=article.precio_costo_divisor||'';calcMultiply.value=article.precio_costo_multiplicador||'';updateCalcResult();calcBackdrop.classList.add('visible');setTimeout(()=>{calcDivide.focus();calcDivide.select()},0)}
+function closeCalcModal(){calcArticle=null;calcBackdrop.classList.remove('visible')}
+async function applyCalculatedPrice(){if(!calcArticle)return;const original=calcBasePrice(calcArticle);const calculated=Number(calcCurrentPrice().toFixed(2));calcArticle.precio_costo=calculated;calcArticle.precio_costo_original=original;calcArticle.precio_costo_divisor=calcDivide.value.trim();calcArticle.precio_costo_multiplicador=calcMultiply.value.trim();if(Math.abs(calculated-original)<=0.009){delete calcArticle.precio_costo_original;delete calcArticle.precio_costo_divisor;delete calcArticle.precio_costo_multiplicador}await saveArticlesCache();render();closeCalcModal();show('Precio guardado')}
+async function undoCalculatedPrice(){if(!calcArticle)return;calcArticle.precio_costo=calcBasePrice(calcArticle);delete calcArticle.precio_costo_original;delete calcArticle.precio_costo_divisor;delete calcArticle.precio_costo_multiplicador;await saveArticlesCache();render();closeCalcModal();show('Precio original restaurado')}
+function calcItems(){return [calcOriginalPrice,calcDivide,calcMultiply,calcTotal,calcApplyBtn,calcUndoBtn,calcCancelBtn]}
+function moveCalc(delta){const items=calcItems();const i=Math.max(0,items.indexOf(document.activeElement));const next=items[Math.max(0,Math.min(items.length-1,i+delta))];next?.focus();if(next?.tagName==='INPUT')next.select()}
+function calcKey(event){if(!calcBackdrop.classList.contains('visible'))return;if(event.key==='Escape'){event.preventDefault();closeCalcModal();return}if(event.key==='Enter'&&document.activeElement===calcApplyBtn){event.preventDefault();calcApplyBtn.click();return}if(event.key==='Enter'&&document.activeElement.tagName==='BUTTON')return;if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();if(document.activeElement===calcTotal&&!event.shiftKey)calcApplyBtn.focus();else moveCalc(event.shiftKey?-1:1)}else if(event.key==='ArrowDown'){event.preventDefault();moveCalc(1)}else if(event.key==='ArrowUp'){event.preventDefault();moveCalc(-1)}else if((event.key==='ArrowLeft'||event.key==='ArrowRight')&&document.activeElement.tagName==='BUTTON'){event.preventDefault();moveCalc(event.key==='ArrowRight'?1:-1)}}
+function setupCalcFunciones(){const root=document.querySelector('.calc-modal');const helpers=window.CorralonFunciones;if(!root||!helpers)return;helpers.bindLabelSelect?.({root,labelSelector:'.calc-label',controlSelector:'input'});helpers.bindRawCurrencySelection?.({root,selector:'#calcOriginalPrice,#calcTotal'});}
+function setupProviderEditFunciones(){const helpers=window.CorralonFunciones;if(!helpers)return;helpers.bindShiftEnterNewLine?.({root:providerEditForm,selector:'textarea'});helpers.bindLinearNavigation?.({root:providerEditForm,selector:'.provider-edit-grid input,.provider-edit-grid textarea,.provider-modal-actions button:not(.hidden)',selectOnFocus:true});helpers.bindLiveLocaleNumber?.({root:providerEditForm,selector:'.provider-percent-live',decimals:2,suffix:' %'});helpers.bindLabelSelect?.({root:providerEditForm});}
+function showRowContext(event,article){contextArticle=article;rowContextMenu.style.left=`${event.clientX}px`;rowContextMenu.style.top=`${event.clientY}px`;rowContextMenu.classList.add('visible')}
+function hideRowContext(){rowContextMenu.classList.remove('visible');contextArticle=null}
+providerSearch.addEventListener('focus',()=>{providerSearch.select();openProviderCombo()});
+providerSearch.addEventListener('input',()=>{comboActive=0;openProviderCombo()});
+providerSearch.addEventListener('dblclick',(event)=>{if(openCurrentProviderPage())event.preventDefault()});
+provName.addEventListener('dblclick',(event)=>{if(openCurrentProviderPage())event.preventDefault()});
+providerSearch.addEventListener('change',()=>selectProviderByText(providerSearch.value));
+providerSearch.addEventListener('keydown',(event)=>{if(event.key==='ArrowDown'){event.preventDefault();moveProviderCombo(1)}else if(event.key==='ArrowUp'){event.preventDefault();moveProviderCombo(-1)}else if(event.key==='Enter'){event.preventDefault();chooseProviderCombo()}else if(event.key==='Escape'){event.preventDefault();closeProviderCombo()}});
+providerComboBtn.addEventListener('mousedown',(event)=>{event.preventDefault();providerCombo.classList.contains('open')?closeProviderCombo():openProviderCombo();providerSearch.focus()});
+providerDropdown.addEventListener('mousedown',(event)=>{event.preventDefault();const option=event.target.closest('.combo-option');if(!option)return;comboActive=Number(option.dataset.index)||0;chooseProviderCombo()});
+document.addEventListener('mousedown',(event)=>{if(!providerCombo.contains(event.target))closeProviderCombo();if(!event.target.closest('.table'))clearTableSelection();if(!event.target.closest('#rowContextMenu'))hideRowContext()});
+document.querySelector('.body').addEventListener('scroll',(event)=>{const box=event.currentTarget;if(box.scrollTop+box.clientHeight>=box.scrollHeight-80)loadMoreRows()});
+rows.addEventListener('focusin',(event)=>{const cell=event.target.closest('.nav-cell');if(cell)selectCellText(cell)});
+rows.addEventListener('keydown',(event)=>{const cell=event.target.closest('.nav-cell');if(!cell)return;let moved=false;if(event.key==='Enter')moved=moveTableCell(cell,event.shiftKey?-1:1,0);else if(event.key==='Tab')moved=moveTableCell(cell,0,event.shiftKey?-1:1);else if(event.key==='ArrowDown')moved=moveTableCell(cell,1,0);else if(event.key==='ArrowUp')moved=moveTableCell(cell,-1,0);else if(event.key==='ArrowRight')moved=moveTableCell(cell,0,1);else if(event.key==='ArrowLeft')moved=moveTableCell(cell,0,-1);if(moved){event.preventDefault();event.stopPropagation()}});
+rows.addEventListener('contextmenu',(event)=>{const row=event.target.closest('.row');if(!row)return;event.preventDefault();const article=view[Number(row.dataset.i)];if(!article)return;showRowContext(event,article)});
+tableSelector.addEventListener('click',()=>focusTablePasteCorner());
+tableSelector.addEventListener('dblclick',(event)=>{event.preventDefault();if(!articles.length)pasteArticlesFromClipboard().catch(e=>{console.error(e);show('No pude pegar')})});
+document.querySelectorAll('.selectable-head').forEach(head=>head.addEventListener('click',(event)=>setSelection('column',head.dataset.selectCol,event)));
+window.addEventListener('keydown',(event)=>{if(event.key==='F1'){event.preventDefault();event.stopPropagation();filterInput.focus();filterInput.select()}},{capture:true});
+document.addEventListener('keydown',(event)=>{if(event.key==='Escape'){hideRowContext();closeCalcModal();closeProviderEditModal()}if(event.key==='F1')return;const key=event.key.toLowerCase();const editable=event.target?.matches?.('input,textarea,[contenteditable="true"]');const modalOpen=calcBackdrop.classList.contains('visible')||providerEditBackdrop.classList.contains('visible');if(modalOpen)return;if(event.ctrlKey&&key==='v'&&selectionMode.type==='column'&&!editable){event.preventDefault();pasteSelectedColumnsFromClipboard().catch(e=>{console.error(e);show('No pude pegar')})}else if(event.ctrlKey&&key==='v'&&!selectionMode.type&&!editable){event.preventDefault();pasteClipboardToFilter().catch(e=>{console.error(e);show('No pude pegar en filtro')})}else if(event.ctrlKey&&key==='c'&&selectionMode.type&&!editable){event.preventDefault();copySelection().catch(e=>{console.error(e);show('No pude copiar')})}});
+filterInput.addEventListener('keydown',(event)=>{if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();render();focusTableCell(0,3)}});
+filterInput.addEventListener('paste',()=>setTimeout(()=>filterInput.select(),0));
+window.CorralonFunciones?.bindLinearNavigation?.({root:document,selector:'#filterInput',selectOnFocus:false});
+setupCalcFunciones();
+setupProviderEditFunciones();
+rowContextMenu.addEventListener('mousedown',(event)=>event.stopPropagation());
+calcContextBtn.addEventListener('click',(event)=>{event.preventDefault();const article=contextArticle;hideRowContext();openCalcModal(article)});
+[calcDivide,calcMultiply].forEach(input=>input.addEventListener('input',updateCalcResult));
+[calcOriginalPrice,calcDivide,calcMultiply,calcTotal].forEach(input=>{input.addEventListener('focus',()=>input.select());input.addEventListener('keydown',calcKey)});
+[calcCancelBtn,calcUndoBtn,calcApplyBtn].forEach(btn=>btn.addEventListener('keydown',calcKey));
+calcCancelBtn.addEventListener('click',closeCalcModal);
+calcUndoBtn.addEventListener('click',()=>undoCalculatedPrice().catch(e=>{console.error(e);show('No pude restaurar')}));
+calcApplyBtn.addEventListener('click',()=>applyCalculatedPrice().catch(e=>{console.error(e);show('No pude guardar')}));
+calcBackdrop.addEventListener('mousedown',(event)=>{if(event.target===calcBackdrop)closeCalcModal()});
+viewProviderBtn.addEventListener('click',openProviderEditModal);
+providerEditCloseBtn.addEventListener('click',closeProviderEditModal);
+providerEditCancelBtn.addEventListener('click',closeProviderEditModal);
+providerEditBackdrop.addEventListener('mousedown',(event)=>{if(event.target===providerEditBackdrop)closeProviderEditModal()});
+providerEditForm.addEventListener('submit',(event)=>{event.preventDefault();saveProviderEdit().catch(error=>{console.error(error);show('No pude guardar proveedor');statusEl.textContent='Error guardando proveedor'})});
+filterInput.oninput=render;clearBtn.onclick=()=>{if(confirm('Eliminar todos los articulos cargados?')){articles=[];filterInput.value='';saveArticlesCache().catch(console.error);render()}};exportBtn.onclick=()=>exportAndUpdate().catch(e=>{console.error(e);hideSyncProgress(1200);show(e.message||'Error')});
+(async()=>{db=await openDb();await Promise.all([loadProviders(),loadArticlesCache()]);render()})();
+</script>
+</body>
+</html>
+
+
+

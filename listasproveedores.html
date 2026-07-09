@@ -1,0 +1,3081 @@
+﻿<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Comparar Listas de Proveedores</title>
+  <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="corralon-system.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --ui-scale: 1;
+      --rojo: #8b7cff;
+      --rojo-oscuro: #5d55c8;
+      --acento: #8b7cff;
+      --acento-oscuro: #5d55c8;
+      --borde: #cce8ff;
+      --borde-fuerte: #8bc7ff;
+      --fondo: #f6fcff;
+      --panel: #fffdfa;
+      --header: #eef8ff;
+      --fila: #ffffff;
+      --fila-alt: #f7fbff;
+      --seleccion: #dff7ff;
+      --texto: #142033;
+      --muted: #627084;
+      --ok: #147847;
+      --warn: #d80000;
+      --shadow: 0 14px 38px rgba(81,129,255,.14);
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      color: var(--texto);
+      font-family: 'Barlow', Arial, sans-serif;
+      background: var(--fondo);
+      background-image:
+        radial-gradient(circle at 18% 8%, rgba(210, 31, 49, .08), transparent 28%),
+        linear-gradient(135deg, rgba(255,255,255,.65), rgba(255,255,255,0));
+    }
+    .app {
+      width: calc(100vw / var(--ui-scale));
+      height: calc(100dvh / var(--ui-scale));
+      display: grid;
+      grid-template-rows: 48px 1fr;
+      min-width: 1280px;
+      transform: scale(var(--ui-scale));
+      transform-origin: top left;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 28px;
+      background: rgba(255,255,255,.84);
+      color: var(--texto);
+      border-bottom: 1px solid #d8ecff;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .topbar img { width: 34px; height: 26px; object-fit: contain; background: #fff; border-radius: 2px; }
+    .title {
+      margin: 0;
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .top-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-wrap {
+      min-width: 250px;
+      display: grid;
+      gap: 4px;
+      justify-items: stretch;
+    }
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .sync-progress {
+      height: 5px;
+      border: 1px solid #cce8ff;
+      border-radius: 999px;
+      background: #eef8ff;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(-2px);
+      transition: opacity .14s ease, transform .14s ease;
+    }
+    .sync-progress.active {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .sync-progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--acento), #17c7ff);
+      transition: width .18s ease;
+    }
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+      background: #eaf8ff;
+      color: #0056b3;
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+    }
+    .loading-overlay.hidden { display: none; }
+    .loading-spinner {
+      width: 42px;
+      height: 42px;
+      border: 4px solid #b7e4ff;
+      border-top-color: #006fc9;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    .loading-title {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .loading-detail {
+      color: #53718d;
+      font-family: Barlow, Arial, sans-serif;
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .loading-progress {
+      width: min(380px, 82vw);
+      height: 9px;
+      border: 1px solid #b7e4ff;
+      border-radius: 999px;
+      background: #f5fcff;
+      overflow: hidden;
+      box-shadow: inset 0 1px 3px rgba(0,86,179,.12);
+    }
+    .loading-progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #006fc9, #17c7ff, #f6c84c);
+      transition: width .18s ease;
+    }
+    .loading-progress-text {
+      min-height: 16px;
+      color: #006fc9;
+      font-family: Barlow, Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 900;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .btn {
+      height: 36px;
+      border: 1px solid #8490a0;
+      border-radius: 5px;
+      color: var(--texto);
+      background: linear-gradient(180deg, #fff, #d9dde2);
+      box-shadow: 1px 2px 2px rgba(0,0,0,.22);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+      padding: 6px 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn.primary {
+      color: #fff;
+      border-color: var(--acento-oscuro);
+      background: linear-gradient(180deg, #e24a57, var(--acento));
+    }
+    .btn.danger {
+      color: #fff;
+      border-color: var(--rojo-oscuro);
+      background: linear-gradient(180deg, #e5535f, var(--rojo));
+    }
+    .main {
+      display: grid;
+      grid-template-columns: minmax(760px, 1fr) 430px;
+      gap: 22px;
+      padding: 18px 28px 10px;
+      min-height: 0;
+    }
+    .left {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto auto 1fr 138px;
+      gap: 14px;
+      min-height: 0;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: 130px 140px minmax(360px, 1fr) 250px;
+      gap: 0;
+      border: 1px solid var(--borde-fuerte);
+      background: rgba(255,255,255,.94);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .filter-cell {
+      min-width: 0;
+      border-right: 1px solid var(--borde);
+    }
+    .filter-cell:last-child { border-right: 0; }
+    .filter-check {
+      height: 28px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      background: #fff;
+    }
+    .filter-check input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--acento);
+    }
+    .filter-label {
+      height: 26px;
+      padding: 4px 6px;
+      background: var(--header);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+      line-height: 18px;
+      white-space: nowrap;
+    }
+    .filter-input, .base-input, .slot-input {
+      width: 100%;
+      height: 28px;
+      border: 0;
+      outline: 0;
+      background: #fff;
+      color: var(--texto);
+      font: 16px 'Barlow Condensed', Arial, sans-serif;
+      padding: 3px 6px;
+    }
+    .base-row {
+      display: grid;
+      grid-template-columns: 130px 1fr 180px 250px;
+      border: 1px solid var(--borde-fuerte);
+      background: rgba(255,255,255,.94);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .base-cell {
+      min-width: 0;
+      border-right: 1px solid var(--borde);
+    }
+    .base-cell:last-child { border-right: 0; }
+    .base-label {
+      height: 26px;
+      padding: 4px 6px;
+      background: var(--header);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+      line-height: 18px;
+    }
+    .table-card {
+      min-height: 0;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+      display: grid;
+      grid-template-rows: 28px 1fr;
+      overflow: hidden;
+    }
+    .grid-head {
+      display: grid;
+      grid-template-columns: var(--listas-grid-columns, 116px minmax(360px, 1fr) 130px 220px);
+      background: var(--header);
+      border-bottom: 1px solid var(--borde-fuerte);
+      padding-right: 14px;
+    }
+    .grid-head div {
+      padding: 5px 6px;
+      border-right: 1px solid var(--borde);
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .sort-head {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      padding: 0;
+      cursor: pointer;
+      text-align: left;
+    }
+    .col-resizer {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 8px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 3;
+    }
+    body.resizing-columns { cursor: col-resize; user-select: none; }
+    .sort-head .sort-mark {
+      color: var(--rojo);
+      font-size: 14px;
+      line-height: 1;
+      min-width: 14px;
+      text-align: center;
+    }
+    .viewport {
+      position: relative;
+      overflow: auto;
+      min-height: 0;
+      background: rgba(255,255,255,.96);
+    }
+    .spacer { width: 1px; opacity: 0; }
+    .rows {
+      position: absolute;
+      inset: 0 0 auto 0;
+    }
+    .row {
+      height: 24px;
+      display: grid;
+      grid-template-columns: var(--listas-grid-columns, 116px minmax(360px, 1fr) 130px 220px);
+      border-bottom: 1px solid #ddd;
+      cursor: default;
+      font-size: 16px;
+      line-height: 24px;
+    }
+    .row:nth-child(even) { background: var(--fila-alt); }
+    .row.selected { background: var(--seleccion) !important; }
+    .row.adjusted { background: #dff3e8 !important; }
+    .row.adjusted.selected { background: #bfe8d3 !important; }
+    .row div {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0 6px;
+      border-right: 1px solid #e2e2e2;
+    }
+    .row div:focus {
+      outline: 2px solid var(--acento);
+      outline-offset: -2px;
+      background: #ffe8eb;
+    }
+    .row div.price-raw-selected {
+      text-align: right;
+    }
+    .provider-link {
+      color: #1f63d8;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .exclude-card {
+      min-height: 0;
+      border: 1px solid var(--borde-fuerte);
+      background: rgba(255,255,255,.94);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-rows: 28px 1fr;
+      overflow: hidden;
+    }
+    .exclude-head {
+      padding: 5px 8px;
+      background: var(--header);
+      border-bottom: 1px solid var(--borde-fuerte);
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .exclude-body {
+      overflow: auto;
+      min-height: 0;
+      background: #fff;
+    }
+    .exclude-row {
+      height: 24px;
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      border-bottom: 1px solid #ddd;
+      font-size: 16px;
+    }
+    .exclude-row:nth-child(even) { background: var(--fila-alt); }
+    .exclude-input:focus {
+      background: #ffe8eb;
+      box-shadow: inset 0 0 0 2px var(--acento);
+    }
+    .exclude-index {
+      padding: 2px 6px;
+      border-right: 1px solid #e2e2e2;
+      color: var(--muted);
+      text-align: right;
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+    }
+    .exclude-input {
+      width: 100%;
+      height: 24px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--texto);
+      font: 16px 'Barlow Condensed', Arial, sans-serif;
+      padding: 2px 7px;
+    }
+    .money { text-align: right; font-variant-numeric: tabular-nums; }
+    .navigator {
+      display: none;
+      height: 24px;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--borde-fuerte);
+      border-top: 0;
+      background: #f3f3f3;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 2px 6px;
+    }
+    .nav-count {
+      min-width: 78px;
+      height: 18px;
+      border: 1px solid var(--borde);
+      background: #fff;
+      text-align: center;
+      line-height: 17px;
+    }
+    .side {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 1fr;
+      gap: 0;
+      align-content: start;
+    }
+    .side-actions {
+      display: none;
+      justify-items: center;
+      gap: 10px;
+      padding-top: 4px;
+    }
+    .slots {
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-right: 8px;
+    }
+    .slot {
+      position: relative;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+      display: grid;
+      grid-template-columns: 112px 1fr;
+      flex: 0 0 auto;
+      margin-right: 36px;
+    }
+    .slot-clear {
+      position: absolute;
+      right: -36px;
+      top: 0;
+      width: 30px;
+      height: 30px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 4px;
+      background: linear-gradient(180deg, #fff, #d9dde2);
+      color: #667;
+      font-size: 22px;
+      line-height: 24px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 1px 2px 2px rgba(0,0,0,.14);
+    }
+    .slot-clear:hover { color: var(--rojo); border-color: var(--rojo); }
+    .slot.empty {
+      min-height: 120px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+      padding: 16px;
+    }
+    .slot.winner { box-shadow: inset 4px 0 0 var(--ok); }
+    .slot-label {
+      height: 28px;
+      padding: 4px 6px;
+      background: var(--header);
+      border-right: 1px solid var(--borde);
+      border-bottom: 1px solid var(--borde);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .slot-value {
+      min-width: 0;
+      border-bottom: 1px solid var(--borde);
+      height: 28px;
+      padding: 3px 6px;
+      font-size: 16px;
+      line-height: 22px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .slot-label.last, .slot-value.last { border-bottom: 0; }
+    .diff.positive { color: var(--ok); font-weight: 800; }
+    .diff.negative { color: var(--warn); font-weight: 800; }
+    .footer {
+      display: none;
+      align-items: center;
+      padding: 0 28px;
+      border-top: 1px solid var(--borde-fuerte);
+      background: #dedbd5;
+      color: var(--muted);
+      font-size: 12px;
+      gap: 12px;
+    }
+    .hidden-file { display: none; }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 34px;
+      transform: translateX(-50%) translateY(8px);
+      z-index: 20;
+      opacity: 0;
+      pointer-events: none;
+      background: #172032;
+      color: #fff;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 800;
+      transition: .18s ease;
+    }
+    .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .context-menu {
+      position: fixed;
+      z-index: 40;
+      display: none;
+      min-width: 132px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 5px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(20, 32, 51, .22);
+      padding: 4px;
+    }
+    .context-menu.visible { display: block; }
+    .context-menu button {
+      width: 100%;
+      height: 30px;
+      border: 0;
+      background: transparent;
+      color: var(--texto);
+      font: 700 16px 'Barlow Condensed', Arial, sans-serif;
+      text-align: left;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    .context-menu button:hover { background: #e8edf2; }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 45;
+      display: none;
+      place-items: center;
+      background: rgba(20, 32, 51, .28);
+    }
+    .modal-backdrop.visible { display: grid; }
+    .calc-modal {
+      width: 430px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(20, 32, 51, .28);
+      padding: 16px;
+    }
+    .updates-modal {
+      width: min(620px, calc(100vw - 28px));
+      max-height: min(78vh, 680px);
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(20, 32, 51, .28);
+      overflow: hidden;
+    }
+    .updates-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--borde);
+    }
+    .updates-title {
+      margin: 0;
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 25px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .updates-list {
+      overflow: auto;
+      padding: 10px 14px 14px;
+    }
+    .updates-search-wrap {
+      padding: 10px 14px 0;
+      border-bottom: 1px solid var(--borde);
+      background: #fff;
+    }
+    .updates-search {
+      width: 100%;
+      height: 32px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 7px;
+      padding: 4px 8px;
+      color: var(--texto);
+      font: 17px 'Barlow Condensed', Arial, sans-serif;
+      outline: 0;
+      box-sizing: border-box;
+    }
+    .update-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 14px;
+      align-items: center;
+      padding: 9px 10px;
+      border: 1px solid var(--borde);
+      border-radius: 6px;
+      background: #f7fbff;
+      margin-bottom: 8px;
+    }
+    .update-provider {
+      min-width: 0;
+      color: var(--texto);
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .update-date {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .update-count {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .updates-empty {
+      padding: 18px 10px;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: center;
+    }
+    .calc-title {
+      margin: 0 0 12px;
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 25px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .calc-grid {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      border: 1px solid var(--borde-fuerte);
+      background: #fff;
+    }
+    .calc-label {
+      height: 30px;
+      padding: 5px 7px;
+      background: var(--header);
+      border-right: 1px solid var(--borde);
+      border-bottom: 1px solid var(--borde);
+      color: var(--muted);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 18px;
+    }
+    .calc-field {
+      height: 30px;
+      border-bottom: 1px solid var(--borde);
+    }
+    .calc-label.last, .calc-field.last { border-bottom: 0; }
+    .calc-field input {
+      width: 100%;
+      height: 29px;
+      border: 0;
+      outline: 0;
+      background: #fff;
+      color: var(--texto);
+      font: 17px 'Barlow Condensed', Arial, sans-serif;
+      padding: 3px 8px;
+      text-align: right;
+    }
+    .calc-result {
+      height: 29px;
+      padding: 3px 8px;
+      text-align: right;
+      font-size: 17px;
+      font-variant-numeric: tabular-nums;
+      line-height: 23px;
+    }
+    .calc-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .branch-modal {
+      width: min(440px, calc(100vw - 28px));
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(20, 32, 51, .28);
+      padding: 18px;
+    }
+    .branch-title {
+      margin: 0 0 12px;
+      color: var(--acento-oscuro);
+      font-family: 'Barlow Condensed', Arial, sans-serif;
+      font-size: 26px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .branch-options { display: grid; gap: 10px; }
+    .branch-option {
+      height: 50px;
+      border: 1px solid var(--borde-fuerte);
+      border-radius: 12px;
+      background: var(--header);
+      color: var(--texto);
+      font: 900 20px 'Barlow Condensed', Arial, sans-serif;
+      cursor: pointer;
+    }
+    .branch-option:hover { background: #dff7ff; }
+    body.popup-mode .topbar { display: none; }
+    body.popup-mode .app { grid-template-rows: 1fr auto; }
+  </style>
+  <script src="nav-helper.js"></script>
+  <script src="funciones.js?v=20260610-menu-session"></script>
+  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="listas_proveedores"></script>
+</head>
+<body>
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-title">Cargando lista...</div>
+    <div class="loading-progress"><div class="loading-progress-fill" id="loadingProgressFill"></div></div>
+    <div class="loading-progress-text" id="loadingProgressText">0%</div>
+    <div class="loading-detail" id="loadingDetail">Preparando comparador</div>
+  </div>
+  <div class="app">
+    <header class="topbar">
+      <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="Corralon Progreso">
+      <h1 class="title">Comparar Listas De Precios</h1>
+      <div class="top-actions">
+        <div class="status-wrap">
+          <span class="status" id="statusText">Inicializando...</span>
+          <div class="sync-progress" id="syncProgress"><div class="sync-progress-fill" id="syncProgressFill"></div></div>
+        </div>
+        <button class="btn primary" id="updatesBtn" type="button">Ver últimas actualizaciones</button>
+        <button class="btn" id="importBtn" type="button">Importar</button>
+        <button class="btn" type="button" data-nav-url="menu.html">Menú</button>
+      </div>
+      <input class="hidden-file" id="fileInput" type="file" accept=".xlsx,.xls,.csv">
+    </header>
+
+    <main class="main">
+      <section class="left">
+        <div class="filters">
+          <div class="filter-cell">
+            <div class="filter-label">Filtrar por código</div>
+            <input class="filter-input" id="filterCode" autocomplete="off">
+          </div>
+          <div class="filter-cell">
+            <div class="filter-label">Resultado exacto</div>
+            <label class="filter-check"><input type="checkbox" id="filterExact"></label>
+          </div>
+          <div class="filter-cell">
+            <div class="filter-label">Filtrar Por Artículo</div>
+            <input class="filter-input" id="filterArticle" autocomplete="off">
+          </div>
+          <div class="filter-cell">
+            <div class="filter-label">Filtrar por proveedor</div>
+            <input class="filter-input" id="filterProvider" autocomplete="off">
+          </div>
+        </div>
+        <input type="hidden" id="filterPrice" value="">
+
+        <div class="base-row">
+          <div class="base-cell">
+            <div class="base-label">Cod. Proveedor</div>
+            <input class="base-input" id="baseCode" readonly>
+          </div>
+          <div class="base-cell">
+            <div class="base-label">Artículo</div>
+            <input class="base-input" id="baseArticle" readonly>
+          </div>
+          <div class="base-cell">
+            <div class="base-label">Precio inicial</div>
+            <input class="base-input money" id="basePrice">
+          </div>
+          <div class="base-cell">
+            <div class="base-label">Proveedor</div>
+            <input class="base-input" id="baseProvider" readonly>
+          </div>
+        </div>
+
+        <section class="table-card">
+          <div class="grid-head">
+            <div><button class="sort-head" type="button" data-sort-col="code" data-resize-col="0"><span>CodProveed</span><span class="sort-mark" data-sort-mark="code">↕</span><span class="col-resizer"></span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="article" data-resize-col="1"><span>Artículo</span><span class="sort-mark" data-sort-mark="article">↕</span><span class="col-resizer"></span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="price" data-resize-col="2"><span>PrecioCosto</span><span class="sort-mark" data-sort-mark="price">↕</span><span class="col-resizer"></span></button></div>
+            <div><button class="sort-head" type="button" data-sort-col="provider" data-resize-col="3"><span>Proveedor</span><span class="sort-mark" data-sort-mark="provider">↕</span><span class="col-resizer"></span></button></div>
+          </div>
+          <div class="viewport" id="viewport">
+            <div class="spacer" id="spacer"></div>
+            <div class="rows" id="rows"></div>
+          </div>
+        </section>
+
+        <section class="exclude-card">
+          <div class="exclude-head">No filtrar si contiene</div>
+          <div class="exclude-body" id="excludeRows"></div>
+        </section>
+
+        <div class="navigator">
+          <span>Registro:</span>
+          <span>|&lt; &lt; &gt; &gt;|</span>
+          <span class="nav-count" id="recordCount">0</span>
+          <span id="activeInfo"></span>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="slots" id="slots"></div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>Subir / Exportar carga el Excel a Supabase. Importar descarga la lista compartida a este navegador.</span>
+      <span id="metaInfo"></span>
+    </footer>
+  </div>
+  <div class="toast" id="toast"></div>
+  <div class="modal-backdrop" id="updatesBackdrop">
+    <div class="updates-modal" role="dialog" aria-modal="true" aria-labelledby="updatesTitle">
+      <div class="updates-head">
+        <h2 class="updates-title" id="updatesTitle">Últimas actualizaciones</h2>
+        <button class="btn" type="button" id="updatesCloseBtn">Cerrar</button>
+      </div>
+      <div class="updates-search-wrap">
+        <input class="updates-search" id="updatesSearch" autocomplete="off" placeholder="Buscar proveedor o ID">
+      </div>
+      <div class="updates-list" id="updatesList"></div>
+    </div>
+  </div>
+  <div class="context-menu" id="rowContextMenu">
+    <button type="button" id="compareContextBtn">Comparar</button>
+    <button type="button" id="calcContextBtn">Dividir / multiplicar</button>
+  </div>
+  <div class="context-menu" id="slotContextMenu">
+    <button type="button" id="sendSlotMissingBtn">Enviar a faltantes</button>
+  </div>
+  <div class="modal-backdrop" id="calcBackdrop">
+    <div class="calc-modal" role="dialog" aria-modal="true" aria-labelledby="calcTitle">
+      <h2 class="calc-title" id="calcTitle">Dividir / multiplicar</h2>
+      <div class="calc-grid">
+        <div class="calc-label">Precio inicial</div>
+        <div class="calc-field"><input id="calcOriginalPrice" readonly></div>
+        <div class="calc-label">Dividir por</div>
+        <div class="calc-field"><input id="calcDivide" inputmode="decimal" autocomplete="off"></div>
+        <div class="calc-label">Multiplicar por</div>
+        <div class="calc-field"><input id="calcMultiply" inputmode="decimal" autocomplete="off"></div>
+        <div class="calc-label last">Precio calculado</div>
+        <div class="calc-field last"><div class="calc-result" id="calcResult">$ 0,00</div></div>
+      </div>
+      <div class="calc-actions">
+        <button class="btn" type="button" id="calcCancelBtn">Cancelar</button>
+        <button class="btn" type="button" id="calcUndoBtn">Volver a original</button>
+        <button class="btn primary" type="button" id="calcApplyBtn">Guardar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="missingBranchBackdrop">
+    <div class="branch-modal" role="dialog" aria-modal="true" aria-labelledby="missingBranchTitle">
+      <h2 class="branch-title" id="missingBranchTitle">Elegí sucursal</h2>
+      <div class="branch-options" id="missingBranchOptions"></div>
+    </div>
+  </div>
+
+  <script>
+    if (new URLSearchParams(location.search).get('popup') === '1') {
+      document.body.classList.add('popup-mode');
+    }
+    const SUPABASE_URL = CorralonSystem.SUPABASE_URL;
+    const SUPABASE_ANON_KEY = CorralonSystem.SUPABASE_KEY;
+    const TABLE = CorralonSystem.TABLES.priceList;
+    const META_TABLE = CorralonSystem.TABLES.priceListMeta;
+    const PROVIDERS_TABLE = CorralonSystem.TABLES.providers;
+    const DB_NAME = 'corralon_lista_proveedores_v1';
+    const ROW_HEIGHT = 24;
+    const BUFFER = 12;
+    const PAGE_SIZE = 1000;
+    const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
+    const FULL_PROVIDER_MANIFEST_PREFIX = 'provider_full_manifest:';
+    const LISTAS_COL_WIDTHS_KEY = 'listasproveedores_col_widths_v1';
+    const listasColumnWidths = [116, 520, 130, 220];
+    const SUCURSALES = Array.isArray(CorralonSystem.BRANCHES) ? CorralonSystem.BRANCHES : [{ id: 'progreso_ruta', label: 'Suc. Progreso y Ruta' }, { id: 'calle5_espana', label: 'Suc. Calle 5 y Espana' }];
+    const state = {
+      db: null,
+      worker: null,
+      loaded: false,
+      total: 0,
+      matchCount: 0,
+      selectedId: null,
+      selectedRow: null,
+      contextRow: null,
+      contextRowId: null,
+      calcRow: null,
+      slotContextIndex: -1,
+      pendingMissingRow: null,
+      providerDates: new Map(),
+      providerLinks: new Map(),
+      filterTimer: null,
+      base: null,
+      slots: [],
+      excludeTerms: ['', '', '', '', ''],
+      sort: { col: null, dir: 0 },
+      tableNav: { matchIndex: 0, col: 0, pending: null },
+      currentRows: [],
+      lastSyncAt: '',
+      latestUpdates: [],
+      loadResolver: null
+    };
+    const el = {
+      status: document.getElementById('statusText'),
+      syncProgress: document.getElementById('syncProgress'),
+      syncProgressFill: document.getElementById('syncProgressFill'),
+      meta: document.getElementById('metaInfo'),
+      filterCode: document.getElementById('filterCode'),
+      filterExact: document.getElementById('filterExact'),
+      filterArticle: document.getElementById('filterArticle'),
+      filterPrice: document.getElementById('filterPrice'),
+      filterProvider: document.getElementById('filterProvider'),
+      baseCode: document.getElementById('baseCode'),
+      baseArticle: document.getElementById('baseArticle'),
+      basePrice: document.getElementById('basePrice'),
+      baseProvider: document.getElementById('baseProvider'),
+      viewport: document.getElementById('viewport'),
+      spacer: document.getElementById('spacer'),
+      rows: document.getElementById('rows'),
+      tableCard: document.querySelector('.table-card'),
+      excludeRows: document.getElementById('excludeRows'),
+      recordCount: document.getElementById('recordCount'),
+      activeInfo: document.getElementById('activeInfo'),
+      slots: document.getElementById('slots'),
+      rowContextMenu: document.getElementById('rowContextMenu'),
+      compareContextBtn: document.getElementById('compareContextBtn'),
+      calcContextBtn: document.getElementById('calcContextBtn'),
+      calcBackdrop: document.getElementById('calcBackdrop'),
+      calcOriginalPrice: document.getElementById('calcOriginalPrice'),
+      calcDivide: document.getElementById('calcDivide'),
+      calcMultiply: document.getElementById('calcMultiply'),
+      calcResult: document.getElementById('calcResult'),
+      calcCancelBtn: document.getElementById('calcCancelBtn'),
+      calcUndoBtn: document.getElementById('calcUndoBtn'),
+      calcApplyBtn: document.getElementById('calcApplyBtn'),
+      slotContextMenu: document.getElementById('slotContextMenu'),
+      sendSlotMissingBtn: document.getElementById('sendSlotMissingBtn'),
+      missingBranchBackdrop: document.getElementById('missingBranchBackdrop'),
+      missingBranchOptions: document.getElementById('missingBranchOptions'),
+      toast: document.getElementById('toast'),
+      updatesBtn: document.getElementById('updatesBtn'),
+      updatesBackdrop: document.getElementById('updatesBackdrop'),
+      updatesList: document.getElementById('updatesList'),
+      updatesSearch: document.getElementById('updatesSearch'),
+      updatesCloseBtn: document.getElementById('updatesCloseBtn'),
+      fileInput: document.getElementById('fileInput')
+    };
+    function setLoadingDetail(text) {
+      const loadingDetail = document.getElementById('loadingDetail');
+      if (loadingDetail) loadingDetail.textContent = text;
+    }
+    function setLoadingProgress(value = 0) {
+      const pct = Math.max(0, Math.min(100, Number(value) || 0));
+      const fill = document.getElementById('loadingProgressFill');
+      const text = document.getElementById('loadingProgressText');
+      if (fill) fill.style.width = `${pct}%`;
+      if (text) text.textContent = `${Math.round(pct)}%`;
+    }
+    function hideLoadingOverlay() {
+      document.getElementById('loadingOverlay')?.classList.add('hidden');
+    }
+
+    const LISTAS_PROVEEDORES_TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const LISTAS_PROVEEDORES_SYNC_KEY = 'corralon_listasproveedores_tab_sync';
+    let listasProveedoresSyncReady = false;
+    let listasProveedoresChannel = null;
+    let listasTableNavigator = null;
+
+    function applyListasColumnWidths() {
+      document.documentElement.style.setProperty('--listas-grid-columns', listasColumnWidths.map((width) => `${Math.max(70, Number(width) || 100)}px`).join(' '));
+    }
+
+    function initListasColumnResize() {
+      if (!window.CorralonFunciones?.bindResizableColumns) {
+        applyListasColumnWidths();
+        return;
+      }
+      CorralonFunciones.bindResizableColumns({
+        root: document.querySelector('.table-card'),
+        widths: listasColumnWidths,
+        storageKey: LISTAS_COL_WIDTHS_KEY,
+        headerSelector: '[data-resize-col]',
+        minWidth: 70,
+        apply: applyListasColumnWidths
+      });
+    }
+
+    function initListasTableNavigation() {
+      if (!window.CorralonFunciones?.createVirtualTableNavigator) return;
+      listasTableNavigator = CorralonFunciones.createVirtualTableNavigator({
+        viewport: el.viewport,
+        rowsRoot: el.rows,
+        rowHeight: ROW_HEIGHT,
+        colCount: 4,
+        cellSelector: '.row [data-col]',
+        getTotal: () => state.matchCount,
+        getCell: (matchIndex, col) => el.rows.querySelector(`.row[data-match-index="${matchIndex}"] [data-col="${col}"]`),
+        getRowIndex: (cell) => Number(cell?.closest?.('.row')?.dataset.matchIndex ?? state.tableNav.matchIndex),
+        getCol: (cell) => Number(cell?.dataset.col ?? state.tableNav.col),
+        onPositionChange: (matchIndex, col) => {
+          state.tableNav.matchIndex = matchIndex;
+          state.tableNav.col = col;
+        },
+        onPendingChange: (pending) => {
+          state.tableNav.pending = pending ? { matchIndex: pending.row, col: pending.col } : null;
+        },
+        focusRendered: focusRenderedTableCell,
+        requestSlice
+      });
+    }
+
+    function cerrarEstaPestanaListasProveedores() {
+      try { window.close(); } catch (_) {}
+
+      setTimeout(() => {
+        try {
+          window.open('', '_self');
+          window.close();
+        } catch (_) {}
+
+        setTimeout(() => {
+          try {
+            document.title = 'Cerrado';
+            document.documentElement.innerHTML = '<head><title>Cerrado</title></head><body></body>';
+          } catch (_) {}
+        }, 120);
+      }, 80);
+    }
+
+    function aplicarCodigoAccessEnFiltro(codigo) {
+      const valor = String(codigo ?? '').trim();
+      if (!valor) return;
+
+      el.filterCode.value = valor;
+
+      try {
+        el.filterCode.focus();
+        el.filterCode.select();
+      } catch (_) {}
+
+      if (typeof requestFilter === 'function') requestFilter();
+    }
+
+    function recibirMensajeListasProveedores(data) {
+      if (!data || data.source !== 'corralon-listasproveedores') return;
+      if (data.tabId === LISTAS_PROVEEDORES_TAB_ID) return;
+
+      if (data.type === 'cerrar-otras-pestanas') {
+        cerrarEstaPestanaListasProveedores();
+      }
+    }
+
+    function prepararSyncListasProveedores() {
+      if (listasProveedoresSyncReady) return;
+      listasProveedoresSyncReady = true;
+
+      try {
+        listasProveedoresChannel = new BroadcastChannel(LISTAS_PROVEEDORES_SYNC_KEY);
+        listasProveedoresChannel.onmessage = (event) => recibirMensajeListasProveedores(event.data);
+      } catch (_) {}
+
+      window.addEventListener('storage', (event) => {
+        if (event.key !== LISTAS_PROVEEDORES_SYNC_KEY || !event.newValue) return;
+        try {
+          recibirMensajeListasProveedores(JSON.parse(event.newValue));
+        } catch (_) {}
+      });
+    }
+
+    function aplicarCodigoDesdeAccessYCerrarDuplicadas() {
+      prepararSyncListasProveedores();
+
+      const params = new URLSearchParams(window.location.search);
+      const codigo = params.get('codigo') || params.get('CODIGO') || '';
+
+      if (!codigo) return;
+
+      aplicarCodigoAccessEnFiltro(codigo);
+
+      const mensaje = {
+        source: 'corralon-listasproveedores',
+        type: 'cerrar-otras-pestanas',
+        tabId: LISTAS_PROVEEDORES_TAB_ID,
+        codigo,
+        ts: Date.now()
+      };
+
+      try { listasProveedoresChannel?.postMessage(mensaje); } catch (_) {}
+
+      try {
+        localStorage.setItem(LISTAS_PROVEEDORES_SYNC_KEY, JSON.stringify(mensaje));
+        localStorage.removeItem(LISTAS_PROVEEDORES_SYNC_KEY);
+      } catch (_) {}
+    }
+
+    function syncComparisonHeight() {
+      if (!el.slots) return;
+      const rect = el.slots.getBoundingClientRect();
+      const bottomGap = 14;
+      const scale = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+      const height = (window.innerHeight - rect.top - bottomGap) / scale;
+      el.slots.style.maxHeight = `${Math.max(160, height)}px`;
+    }
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+    function syncResponsiveScale() {
+      const desiredZoom = 1.33;
+      const fitScale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080) * desiredZoom;
+      const scale = clamp(fitScale, .72, desiredZoom);
+      document.documentElement.style.setProperty('--ui-scale', scale.toFixed(3));
+      requestAnimationFrame(syncComparisonHeight);
+    }
+
+    function supabaseHeaders(extra = {}) { return CorralonSystem.headers(extra); }
+    function normalize(value) {
+      return CorralonSystem.norm(value);
+    }
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    function formatMoney(value) {
+      return CorralonSystem.money(value);
+    }
+    function rawPriceText(value) {
+      const number = Number(value || 0);
+      if (!Number.isFinite(number)) return '';
+      return number.toFixed(2).replace('.', ',');
+    }
+    function restorePriceCell(cell) {
+      if (!cell || Number(cell.dataset.col) !== 2) return;
+      cell.textContent = cell.dataset.priceFormatted || formatMoney(cell.dataset.priceRaw || 0);
+      cell.classList.add('money');
+      cell.classList.remove('price-raw-selected');
+    }
+    function selectPriceCellRaw(cell) {
+      if (!cell || Number(cell.dataset.col) !== 2) return false;
+      cell.textContent = cell.dataset.priceRaw || '';
+      cell.classList.remove('money');
+      cell.classList.add('price-raw-selected');
+      selectCellText(cell);
+      return true;
+    }
+    function parseMoney(value) {
+      return CorralonSystem.parseMoney(value);
+    }
+    function parseFactor(value, fallback = 1) {
+      const text = String(value ?? '').replace(',', '.').trim();
+      if (!text) return fallback;
+      const number = Number(text.replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(number) && number !== 0 ? number : fallback;
+    }
+    function showToast(message) {
+      el.toast.textContent = message;
+      el.toast.classList.add('visible');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => el.toast.classList.remove('visible'), 2300);
+    }
+    function setStatus(message) {
+      el.status.textContent = message;
+      if (!document.getElementById('loadingOverlay')?.classList.contains('hidden')) setLoadingDetail(message);
+    }
+    function setSyncProgress(value = 0, visible = true) {
+      const pct = Math.max(0, Math.min(100, Number(value) || 0));
+      if (!document.getElementById('loadingOverlay')?.classList.contains('hidden')) setLoadingProgress(pct);
+      if (!el.syncProgress || !el.syncProgressFill) return;
+      el.syncProgress.classList.toggle('active', Boolean(visible));
+      el.syncProgressFill.style.width = `${pct}%`;
+    }
+    function hideSyncProgress(delay = 450) {
+      if (!el.syncProgress || !el.syncProgressFill) return;
+      clearTimeout(hideSyncProgress.timer);
+      hideSyncProgress.timer = setTimeout(() => {
+        el.syncProgress.classList.remove('active');
+        el.syncProgressFill.style.width = '0%';
+      }, delay);
+    }
+    function todayDate() {
+      return new Date().toISOString().slice(0, 10);
+    }
+    function formatSyncDate(value) {
+      if (!value) return 'sin datos';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    function updateDateValue(item) {
+      const raw = item?.updated_at || item?.fecha || item?.synced_at || '';
+      const rawTime = timestampValue(raw);
+      if (rawTime) return rawTime;
+      const version = Number(item?.version || 0);
+      return version > 1000000000000 ? version : 0;
+    }
+    function updateDateText(item) {
+      const time = updateDateValue(item);
+      return time ? formatSyncDate(new Date(time).toISOString()) : 'sin fecha';
+    }
+    function normalizeUpdateItem(item) {
+      return {
+        id_proveedor: String(item?.id_proveedor || ''),
+        proveedor: String(item?.proveedor || item?.nombre || item?.id_proveedor || '').trim(),
+        updated_at: item?.updated_at || '',
+        version: Number(item?.version || 0),
+        total_articulos: Number(item?.total_articulos || item?.articulos || 0),
+        synced_at: item?.synced_at || ''
+      };
+    }
+    function sortUpdates(items) {
+      return (items || [])
+        .map(normalizeUpdateItem)
+        .filter((item) => item.id_proveedor || item.proveedor)
+        .sort((a, b) => updateDateValue(b) - updateDateValue(a));
+    }
+    function syncToastMessage(items) {
+      const updates = sortUpdates(items);
+      if (updates.length === 1) return `Proveedor actualizado: ${updates[0].proveedor || updates[0].id_proveedor}`;
+      return `${updates.length.toLocaleString('es-AR')} proveedores actualizados`;
+    }
+    function updatesFromManifest(manifest) {
+      return sortUpdates(Object.values(manifest || {}));
+    }
+    function updatesLast30Days(items) {
+      const limit = Date.now() - 30 * 86400000;
+      return sortUpdates(items).filter((item) => updateDateValue(item) >= limit);
+    }
+    function renderUpdatesModal() {
+      const term = normalize(el.updatesSearch?.value || '');
+      const items = updatesLast30Days(state.latestUpdates).filter((item) => {
+        if (!term) return true;
+        return normalize(`${item.proveedor || ''} ${item.id_proveedor || ''}`).includes(term);
+      });
+      if (!items.length) {
+        el.updatesList.innerHTML = '<div class="updates-empty">Sin actualizaciones registradas.</div>';
+        return;
+      }
+      el.updatesList.innerHTML = items.map((item) => `
+        <div class="update-row">
+          <div class="update-provider">${escapeHtml(item.proveedor || item.id_proveedor)}</div>
+          <div class="update-date">${escapeHtml(updateDateText(item))}</div>
+          <div class="update-count">${Number(item.total_articulos || 0).toLocaleString('es-AR')} artículos${item.id_proveedor ? ` · ID ${escapeHtml(item.id_proveedor)}` : ''}</div>
+        </div>
+      `).join('');
+    }
+    async function loadLatestUpdatesForModal() {
+      if (CorralonSystem.fetchProviderJsonTableRows) {
+        const rows = await CorralonSystem.fetchProviderJsonTableRows('order=fecha_actualizacion.desc');
+        state.latestUpdates = sortUpdates((rows || []).map((row) => ({
+          id_proveedor: row.id_proveedor,
+          proveedor: row.proveedor,
+          updated_at: row.fecha_actualizacion || row.updated_at,
+          version: Number(row.version || 0),
+          total_articulos: Number(row.total_articulos || 0)
+        })));
+        return;
+      }
+      const remote = await remoteMeta().catch(() => null);
+      const fullManifestUrl = fullProviderManifestUrl(remote);
+      if (fullManifestUrl) {
+        const manifest = await fetchProviderManifest(remote, fullManifestUrl);
+        state.latestUpdates = sortUpdates(updatesFromManifest(manifest?.providers || {}));
+        return;
+      }
+      const local = await idbGet('meta', 'principal').catch(() => null);
+      const saved = Array.isArray(local?.last_provider_updates) ? local.last_provider_updates : [];
+      state.latestUpdates = updatesFromManifest(localProviderManifest(local || {}));
+      if (saved.length) {
+        const byId = new Map(state.latestUpdates.map((item) => [String(item.id_proveedor || item.proveedor), item]));
+        saved.forEach((item) => byId.set(String(item.id_proveedor || item.proveedor), normalizeUpdateItem(item)));
+        state.latestUpdates = sortUpdates(Array.from(byId.values()));
+      }
+    }
+    function openUpdatesModal() {
+      loadLatestUpdatesForModal()
+        .then(() => {
+          if (el.updatesSearch) el.updatesSearch.value = '';
+          renderUpdatesModal();
+          el.updatesBackdrop.classList.add('visible');
+          setTimeout(() => el.updatesSearch?.focus(), 0);
+        })
+        .catch((error) => showToast(error.message || 'No pude cargar actualizaciones.'));
+    }
+    function closeUpdatesModal() {
+      el.updatesBackdrop.classList.remove('visible');
+    }
+    function formatProviderDateTime(value) {
+      if (!value) return '';
+      const text = String(value).trim();
+      const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(text) ? text.replace(' ', 'T') : text;
+      const date = new Date(normalized);
+      const pad = (number) => String(number).padStart(2, '0');
+      if (!Number.isNaN(date.getTime())) {
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      }
+      const match = text.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2}(?::\d{2})?))?/);
+      return match ? `${match[1]} ${match[2] || '00:00:00'}` : text;
+    }
+    function providerUrl(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      return /^https?:\/\//i.test(text) ? text : `https://${text}`;
+    }
+    function providerLinkForRow(row) {
+      if (!row) return '';
+      const id = String(row.id_proveedor || row.idProveedor || '').trim();
+      const name = normalize(row.proveedor || '');
+      return (id ? state.providerLinks.get(`id:${id}`) : '') || (name ? state.providerLinks.get(`name:${name}`) : '') || '';
+    }
+    function openProviderPage(row) {
+      const url = providerUrl(providerLinkForRow(row));
+      if (!url) return false;
+      window.open(url, '_blank', 'noopener');
+      return true;
+    }
+    function syncLabel() {
+      return `Última sincronización: ${formatSyncDate(state.lastSyncAt)}`;
+    }
+    function localListStatus(total) {
+      return `Lista local al día: ${Number(total || state.total).toLocaleString('es-AR')} artículos · ${syncLabel()}`;
+    }
+    function hideRowContextMenu() {
+      state.contextRow = null;
+      state.contextRowId = null;
+      el.compareContextBtn.dataset.rowId = '';
+      el.calcContextBtn.dataset.rowId = '';
+      el.rowContextMenu.classList.remove('visible');
+    }
+    function showSlotContextMenu(event, index) {
+      event.preventDefault();
+      hideRowContextMenu();
+      state.slotContextIndex = index;
+      el.slotContextMenu.style.left = `${event.clientX}px`;
+      el.slotContextMenu.style.top = `${event.clientY}px`;
+      el.slotContextMenu.classList.add('visible');
+    }
+    function hideSlotContextMenu() {
+      state.slotContextIndex = -1;
+      el.slotContextMenu.classList.remove('visible');
+    }
+    function showRowContextMenu(event, row) {
+      state.contextRow = row;
+      state.contextRowId = row?.idorden ?? null;
+      el.compareContextBtn.dataset.rowId = state.contextRowId ?? '';
+      el.calcContextBtn.dataset.rowId = state.contextRowId ?? '';
+      el.rowContextMenu.style.left = `${event.clientX}px`;
+      el.rowContextMenu.style.top = `${event.clientY}px`;
+      el.rowContextMenu.classList.add('visible');
+    }
+    function openDb() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 4);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          let store;
+          if (!db.objectStoreNames.contains('articulos')) store = db.createObjectStore('articulos', { keyPath: 'idorden' });
+          else store = req.transaction.objectStore('articulos');
+          if (!store.indexNames.contains('id_proveedor')) store.createIndex('id_proveedor', 'id_proveedor', { unique: false });
+          if (!store.indexNames.contains('proveedor')) store.createIndex('proveedor', 'proveedor', { unique: false });
+          if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbGet(store, key) {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction(store, 'readonly').objectStore(store).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbSet(store, value) {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction(store, 'readwrite').objectStore(store).put(value);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbClear(store) {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction(store, 'readwrite').objectStore(store).clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbBulkPut(rows) {
+      return new Promise((resolve, reject) => {
+        const tx = state.db.transaction('articulos', 'readwrite');
+        const store = tx.objectStore('articulos');
+        rows.forEach((row) => store.put(row));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    function idbAllArticles() {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction('articulos', 'readonly').objectStore('articulos').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function idbCountArticles() {
+      return new Promise((resolve, reject) => {
+        const req = state.db.transaction('articulos', 'readonly').objectStore('articulos').count();
+        req.onsuccess = () => resolve(Number(req.result || 0));
+        req.onerror = () => reject(req.error);
+      });
+    }
+    function createWorker() {
+      const code = `
+        let data = [];
+        let matches = [];
+        function norm(v){ return String(v ?? '').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/\\s+/g,' ').trim(); }
+        function test(row, f) {
+          if (f.code && (f.exact ? row.cod_proveedor_norm !== f.code : !row.cod_proveedor_norm.includes(f.code))) return false;
+          if (f.provider && !row.proveedor_norm.includes(f.provider)) return false;
+          if (f.articleWords.length && (f.exact && !f.code ? row.articulo_norm !== f.article : !f.articleWords.every(w => row.articulo_norm.includes(w)))) return false;
+          if (f.excludeWords.length && f.excludeWords.some(w => row.articulo_norm.includes(w))) return false;
+          if (f.price && !String(row.precio_costo || '').includes(f.price)) return false;
+          return true;
+        }
+        function valueFor(row, col) {
+          if (col === 'code') return row.cod_proveedor_norm || norm(row.cod_proveedor || '');
+          if (col === 'article') return row.articulo_norm || norm(row.articulo || '');
+          if (col === 'provider') return row.proveedor_norm || norm(row.proveedor || '');
+          if (col === 'price') return Number(row.precio_costo || 0);
+          return '';
+        }
+        function applySort(sort) {
+          if (!sort || !sort.col || !sort.dir) return;
+          const dir = Number(sort.dir) || 1;
+          const col = sort.col;
+          matches.sort((a, b) => {
+            const av = valueFor(data[a] || {}, col);
+            const bv = valueFor(data[b] || {}, col);
+            if (col === 'price') return (av - bv) * dir;
+            return String(av).localeCompare(String(bv), 'es', { numeric:true, sensitivity:'base' }) * dir;
+          });
+        }
+        self.onmessage = (event) => {
+          const msg = event.data || {};
+          if (msg.type === 'load') {
+            data = msg.rows || [];
+            matches = data.map((_, i) => i);
+            self.postMessage({ type:'loaded', total:data.length, count:matches.length });
+          }
+          if (msg.type === 'filter') {
+            const article = norm(msg.filter.article || '');
+            const f = {
+              code: norm(msg.filter.code || ''),
+              exact: Boolean(msg.filter.exact),
+              article,
+              provider: norm(msg.filter.provider || ''),
+              price: String(msg.filter.price || '').replace(/[^0-9.,-]/g,'').trim(),
+              articleWords: article.split(' ').filter(Boolean),
+              excludeWords: (msg.filter.exclude || []).map(norm).filter(Boolean)
+            };
+            matches = [];
+            for (let i = 0; i < data.length; i++) if (test(data[i], f)) matches.push(i);
+            applySort(msg.sort);
+            self.postMessage({ type:'filtered', count:matches.length });
+          }
+          if (msg.type === 'slice') {
+            const start = Math.max(0, msg.start || 0);
+            const end = Math.min(matches.length, start + (msg.limit || 100));
+            const rows = [];
+            for (let i = start; i < end; i++) rows.push({ index:i, row:data[matches[i]] });
+            self.postMessage({ type:'slice', start, rows, count:matches.length });
+          }
+          if (msg.type === 'update') {
+            const idx = data.findIndex(row => String(row.idorden) === String(msg.row?.idorden));
+            if (idx >= 0) data[idx] = { ...data[idx], ...msg.row };
+          }
+          if (msg.type === 'replaceProvider') {
+            const providerId = String(msg.providerId || '');
+            const incoming = Array.isArray(msg.rows) ? msg.rows : [];
+            data = data.filter(row => String(row.id_proveedor || '') !== providerId).concat(incoming);
+            const article = norm(msg.filter?.article || '');
+            const f = {
+              code: norm(msg.filter?.code || ''),
+              provider: norm(msg.filter?.provider || ''),
+              price: String(msg.filter?.price || '').replace(/[^0-9.,-]/g,'').trim(),
+              articleWords: article.split(' ').filter(Boolean),
+              excludeWords: (msg.filter?.exclude || []).map(norm).filter(Boolean)
+            };
+            matches = [];
+            for (let i = 0; i < data.length; i++) if (test(data[i], f)) matches.push(i);
+            applySort(msg.sort);
+            self.postMessage({ type:'providerReplaced', total:data.length, count:matches.length });
+          }
+        };
+      `;
+      const blob = new Blob([code], { type: 'text/javascript' });
+      const worker = new Worker(URL.createObjectURL(blob));
+      worker.onmessage = handleWorkerMessage;
+      return worker;
+    }
+    function workerPost(message) {
+      if (state.worker) state.worker.postMessage(message);
+    }
+    function handleWorkerMessage(event) {
+      const msg = event.data || {};
+      if (msg.type === 'loaded') {
+        state.loaded = true;
+        state.total = msg.total;
+        state.matchCount = msg.count;
+        updateCounts();
+        requestFilter();
+        syncComparisonHeight();
+        setStatus(`${msg.total.toLocaleString('es-AR')} artículos cargados · ${syncLabel()}`);
+        if (state.loadResolver) {
+          state.loadResolver(true);
+          state.loadResolver = null;
+        }
+      }
+      if (msg.type === 'filtered') {
+        state.matchCount = msg.count;
+        el.viewport.scrollTop = 0;
+        updateCounts();
+        requestSlice();
+      }
+      if (msg.type === 'slice') {
+        state.currentRows = msg.rows || [];
+        renderSlice(msg.start || 0, state.currentRows);
+      }
+      if (msg.type === 'providerReplaced') {
+        state.loaded = true;
+        state.total = msg.total;
+        state.matchCount = msg.count;
+        updateCounts();
+        requestSlice();
+        syncComparisonHeight();
+      }
+    }
+    function updateCounts() {
+      el.spacer.style.height = `${Math.max(1, state.matchCount) * ROW_HEIGHT}px`;
+      el.recordCount.textContent = state.matchCount.toLocaleString('es-AR');
+      el.meta.textContent = `${state.matchCount.toLocaleString('es-AR')} filtrados / ${state.total.toLocaleString('es-AR')} artículos · ${syncLabel()}`;
+    }
+    function currentFilter() {
+      return {
+        code: el.filterCode.value,
+        exact: el.filterExact.checked,
+        article: el.filterArticle.value,
+        price: el.filterPrice.value,
+        provider: el.filterProvider.value,
+        exclude: state.excludeTerms
+      };
+    }
+    function renderExcludeRows() {
+      el.excludeRows.innerHTML = state.excludeTerms.map((term, i) => `
+        <label class="exclude-row">
+          <span class="exclude-index">${i + 1}</span>
+          <input class="exclude-input" data-exclude-index="${i}" value="${escapeHtml(term)}" autocomplete="off">
+        </label>
+      `).join('');
+    }
+    function focusExcludeInput(index) {
+      const bounded = Math.max(0, Math.min(state.excludeTerms.length - 1, index));
+      const input = el.excludeRows.querySelector(`[data-exclude-index="${bounded}"]`);
+      if (!input) return;
+      input.focus();
+      input.select();
+      input.scrollIntoView({ block: 'nearest' });
+    }
+    function ensureExcludeIndex(index) {
+      while (index >= state.excludeTerms.length) state.excludeTerms.push('');
+      renderExcludeRows();
+    }
+    function updateExcludeTerm(index, value) {
+      state.excludeTerms[index] = value;
+      const lastHasText = state.excludeTerms[state.excludeTerms.length - 1]?.trim();
+      if (lastHasText) {
+        state.excludeTerms.push('');
+        renderExcludeRows();
+        const next = el.excludeRows.querySelector(`[data-exclude-index="${index}"]`);
+        next?.focus();
+        next?.setSelectionRange(value.length, value.length);
+      }
+      requestFilter();
+    }
+    function requestFilter() {
+      clearTimeout(state.filterTimer);
+      state.filterTimer = setTimeout(() => {
+        workerPost({ type: 'filter', filter: currentFilter(), sort: state.sort });
+      }, 35);
+    }
+    function clearSearchFilters() {
+      el.filterCode.value = '';
+      el.filterArticle.value = '';
+      el.filterPrice.value = '';
+      el.filterProvider.value = '';
+      el.filterExact.checked = false;
+      requestFilter();
+    }
+    function requestSlice() {
+      if (!state.loaded) return;
+      const start = Math.max(0, Math.floor(el.viewport.scrollTop / ROW_HEIGHT) - BUFFER);
+      const visible = Math.ceil(el.viewport.clientHeight / ROW_HEIGHT) + BUFFER * 2;
+      workerPost({ type: 'slice', start, limit: visible });
+    }
+    function updateSortMarks() {
+      document.querySelectorAll('[data-sort-mark]').forEach((mark) => {
+        const col = mark.dataset.sortMark;
+        mark.textContent = state.sort.col === col && state.sort.dir ? (state.sort.dir > 0 ? '▲' : '▼') : '↕';
+      });
+    }
+    function cycleSort(col) {
+      if (state.sort.col !== col) state.sort = { col, dir: 1 };
+      else if (state.sort.dir === 1) state.sort.dir = -1;
+      else state.sort = { col: null, dir: 0 };
+      updateSortMarks();
+      requestFilter();
+    }
+    function renderSlice(start, rows) {
+      el.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
+      el.rows.innerHTML = rows.map(({ index, row }) => `
+        <div class="row ${state.selectedId === row.idorden ? 'selected' : ''} ${isAdjustedPrice(row) ? 'adjusted' : ''}" data-id="${escapeHtml(row.idorden)}" data-match-index="${index}" title="${escapeHtml(row.articulo)}">
+          <div tabindex="-1" data-col="0">${escapeHtml(row.cod_proveedor)}</div>
+          <div tabindex="-1" data-col="1">${escapeHtml(row.articulo)}</div>
+          <div tabindex="-1" data-col="2" class="money" data-price-raw="${escapeHtml(rawPriceText(row.precio_costo))}" data-price-formatted="${escapeHtml(formatMoney(row.precio_costo))}">${formatMoney(row.precio_costo)}</div>
+          <div tabindex="-1" data-col="3" class="${providerLinkForRow(row) ? 'provider-link' : ''}" title="${providerLinkForRow(row) ? 'Doble clic para abrir la pagina del proveedor' : escapeHtml(row.proveedor)}">${escapeHtml(row.proveedor)}</div>
+        </div>
+      `).join('');
+      focusPendingTableCell();
+    }
+    function rowById(id) {
+      return state.currentRows.find((item) => String(item.row.idorden) === String(id))?.row || null;
+    }
+    function paintSelectedRow() {
+      el.rows.querySelectorAll('.row.selected').forEach((node) => node.classList.remove('selected'));
+      const safeId = CSS.escape(String(state.selectedId ?? ''));
+      if (safeId) el.rows.querySelector(`.row[data-id="${safeId}"]`)?.classList.add('selected');
+    }
+    function selectRow(row) {
+      if (!row) return;
+      state.selectedId = row.idorden;
+      state.selectedRow = row;
+      el.activeInfo.textContent = `${row.cod_proveedor || ''} · ${row.articulo || ''}`;
+      paintSelectedRow();
+    }
+    function selectRowText(rowEl) {
+      if (!rowEl) return;
+      const range = document.createRange();
+      range.selectNodeContents(rowEl);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    function selectCellText(cell) {
+      if (!cell) return;
+      cell.focus({ preventScroll: true });
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    function isCellTextSelected(cell) {
+      const selection = window.getSelection();
+      if (!cell || !selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+      const selected = selection.getRangeAt(0);
+      const full = document.createRange();
+      full.selectNodeContents(cell);
+      return selected.compareBoundaryPoints(Range.START_TO_START, full) === 0 &&
+        selected.compareBoundaryPoints(Range.END_TO_END, full) === 0;
+    }
+    function clearCellTextSelection(cell) {
+      if (!cell) return;
+      cell.focus({ preventScroll: true });
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+    }
+    function selectActiveField() {
+      const active = document.activeElement;
+      if (!active) return false;
+      if (active.matches?.('input, textarea')) {
+        const value = String(active.value ?? '');
+        const allSelected = value.length > 0 && active.selectionStart === 0 && active.selectionEnd === value.length;
+        if (allSelected) {
+          const pos = value.length;
+          active.setSelectionRange(pos, pos);
+        } else {
+          active.select();
+        }
+        return true;
+      }
+      const cell = active.closest?.('.row [data-col], .slot-value, .slot-label');
+      if (cell) {
+        if (Number(cell.dataset.col) === 2) {
+          if (isCellTextSelected(cell)) clearCellTextSelection(cell);
+          else selectPriceCellRaw(cell);
+          return true;
+        }
+        if (isCellTextSelected(cell)) clearCellTextSelection(cell);
+        else selectCellText(cell);
+        return true;
+      }
+      return false;
+    }
+    function focusPendingTableCell() {
+      if (listasTableNavigator?.focusPending()) return;
+      const pending = state.tableNav.pending;
+      if (!pending) return;
+      if (focusRenderedTableCell(pending.matchIndex, pending.col)) state.tableNav.pending = null;
+    }
+    function focusRenderedTableCell(matchIndex, col) {
+      const cell = el.rows.querySelector(`.row[data-match-index="${matchIndex}"] [data-col="${col}"]`);
+      if (!cell) return false;
+      const rowEl = cell.closest('.row');
+      selectRow(rowById(rowEl?.dataset.id));
+      selectCellText(cell);
+      return true;
+    }
+    function scrollTableIndexIntoView(matchIndex, fromIndex = null) {
+      const viewTop = el.viewport.scrollTop;
+      const direction = Number.isFinite(fromIndex) ? Math.sign(matchIndex - fromIndex) : 0;
+      const maxTop = Math.max(0, el.viewport.scrollHeight - el.viewport.clientHeight);
+      const activeCell = document.activeElement?.closest?.('.row [data-col]');
+      if (activeCell && direction) {
+        const activeRow = activeCell.closest('.row');
+        const rowRect = activeRow?.getBoundingClientRect();
+        const viewportRect = el.viewport.getBoundingClientRect();
+        const topWall = viewportRect.top + 1;
+        const bottomWall = viewportRect.top + el.viewport.clientHeight - 1;
+        let nextTop = null;
+        if (direction > 0 && rowRect?.bottom >= bottomWall) nextTop = viewTop + ROW_HEIGHT;
+        else if (direction < 0 && rowRect?.top <= topWall) nextTop = viewTop - ROW_HEIGHT;
+        if (nextTop !== null) {
+          el.viewport.scrollTop = Math.max(0, Math.min(nextTop, maxTop));
+          return Math.abs(el.viewport.scrollTop - viewTop) >= 1;
+        }
+      }
+      const viewBottom = viewTop + el.viewport.clientHeight;
+      const targetTop = matchIndex * ROW_HEIGHT;
+      const targetBottom = targetTop + ROW_HEIGHT;
+      const fromTop = Number.isFinite(fromIndex) ? fromIndex * ROW_HEIGHT : targetTop;
+      const fromBottom = fromTop + ROW_HEIGHT;
+      let nextTop = viewTop;
+      if (direction > 0 && fromBottom >= viewBottom - 1) nextTop = viewTop + ROW_HEIGHT;
+      else if (direction < 0 && fromTop <= viewTop + 1) nextTop = viewTop - ROW_HEIGHT;
+      else if (targetTop < viewTop) nextTop = targetTop;
+      else if (targetBottom > viewBottom) nextTop = targetBottom - el.viewport.clientHeight;
+      if (Math.abs(nextTop - viewTop) < 1) return false;
+      el.viewport.scrollTop = Math.max(0, Math.min(nextTop, maxTop));
+      return true;
+    }
+    function focusTableCell(matchIndex = 0, col = 0, fromIndex = null) {
+      if (listasTableNavigator) {
+        listasTableNavigator.focusCell(matchIndex, col, fromIndex);
+        return;
+      }
+      if (!state.matchCount) return;
+      const nextIndex = Math.max(0, Math.min(state.matchCount - 1, matchIndex));
+      const nextCol = Math.max(0, Math.min(3, col));
+      state.tableNav.matchIndex = nextIndex;
+      state.tableNav.col = nextCol;
+      const didScroll = scrollTableIndexIntoView(nextIndex, fromIndex);
+      state.tableNav.pending = { matchIndex: nextIndex, col: nextCol };
+      if (didScroll) {
+        requestSlice();
+        return;
+      }
+      if (focusRenderedTableCell(nextIndex, nextCol)) {
+        state.tableNav.pending = null;
+        return;
+      }
+      el.viewport.scrollTop = nextIndex * ROW_HEIGHT;
+      requestSlice();
+    }
+    function focusFirstTableCell() {
+      const first = state.currentRows[0];
+      if (!first) return;
+      focusTableCell(first.index, 0);
+    }
+    function setBase(row) {
+      if (!row) return;
+      state.base = row;
+      el.baseCode.value = row.cod_proveedor || '';
+      el.baseArticle.value = row.articulo || '';
+      el.basePrice.value = formatMoney(row.precio_costo);
+      el.baseProvider.value = row.proveedor || '';
+      renderSlots();
+    }
+    function applyBaseFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const article = params.get('baseArticle') || '';
+      const code = params.get('baseCode') || '';
+      const provider = params.get('baseProvider') || '';
+      const priceText = params.get('basePrice') || '';
+      if (!article && !code && !provider && !priceText) return;
+      setBase({
+        idorden: `externo-${Date.now()}`,
+        cod_proveedor: code,
+        articulo: article,
+        precio_costo: parseMoney(priceText),
+        proveedor: provider
+      });
+      setStatus('Artículo cargado para comparar.');
+    }
+    function applyBaseFromMessage(data) {
+      const payload = data || {};
+      const article = payload.baseArticle || payload.article || '';
+      const code = payload.baseCode || payload.code || '';
+      const provider = payload.baseProvider || payload.provider || '';
+      const priceText = payload.basePrice ?? payload.price ?? '';
+      if (!article && !code && !provider && !priceText) return;
+      clearSearchFilters();
+      setBase({
+        idorden: `externo-${Date.now()}`,
+        cod_proveedor: code,
+        articulo: article,
+        precio_costo: parseMoney(priceText),
+        proveedor: provider
+      });
+      setStatus('Artículo cargado para comparar.');
+    }
+    function copyToSlot(row) {
+      if (!row) return;
+      state.slots.push({ ...row, pickedAt: Date.now() });
+      renderSlots();
+    }
+    function calcOriginalPrice(row) {
+      return Number(row?.precio_costo_original || row?.precio_costo || 0);
+    }
+    function isAdjustedPrice(row) {
+      if (!row?.precio_costo_original) return false;
+      return Math.abs(Number(row.precio_costo || 0) - Number(row.precio_costo_original || 0)) > 0.009;
+    }
+    function calcCurrentPrice() {
+      const original = calcOriginalPrice(state.calcRow);
+      const divisor = parseFactor(el.calcDivide.value, 1);
+      const multiplier = parseFactor(el.calcMultiply.value, 1);
+      return original / divisor * multiplier;
+    }
+    function updateCalcResult() {
+      el.calcResult.textContent = formatMoney(calcCurrentPrice());
+    }
+    function calcNavItems() {
+      return [el.calcDivide, el.calcMultiply, el.calcCancelBtn, el.calcUndoBtn, el.calcApplyBtn].filter(Boolean);
+    }
+    function focusCalcItem(index) {
+      const items = calcNavItems();
+      const item = items[Math.max(0, Math.min(items.length - 1, index))];
+      if (!item) return;
+      item.focus();
+      if (item.tagName === 'INPUT') item.select();
+    }
+    function moveCalcFocus(delta) {
+      const items = calcNavItems();
+      const index = Math.max(0, items.indexOf(document.activeElement));
+      focusCalcItem(index + delta);
+    }
+    function handleCalcKeydown(event) {
+      if (!el.calcBackdrop.classList.contains('visible')) return false;
+      const items = calcNavItems();
+      if (!items.includes(document.activeElement)) return false;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCalcModal();
+        return true;
+      }
+      if (event.key === 'Enter' && document.activeElement.tagName === 'BUTTON') return false;
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === 'Enter' && document.activeElement === el.calcMultiply && !event.shiftKey) {
+          el.calcApplyBtn.focus();
+          return true;
+        }
+        moveCalcFocus(event.shiftKey ? -1 : 1);
+        return true;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        event.stopPropagation();
+        moveCalcFocus(1);
+        return true;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        event.stopPropagation();
+        moveCalcFocus(-1);
+        return true;
+      }
+      if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && document.activeElement.tagName === 'BUTTON') {
+        event.preventDefault();
+        event.stopPropagation();
+        moveCalcFocus(event.key === 'ArrowRight' ? 1 : -1);
+        return true;
+      }
+      return false;
+    }
+    function openCalcModal(row) {
+      if (!row) return;
+      state.calcRow = row;
+      el.calcOriginalPrice.value = formatMoney(calcOriginalPrice(row));
+      el.calcDivide.value = row.precio_costo_divisor || '';
+      el.calcMultiply.value = row.precio_costo_multiplicador || '';
+      updateCalcResult();
+      el.calcBackdrop.classList.add('visible');
+      setTimeout(() => focusCalcItem(0), 0);
+    }
+    function closeCalcModal() {
+      state.calcRow = null;
+      el.calcBackdrop.classList.remove('visible');
+    }
+    async function applyCalculatedPrice() {
+      const row = state.calcRow;
+      if (!row) return;
+      const original = calcOriginalPrice(row);
+      const calculated = Number(calcCurrentPrice().toFixed(2));
+      const updated = {
+        ...row,
+        precio_costo_original: original,
+        precio_costo_divisor: el.calcDivide.value.trim(),
+        precio_costo_multiplicador: el.calcMultiply.value.trim(),
+        precio_costo: calculated
+      };
+      if (Math.abs(calculated - original) <= 0.009) {
+        delete updated.precio_costo_original;
+        delete updated.precio_costo_divisor;
+        delete updated.precio_costo_multiplicador;
+      }
+      await saveUpdatedPriceRow(updated);
+      closeCalcModal();
+      showToast('Precio guardado.');
+    }
+    async function undoCalculatedPrice() {
+      const row = state.calcRow;
+      if (!row) return;
+      const original = calcOriginalPrice(row);
+      const updated = { ...row, precio_costo: original };
+      delete updated.precio_costo_original;
+      delete updated.precio_costo_divisor;
+      delete updated.precio_costo_multiplicador;
+      await saveUpdatedPriceRow(updated);
+      closeCalcModal();
+      showToast('Precio original restaurado.');
+    }
+    async function saveUpdatedPriceRow(updated) {
+      state.currentRows.forEach((item) => {
+        if (String(item.row.idorden) === String(updated.idorden)) item.row = updated;
+      });
+      state.slots = state.slots.map((item) => String(item.idorden) === String(updated.idorden) ? { ...item, ...updated } : item);
+      if (String(state.selectedRow?.idorden) === String(updated.idorden)) state.selectedRow = updated;
+      if (String(state.contextRow?.idorden) === String(updated.idorden)) state.contextRow = updated;
+      workerPost({ type: 'update', row: updated });
+      await idbSet('articulos', updated);
+      renderSlice(Math.max(0, Math.floor(el.viewport.scrollTop / ROW_HEIGHT) - BUFFER), state.currentRows);
+      renderSlots();
+    }
+    function clearSlot(index) {
+      state.slots.splice(index, 1);
+      renderSlots();
+    }
+    function openMissingBranchPicker(row) {
+      state.pendingMissingRow = row;
+      el.missingBranchOptions.innerHTML = SUCURSALES.map((s) => `<button class="branch-option" type="button" data-sucursal-id="${s.id}">${escapeHtml(s.label)}</button>`).join('');
+      el.missingBranchBackdrop.classList.add('visible');
+    }
+    function closeMissingBranchPicker() {
+      state.pendingMissingRow = null;
+      el.missingBranchBackdrop.classList.remove('visible');
+    }
+    async function confirmMissingBranch(id) {
+      const sucursal = SUCURSALES.find((s) => s.id === id);
+      const row = state.pendingMissingRow;
+      if (!row || !sucursal) return;
+      closeMissingBranchPicker();
+      showToast('Enviando a faltantes...');
+      await CorralonSystem.faltantes.addRow({ ...row, sucursalId: sucursal.id, sucursal: sucursal.label });
+      showToast('Enviado a faltantes.');
+    }
+    async function sendSlotToMissing() {
+      const row = state.slots[state.slotContextIndex];
+      if (!row) return;
+      hideSlotContextMenu();
+      const missingRow = {
+        idart: row.idart ? String(row.idart).padStart(6, '0') : '',
+        idProveedor: String(row.id_proveedor || row.idProveedor || '').trim(),
+        codProv: String(row.cod_proveedor || '').trim(),
+        filtro: '',
+        proveedor: String(row.proveedor || '').trim(),
+        descripcion: String(row.articulo || '').trim(),
+        cantidad: '',
+        precioCosto: Number(row.precio_costo || 0),
+        precioFinal: Number(row.precio_costo || 0),
+        pedido: false,
+        source: 'proveedores'
+      };
+      openMissingBranchPicker(missingRow);
+    }
+    function slotDiff(row) {
+      const base = parseMoney(el.basePrice.value) || Number(state.base?.precio_costo || 0);
+      const price = Number(row?.precio_costo || 0);
+      if (!row || !base) return '';
+      return `${(((price - base) / base) * 100).toFixed(2).replace('.', ',')}%`;
+    }
+    function providerDateForRow(row) {
+      if (!row) return '';
+      const id = String(row.id_proveedor || row.idProveedor || '').trim();
+      const name = normalize(row.proveedor || '');
+      return row.updated_at || row.ultima_actualizacion || (id ? state.providerDates.get(`id:${id}`) : '') || (name ? state.providerDates.get(`name:${name}`) : '') || '';
+    }
+    async function loadProviderDates() {
+      try {
+        let providers = await CorralonSystem.getProvidersCache();
+        if (!providers.length) providers = await CorralonSystem.importProvidersCloud();
+        state.providerDates = new Map();
+        state.providerLinks = new Map();
+        providers.forEach((provider) => {
+          const date = provider.updated_at || provider.ultima_actualizacion || '';
+          const id = String(provider.id_proveedor || '').trim();
+          const name = normalize(provider.proveedor || '');
+          const link = String(provider.pagina_link || provider.pagina || provider.web || '').trim();
+          if (date) {
+            if (id) state.providerDates.set(`id:${id}`, date);
+            if (name) state.providerDates.set(`name:${name}`, date);
+          }
+          if (link) {
+            if (id) state.providerLinks.set(`id:${id}`, link);
+            if (name) state.providerLinks.set(`name:${name}`, link);
+          }
+        });
+        renderSlots();
+        requestSlice();
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+    function renderSlots() {
+      const prices = state.slots.filter(Boolean).map((row) => Number(row.precio_costo || 0));
+      const min = prices.length ? Math.min(...prices) : null;
+      if (!state.slots.length) {
+        el.slots.innerHTML = '<div class="slot empty">Toca un precio de la lista para agregarlo aca.</div>';
+        return;
+      }
+      el.slots.innerHTML = state.slots.map((row, i) => {
+        const diff = slotDiff(row);
+        const diffNum = Number(diff.replace(',', '.').replace('%', '')) || 0;
+        const providerDate = providerDateForRow(row);
+        const providerDateText = formatProviderDateTime(providerDate);
+        return `<div class="slot ${row && Number(row.precio_costo || 0) === min ? 'winner' : ''}" data-slot-index="${i}">
+          <button class="slot-clear" type="button" data-clear-slot="${i}" title="Eliminar comparación">×</button>
+          <div class="slot-label">Cod. proveedor</div>
+          <div class="slot-value">${escapeHtml(row?.cod_proveedor || '')}</div>
+          <div class="slot-label">Articulo</div>
+          <div class="slot-value" title="${escapeHtml(row?.articulo || '')}">${escapeHtml(row?.articulo || '')}</div>
+          <div class="slot-label">Proveedor</div>
+          <div class="slot-value ${providerLinkForRow(row) ? 'provider-link' : ''}" data-slot-provider="1" title="${providerLinkForRow(row) ? 'Doble clic para abrir la pagina del proveedor' : escapeHtml(row?.proveedor || '')}">${escapeHtml(row?.proveedor || '')}</div>
+          <div class="slot-label">Precio</div>
+          <div class="slot-value money">${row ? formatMoney(row.precio_costo) : ''}</div>
+          <div class="slot-label">Última act.</div>
+          <div class="slot-value" title="${escapeHtml(providerDateText || providerDate)}">${escapeHtml(providerDateText || 'Sin fecha')}</div>
+          <div class="slot-label last">% diferencia</div>
+          <div class="slot-value last diff ${diffNum >= 0 ? 'positive' : 'negative'}">${escapeHtml(diff || 'Sin precio inicial')}</div>
+        </div>`;
+      }).join('');
+    }
+    function articleFromSheetRow(raw, headers) {
+      const get = (...names) => {
+        for (const name of names) {
+          const idx = headers.findIndex((h) => normalize(h) === normalize(name));
+          if (idx >= 0) return raw[idx];
+        }
+        return '';
+      };
+      const row = {
+        idorden: Number(get('idorden')) || Date.now() + Math.floor(Math.random() * 100000000),
+        cod_proveedor: String(get('CodProveedor') ?? '').trim(),
+        articulo: String(get('Articulo') ?? '').trim(),
+        precio_costo: Number(get('PrecioCosto')) || 0,
+        id_proveedor: String(get('IDProveedor') ?? '').trim(),
+        proveedor: String(get('Proveedor') ?? '').trim()
+      };
+      row.cod_proveedor_norm = normalize(row.cod_proveedor);
+      row.articulo_norm = normalize(row.articulo);
+      row.proveedor_norm = normalize(row.proveedor);
+      row.activo = true;
+      return row.articulo ? row : null;
+    }
+    async function readExcel(file) {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const headers = rows[0] || [];
+      const out = [];
+      for (let i = 1; i < rows.length; i++) {
+        const row = articleFromSheetRow(rows[i], headers);
+        if (row) out.push(row);
+      }
+      return out;
+    }
+    async function supabaseDeleteAll() {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?idorden=gte.0`, {
+        method: 'DELETE',
+        headers: supabaseHeaders()
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }
+    async function supabaseInsertRows(rows, version) {
+      for (let i = 0; i < rows.length; i += PAGE_SIZE) {
+        const chunk = rows.slice(i, i + PAGE_SIZE).map((row) => ({ ...row, lista_version: version }));
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?on_conflict=idorden`, {
+          method: 'POST',
+          headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+          body: JSON.stringify(chunk)
+        });
+        if (!response.ok) throw new Error(await response.text());
+        setStatus(`Subiendo a Supabase ${Math.min(i + PAGE_SIZE, rows.length).toLocaleString('es-AR')} / ${rows.length.toLocaleString('es-AR')}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    async function saveMeta(version, total, fileName = '') {
+      const payload = { id: 'principal', lista_version: version, total_articulos: total, archivo_nombre: fileName, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() };
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?on_conflict=id`, {
+        method: 'POST',
+        headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error(await response.text());
+      state.lastSyncAt = payload.last_provider_sync_at;
+      await idbSet('meta', payload);
+      updateCounts();
+    }
+    async function remoteMeta() {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${META_TABLE}?id=eq.principal&select=lista_version,total_articulos,archivo_nombre,importado_por,updated_at&limit=1`, {
+        headers: supabaseHeaders()
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return (await response.json())?.[0] || null;
+    }
+    function providerManifestUrl(meta) {
+      const text = String(meta?.archivo_nombre || '').trim();
+      return text.startsWith(PROVIDER_MANIFEST_PREFIX) ? text.slice(PROVIDER_MANIFEST_PREFIX.length) : '';
+    }
+    function fullProviderManifestUrl(meta) {
+      const text = String(meta?.importado_por || meta?.reserva_json_1 || '').trim();
+      return text.startsWith(FULL_PROVIDER_MANIFEST_PREFIX) ? text.slice(FULL_PROVIDER_MANIFEST_PREFIX.length) : '';
+    }
+    async function fetchProviderManifest(meta, urlOverride = '') {
+      if (!urlOverride && CorralonSystem.fetchProviderJsonTableManifest) {
+        const tableManifest = await CorralonSystem.fetchProviderJsonTableManifest().catch((error) => {
+          console.warn(error);
+          return null;
+        });
+        if (tableManifest && Object.keys(tableManifest.providers || {}).length) return tableManifest;
+      }
+      const url = String(urlOverride || providerManifestUrl(meta)).trim();
+      if (!url) return null;
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
+      if (!response.ok) throw new Error(await response.text());
+      const manifest = await response.json();
+      return {
+        id: 'provider-json-manifest-v1',
+        version: Number(manifest?.version || 0),
+        updated_at: manifest?.updated_at || '',
+        providers: manifest?.providers && typeof manifest.providers === 'object' ? manifest.providers : {}
+      };
+    }
+    function localProviderManifest(meta) {
+      return meta?.provider_json_manifest && typeof meta.provider_json_manifest === 'object'
+        ? meta.provider_json_manifest
+        : {};
+    }
+    function providerManifestEntries(manifest) {
+      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length);
+    }
+    function providerJsonUrls(entry) {
+      const chunks = Array.isArray(entry?.chunks) ? entry.chunks.map((chunk) => String(chunk?.json_url || '').trim()).filter(Boolean) : [];
+      return chunks.length ? chunks : [String(entry?.json_url || '').trim()].filter(Boolean);
+    }
+    function needsProviderJsonSync(entry, localManifest) {
+      const id = String(entry.id_proveedor || '').trim();
+      const local = localManifest[id];
+      if (!local) return true;
+      if (providerJsonUrls(local).join('|') !== providerJsonUrls(entry).join('|')) return true;
+      return Number(local.version || 0) < Number(entry.version || 0);
+    }
+    function normalizeProviderJsonRow(row, entry, index) {
+      const id = String(row?.id_proveedor || row?.idProveedor || entry?.id_proveedor || '').trim();
+      const providerName = String(row?.proveedor || entry?.proveedor || '').trim();
+      const cod = String(row?.cod_proveedor || row?.codProv || row?.codprov || '').trim();
+      const article = String(row?.articulo || row?.descripcion || row?.nombre || '').trim();
+      return {
+        idorden: Number(row?.idorden || 0) || Number(entry?.version || Date.now()) * 1000 + index,
+        cod_proveedor: cod,
+        articulo: article,
+        precio_costo: Number(row?.precio_costo ?? row?.precioCosto ?? row?.precio ?? 0) || 0,
+        id_proveedor: id,
+        proveedor: providerName,
+        cod_proveedor_norm: normalize(row?.cod_proveedor_norm || cod),
+        articulo_norm: normalize(row?.articulo_norm || article),
+        proveedor_norm: normalize(row?.proveedor_norm || providerName),
+        articulo_source: row?.articulo_source || 'provider_json'
+      };
+    }
+    function expectedProviderJsonRows(entry) {
+      const chunkRows = Array.isArray(entry?.chunks)
+        ? entry.chunks.reduce((sum, chunk) => sum + (Number(chunk?.rows || 0) || 0), 0)
+        : 0;
+      return Number(entry?.total_articulos || 0) || chunkRows || 0;
+    }
+    async function fetchJsonTextWithProgress(url, onProgress = null) {
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
+      if (!response.ok) throw new Error(await response.text());
+      const totalBytes = Number(response.headers.get('content-length') || 0) || 0;
+      if (!response.body?.getReader) {
+        const text = await response.text();
+        if (onProgress) onProgress(1);
+        return text;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let receivedBytes = 0;
+      let text = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        receivedBytes += value.byteLength || value.length || 0;
+        text += decoder.decode(value, { stream: true });
+        if (onProgress) {
+          const progress = totalBytes ? receivedBytes / totalBytes : Math.min(0.95, receivedBytes / (8 * 1024 * 1024));
+          onProgress(Math.max(0, Math.min(1, progress)));
+        }
+      }
+      text += decoder.decode();
+      if (onProgress) onProgress(1);
+      return text;
+    }
+    async function fetchProviderJsonRows(entry, progress = {}) {
+      const out = [];
+      const urls = providerJsonUrls(entry);
+      const expectedTotal = expectedProviderJsonRows(entry);
+      let processed = 0;
+      if (progress.onProcess) progress.onProcess(0, expectedTotal);
+      for (let i = 0; i < urls.length; i += 1) {
+        const url = urls[i];
+        const text = await fetchJsonTextWithProgress(url, (partProgress) => {
+          const downloadProgress = (i + partProgress) / Math.max(1, urls.length);
+          if (progress.onDownload) progress.onDownload(downloadProgress);
+        });
+        const rows = JSON.parse(text);
+        if (Array.isArray(rows)) {
+          for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1000) {
+            const chunk = rows.slice(rowIndex, rowIndex + 1000);
+            const offset = out.length;
+            out.push(...chunk.map((row, index) => normalizeProviderJsonRow(row, entry, offset + index)).filter((row) => row.articulo || row.cod_proveedor));
+            processed += chunk.length;
+            if (progress.onProcess) progress.onProcess(processed, expectedTotal || processed);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+        }
+      }
+      if (progress.onProcess) progress.onProcess(expectedTotal || processed || out.length, expectedTotal || processed || out.length);
+      return out;
+    }
+    async function downloadRemoteArticles(meta) {
+      setSyncProgress(8);
+      await idbClear('articulos');
+      let from = 0;
+      let total = 0;
+      const expectedTotal = Number(meta?.total_articulos || 0) || 0;
+      while (true) {
+        const to = from + PAGE_SIZE - 1;
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&order=idorden.asc`, {
+          headers: supabaseHeaders({ Range: `${from}-${to}` })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const rows = await response.json();
+        if (!rows.length) break;
+        await idbBulkPut(rows);
+        total += rows.length;
+        setStatus(`Descargando lista ${total.toLocaleString('es-AR')} artículos`);
+        if (expectedTotal) setSyncProgress(8 + Math.min(82, (total / expectedTotal) * 82));
+        else setSyncProgress(Math.min(90, 8 + total / 2500));
+        from += PAGE_SIZE;
+        if (rows.length < PAGE_SIZE) break;
+      }
+      setSyncProgress(94);
+      const syncMeta = { id: 'principal', ...meta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: todayDate() };
+      state.lastSyncAt = syncMeta.last_provider_sync_at;
+      await idbSet('meta', syncMeta);
+      updateCounts();
+    }
+    function timestampValue(value) {
+      if (!value) return 0;
+      const text = String(value).trim();
+      const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(text) ? text.replace(' ', 'T') : text;
+      const date = new Date(normalized);
+      if (!Number.isNaN(date.getTime())) return date.getTime();
+      const day = new Date(text.slice(0, 10));
+      return Number.isNaN(day.getTime()) ? 0 : day.getTime();
+    }
+    async function fetchProvidersUpdatedAfter(lastSyncAt) {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${PROVIDERS_TABLE}?select=id_proveedor,proveedor,ultima_actualizacion,updated_at&order=updated_at.asc`, {
+        headers: supabaseHeaders()
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const providers = await response.json();
+      const lastValue = timestampValue(lastSyncAt);
+      return (providers || []).filter((provider) => {
+        const providerValue = timestampValue(provider.updated_at || provider.ultima_actualizacion);
+        return provider.id_proveedor && providerValue && (!lastValue || providerValue > lastValue);
+      });
+    }
+    async function fetchProviderArticles(providerId) {
+      const out = [];
+      let from = 0;
+      while (true) {
+        const to = from + PAGE_SIZE - 1;
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=idorden,cod_proveedor,articulo,precio_costo,id_proveedor,proveedor,cod_proveedor_norm,articulo_norm,proveedor_norm&id_proveedor=eq.${encodeURIComponent(providerId)}&order=idorden.asc`, {
+          headers: supabaseHeaders({ Range: `${from}-${to}` })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const rows = await response.json();
+        out.push(...rows);
+        from += PAGE_SIZE;
+        if (rows.length < PAGE_SIZE) return out;
+      }
+    }
+    async function remoteArticleCount() {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=idorden`, {
+        method: 'HEAD',
+        headers: supabaseHeaders({ Prefer: 'count=exact', Range: '0-0' })
+      });
+      if (!response.ok) return 0;
+      const range = response.headers.get('content-range') || '';
+      const total = Number(range.split('/').pop() || 0);
+      return Number.isFinite(total) ? total : 0;
+    }
+    function idbDeleteProviderArticles(providerId) {
+      return new Promise((resolve, reject) => {
+        const id = String(providerId || '');
+        const tx = state.db.transaction('articulos', 'readwrite');
+        const store = tx.objectStore('articulos');
+        const source = store.indexNames.contains('id_proveedor')
+          ? store.index('id_proveedor')
+          : store;
+        const request = source.openCursor(store.indexNames.contains('id_proveedor') ? IDBKeyRange.only(id) : null);
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (cursor) {
+            if (source !== store || String(cursor.value?.id_proveedor || '') === id) cursor.delete();
+            cursor.continue();
+            return;
+          }
+        };
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    function idbPutArticleChunk(rows) {
+      return new Promise((resolve, reject) => {
+        const tx = state.db.transaction('articulos', 'readwrite');
+        const store = tx.objectStore('articulos');
+        rows.forEach((row) => store.put(row));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    async function idbReplaceProviderArticles(providerId, rows, onProgress = null, options = {}) {
+      if (!options.skipDelete) await idbDeleteProviderArticles(providerId);
+      const total = rows.length;
+      if (!total) {
+        if (onProgress) onProgress(0, 0);
+        return;
+      }
+      const chunkSize = 500;
+      for (let i = 0; i < total; i += chunkSize) {
+        const done = Math.min(i + chunkSize, total);
+        await idbPutArticleChunk(rows.slice(i, done));
+        if (onProgress) onProgress(done, total);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    function replaceProviderInWorker(providerId, rows) {
+      if (!state.worker || !state.loaded) return false;
+      workerPost({
+        type: 'replaceProvider',
+        providerId: String(providerId || ''),
+        rows,
+        filter: currentFilter(),
+        sort: state.sort
+      });
+      return true;
+    }
+    async function saveLocalSyncMeta(metaPatch = {}) {
+      const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
+      const next = { ...local, ...metaPatch, id: 'principal' };
+      state.lastSyncAt = next.last_provider_sync_at || state.lastSyncAt;
+      await idbSet('meta', next);
+      updateCounts();
+      return next;
+    }
+    async function markSyncFinished(metaPatch = {}) {
+      return saveLocalSyncMeta({
+        ...metaPatch,
+        last_provider_sync_at: new Date().toISOString(),
+        last_provider_sync_date: todayDate()
+      });
+    }
+    async function syncProviderJsonManifest(meta, options = {}) {
+      const manifest = await fetchProviderManifest(meta, options.manifestUrl || '').catch((error) => {
+        console.warn(error);
+        return null;
+      });
+      if (!manifest) return false;
+      const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
+      const localManifest = localProviderManifest(local);
+      const entries = providerManifestEntries(manifest);
+      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest));
+      if (!changed.length) {
+        if (options.updateWhenNoChanges !== false) {
+          await markSyncFinished({
+            ...meta,
+            provider_json_manifest: manifest.providers
+          });
+        }
+        return false;
+      }
+      setStatus(`Sincronizando ${changed.length} proveedor(es) desde JSON...`);
+      setSyncProgress(3);
+      let total = 0;
+      const nextLocalManifest = options.forceAll ? {} : { ...localManifest };
+      const updatedProviders = [];
+      if (options.clearBeforeImport) {
+        setStatus('Limpiando base local...');
+        await idbClear('articulos');
+      }
+      for (let index = 0; index < changed.length; index += 1) {
+        const entry = changed[index];
+        const label = entry.proveedor || entry.id_proveedor;
+        const startProgress = (index / changed.length) * 88 + 6;
+        const endProgress = ((index + 1) / changed.length) * 88 + 6;
+        const providerSpan = endProgress - startProgress;
+        const downloadEnd = startProgress + providerSpan / 3;
+        const processEnd = startProgress + (providerSpan * 2) / 3;
+        setSyncProgress(startProgress);
+        setStatus(`1/3 Descargando ${label}...`);
+        const deletePromise = options.clearBeforeImport ? Promise.resolve() : idbDeleteProviderArticles(entry.id_proveedor);
+        const rowsPromise = fetchProviderJsonRows(entry, {
+          onDownload: (progress) => {
+            const clamped = Math.max(0, Math.min(1, progress));
+            const pct = Math.round(clamped * 100);
+            setSyncProgress(startProgress + (downloadEnd - startProgress) * clamped);
+            setStatus(`1/3 Descargando ${label}: ${pct}%`);
+          },
+          onProcess: (done, totalRows) => {
+            const clamped = totalRows ? Math.max(0, Math.min(1, done / totalRows)) : 1;
+            setSyncProgress(downloadEnd + (processEnd - downloadEnd) * clamped);
+            setStatus(`2/3 Procesando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+          }
+        });
+        const [rows] = await Promise.all([rowsPromise, deletePromise]);
+        setSyncProgress(processEnd);
+        await idbReplaceProviderArticles(entry.id_proveedor, rows, (done, totalRows) => {
+          const articleProgress = totalRows ? done / totalRows : 1;
+          const clamped = Math.max(0, Math.min(1, articleProgress));
+          setSyncProgress(processEnd + (endProgress - processEnd) * clamped);
+          setStatus(`3/3 Aplicando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+        }, { skipDelete: true });
+        replaceProviderInWorker(entry.id_proveedor, rows);
+        total += rows.length;
+        updatedProviders.push({
+          id_proveedor: String(entry.id_proveedor),
+          proveedor: entry.proveedor || '',
+          updated_at: entry.updated_at || '',
+          version: Number(entry.version || 0),
+          total_articulos: Number(entry.total_articulos || rows.length),
+          synced_at: new Date().toISOString()
+        });
+        nextLocalManifest[String(entry.id_proveedor)] = {
+          id_proveedor: String(entry.id_proveedor),
+          proveedor: entry.proveedor || '',
+          version: Number(entry.version || 0),
+          updated_at: entry.updated_at || '',
+          total_articulos: Number(entry.total_articulos || rows.length),
+          json_url: entry.json_url,
+          chunk_count: Number(entry.chunk_count || providerJsonUrls(entry).length || 1),
+          chunks: Array.isArray(entry.chunks) ? entry.chunks : null
+        };
+        setSyncProgress(endProgress);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      setSyncProgress(96);
+      await markSyncFinished({
+        ...meta,
+        provider_json_manifest: nextLocalManifest,
+        last_provider_updates: updatedProviders
+      });
+      state.latestUpdates = sortUpdates(updatedProviders);
+      if (!state.worker || !state.loaded) await loadCacheIntoWorker();
+      setSyncProgress(100);
+      hideSyncProgress();
+      showToast(syncToastMessage(updatedProviders));
+      return true;
+    }
+    async function syncProvidersUpdatedAfterLocalMeta(remoteMeta = null) {
+      const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
+      const lastSyncAt = local.last_provider_sync_at || local.updated_at || local.last_provider_sync_date || '';
+      if (!lastSyncAt) {
+        if (remoteMeta) await downloadRemoteArticles(remoteMeta);
+        return Boolean(remoteMeta);
+      }
+      const changed = await fetchProvidersUpdatedAfter(lastSyncAt);
+      if (!changed.length) {
+        if (remoteMeta) await markSyncFinished(remoteMeta);
+        else state.lastSyncAt = local.last_provider_sync_at || state.lastSyncAt;
+        updateCounts();
+        return false;
+      }
+      setStatus(`Sincronizando ${changed.length} proveedor(es) actualizado(s)...`);
+      setSyncProgress(3);
+      let total = 0;
+      const updatedProviders = [];
+      for (let index = 0; index < changed.length; index += 1) {
+        const provider = changed[index];
+        const startProgress = (index / changed.length) * 88 + 6;
+        const endProgress = ((index + 1) / changed.length) * 88 + 6;
+        const downloadEnd = startProgress + (endProgress - startProgress) * 0.45;
+        const prepareEnd = startProgress + (endProgress - startProgress) * 0.62;
+        setSyncProgress(startProgress);
+        setStatus(`1/3 Descargando ${provider.proveedor || provider.id_proveedor}...`);
+        const deletePromise = idbDeleteProviderArticles(provider.id_proveedor);
+        const rows = await fetchProviderArticles(provider.id_proveedor);
+        setSyncProgress(downloadEnd);
+        setStatus(`2/3 Preparando ${provider.proveedor || provider.id_proveedor}...`);
+        await deletePromise;
+        setSyncProgress(prepareEnd);
+        await idbReplaceProviderArticles(provider.id_proveedor, rows, (done, totalRows) => {
+          const articleProgress = totalRows ? done / totalRows : 1;
+          setSyncProgress(prepareEnd + (endProgress - prepareEnd) * articleProgress);
+          setStatus(`3/3 Aplicando ${provider.proveedor || provider.id_proveedor}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
+        }, { skipDelete: true });
+        total += rows.length;
+        updatedProviders.push({
+          id_proveedor: String(provider.id_proveedor || ''),
+          proveedor: provider.proveedor || '',
+          updated_at: provider.updated_at || provider.ultima_actualizacion || '',
+          total_articulos: rows.length,
+          synced_at: new Date().toISOString()
+        });
+        setStatus(`Sincronizado ${provider.proveedor || provider.id_proveedor}: ${rows.length.toLocaleString('es-AR')} artículos`);
+        setSyncProgress(endProgress);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      setSyncProgress(96);
+      await markSyncFinished({ ...(remoteMeta || {}), last_provider_updates: updatedProviders });
+      state.latestUpdates = sortUpdates(updatedProviders);
+      await loadCacheIntoWorker();
+      setSyncProgress(100);
+      hideSyncProgress();
+      showToast(syncToastMessage(updatedProviders));
+      return true;
+    }
+    async function loadCacheIntoWorker() {
+      setLoadingProgress(18);
+      setLoadingDetail('Leyendo base local');
+      const rows = await idbAllArticles();
+      if (!rows.length) return false;
+      setLoadingProgress(72);
+      setLoadingDetail(`Preparando ${rows.length.toLocaleString('es-AR')} articulos`);
+      const local = await idbGet('meta', 'principal').catch(() => null);
+      state.lastSyncAt = local?.last_provider_sync_at || local?.updated_at || state.lastSyncAt;
+      state.worker = state.worker || createWorker();
+      await new Promise((resolve) => {
+        state.loadResolver = resolve;
+        workerPost({ type: 'load', rows });
+      });
+      setLoadingProgress(96);
+      return true;
+    }
+    async function checkCloudUpdates(options = {}) {
+      const meta = await remoteMeta();
+      if (!meta) return false;
+      const local = await idbGet('meta', 'principal');
+      if (!local || Number(local.lista_version) !== Number(meta.lista_version)) {
+        setStatus('Buscando actualización JSON...');
+        if (!local) {
+          setStatus('Importando base JSON...');
+          const jsonUpdated = await syncProviderJsonManifest(meta);
+          if (!jsonUpdated) {
+            setStatus('Importando lista desde Supabase...');
+            await downloadRemoteArticles(meta);
+            await loadCacheIntoWorker();
+          }
+          showToast('Lista actualizada.');
+          return true;
+        }
+        const jsonUpdated = await syncProviderJsonManifest(meta, { updateWhenNoChanges: false });
+        if (jsonUpdated) return true;
+        const updated = await syncProvidersUpdatedAfterLocalMeta(meta);
+        if (updated) return true;
+        await markSyncFinished(meta);
+        return true;
+      }
+      if (options.skipSameVersionBackground) return false;
+      syncProviderJsonManifest(meta).then((jsonUpdated) => {
+        if (!jsonUpdated) return syncProvidersUpdatedAfterLocalMeta();
+        return null;
+      }).catch((error) => {
+        console.error(error);
+        hideSyncProgress(1200);
+        return syncProvidersUpdatedAfterLocalMeta().catch((fallbackError) => {
+          console.error(fallbackError);
+          hideSyncProgress(1200);
+        });
+      });
+      return false;
+    }
+    async function importFromCloud() {
+      setStatus('Importando todas las listas desde JSON...');
+      const meta = await remoteMeta();
+      if (!meta) {
+        setStatus('Sin lista en Supabase. Subí el Excel primero.');
+        return;
+      }
+      const tableManifest = CorralonSystem.fetchProviderJsonTableManifest ? await CorralonSystem.fetchProviderJsonTableManifest().catch(() => null) : null;
+      const fullManifestUrl = fullProviderManifestUrl(meta);
+      if (tableManifest && Object.keys(tableManifest.providers || {}).length) {
+        await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true });
+      } else if (fullManifestUrl) {
+        await syncProviderJsonManifest(meta, { forceAll: true, clearBeforeImport: true, manifestUrl: fullManifestUrl });
+        const importedTotal = await idbCountArticles();
+        const remoteTotal = Math.max(Number(meta.total_articulos || 0), await remoteArticleCount());
+        if (remoteTotal && importedTotal < remoteTotal) {
+          setStatus(`JSON incompleto (${importedTotal.toLocaleString('es-AR')} / ${remoteTotal.toLocaleString('es-AR')}). Descargando base completa...`);
+          await downloadRemoteArticles(meta);
+        }
+      } else {
+        setStatus('Importando lista desde Supabase...');
+        await downloadRemoteArticles(meta);
+      }
+      await loadCacheIntoWorker();
+      setStatus(`Lista importada: ${Number(meta.total_articulos || state.total).toLocaleString('es-AR')} artículos`);
+      showToast('Lista importada a esta computadora.');
+    }
+    async function importExcel(file) {
+      setStatus('Leyendo Excel...');
+      const rows = await readExcel(file);
+      if (!rows.length) throw new Error('No encontré artículos en el Excel.');
+      const version = Date.now();
+      rows.forEach((row) => row.lista_version = version);
+      setStatus('Guardando cache local...');
+      await idbClear('articulos');
+      for (let i = 0; i < rows.length; i += 5000) {
+        await idbBulkPut(rows.slice(i, i + 5000));
+        setStatus(`Cache local ${Math.min(i + 5000, rows.length).toLocaleString('es-AR')} / ${rows.length.toLocaleString('es-AR')}`);
+      }
+      await loadCacheIntoWorker();
+      setStatus('Limpiando lista anterior...');
+      await supabaseDeleteAll();
+      await supabaseInsertRows(rows, version);
+      await saveMeta(version, rows.length, file.name);
+      setStatus(`Lista subida: ${rows.length.toLocaleString('es-AR')} artículos`);
+      showToast('Lista subida a Supabase.');
+    }
+    function exportTxt() {
+      const lines = state.slots.filter(Boolean).map((row, i) => [
+        `Proveedor ${i + 1}`,
+        row.proveedor || '',
+        row.cod_proveedor || '',
+        row.articulo || '',
+        formatMoney(row.precio_costo),
+        slotDiff(row)
+      ].join('\t'));
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'comparacion-proveedores.txt';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+    el.updatesBtn.addEventListener('click', openUpdatesModal);
+    el.updatesSearch.addEventListener('input', renderUpdatesModal);
+    el.updatesCloseBtn.addEventListener('click', closeUpdatesModal);
+    el.updatesBackdrop.addEventListener('click', (event) => {
+      if (event.target === el.updatesBackdrop) closeUpdatesModal();
+    });
+    document.getElementById('importBtn').addEventListener('click', () => importFromCloud().catch((error) => showToast(error.message)));
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin && event.origin !== 'null') return;
+      const message = event.data || {};
+      if (message.type === 'setCompareBase') applyBaseFromMessage(message.payload || message);
+    });
+    el.fileInput.addEventListener('change', () => {
+      const file = el.fileInput.files?.[0];
+      if (!file) return;
+      importExcel(file).catch((error) => {
+        console.error(error);
+        setStatus('Error al subir');
+        showToast(error.message || 'No pude subir el Excel.');
+      }).finally(() => el.fileInput.value = '');
+    });
+    let suppressFilterSelectOnFocus = false;
+    window.addEventListener('blur', () => { suppressFilterSelectOnFocus = true; });
+    [el.filterCode, el.filterArticle, el.filterPrice, el.filterProvider].forEach((input) => {
+      input.addEventListener('input', requestFilter);
+      input.addEventListener('focus', () => {
+        if (suppressFilterSelectOnFocus) {
+          suppressFilterSelectOnFocus = false;
+          return;
+        }
+        input.select();
+      });
+    });
+    el.filterExact.addEventListener('change', requestFilter);
+    document.querySelectorAll('[data-sort-col]').forEach((button) => {
+      button.addEventListener('click', () => cycleSort(button.dataset.sortCol));
+    });
+    el.basePrice.addEventListener('input', renderSlots);
+    el.basePrice.addEventListener('focus', () => el.basePrice.select());
+    el.excludeRows.addEventListener('input', (event) => {
+      const input = event.target.closest('[data-exclude-index]');
+      if (!input) return;
+      updateExcludeTerm(Number(input.dataset.excludeIndex), input.value);
+    });
+    el.excludeRows.addEventListener('focusin', (event) => {
+      if (event.target.matches('.exclude-input')) event.target.select();
+    });
+    el.excludeRows.addEventListener('keydown', (event) => {
+      const input = event.target.closest('[data-exclude-index]');
+      if (!input) return;
+      const index = Number(input.dataset.excludeIndex);
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        const nextIndex = index + (event.shiftKey ? -1 : 1);
+        if (nextIndex >= state.excludeTerms.length) ensureExcludeIndex(nextIndex);
+        focusExcludeInput(nextIndex);
+        return;
+      }
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        const nextIndex = index + (event.key === 'ArrowDown' ? 1 : -1);
+        if (nextIndex >= state.excludeTerms.length) ensureExcludeIndex(nextIndex);
+        focusExcludeInput(nextIndex);
+        return;
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        const allSelected = input.selectionStart === 0 && input.selectionEnd === input.value.length;
+        const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
+        const atEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+        const shouldMoveUp = event.key === 'ArrowLeft' && (allSelected || atStart);
+        const shouldMoveDown = event.key === 'ArrowRight' && (allSelected || atEnd);
+        if (shouldMoveUp || shouldMoveDown) {
+          event.preventDefault();
+          const nextIndex = index + (shouldMoveDown ? 1 : -1);
+          if (nextIndex >= state.excludeTerms.length) ensureExcludeIndex(nextIndex);
+          focusExcludeInput(nextIndex);
+        }
+      }
+    });
+    el.viewport.addEventListener('scroll', requestSlice);
+    el.rows.addEventListener('focusin', (event) => {
+      const cell = event.target.closest('.row [data-col="2"]');
+      if (cell) selectPriceCellRaw(cell);
+    });
+    el.rows.addEventListener('focusout', (event) => {
+      const cell = event.target.closest('.row [data-col="2"]');
+      if (cell) restorePriceCell(cell);
+    });
+    el.rows.addEventListener('click', (event) => {
+      hideRowContextMenu();
+      const rowEl = event.target.closest('.row');
+      if (!rowEl) return;
+      const row = rowById(rowEl.dataset.id);
+      selectRow(row);
+      state.tableNav.matchIndex = Number(rowEl.dataset.matchIndex) || 0;
+      const clickedCell = event.target.closest('[data-col]');
+      const clickedCol = Number(clickedCell?.dataset.col) || 0;
+      state.tableNav.col = clickedCol;
+      if (clickedCol === 2) selectPriceCellRaw(clickedCell);
+      if (event.detail === 2 && clickedCol === 3) {
+        if (openProviderPage(row)) event.preventDefault();
+        return;
+      }
+      if (event.detail >= 4) {
+        event.preventDefault();
+        selectRowText(rowEl);
+      }
+    });
+    el.rows.addEventListener('contextmenu', (event) => {
+      const rowEl = event.target.closest('.row');
+      if (!rowEl) return;
+      event.preventDefault();
+      const row = rowById(rowEl.dataset.id);
+      selectRow(row);
+      showRowContextMenu(event, row);
+    });
+    el.rowContextMenu.addEventListener('pointerdown', (event) => event.stopPropagation());
+    el.rowContextMenu.addEventListener('click', (event) => event.stopPropagation());
+    function compareContextRow(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rowId = event.currentTarget.dataset.rowId;
+      const row = rowById(rowId) || state.contextRow || state.selectedRow;
+      copyToSlot(row);
+      hideRowContextMenu();
+    }
+    el.compareContextBtn.addEventListener('mousedown', compareContextRow);
+    el.calcContextBtn.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rowId = event.currentTarget.dataset.rowId || el.compareContextBtn.dataset.rowId;
+      const row = rowById(rowId) || state.contextRow || state.selectedRow;
+      hideRowContextMenu();
+      openCalcModal(row);
+    });
+    [el.calcDivide, el.calcMultiply].forEach((input) => {
+      input.addEventListener('input', updateCalcResult);
+      input.addEventListener('focus', () => input.select());
+      input.addEventListener('keydown', handleCalcKeydown);
+    });
+    [el.calcCancelBtn, el.calcUndoBtn, el.calcApplyBtn].forEach((button) => {
+      button.addEventListener('keydown', handleCalcKeydown);
+    });
+    el.calcCancelBtn.addEventListener('click', closeCalcModal);
+    el.calcUndoBtn.addEventListener('click', () => undoCalculatedPrice().catch((error) => {
+      console.error(error);
+      showToast('No pude restaurar el precio.');
+    }));
+    el.calcApplyBtn.addEventListener('click', () => applyCalculatedPrice().catch((error) => {
+      console.error(error);
+      showToast('No pude guardar el precio.');
+    }));
+    el.calcBackdrop.addEventListener('mousedown', (event) => {
+      if (event.target === el.calcBackdrop) closeCalcModal();
+    });
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('#rowContextMenu')) hideRowContextMenu();
+      if (!event.target.closest('#slotContextMenu')) hideSlotContextMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        hideRowContextMenu();
+        hideSlotContextMenu();
+        closeUpdatesModal();
+      }
+    });
+    el.slots.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-clear-slot]');
+      if (btn) clearSlot(Number(btn.dataset.clearSlot));
+    });
+    el.slots.addEventListener('dblclick', (event) => {
+      const providerCell = event.target.closest('[data-slot-provider]');
+      if (!providerCell) return;
+      const slot = providerCell.closest('[data-slot-index]');
+      const row = state.slots[Number(slot?.dataset.slotIndex)];
+      if (openProviderPage(row)) event.preventDefault();
+    });
+    el.slots.addEventListener('contextmenu', (event) => {
+      const slot = event.target.closest('[data-slot-index]');
+      if (!slot) return;
+      showSlotContextMenu(event, Number(slot.dataset.slotIndex));
+    });
+    el.slotContextMenu.addEventListener('mousedown', (event) => event.stopPropagation());
+    el.sendSlotMissingBtn.addEventListener('click', () => {
+      sendSlotToMissing().catch((error) => {
+        console.error(error);
+        showToast('No pude enviar a faltantes.');
+      });
+    });
+    el.missingBranchOptions.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-sucursal-id]');
+      if (!btn) return;
+      confirmMissingBranch(btn.dataset.sucursalId).catch((error) => {
+        console.error(error);
+        showToast('No pude enviar a faltantes.');
+      });
+    });
+    el.missingBranchBackdrop.addEventListener('click', (event) => {
+      if (event.target === el.missingBranchBackdrop) closeMissingBranchPicker();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && el.missingBranchBackdrop.classList.contains('visible')) {
+        event.preventDefault();
+        closeMissingBranchPicker();
+        return;
+      }
+      if (handleCalcKeydown(event)) return;
+      if (event.key === 'F1') {
+        event.preventDefault();
+        state.slots = [];
+        hideSlotContextMenu();
+        renderSlots();
+        showToast('Comparaciones limpiadas.');
+        return;
+      }
+      if (event.key === 'F2') {
+        if (selectActiveField()) event.preventDefault();
+        return;
+      }
+      const filterOrder = [el.filterCode, el.filterExact, el.filterArticle, el.filterProvider];
+      const filterIndex = filterOrder.indexOf(document.activeElement);
+      if ((event.key === 'Enter' || event.key === 'Tab') && filterIndex >= 0) {
+        event.preventDefault();
+        const next = filterOrder[filterIndex + 1];
+        if (next) {
+          next.focus();
+          next.select?.();
+        } else {
+          focusFirstTableCell();
+        }
+        return;
+      }
+      if (filterIndex >= 0 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        const input = document.activeElement;
+        const isTextFilter = input.matches?.('input:not([type="checkbox"])');
+        const allSelected = !isTextFilter || input.selectionStart === 0 && input.selectionEnd === input.value.length;
+        const atStart = !isTextFilter || input.selectionStart === 0 && input.selectionEnd === 0;
+        const atEnd = !isTextFilter || input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+        const shouldMoveLeft = event.key === 'ArrowLeft' && (allSelected || atStart);
+        const shouldMoveRight = event.key === 'ArrowRight' && (allSelected || atEnd);
+        if (shouldMoveLeft || shouldMoveRight) {
+          event.preventDefault();
+          const next = filterOrder[filterIndex + (shouldMoveRight ? 1 : -1)];
+          if (next) {
+            next.focus();
+            next.select?.();
+          }
+        }
+        return;
+      }
+      const activeCell = document.activeElement?.closest?.('.row [data-col]');
+      if (activeCell && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+        if (listasTableNavigator?.moveFromActive(event)) return;
+        event.preventDefault();
+        const rowEl = activeCell.closest('.row');
+        const currentIndex = Number(rowEl?.dataset.matchIndex ?? state.tableNav.matchIndex);
+        const currentCol = Number(activeCell.dataset.col ?? state.tableNav.col);
+        const delta = {
+          ArrowLeft: [0, -1],
+          ArrowRight: [0, 1],
+          ArrowUp: [-1, 0],
+          ArrowDown: [1, 0]
+        }[event.key];
+        focusTableCell(currentIndex + delta[0], currentCol + delta[1], currentIndex);
+        return;
+      }
+      if (event.key === 'F3' && state.selectedRow) {
+        event.preventDefault();
+        setBase(state.selectedRow);
+      }
+    });
+    async function init() {
+      try {
+        setLoadingProgress(3);
+        setLoadingDetail('Abriendo base local');
+        state.db = await openDb();
+        initListasColumnResize();
+        initListasTableNavigation();
+        syncResponsiveScale();
+        renderSlots();
+        loadProviderDates();
+        renderExcludeRows();
+        syncComparisonHeight();
+        applyBaseFromUrl();
+        aplicarCodigoDesdeAccessYCerrarDuplicadas();
+        window.addEventListener('resize', syncResponsiveScale);
+        setLoadingProgress(10);
+        setLoadingDetail('Cargando lista completa');
+        setStatus('Cargando lista local...');
+        const hadCache = await loadCacheIntoWorker();
+        if (hadCache) {
+          setLoadingProgress(100);
+          setLoadingDetail('Lista preparada');
+          setStatus(localListStatus(state.total));
+          setTimeout(() => {
+            checkCloudUpdates().catch((error) => {
+              console.error(error);
+              hideSyncProgress(1200);
+            });
+          }, 0);
+          return;
+        }
+        setLoadingDetail('Importando desde Supabase');
+        setLoadingProgress(6);
+        setStatus('Sin cache local. Importando desde Supabase...');
+        await importFromCloud();
+        setLoadingProgress(100);
+      } catch (error) {
+        setLoadingDetail('Reintentando con cache local');
+        setLoadingProgress(12);
+        const rows = await idbAllArticles();
+        if (rows.length) {
+          state.worker = createWorker();
+          await new Promise((resolve) => {
+            state.loadResolver = resolve;
+            workerPost({ type: 'load', rows });
+          });
+          setLoadingProgress(100);
+          setStatus('Lista local cargada. No pude sincronizar Supabase.');
+        } else {
+          setStatus('Subí el Excel o importá la lista desde Supabase.');
+        }
+      } finally {
+        setTimeout(hideLoadingOverlay, 160);
+      }
+    }
+    init();
+  </script>
+</body>
+</html>
+
