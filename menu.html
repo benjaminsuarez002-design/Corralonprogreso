@@ -1250,10 +1250,16 @@
     }
 
     function notificationNumberText(item = {}) {
-      const direct = String(item.numeroPresupuesto || item.nroPresupuesto || item.presupuestoNumero || item.numero || item.id || '').trim();
-      if (direct) return direct;
-      const matches = String(item.title || item.titulo || item.detalle || item.detail || item.firestoreId || '').match(/\b\d{1,4}-\d+\b|\b\d+\b/g);
-      return matches?.length ? matches[matches.length - 1] : '';
+      const values = [
+        item.numeroPresupuesto, item.nroPresupuesto, item.presupuestoNumero, item.numero,
+        item.id, item.title, item.titulo, item.detalle, item.detail, item.firestoreId
+      ].map((value) => String(value || '').trim()).filter(Boolean);
+      for (const value of values) {
+        const formatted = value.match(/\d{1,4}-\d+/);
+        if (formatted) return formatted[0];
+      }
+      const numeric = values.find((value) => /^\d+$/.test(value));
+      return numeric || '';
     }
 
     function cleanNotificationDetail(item = {}) {
@@ -1263,8 +1269,10 @@
         item.detail, item.detalle, item.cliente, item.proveedor, item.nombre,
         item.titulo, item.title, item.firestoreId
       ].map((value) => String(value || '').trim())
-        .find((value) => value && !/^pres\.?\s*web$/i.test(value) && !/^presupuesto\s*web$/i.test(value)) || '';
-      if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(raw)) return '';
+        .find((value) => value
+          && !/^pres\.?\s*web$/i.test(value)
+          && !/^presupuesto\s*web$/i.test(value)
+          && !/^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(value)) || '';
       const cleaned = raw
         .replace(/^pres\.?\s*web\s*/i, '')
         .replace(/^presupuesto\s*web\s*/i, '')
@@ -1757,6 +1765,5 @@
   </script>
 </body>
 </html>
-
 
 
