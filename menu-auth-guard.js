@@ -90,11 +90,31 @@
     return localStorage.getItem(KEEP_LOGIN_KEY) === '1';
   }
 
-  function saveActiveUser(user) {
+  function temporarySession() {
+    try {
+      const data = JSON.parse(sessionStorage.getItem(ACTIVE_USER_SESSION_KEY) || 'null');
+      const usuario = data?.usuario?.id ? data.usuario : data?.id ? data : null;
+      if (!usuario?.id || Number(data.expiresAt || 0) <= Date.now()) {
+        sessionStorage.removeItem(ACTIVE_USER_SESSION_KEY);
+        return null;
+      }
+      return { ...data, usuario };
+    } catch (_) {
+      sessionStorage.removeItem(ACTIVE_USER_SESSION_KEY);
+      return null;
+    }
+  }
+
+  function saveActiveUser(user, persistent, temporary) {
     if (!user?.id) return;
-    localStorage.setItem(ACTIVE_USER_KEY, user.id);
-    localStorage.setItem(ACTIVE_USER_SNAPSHOT_KEY, JSON.stringify(user));
-    try { sessionStorage.setItem(ACTIVE_USER_SESSION_KEY, JSON.stringify(user)); } catch (_) {}
+    if (persistent) {
+      localStorage.setItem(ACTIVE_USER_KEY, user.id);
+      localStorage.setItem(ACTIVE_USER_SNAPSHOT_KEY, JSON.stringify(user));
+      return;
+    }
+    try {
+      sessionStorage.setItem(ACTIVE_USER_SESSION_KEY, JSON.stringify({ ...user, usuario: user, expiresAt: temporary.expiresAt }));
+    } catch (_) {}
   }
 
   function loadScript(src) {
@@ -133,8 +153,10 @@
       redirectTo('index.html');
       return;
     }
-    const id = activeUserId();
-    if (!keepLogged() || !id) {
+    const persistent = keepLogged();
+    const temporary = persistent ? null : temporarySession();
+    const id = persistent ? activeUserId() : String(temporary?.usuario?.id || '').trim();
+    if (!id) {
       clearSession();
       redirectTo('index.html');
       return;
@@ -146,7 +168,7 @@
         redirectTo('index.html');
         return;
       }
-      saveActiveUser(user);
+      saveActiveUser(user, persistent, temporary);
       try {
         const db = await firestoreDb();
         db.collection(USERS_COLLECTION).get().then((snap) => {
