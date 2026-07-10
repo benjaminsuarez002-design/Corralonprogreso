@@ -427,12 +427,20 @@
     font-size: 12px;
     color: var(--red);
   }
+  .login-session-note {
+    margin-top: 8px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+  }
   .login-remember {
-    margin-top: 14px;
+    margin: 12px 0;
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: 15px;
+    font-weight: 700;
     color: var(--muted);
   }
   .login-cta {
@@ -555,15 +563,16 @@
           <label class="login-pass-label" for="loginInput">Clave:</label>
           <input type="password" id="loginInput" class="login-input" autocomplete="current-password">
         </div>
-        <div class="login-actions">
-          <button class="login-cta" id="loginBtn" type="button">Ingresar</button>
-          <button class="login-exit" id="loginExitBtn" type="button">Salir</button>
-        </div>
         <div class="login-remember">
           <input type="checkbox" id="rememberLogin">
           <label for="rememberLogin">Mantener sesión iniciada</label>
         </div>
+        <div class="login-actions">
+          <button class="login-cta" id="loginBtn" type="button">Ingresar</button>
+          <button class="login-exit" id="loginExitBtn" type="button">Salir</button>
+        </div>
         <div class="login-error" id="loginError"></div>
+        <div class="login-session-note">Si no marcás “Mantener sesión iniciada”, la sesión durará 1 hora.</div>
       </div>
     </div>
   </div>
@@ -648,6 +657,7 @@
     const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
     const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
     const MENU_ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
+    const MENU_SESSION_DURATION_MS = 60 * 60 * 1000;
     const MENU_USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
     const MENU_USERS_COLLECTION = 'menuUsuarios';
     const MENU_ORDER_STORAGE_KEY = 'corralon_menu_order_v1';
@@ -689,6 +699,7 @@
     let reviewModalSnapshot = null;
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
+    let sessionExpiryTimer = null;
     let objectiveSummaryUnsubscribe = null;
     let objectiveSummaryLoaded = false;
     let objectivePreloadStarted = false;
@@ -956,7 +967,35 @@
       const snapshot = usuarioSnapshot(usuario);
       localStorage.setItem(MENU_ACTIVE_USER_KEY, usuario.id);
       localStorage.setItem(MENU_ACTIVE_USER_SNAPSHOT_KEY, JSON.stringify(snapshot));
-      try { sessionStorage.setItem(MENU_ACTIVE_USER_SESSION_KEY, JSON.stringify(snapshot)); } catch {}
+    }
+
+    function guardarSesionTemporal(usuario) {
+      const expiresAt = Date.now() + MENU_SESSION_DURATION_MS;
+      const snapshot = usuarioSnapshot(usuario);
+      try {
+        sessionStorage.setItem(MENU_ACTIVE_USER_SESSION_KEY, JSON.stringify({ ...snapshot, usuario: snapshot, expiresAt }));
+      } catch {}
+      programarVencimientoSesion(expiresAt);
+    }
+
+    function obtenerSesionTemporal() {
+      try {
+        const data = JSON.parse(sessionStorage.getItem(MENU_ACTIVE_USER_SESSION_KEY) || 'null');
+        if (!data?.usuario?.id || Number(data.expiresAt || 0) <= Date.now()) {
+          sessionStorage.removeItem(MENU_ACTIVE_USER_SESSION_KEY);
+          return null;
+        }
+        programarVencimientoSesion(Number(data.expiresAt));
+        return data.usuario;
+      } catch {
+        sessionStorage.removeItem(MENU_ACTIVE_USER_SESSION_KEY);
+        return null;
+      }
+    }
+
+    function programarVencimientoSesion(expiresAt) {
+      clearTimeout(sessionExpiryTimer);
+      sessionExpiryTimer = setTimeout(cerrarSesion, Math.max(0, expiresAt - Date.now()));
     }
 
     function tieneSesionMenuRecordada() {
@@ -1021,10 +1060,13 @@
       if (activar) {
         localStorage.setItem(HISTORIAL_LOGIN_STORAGE_KEY, '1');
         guardarUsuarioActivo(usuario);
+        clearTimeout(sessionExpiryTimer);
+        try { sessionStorage.removeItem(MENU_ACTIVE_USER_SESSION_KEY); } catch {}
       } else {
         localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
         localStorage.removeItem(MENU_ACTIVE_USER_KEY);
         localStorage.removeItem(MENU_ACTIVE_USER_SNAPSHOT_KEY);
+        guardarSesionTemporal(usuario);
       }
     }
 
@@ -1711,8 +1753,9 @@
     });
 
     function validarSesionRecordada() {
-      if (!tieneSesionMenuRecordada()) return null;
-      return obtenerUsuarioActivoValidado();
+      if (tieneSesionMenuRecordada()) return obtenerUsuarioActivoValidado();
+      const temporal = obtenerSesionTemporal();
+      return temporal ? usuariosMenu.find((usuario) => usuario.id === temporal.id) || null : null;
     }
 
     async function validarSesionEnSegundoPlano() {
@@ -1724,7 +1767,7 @@
         cerrarSesion();
         return;
       }
-      guardarUsuarioActivo(usuarioValidado);
+      if (tieneSesionMenuRecordada()) guardarUsuarioActivo(usuarioValidado);
       mostrarMenu(usuarioValidado);
     }
 
@@ -1733,12 +1776,12 @@
         usuariosMenu = usuariosDefault();
       }
       renderCachedFastData();
-      const usuarioInicial = tieneSesionMenuRecordada() ? obtenerUsuarioActivo() : null;
+      const usuarioInicial = tieneSesionMenuRecordada() ? obtenerUsuarioActivo() : obtenerSesionTemporal();
       setupAliasObjectives();
       renderLoginUsers();
       rememberLogin.checked = tieneSesionMenuRecordada();
-      if (tieneSesionMenuRecordada()) {
-        const usuarioActivo = obtenerUsuarioActivo();
+      if (usuarioInicial) {
+        const usuarioActivo = usuarioInicial;
         mostrarCargaMenu('Cargando comprobantes y notificaciones...');
         await Promise.all([
           preloadAliasObjectives(),
@@ -1765,5 +1808,3 @@
   </script>
 </body>
 </html>
-
-
