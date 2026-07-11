@@ -1568,17 +1568,17 @@
       return Boolean(opened);
     }
 
-    function openReviewOrder(id, docId = '') {
+    function openReviewOrder(id, docId = '', keepPopupOpen = false) {
       const targetId = String(docId || id || '').trim();
       const visibleId = String(id || targetId).trim();
-      reviewModal.classList.remove('visible');
+      if (!keepPopupOpen) reviewModal.classList.remove('visible');
       localStorage.setItem('corralon_open_review_order_id', targetId);
       const params = new URLSearchParams({ abrirPedidoDoc: targetId, abrirPedido: visibleId });
       openNotificationTarget(`pedidos.html?${params.toString()}`);
     }
 
-    function openHistorialNotification(tipo, id) {
-      reviewModal.classList.remove('visible');
+    function openHistorialNotification(tipo, id, keepPopupOpen = false) {
+      if (!keepPopupOpen) reviewModal.classList.remove('visible');
       localStorage.setItem('corralon_open_historial_notification', JSON.stringify({ tipo, id }));
       const params = new URLSearchParams({ abrirTipo: String(tipo || ''), abrirId: String(id || '') });
       openNotificationTarget(`historial.html?${params.toString()}`);
@@ -1694,9 +1694,10 @@
     resolvedReviewList.addEventListener('click', (event) => {
       const item = event.target.closest('[data-review-id]');
       if (!item) return;
-      resolvedReviewModal.classList.remove('visible');
-      if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId);
-      else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc);
+      const keepPopupOpen = event.ctrlKey || event.metaKey;
+      if (!keepPopupOpen) resolvedReviewModal.classList.remove('visible');
+      if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId, keepPopupOpen);
+      else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
     });
     pendingBtn.addEventListener('click', abrirPendientesModal);
     closePendingModal.addEventListener('click', cerrarPendientesModal);
@@ -1730,8 +1731,9 @@
       }
       const item = event.target.closest('[data-review-id]');
       if (!item) return;
-      if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId);
-      else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc);
+      const keepPopupOpen = event.ctrlKey || event.metaKey;
+      if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId, keepPopupOpen);
+      else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
     });
 
     document.getElementById('loginBtn').addEventListener('click', verificarPass);

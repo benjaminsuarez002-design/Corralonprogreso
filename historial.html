@@ -170,6 +170,8 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .dropzone-title { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900; color: var(--violeta); text-transform: uppercase; }
 .dropzone-sub { font-size: 12px; color: #888; margin-top: 4px; }
 .dropzone-file { margin-top: 8px; font-size: 12px; color: var(--texto-dark); font-weight: 700; word-break: break-word; }
+.dropzone-preview { display: block; max-width: 100%; max-height: 190px; margin: 0 auto 10px; border-radius: 10px; object-fit: contain; box-shadow: 0 8px 22px rgba(38,31,62,.18); }
+.dropzone-preview[hidden] { display: none; }
 
 /* ── DETALLE ── */
 .detalle-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100; display: none; align-items: flex-end; }
@@ -259,7 +261,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .loading-txt { color: var(--violeta); font-size: 16px; letter-spacing: 1px; text-transform: uppercase; font-family: 'Barlow Condensed', sans-serif; }
 </style>
   <script src="nav-helper.js"></script>
-  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="historial"></script>
+  <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="historial"></script>
 </head>
 <body>
 
@@ -333,6 +335,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     <input type="file" id="garantiaFotoInput" accept="image/*" style="display:none;">
     <div class="dropzone" id="garantiaDropzone" tabindex="0">
       <div>
+        <img id="garantiaDropzonePreview" class="dropzone-preview" alt="Vista previa de la garantía" hidden>
         <div class="dropzone-icon">📷</div>
         <div class="dropzone-title">Arrastrá la foto firmada</div>
         <div class="dropzone-sub">También podés tocar acá para buscarla o usar Ctrl+V para pegar</div>
@@ -420,6 +423,7 @@ let _remitosCache = [];
 let _garantiasCache = [];
 let _garantiaFotoActual = null;
 let _garantiaFotoFile = null;
+let _garantiaFotoPreviewUrl = '';
 let _fotoZoom = 1;
 let _fotoPanX = 0;
 let _fotoPanY = 0;
@@ -834,8 +838,19 @@ function setGarantiaFotoFile(file) {
 
 function actualizarDropzoneGarantia() {
   const label = document.getElementById('garantiaDropzoneFile');
-  if (!label) return;
+  const preview = document.getElementById('garantiaDropzonePreview');
+  if (!label || !preview) return;
+  if (_garantiaFotoPreviewUrl) URL.revokeObjectURL(_garantiaFotoPreviewUrl);
+  _garantiaFotoPreviewUrl = '';
   label.textContent = _garantiaFotoFile ? _garantiaFotoFile.name : 'Sin imagen seleccionada';
+  if (_garantiaFotoFile) {
+    _garantiaFotoPreviewUrl = URL.createObjectURL(_garantiaFotoFile);
+    preview.src = _garantiaFotoPreviewUrl;
+    preview.hidden = false;
+  } else {
+    preview.removeAttribute('src');
+    preview.hidden = true;
+  }
 }
 
 async function pegarImagenGarantiaDesdeClipboard() {
@@ -1717,8 +1732,6 @@ document.getElementById('remitosSearch')?.addEventListener('input', renderRemito
 </script>
 </body>
 </html>
-
-
 
 
 

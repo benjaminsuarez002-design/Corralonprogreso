@@ -9,7 +9,7 @@
   <script src="corralon-system.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
-  <script src="menu-auth-guard.js?v=20260708-guard3" data-menu-guard="carga_stock"></script>
+  <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="carga_stock"></script>
   <style>
     *{box-sizing:border-box}
     :root{--red:#e8183a;--purple:#6d5df7;--line:#8bc7ff;--soft:#eef8ff;--bg:#f6fcff;--row:#f7fbff;--text:#20223a;--muted:#6d7190;--ok:#d9f8e4;--ok2:#079a52;--bad:#ffe0e6;--bad2:#d7163c}
@@ -53,7 +53,7 @@
     .info-check input{width:18px;height:18px}
     input:focus,select:focus,[contenteditable="true"]:focus{box-shadow:0 0 0 2px #7d6cff;border-color:#7d6cff}
     .table-wrap{min-height:0;margin:14px 22px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 8px 22px #1e304c17;overflow:hidden;display:grid;grid-template-rows:34px 1fr 28px}
-    .head,.row{display:grid;grid-template-columns:34px 150px minmax(380px,1fr) 110px 130px 110px 135px}
+    .head,.row{display:grid;grid-template-columns:34px 150px minmax(380px,1fr) 110px 130px 110px 135px 145px}
     .head{background:var(--soft);font:900 18px 'Barlow Condensed';color:#3b2fa3;padding-right:14px}
     .head>div,.row>div{border-right:1px solid #d9edff;padding:6px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .corner{display:flex;align-items:center;justify-content:center;cursor:pointer;background:#e4f7ff}
@@ -64,11 +64,15 @@
     .row:nth-child(even){background:var(--row)}
     .row.ok{background:var(--ok)}
     .row.bad{background:var(--bad)}
+    .row.blank{background:#fff}
+    .row.has-focused-cell{position:relative;z-index:1;box-shadow:inset 4px 0 0 #6d5df7,inset 0 1px 0 rgba(109,93,247,.35),inset 0 -1px 0 rgba(109,93,247,.35)}
+    .row.has-focused-cell>div:not([data-field].is-active-cell){background:rgba(109,93,247,.035)}
     .row.ok .state{color:#fff;background:var(--ok2)}
     .row.bad .state{color:#fff;background:var(--bad2)}
     .row .state{display:inline-flex;align-items:center;justify-content:center;min-width:84px;height:23px;border-radius:999px;font:900 14px 'Barlow Condensed'}
     .row .num{text-align:right;font-variant-numeric:tabular-nums}
-    .row [contenteditable="true"]{outline:0;min-height:20px}
+    .row [contenteditable="true"]{outline:0;min-height:20px;caret-color:transparent;cursor:default}
+    .row [contenteditable="true"].text-caret-visible{caret-color:auto;cursor:text}
     .head [data-col-select]{cursor:pointer;user-select:none}
     .head [data-col-select].is-selected,.row [data-row-select].is-selected{background:rgba(109,93,247,.18);box-shadow:inset 0 0 0 2px rgba(109,93,247,.55)}
     .head [data-sort-key].sort-asc::after{content:" ▲";font-size:12px}
@@ -76,7 +80,7 @@
     .row [data-row-select]{cursor:pointer;user-select:none;background:#eef8ff}
     .row [data-field].is-selected{background:rgba(109,93,247,.13);box-shadow:inset 0 0 0 2px rgba(109,93,247,.65)}
     .row [data-field].is-active-cell{background:rgba(109,93,247,.13);box-shadow:inset 0 0 0 2px rgba(109,93,247,.65)}
-    .row [data-field].currency-raw-selected{background:#fff;box-shadow:inset 0 0 0 2px #7d6cff}
+    .row [data-field].currency-raw-selected{background:rgba(109,93,247,.13);box-shadow:inset 0 0 0 2px rgba(109,93,247,.65);outline:0}
     .foot{display:flex;align-items:center;gap:14px;padding:4px 9px;background:#fff;border-top:1px solid #d9edff;font:800 13px Barlow;color:var(--muted)}
     .foot-totals{margin-left:auto;display:flex;align-items:center;gap:16px;font:900 16px 'Barlow Condensed';color:#17315f}
     .actions-bottom{display:flex;align-items:center;justify-content:center;gap:14px;padding:0 22px 18px}
@@ -84,6 +88,21 @@
     .empty{padding:34px;text-align:center;font:900 24px 'Barlow Condensed';color:#6d7190}
     .toast{position:fixed;left:50%;bottom:24px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none;transition:.15s}
     .toast.visible{opacity:1}
+    .table-context-menu{position:fixed;z-index:120;display:none;min-width:180px;padding:6px;border:1px solid #bde4ff;border-radius:10px;background:#fff;box-shadow:0 14px 34px rgba(30,48,76,.24)}
+    .table-context-menu.visible{display:block}
+    .table-context-menu button{width:100%;height:34px;border:0;box-shadow:none;text-align:left;color:#24315f;background:#fff}
+    .table-context-menu button:hover{background:#eef8ff}
+    .table-context-menu button.danger-item{color:var(--bad2)}
+    .table-context-menu button.danger-item:hover{background:#fff0f3}
+    .article-provider-menu{position:fixed;z-index:130;display:none;max-height:280px;overflow:auto;min-width:520px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 16px 38px rgba(30,48,76,.26)}
+    .article-provider-menu.open{display:block}
+    .article-provider-option{display:grid;grid-template-columns:140px minmax(320px,1fr);gap:10px;padding:8px 10px;border-bottom:1px solid #e6f1fb;cursor:pointer;font:700 15px Barlow}
+    .article-provider-option:last-child{border-bottom:0}
+    .article-provider-option:hover,.article-provider-option.active{background:#e9f6ff}
+    .article-provider-option b{color:#3b2fa3}
+    .article-provider-toggle{position:fixed;z-index:125;display:none;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:#fff;color:#3b2fa3;box-shadow:0 1px 5px #0002;font:900 17px Barlow;line-height:28px}
+    .article-provider-toggle.visible{display:block}
+    .article-provider-toggle:hover{background:#e9f6ff}
     @media(max-width:900px){
       .toolbar label:first-child,.toolbar label:not(:first-child){flex:1 1 100%}
       .table-wrap{overflow-x:auto}
@@ -136,6 +155,7 @@
       <div data-col-select="3" data-sort-key="precio">Precio unit.</div>
       <div data-col-select="4" data-sort-key="descuento">Desc. adicional</div>
       <div data-col-select="5" data-sort-key="precioFinal">Precio final</div>
+      <div data-col-select="6" data-sort-key="precioFinalCantidad">Final x cantidad</div>
     </div>
     <div class="rows" id="rows"></div>
     <div class="foot">
@@ -180,6 +200,13 @@
     </div>
   </div>
 </div>
+<div class="table-context-menu" id="tableContextMenu">
+  <button type="button" id="recalculateContextBtn">Recalcular</button>
+  <button type="button" id="searchListsContextBtn">Buscar en listas</button>
+  <button type="button" class="danger-item" id="clearTableContextBtn">Limpiar tabla</button>
+</div>
+<button type="button" class="article-provider-toggle" id="articleProviderToggle" aria-label="Abrir o cerrar lista de artículos" title="Abrir/cerrar lista (F4)">▼</button>
+<div class="article-provider-menu" id="articleProviderMenu"></div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
@@ -214,10 +241,18 @@ let suppressFullSelectTarget = null;
 let mouseEditTarget = null;
 let activeToolbarField = null;
 let providerMouseEdit = false;
+let providerArticles = [];
+let providerArticlesLoadSeq = 0;
+let articleProviderCell = null;
+let articleProviderButtonCell = null;
+let articleProviderOptions = [];
+let articleProviderActive = 0;
 const selectedRows = new Set();
 const selectedCols = new Set();
 let rowSelectionAnchor = null;
 let colSelectionAnchor = null;
+let lastFocusedTableCell = null;
+let contextMenuRowIndex = null;
 
 const FX = window.CorralonFunciones || {};
 
@@ -236,6 +271,12 @@ const el = {
   totalUnitario: document.getElementById('totalUnitario'),
   totalFinal: document.getElementById('totalFinal'),
   copySummary: document.getElementById('copySummary'),
+  tableContextMenu: document.getElementById('tableContextMenu'),
+  recalculateContextBtn: document.getElementById('recalculateContextBtn'),
+  searchListsContextBtn: document.getElementById('searchListsContextBtn'),
+  clearTableContextBtn: document.getElementById('clearTableContextBtn'),
+  articleProviderToggle: document.getElementById('articleProviderToggle'),
+  articleProviderMenu: document.getElementById('articleProviderMenu'),
   toast: document.getElementById('toast')
 };
 
@@ -361,6 +402,9 @@ function calcPrecioFinal(row) {
   base = ivaIncluido ? (base / (1 + iva)) : (base * (1 + iva));
   return base;
 }
+function calcPrecioFinalCantidad(row) {
+  return calcPrecioFinal(row) * (moneyNumber(row.cantidad) || 0);
+}
 function calcPrecioFinalTotal(row) {
   const precio = Number(row.precio) || 0;
   const descuento = Number(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0) || 0;
@@ -409,6 +453,86 @@ function filteredProviders() {
     : providers;
   return source.slice(0, 40);
 }
+function closeArticleProviderList() {
+  el.articleProviderMenu.classList.remove('open');
+  articleProviderCell = null;
+  articleProviderOptions = [];
+  articleProviderActive = 0;
+}
+function showArticleProviderToggle(cell) {
+  if (!cell) return;
+  articleProviderButtonCell = cell;
+  const rect = cell.getBoundingClientRect();
+  el.articleProviderToggle.style.left = `${rect.right - 32}px`;
+  el.articleProviderToggle.style.top = `${rect.top + Math.max(2, (rect.height - 28) / 2)}px`;
+  el.articleProviderToggle.classList.add('visible');
+}
+function hideArticleProviderToggle() {
+  el.articleProviderToggle.classList.remove('visible');
+  articleProviderButtonCell = null;
+}
+async function loadProviderArticles(nextProvider) {
+  const seq = ++providerArticlesLoadSeq;
+  providerArticles = [];
+  closeArticleProviderList();
+  if (!nextProvider?.id_proveedor) return;
+  el.status.textContent = `Cargando lista de ${providerLabel(nextProvider)}...`;
+  try {
+    const loaded = await CorralonSystem.faltantes.syncSingleProviderJson(providerLabel(nextProvider), nextProvider.id_proveedor);
+    if (seq !== providerArticlesLoadSeq) return;
+    providerArticles = Array.isArray(loaded) ? loaded : [];
+    el.status.textContent = `${providerArticles.length.toLocaleString('es-AR')} artículos de ${providerLabel(nextProvider)} disponibles`;
+  } catch (error) {
+    if (seq !== providerArticlesLoadSeq) return;
+    console.warn(error);
+    el.status.textContent = 'No se pudo cargar el JSON del proveedor';
+  }
+}
+function filteredProviderArticles(cell) {
+  const rowIndex = Number(cell?.dataset?.row);
+  const row = rowsData[rowIndex] || {};
+  const terms = norm(`${row.codigo || ''} ${cell?.textContent || ''}`).split(' ').filter(Boolean);
+  const source = terms.length ? providerArticles.filter((item) => {
+    const hay = norm(`${item.codProv || ''} ${item.idart || ''} ${item.descripcion || ''}`);
+    return terms.every((term) => hay.includes(term));
+  }) : providerArticles;
+  return source.slice(0, 80);
+}
+function renderArticleProviderList() {
+  el.articleProviderMenu.innerHTML = articleProviderOptions.length
+    ? articleProviderOptions.map((item, index) => `<div class="article-provider-option${index === articleProviderActive ? ' active' : ''}" data-article-option="${index}"><b>${escapeHtml(item.codProv || item.idart || '-')}</b><span>${escapeHtml(item.descripcion || '')}</span></div>`).join('')
+    : '<div class="article-provider-option"><span>Sin coincidencias</span></div>';
+}
+function openArticleProviderList(cell) {
+  if (!cell || !provider) return;
+  articleProviderCell = cell;
+  articleProviderOptions = filteredProviderArticles(cell);
+  articleProviderActive = 0;
+  renderArticleProviderList();
+  const rect = cell.getBoundingClientRect();
+  el.articleProviderMenu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - Math.max(520, rect.width) - 8))}px`;
+  el.articleProviderMenu.style.top = `${Math.min(rect.bottom + 3, window.innerHeight - 288)}px`;
+  el.articleProviderMenu.style.width = `${Math.max(520, rect.width)}px`;
+  el.articleProviderMenu.classList.add('open');
+}
+function pickArticleProviderOption(index = articleProviderActive) {
+  const item = articleProviderOptions[index];
+  const cell = articleProviderCell;
+  if (!item || !cell) return false;
+  const rowIndex = Number(cell.dataset.row);
+  const row = rowsData[rowIndex];
+  if (!row) return false;
+  pushUndoSnapshot();
+  row.codigo = String(item.codProv || item.idart || '').trim();
+  row.descripcion = String(item.descripcion || '').trim();
+  saveRows();
+  closeArticleProviderList();
+  render();
+  const nextCell = editableCellAt(rowIndex, 1);
+  focusNavigationTarget(nextCell);
+  show('Artículo seleccionado');
+  return true;
+}
 function setProvider(nextProvider, options = {}) {
   pushUndoSnapshot();
   provider = nextProvider || null;
@@ -420,6 +544,7 @@ function setProvider(nextProvider, options = {}) {
   rowsData.forEach((row) => row.descuento = desc);
   saveRows();
   render();
+  loadProviderArticles(provider);
 }
 function applyProvider() {
   const text = norm(el.providerInput.value);
@@ -580,6 +705,7 @@ function scheduleFullSelect(target) {
 }
 function focusNavigationTarget(target) {
   if (!target) return false;
+  el.rows.querySelectorAll('.text-caret-visible').forEach((cell) => cell.classList.remove('text-caret-visible'));
   if (target === el.providerInput) providerMouseEdit = false;
   if (target.matches?.('input[type="checkbox"]')) {
     target.focus?.({ preventScroll: true });
@@ -640,6 +766,7 @@ function placeCaretOnMouseClick(target, event) {
   target.dataset.fullSelected = '0';
   suppressFullSelectTarget = target;
   mouseEditTarget = target;
+  if (target.matches?.('[contenteditable="true"]')) target.classList.add('text-caret-visible');
   if (target.matches?.('[data-field][data-row][data-col]')) tableSelectionApi?.clearSelection?.();
   target.focus?.({ preventScroll: true });
   if (!target.matches?.('input, textarea') && document.caretRangeFromPoint) {
@@ -657,11 +784,28 @@ function moveTableNavigation(cell, rowDelta, colDelta) {
   const next = editableCellAt(position.row + rowDelta, position.col + colDelta);
   return focusNavigationTarget(next);
 }
+function moveTableToEdge(cell, key) {
+  const position = editableCellPosition(cell);
+  const lastRow = Math.max(0, rowsData.length - 1);
+  const lastCol = 6;
+  const row = key === 'ArrowUp' ? 0 : key === 'ArrowDown' ? lastRow : position.row;
+  const col = key === 'ArrowLeft' ? 0 : key === 'ArrowRight' ? lastCol : position.col;
+  return focusNavigationTarget(editableCellAt(row, col));
+}
 function handleRuleNavigation(event) {
-  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.defaultPrevented || event.altKey || event.metaKey) return;
   const target = event.target?.closest?.('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva,#copyBtn,[data-field][data-row][data-col]');
   if (!target) return;
   const key = event.key;
+  if (event.ctrlKey) {
+    if (target.matches('[data-field][data-row][data-col]') && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeArticleProviderList();
+      moveTableToEdge(target, key);
+    }
+    return;
+  }
   if (isPrintableTypingKey(event)) target.dataset.fullSelected = '0';
   if (target.matches?.('input[type="checkbox"]')) {
     const navDir = key === 'ArrowLeft' || key === 'ArrowUp' || event.shiftKey ? -1 : 1;
@@ -677,12 +821,14 @@ function handleRuleNavigation(event) {
   const isTable = target.matches('[data-field][data-row][data-col]');
   const providerListOpen = target === el.providerInput && el.providerList.classList.contains('open');
   if (providerListOpen && (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter')) return;
+  const articleListOpen = target.dataset.field === 'descripcion' && el.articleProviderMenu.classList.contains('open');
+  if (articleListOpen && (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter')) return;
 
   let moved = false;
   if (key === 'Tab') {
     moved = moveNavigation(target, event.shiftKey ? -1 : 1);
   } else if (key === 'Enter') {
-    moved = isTable ? moveTableNavigation(target, event.shiftKey ? -1 : 1, 0) : moveNavigation(target, event.shiftKey ? -1 : 1);
+    moved = isTable ? moveTableNavigation(target, 0, event.shiftKey ? -1 : 1) : moveNavigation(target, event.shiftKey ? -1 : 1);
   } else if (key === 'ArrowDown' && isTextFullySelected(target)) {
     moved = isTable ? moveTableNavigation(target, 1, 0) : moveNavigation(target, 1);
   } else if (key === 'ArrowUp' && isTextFullySelected(target)) {
@@ -709,10 +855,13 @@ function normalizeRow(row = {}, index = 0) {
     descuentoAdicional: Number(row.descuentoAdicional ?? 0) || 0
   };
 }
+function parseStockClipboardTable(text) {
+  const value = String(text || '');
+  if (value.includes('\t')) return value.split(/\r\n|\n|\r/).filter((line) => line.length).map((line) => line.split('\t'));
+  return FX.parseClipboardTable ? FX.parseClipboardTable(value) : value.split(/\r\n|\n|\r/).map((line) => [line]);
+}
 function parsePasted(text) {
-  const table = FX.parseClipboardTable
-    ? FX.parseClipboardTable(text)
-    : String(text || '').split(/\r?\n/).filter((line) => line.trim()).map((line) => line.split('\t'));
+  const table = parseStockClipboardTable(text);
   return table
     .filter((cols) => cols.some((value) => String(value || '').trim()))
     .map((cols, index) => {
@@ -725,28 +874,39 @@ function parsePasted(text) {
     })
     .filter(Boolean);
 }
+function isBlankStockRow(row = {}) {
+  return !String(row.codigo || '').trim()
+    && !String(row.descripcion || '').trim()
+    && !String(row.cantidad || '').trim()
+    && !(Number(row.precio) || 0)
+    && !(Number(row.descuentoAdicional) || 0);
+}
+function ensureTrailingBlankRow() {
+  while (rowsData.length > 1 && isBlankStockRow(rowsData.at(-1)) && isBlankStockRow(rowsData.at(-2))) rowsData.pop();
+  if (!rowsData.length || !isBlankStockRow(rowsData.at(-1))) rowsData.push(normalizeRow({}, rowsData.length));
+}
+function stockRowHtml(row, rowIndex) {
+  const blank = isBlankStockRow(row);
+  const ok = !blank && isGreen(row);
+  return `<div class="row ${blank ? 'blank' : (ok ? 'ok' : 'bad')}" data-id="${escapeHtml(row.id)}" data-row="${rowIndex}">
+    <div data-row-select="${rowIndex}" class="${selectedRows.has(rowIndex) ? 'is-selected' : ''}"></div>
+    <div contenteditable="true" data-field="codigo" data-row="${rowIndex}" data-col="0">${escapeHtml(row.codigo)}</div>
+    <div contenteditable="true" data-field="descripcion" data-row="${rowIndex}" data-col="1" title="${escapeHtml(row.descripcion)}">${escapeHtml(row.descripcion)}</div>
+    <div class="num" contenteditable="true" data-field="cantidad" data-row="${rowIndex}" data-col="2">${escapeHtml(row.cantidad)}</div>
+    <div class="num" contenteditable="true" data-field="precio" data-row="${rowIndex}" data-col="3" data-currency-cell="1">${blank ? '' : money(row.precio)}</div>
+    <div class="num" contenteditable="true" data-field="descuento" data-row="${rowIndex}" data-col="4">${row.descuentoAdicional ? percent(row.descuentoAdicional) : ''}</div>
+    <div class="num" tabindex="0" data-field="precioFinal" data-row="${rowIndex}" data-col="5" data-readonly-cell="1" data-currency-cell="1">${blank ? '' : money(calcPrecioFinal(row))}</div>
+    <div class="num" tabindex="0" data-field="precioFinalCantidad" data-row="${rowIndex}" data-col="6" data-readonly-cell="1" data-currency-cell="1">${blank ? '' : money(calcPrecioFinalCantidad(row))}</div>
+  </div>`;
+}
 function render() {
+  ensureTrailingBlankRow();
   const view = rowsData;
-  if (!rowsData.length) {
-    el.rows.innerHTML = '<div class="empty">Pega una tabla con Codigo, Descripcion, Cantidad y Precio.</div>';
-  } else {
-    el.rows.innerHTML = view.map((row, rowIndex) => {
-      const ok = isGreen(row);
-      return `<div class="row ${ok ? 'ok' : 'bad'}" data-id="${escapeHtml(row.id)}" data-row="${rowIndex}">
-        <div data-row-select="${rowIndex}" class="${selectedRows.has(rowIndex) ? 'is-selected' : ''}"></div>
-        <div contenteditable="true" data-field="codigo" data-row="${rowIndex}" data-col="0">${escapeHtml(row.codigo)}</div>
-        <div contenteditable="true" data-field="descripcion" data-row="${rowIndex}" data-col="1" title="${escapeHtml(row.descripcion)}">${escapeHtml(row.descripcion)}</div>
-        <div class="num" contenteditable="true" data-field="cantidad" data-row="${rowIndex}" data-col="2">${escapeHtml(row.cantidad)}</div>
-        <div class="num" contenteditable="true" data-field="precio" data-row="${rowIndex}" data-col="3" data-currency-cell="1">${money(row.precio)}</div>
-        <div class="num" contenteditable="true" data-field="descuento" data-row="${rowIndex}" data-col="4">${row.descuentoAdicional ? percent(row.descuentoAdicional) : ''}</div>
-        <div class="num" tabindex="0" data-field="precioFinal" data-row="${rowIndex}" data-col="5" data-readonly-cell="1" data-currency-cell="1">${money(calcPrecioFinal(row))}</div>
-      </div>`;
-    }).join('');
-  }
+  el.rows.innerHTML = view.map(stockRowHtml).join('');
   const okCount = rowsData.filter(isGreen).length;
   const totalUnitario = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
-  const totalFinal = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(calcPrecioFinalTotal(row)) || 0)), 0);
-  el.totalRows.textContent = `${rowsData.length.toLocaleString('es-AR')} filas`;
+  const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
+  el.totalRows.textContent = `${rowsData.filter((row) => !isBlankStockRow(row)).length.toLocaleString('es-AR')} filas`;
   el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
   el.totalFinal.textContent = `Final: ${money(totalFinal)}`;
   el.copySummary.textContent = `${okCount.toLocaleString('es-AR')} listos para copiar`;
@@ -755,10 +915,12 @@ function render() {
 function updateCalculatedCells() {
   rowsData.forEach((row, index) => {
     const finalCell = editableCellAt(index, 5);
-    if (finalCell && document.activeElement !== finalCell) finalCell.textContent = money(calcPrecioFinal(row));
+    if (finalCell && document.activeElement !== finalCell) finalCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinal(row));
+    const finalQuantityCell = editableCellAt(index, 6);
+    if (finalQuantityCell && document.activeElement !== finalQuantityCell) finalQuantityCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinalCantidad(row));
   });
   const totalUnitario = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
-  const totalFinal = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(calcPrecioFinalTotal(row)) || 0)), 0);
+  const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
   el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
   el.totalFinal.textContent = `Final: ${money(totalFinal)}`;
 }
@@ -879,6 +1041,7 @@ function getEditableCellValue(cell) {
   const field = cell.dataset.field;
   if (field === 'precio') return rawNumber(row.precio);
   if (field === 'precioFinal') return rawNumber(calcPrecioFinal(row));
+  if (field === 'precioFinalCantidad') return rawNumber(calcPrecioFinalCantidad(row));
   if (field === 'descuento') return row.descuentoAdicional ? percent(row.descuentoAdicional) : '';
   return String(row[field] ?? '');
 }
@@ -974,9 +1137,39 @@ function deleteSelectedRows() {
   show('Filas borradas');
   return true;
 }
+function clearStockTable() {
+  if (!rowsData.length) {
+    show('La tabla ya está vacía');
+    return;
+  }
+  if (!confirm('¿Limpiar toda la tabla?')) return;
+  pushUndoSnapshot();
+  rowsData = [];
+  clearTableSelections();
+  saveRows();
+  render();
+  show('Tabla limpiada');
+}
+function closeTableContextMenu() {
+  el.tableContextMenu.classList.remove('visible');
+}
+function copyTextForContextMenu(text) {
+  const fallback = () => {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(fallback);
+  else fallback();
+}
 function pasteIntoSelectedColumns(text) {
   if (!selectedCols.size) return false;
-  const table = FX.parseClipboardTable ? FX.parseClipboardTable(text) : String(text || '').split(/\r?\n/).map((line) => line.split('\t'));
+  const table = parseStockClipboardTable(text);
   const cols = [...selectedCols].sort((a, b) => a - b);
   if (!table.length || !cols.length) return false;
   pushUndoSnapshot();
@@ -989,14 +1182,39 @@ function pasteIntoSelectedColumns(text) {
   finishTableEditUndo('Columnas pegadas');
   return true;
 }
+function pasteIntoTableFromCell(text, startCell) {
+  const start = editableCellPosition(startCell);
+  if (!startCell || !Number.isFinite(start.row) || !Number.isFinite(start.col)) return false;
+  const table = parseStockClipboardTable(text);
+  if (!table.length) return false;
+  pushUndoSnapshot();
+  const fields = ['codigo', 'descripcion', 'cantidad', 'precio', 'descuento'];
+  table.forEach((line, rowOffset) => {
+    const targetRow = start.row + rowOffset;
+    while (rowsData.length <= targetRow) rowsData.push(normalizeRow({}, rowsData.length));
+    line.forEach((value, colOffset) => {
+      const field = fields[start.col + colOffset];
+      if (!field) return;
+      if (field === 'precio') rowsData[targetRow].precio = moneyNumber(value);
+      else if (field === 'cantidad') rowsData[targetRow].cantidad = String(value ?? '').trim();
+      else if (field === 'descuento') rowsData[targetRow].descuentoAdicional = parsePercent(value);
+      else rowsData[targetRow][field] = String(value ?? '').trim();
+    });
+  });
+  saveRows();
+  render();
+  show(`${table.length} fila${table.length === 1 ? '' : 's'} pegada${table.length === 1 ? '' : 's'}`);
+  return true;
+}
 function sortRowsBy(key, dir) {
   if (!key || !dir) return;
   pushUndoSnapshot();
-  const numeric = key === 'cantidad' || key === 'precio' || key === 'descuento' || key === 'precioFinal';
+  rowsData = rowsData.filter((row) => !isBlankStockRow(row));
+  const numeric = key === 'cantidad' || key === 'precio' || key === 'descuento' || key === 'precioFinal' || key === 'precioFinalCantidad';
   const factor = dir === 'desc' ? -1 : 1;
   rowsData.sort((a, b) => {
-    const av = key === 'precioFinal' ? calcPrecioFinal(a) : (key === 'descuento' ? Number(a.descuentoAdicional || 0) : (numeric ? moneyNumber(a[key]) : norm(a[key])));
-    const bv = key === 'precioFinal' ? calcPrecioFinal(b) : (key === 'descuento' ? Number(b.descuentoAdicional || 0) : (numeric ? moneyNumber(b[key]) : norm(b[key])));
+    const av = key === 'precioFinalCantidad' ? calcPrecioFinalCantidad(a) : (key === 'precioFinal' ? calcPrecioFinal(a) : (key === 'descuento' ? Number(a.descuentoAdicional || 0) : (numeric ? moneyNumber(a[key]) : norm(a[key]))));
+    const bv = key === 'precioFinalCantidad' ? calcPrecioFinalCantidad(b) : (key === 'precioFinal' ? calcPrecioFinal(b) : (key === 'descuento' ? Number(b.descuentoAdicional || 0) : (numeric ? moneyNumber(b[key]) : norm(b[key]))));
     if (numeric) return (av - bv) * factor;
     return String(av).localeCompare(String(bv), 'es') * factor;
   });
@@ -1032,7 +1250,7 @@ function initFuncionesJsBindings() {
     findCell: editableCellAt,
     getCellValue: getEditableCellValue,
     setCellValue: setEditableCellValue,
-    pasteText: (text) => pasteIntoSelectedColumns(text),
+    pasteText: (text, activeCell) => pasteIntoSelectedColumns(text) || pasteIntoTableFromCell(text, activeCell),
     afterPaste: (rows) => finishTableEditUndo(`${rows.length} fila${rows.length === 1 ? '' : 's'} pegada${rows.length === 1 ? '' : 's'}`),
     afterClear: () => finishTableEditUndo('Celdas borradas'),
     selectOnCellMouseDown: true,
@@ -1071,6 +1289,8 @@ el.providerInput.addEventListener('input', () => {
   el.providerInput.dataset.fullSelected = '0';
   providerMouseEdit = true;
   provider = null;
+  providerArticles = [];
+  closeArticleProviderList();
   openProviderList();
 });
 el.providerInput.addEventListener('focus', () => {
@@ -1184,6 +1404,9 @@ el.corner.addEventListener('dblclick', (event) => {
 el.rows.addEventListener('focusin', (event) => {
   const cell = event.target.closest('[data-field]');
   if (!cell) return;
+  el.rows.querySelectorAll('.row.has-focused-cell').forEach((row) => row.classList.remove('has-focused-cell'));
+  cell.closest('.row')?.classList.add('has-focused-cell');
+  lastFocusedTableCell = { row: Number(cell.dataset.row), col: Number(cell.dataset.col) };
   startCellEditSnapshot();
   if (cell.dataset.field === 'precio') cell.textContent = getEditableCellValue(cell);
   if (suppressFullSelectTarget === cell) {
@@ -1216,8 +1439,56 @@ document.querySelector('.table-wrap').addEventListener('mousedown', (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
     focusNavigationTarget(cell);
+    if (cell.matches('[contenteditable="true"]')) cell.classList.add('text-caret-visible');
   }
 });
+document.querySelector('.table-wrap').addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  const rowElement = event.target.closest('.row[data-row]');
+  contextMenuRowIndex = rowElement
+    ? Number(rowElement.dataset.row)
+    : Number.isFinite(lastFocusedTableCell?.row) ? lastFocusedTableCell.row : null;
+  const menuWidth = 190;
+  const menuHeight = 116;
+  el.tableContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - menuWidth - 8)}px`;
+  el.tableContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - menuHeight - 8)}px`;
+  el.tableContextMenu.classList.add('visible');
+});
+el.recalculateContextBtn.addEventListener('click', async () => {
+  closeTableContextMenu();
+  el.recalculateContextBtn.disabled = true;
+  try {
+    await Promise.all([
+      loadIndexCodes(),
+      provider ? loadProviderArticles(provider) : Promise.resolve()
+    ]);
+    render();
+    show('Códigos recalculados');
+  } finally {
+    el.recalculateContextBtn.disabled = false;
+  }
+});
+el.searchListsContextBtn.addEventListener('click', () => {
+  const code = String(rowsData[contextMenuRowIndex]?.codigo || '').trim();
+  closeTableContextMenu();
+  if (!code) {
+    show('La fila no tiene código');
+    return;
+  }
+  copyTextForContextMenu(code);
+  window.open(`listasproveedores.html?codigo=${encodeURIComponent(code)}`, '_blank');
+});
+el.clearTableContextBtn.addEventListener('click', () => {
+  closeTableContextMenu();
+  clearStockTable();
+});
+document.addEventListener('mousedown', (event) => {
+  if (!event.target.closest('#tableContextMenu')) closeTableContextMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeTableContextMenu();
+});
+window.addEventListener('blur', closeTableContextMenu);
 el.rows.addEventListener('input', (event) => {
   const cell = event.target.closest('[data-field]');
   const rowEl = event.target.closest('.row');
@@ -1230,21 +1501,135 @@ el.rows.addEventListener('input', (event) => {
   else if (field === 'cantidad') row.cantidad = rawNumber(moneyNumber(cell.textContent));
   else if (field === 'descuento') row.descuentoAdicional = parsePercent(cell.textContent);
   else row[field] = String(cell.textContent || '').trim();
+  const rowIndex = Number(rowEl.dataset.row);
+  const blank = isBlankStockRow(row);
+  rowEl.classList.toggle('blank', blank);
+  rowEl.classList.toggle('ok', !blank && isGreen(row));
+  rowEl.classList.toggle('bad', !blank && !isGreen(row));
+  if (!blank && rowIndex === rowsData.length - 1) {
+    const nextRow = normalizeRow({}, rowsData.length);
+    rowsData.push(nextRow);
+    el.rows.insertAdjacentHTML('beforeend', stockRowHtml(nextRow, rowsData.length - 1));
+  }
+  if (field === 'codigo') {
+    el.copySummary.textContent = `${rowsData.filter(isGreen).length.toLocaleString('es-AR')} listos para copiar`;
+  }
+  el.totalRows.textContent = `${rowsData.filter((item) => !isBlankStockRow(item)).length.toLocaleString('es-AR')} filas`;
   editHadChanges = true;
   saveRows();
   if (field === 'descuento' || field === 'precio' || field === 'cantidad') updateCalculatedCells();
+  if (field === 'descripcion') openArticleProviderList(cell);
 });
+el.rows.addEventListener('keydown', (event) => {
+  const cell = event.target.closest('[data-field="descripcion"]');
+  if (!cell) return;
+  if (event.key === 'F2') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    mouseEditTarget = cell;
+    selectEditableCellText(cell);
+    return;
+  }
+  if (event.key === 'F4') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (el.articleProviderMenu.classList.contains('open') && articleProviderCell === cell) {
+      closeArticleProviderList();
+    } else {
+      openArticleProviderList(cell);
+    }
+    return;
+  }
+  if (event.key === 'Escape' && el.articleProviderMenu.classList.contains('open')) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeArticleProviderList();
+    return;
+  }
+  if (event.key === 'Tab') closeArticleProviderList();
+  if (!el.articleProviderMenu.classList.contains('open') || articleProviderCell !== cell) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    event.stopPropagation();
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    articleProviderActive = Math.max(0, Math.min(articleProviderOptions.length - 1, articleProviderActive + direction));
+    renderArticleProviderList();
+    el.articleProviderMenu.querySelector('.article-provider-option.active')?.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    event.stopPropagation();
+    const row = rowsData[Number(cell.dataset.row)] || {};
+    if (!String(cell.textContent || '').trim() && !String(row.codigo || '').trim()) {
+      closeArticleProviderList();
+      moveTableNavigation(cell, 0, 1);
+      return;
+    }
+    if (pickArticleProviderOption()) {
+      moveTableNavigation(cell, 0, 1);
+    } else {
+      closeArticleProviderList();
+      moveTableNavigation(cell, 0, 1);
+    }
+  }
+});
+el.articleProviderMenu.addEventListener('mousedown', (event) => {
+  const option = event.target.closest('[data-article-option]');
+  if (!option) return;
+  event.preventDefault();
+  pickArticleProviderOption(Number(option.dataset.articleOption));
+});
+el.rows.addEventListener('mouseover', (event) => {
+  const cell = event.target.closest('[data-field="descripcion"]');
+  if (cell) showArticleProviderToggle(cell);
+});
+el.rows.addEventListener('mouseout', (event) => {
+  const cell = event.target.closest('[data-field="descripcion"]');
+  if (!cell || cell.contains(event.relatedTarget) || event.relatedTarget === el.articleProviderToggle) return;
+  hideArticleProviderToggle();
+});
+el.articleProviderToggle.addEventListener('mousedown', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const cell = articleProviderButtonCell;
+  if (!cell) return;
+  if (el.articleProviderMenu.classList.contains('open') && articleProviderCell === cell) {
+    closeArticleProviderList();
+  } else {
+    openArticleProviderList(cell);
+  }
+});
+el.articleProviderToggle.addEventListener('mouseleave', (event) => {
+  if (event.relatedTarget !== articleProviderButtonCell) hideArticleProviderToggle();
+});
+document.addEventListener('mousedown', (event) => {
+  if (!event.target.closest('#articleProviderMenu,#articleProviderToggle,[data-field="descripcion"]')) closeArticleProviderList();
+});
+window.addEventListener('resize', () => { closeArticleProviderList(); hideArticleProviderToggle(); });
+el.rows.addEventListener('scroll', () => { closeArticleProviderList(); hideArticleProviderToggle(); });
 el.rows.addEventListener('blur', (event) => {
   const cell = event.target.closest('[data-field]');
   if (!cell) return;
+  cell.classList.remove('text-caret-visible');
+  if (cell.dataset.field === 'descripcion') closeArticleProviderList();
   commitCellEditSnapshot();
   if (cell.dataset.field === 'precio') cell.textContent = money(rowFromCell(cell)?.precio || 0);
   if (cell.dataset.field === 'descuento') {
     const row = rowFromCell(cell);
     cell.textContent = row?.descuentoAdicional ? percent(row.descuentoAdicional) : '';
   }
+  if (!document.hasFocus()) return;
+  if (!cell.closest('.row')?.contains(event.relatedTarget)) cell.closest('.row')?.classList.remove('has-focused-cell');
   if (!el.rows.contains(event.relatedTarget)) render();
 }, true);
+window.addEventListener('focus', () => {
+  if (!lastFocusedTableCell || document.activeElement?.closest?.('[data-field][data-row][data-col]')) return;
+  requestAnimationFrame(() => {
+    const cell = editableCellAt(lastFocusedTableCell.row, lastFocusedTableCell.col);
+    cell?.focus?.({ preventScroll: true });
+  });
+});
 el.rows.addEventListener('keydown', (event) => {
   if (event.defaultPrevented) return;
   const cell = event.target.closest('[contenteditable="true"]');
@@ -1276,7 +1661,8 @@ document.addEventListener('keydown', (event) => {
     input.setSelectionRange(start + 1, start + 1);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  if (event.ctrlKey && key === 'v' && el.corner.classList.contains('active')) {
+  const pasteTarget = event.target.closest?.('[data-field], input, textarea, [contenteditable="true"]');
+  if (event.ctrlKey && key === 'v' && el.corner.classList.contains('active') && !pasteTarget) {
     event.preventDefault();
     pasteAll().catch((error) => { console.error(error); show('No pude pegar'); });
   }
