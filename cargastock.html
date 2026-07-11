@@ -75,8 +75,9 @@
     .row [contenteditable="true"].text-caret-visible{caret-color:auto;cursor:text}
     .head [data-col-select]{cursor:pointer;user-select:none}
     .head [data-col-select].is-selected,.row [data-row-select].is-selected{background:rgba(109,93,247,.18);box-shadow:inset 0 0 0 2px rgba(109,93,247,.55)}
-    .head [data-sort-key].sort-asc::after{content:" ▲";font-size:12px}
-    .head [data-sort-key].sort-desc::after{content:" ▼";font-size:12px}
+    .head [data-sort-key]{display:flex;align-items:center;gap:5px}
+    .sort-control{width:18px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;box-shadow:none;color:#7795ff;font:900 15px Barlow;line-height:24px}
+    .sort-control:hover{background:#dceeff;color:#3b2fa3}
     .row [data-row-select]{cursor:pointer;user-select:none;background:#eef8ff}
     .row [data-field].is-selected{background:rgba(109,93,247,.13);box-shadow:inset 0 0 0 2px rgba(109,93,247,.65)}
     .row [data-field].is-active-cell{background:rgba(109,93,247,.13);box-shadow:inset 0 0 0 2px rgba(109,93,247,.65)}
@@ -149,13 +150,13 @@
   <section class="table-wrap">
     <div class="head">
       <div class="corner" id="corner" data-table-corner title="Doble clic para pegar toda la tabla"></div>
-      <div data-col-select="0" data-sort-key="codigo">Codigo</div>
-      <div data-col-select="1" data-sort-key="descripcion">Descripcion</div>
-      <div data-col-select="2" data-sort-key="cantidad">Cantidad</div>
-      <div data-col-select="3" data-sort-key="precio">Precio unit.</div>
-      <div data-col-select="4" data-sort-key="descuento">Desc. adicional</div>
-      <div data-col-select="5" data-sort-key="precioFinal">Precio final</div>
-      <div data-col-select="6" data-sort-key="precioFinalCantidad">Final x cantidad</div>
+      <div data-col-select="0" data-sort-key="codigo"><span>Codigo</span><button type="button" class="sort-control" data-sort-control="codigo" title="Ordenar">↕</button></div>
+      <div data-col-select="1" data-sort-key="descripcion"><span>Descripcion</span><button type="button" class="sort-control" data-sort-control="descripcion" title="Ordenar">↕</button></div>
+      <div data-col-select="2" data-sort-key="cantidad"><span>Cantidad</span><button type="button" class="sort-control" data-sort-control="cantidad" title="Ordenar">↕</button></div>
+      <div data-col-select="3" data-sort-key="precio"><span>Precio unit.</span><button type="button" class="sort-control" data-sort-control="precio" title="Ordenar">↕</button></div>
+      <div data-col-select="4" data-sort-key="descuento"><span>Desc. adicional</span><button type="button" class="sort-control" data-sort-control="descuento" title="Ordenar">↕</button></div>
+      <div data-col-select="5" data-sort-key="precioFinal"><span>Precio final</span><button type="button" class="sort-control" data-sort-control="precioFinal" title="Ordenar">↕</button></div>
+      <div data-col-select="6" data-sort-key="precioFinalCantidad"><span>Final x cantidad</span><button type="button" class="sort-control" data-sort-control="precioFinalCantidad" title="Ordenar">↕</button></div>
     </div>
     <div class="rows" id="rows"></div>
     <div class="foot">
@@ -253,6 +254,9 @@ let rowSelectionAnchor = null;
 let colSelectionAnchor = null;
 let lastFocusedTableCell = null;
 let contextMenuRowIndex = null;
+let currentSortKey = '';
+let currentSortDir = '';
+let originalSortOrder = [];
 
 const FX = window.CorralonFunciones || {};
 
@@ -381,15 +385,17 @@ function readField(source, names) {
 }
 function articleProviderCodes(article = {}) {
   const value = readField(article, [
-    'idartprov', 'idArtProv', 'idart_prov', 'id_art_prov',
-    'codprov', 'codProv', 'cod_prov', 'codigoProveedor',
-    'codigo_proveedor', 'codigo_prov', 'codProveedor',
+    'cod_proveedor', 'codProveedor', 'codigoProveedor',
+    'codigo_proveedor', 'codigo_prov', 'cod_prov',
+    'codprov', 'codProv',
     'CodProveedor', 'CodProveed'
   ]);
-  return codeVariants(value);
+  const key = codeKey(value);
+  return key ? [key] : [];
 }
 function isGreen(row) {
-  return codeVariants(row.codigo).some((key) => indexCodes.has(key));
+  const key = codeKey(row.codigo);
+  return Boolean(key) && indexCodes.has(key);
 }
 function calcPrecioFinal(row) {
   const precio = Number(row.precio) || 0;
@@ -1207,9 +1213,18 @@ function pasteIntoTableFromCell(text, startCell) {
   return true;
 }
 function sortRowsBy(key, dir) {
-  if (!key || !dir) return;
   pushUndoSnapshot();
   rowsData = rowsData.filter((row) => !isBlankStockRow(row));
+  if (!key || !dir) {
+    const positions = new Map(originalSortOrder.map((id, index) => [id, index]));
+    rowsData.sort((a, b) => (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    originalSortOrder = [];
+    clearTableSelections();
+    saveRows();
+    render();
+    return;
+  }
+  if (!originalSortOrder.length) originalSortOrder = rowsData.map((row) => row.id);
   const numeric = key === 'cantidad' || key === 'precio' || key === 'descuento' || key === 'precioFinal' || key === 'precioFinalCantidad';
   const factor = dir === 'desc' ? -1 : 1;
   rowsData.sort((a, b) => {
@@ -1222,6 +1237,35 @@ function sortRowsBy(key, dir) {
   saveRows();
   render();
 }
+function updateSortControls() {
+  document.querySelectorAll('[data-sort-control]').forEach((button) => {
+    const active = button.dataset.sortControl === currentSortKey;
+    button.textContent = active && currentSortDir === 'asc' ? '↑' : active && currentSortDir === 'desc' ? '↓' : '↕';
+    button.title = active && currentSortDir === 'asc'
+      ? 'Orden ascendente; clic para descendente'
+      : active && currentSortDir === 'desc'
+        ? 'Orden descendente; clic para volver al original'
+        : 'Orden original; clic para ascendente';
+  });
+}
+document.querySelector('.head').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-sort-control]');
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const key = button.dataset.sortControl;
+  if (currentSortKey !== key) {
+    currentSortKey = key;
+    currentSortDir = 'asc';
+  } else if (currentSortDir === 'asc') {
+    currentSortDir = 'desc';
+  } else {
+    currentSortKey = '';
+    currentSortDir = '';
+  }
+  sortRowsBy(currentSortKey, currentSortDir);
+  updateSortControls();
+});
 function initFuncionesJsBindings() {
   undoStack = FX.createUndoStack ? FX.createUndoStack({
     getState: rowsState,
@@ -1261,12 +1305,6 @@ function initFuncionesJsBindings() {
         selectEditableCellText(cell);
       }
     }
-  });
-
-  if (FX.bindTableSort) FX.bindTableSort({
-    root: document.querySelector('.head'),
-    headerSelector: '[data-sort-key]',
-    sort: sortRowsBy
   });
 
   if (FX.bindRawCurrencySelection) FX.bindRawCurrencySelection({
@@ -1416,6 +1454,7 @@ el.rows.addEventListener('focusin', (event) => {
   selectEditableCellText(cell);
 });
 document.querySelector('.table-wrap').addEventListener('mousedown', (event) => {
+  if (event.target.closest('[data-sort-control]')) return;
   const rowSelect = event.target.closest('[data-row-select]');
   if (rowSelect) {
     event.preventDefault();
