@@ -196,6 +196,7 @@
       <label>Nota</label><textarea id="modalNote" readonly></textarea>
     </div>
     <div class="provider-modal-actions">
+      <button class="danger provider-hidden" type="button" id="deleteProviderModalBtn">Eliminar proveedor</button>
       <button class="provider-hidden" type="button" id="saveProviderModalBtn">Guardar</button>
       <button type="button" id="closeProviderModalActionBtn">Cerrar</button>
     </div>
@@ -231,6 +232,7 @@ const INDEX_CODES_CACHE_KEY = 'corralon_carga_stock_index_codes_v1';
 
 let providers = [];
 let provider = null;
+let modalEditingProviderId = null;
 let rowsData = [];
 let indexCodes = new Set();
 let undoStack = null;
@@ -578,12 +580,13 @@ function selectedProvider() {
   return provider || providers.find((item) => norm(providerLabel(item)) === norm(el.providerInput.value) || String(item.id_proveedor || '') === String(el.providerInput.value).trim()) || null;
 }
 function setProviderModalEditing(enabled) {
-  ['modalProviderName','modalDiscountInvoice','modalDiscountFinalInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
+  ['modalProviderId','modalProviderName','modalDiscountInvoice','modalDiscountFinalInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
     const field = modalValue(id);
     if (field) field.readOnly = !enabled;
   });
   modalValue('modalIvaIncluded').disabled = !enabled;
   modalValue('saveProviderModalBtn')?.classList.toggle('provider-hidden', !enabled);
+  modalValue('deleteProviderModalBtn')?.classList.toggle('provider-hidden', !enabled);
 }
 function openProviderModal() {
   const current = selectedProvider();
@@ -593,6 +596,7 @@ function openProviderModal() {
     return;
   }
   setProviderModalEditing(false);
+  modalEditingProviderId = current.id_proveedor || null;
   modalValue('modalProviderId').value = current.id_proveedor || '';
   modalValue('modalProviderName').value = current.proveedor || '';
   modalValue('modalDiscountInvoice').value = percent(current.descuento_factura);
@@ -610,11 +614,13 @@ function openProviderModal() {
 }
 function closeProviderModal() {
   modalValue('providerModal').classList.remove('visible');
+  modalEditingProviderId = null;
   setProviderModalEditing(false);
 }
 async function saveProviderModal() {
   const id = String(modalValue('modalProviderId').value || '').trim();
-  const current = providers.find((item) => String(item.id_proveedor) === id) || {};
+  const originalId = modalEditingProviderId;
+  const current = providers.find((item) => String(item.id_proveedor) === String(originalId ?? id)) || {};
   const pageLink = String(modalValue('modalPageLink').value || '').trim();
   const nextProvider = {
     ...current,
@@ -635,23 +641,45 @@ async function saveProviderModal() {
   };
   nextProvider.proveedor_norm = String(nextProvider.proveedor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   if (!nextProvider.id_proveedor || !nextProvider.proveedor) return;
+  const idChanged = originalId !== null && String(originalId) !== String(nextProvider.id_proveedor);
+  if (idChanged && providers.some((item) => String(item.id_proveedor) === String(nextProvider.id_proveedor))) throw new Error('El ID de proveedor ya existe');
 
-  const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?on_conflict=id_proveedor`, {
-    method: 'POST',
+  const saveUrl = idChanged
+    ? `${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?id_proveedor=eq.${encodeURIComponent(originalId)}`
+    : `${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?on_conflict=id_proveedor`;
+  const response = await fetch(saveUrl, {
+    method: idChanged ? 'PATCH' : 'POST',
     headers: CorralonSystem.headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
     body: JSON.stringify(CorralonSystem.providerRemotePayload(nextProvider))
   });
   if (!response.ok) throw new Error(await response.text());
 
   const localProvider = CorralonSystem.normalizeProviderPageLink(nextProvider);
-  const index = providers.findIndex((item) => String(item.id_proveedor) === String(localProvider.id_proveedor));
+  const index = providers.findIndex((item) => String(item.id_proveedor) === String(idChanged ? originalId : localProvider.id_proveedor));
   if (index >= 0) providers[index] = localProvider;
   else providers.push(localProvider);
   providers.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
   await CorralonSystem.setProvidersCache(providers);
+  modalEditingProviderId = localProvider.id_proveedor;
   setProvider(localProvider);
   setProviderModalEditing(false);
   show('Proveedor guardado');
+}
+async function deleteProviderModal() {
+  const id = modalEditingProviderId;
+  const current = providers.find((item) => String(item.id_proveedor) === String(id));
+  if (id === null || !current) return;
+  if (!confirm(`¿Eliminar el proveedor ${providerLabel(current)}?`)) return;
+  const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?id_proveedor=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: CorralonSystem.headers({ Prefer: 'return=minimal' })
+  });
+  if (!response.ok) throw new Error(await response.text());
+  providers = providers.filter((item) => String(item.id_proveedor) !== String(id));
+  await CorralonSystem.setProvidersCache(providers);
+  closeProviderModal();
+  setProvider(null);
+  show('Proveedor eliminado');
 }
 function moveProviderActive(step) {
   const items = Array.from(el.providerList.querySelectorAll('[data-id]'));
@@ -1426,6 +1454,14 @@ document.getElementById('saveProviderModalBtn').addEventListener('click', async 
   } catch (error) {
     console.error(error);
     show('No se pudo guardar el proveedor');
+  }
+});
+document.getElementById('deleteProviderModalBtn').addEventListener('click', async () => {
+  try {
+    await deleteProviderModal();
+  } catch (error) {
+    console.error(error);
+    show('No se pudo eliminar el proveedor');
   }
 });
 document.getElementById('closeProviderModalBtn').addEventListener('click', closeProviderModal);
