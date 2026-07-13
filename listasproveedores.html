@@ -1185,6 +1185,45 @@
     function normalize(value) {
       return CorralonSystem.norm(value);
     }
+    function cleanProviderCode(value) {
+      return String(value ?? '')
+        .replace(/[\u0000-\u001F\u007F\u200B-\u200D\u2060\uFEFF]/g, '')
+        .trim();
+    }
+    function cleanProviderLabel(value) {
+      return String(value ?? '')
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    function sanitizeProviderArticleRow(row) {
+      const cod = cleanProviderCode(row?.cod_proveedor ?? row?.codProv ?? row?.codprov);
+      const article = cleanProviderLabel(row?.articulo ?? row?.descripcion ?? row?.nombre);
+      const providerId = cleanProviderCode(row?.id_proveedor ?? row?.idProveedor);
+      const provider = cleanProviderLabel(row?.proveedor);
+      const codNorm = normalize(cod);
+      const articleNorm = normalize(article);
+      const providerNorm = normalize(provider);
+      const unchanged = cod === String(row?.cod_proveedor ?? '')
+        && article === String(row?.articulo ?? '')
+        && providerId === String(row?.id_proveedor ?? '')
+        && provider === String(row?.proveedor ?? '')
+        && codNorm === String(row?.cod_proveedor_norm ?? '')
+        && articleNorm === String(row?.articulo_norm ?? '')
+        && providerNorm === String(row?.proveedor_norm ?? '');
+      if (unchanged) return row;
+      return {
+        ...row,
+        cod_proveedor: cod,
+        articulo: article,
+        id_proveedor: providerId,
+        proveedor: provider,
+        cod_proveedor_norm: codNorm,
+        articulo_norm: articleNorm,
+        proveedor_norm: providerNorm
+      };
+    }
     function escapeHtml(value) {
       return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -2141,11 +2180,11 @@
       };
       const row = {
         idorden: Number(get('idorden')) || Date.now() + Math.floor(Math.random() * 100000000),
-        cod_proveedor: String(get('CodProveedor') ?? '').trim(),
-        articulo: String(get('Articulo') ?? '').trim(),
+        cod_proveedor: cleanProviderCode(get('CodProveedor')),
+        articulo: cleanProviderLabel(get('Articulo')),
         precio_costo: Number(get('PrecioCosto')) || 0,
-        id_proveedor: String(get('IDProveedor') ?? '').trim(),
-        proveedor: String(get('Proveedor') ?? '').trim()
+        id_proveedor: cleanProviderCode(get('IDProveedor')),
+        proveedor: cleanProviderLabel(get('Proveedor'))
       };
       row.cod_proveedor_norm = normalize(row.cod_proveedor);
       row.articulo_norm = normalize(row.articulo);
@@ -2253,10 +2292,10 @@
       return Number(local.version || 0) < Number(entry.version || 0);
     }
     function normalizeProviderJsonRow(row, entry, index) {
-      const id = String(row?.id_proveedor || row?.idProveedor || entry?.id_proveedor || '').trim();
-      const providerName = String(row?.proveedor || entry?.proveedor || '').trim();
-      const cod = String(row?.cod_proveedor || row?.codProv || row?.codprov || '').trim();
-      const article = String(row?.articulo || row?.descripcion || row?.nombre || '').trim();
+      const id = cleanProviderCode(row?.id_proveedor || row?.idProveedor || entry?.id_proveedor);
+      const providerName = cleanProviderLabel(row?.proveedor || entry?.proveedor);
+      const cod = cleanProviderCode(row?.cod_proveedor || row?.codProv || row?.codprov);
+      const article = cleanProviderLabel(row?.articulo || row?.descripcion || row?.nombre);
       return {
         idorden: Number(row?.idorden || 0) || Number(entry?.version || Date.now()) * 1000 + index,
         cod_proveedor: cod,
@@ -2344,8 +2383,9 @@
         if (!response.ok) throw new Error(await response.text());
         const rows = await response.json();
         if (!rows.length) break;
-        await idbBulkPut(rows);
-        total += rows.length;
+        const cleanedRows = rows.map(sanitizeProviderArticleRow);
+        await idbBulkPut(cleanedRows);
+        total += cleanedRows.length;
         setStatus(`Descargando lista ${total.toLocaleString('es-AR')} artículos`);
         if (expectedTotal) setSyncProgress(8 + Math.min(82, (total / expectedTotal) * 82));
         else setSyncProgress(Math.min(90, 8 + total / 2500));
@@ -2389,7 +2429,7 @@
         });
         if (!response.ok) throw new Error(await response.text());
         const rows = await response.json();
-        out.push(...rows);
+        out.push(...rows.map(sanitizeProviderArticleRow));
         from += PAGE_SIZE;
         if (rows.length < PAGE_SIZE) return out;
       }
@@ -2633,8 +2673,15 @@
     async function loadCacheIntoWorker() {
       setLoadingProgress(18);
       setLoadingDetail('Leyendo base local');
-      const rows = await idbAllArticles();
-      if (!rows.length) return false;
+      const cachedRows = await idbAllArticles();
+      if (!cachedRows.length) return false;
+      const correctedRows = [];
+      const rows = cachedRows.map((row) => {
+        const cleaned = sanitizeProviderArticleRow(row);
+        if (cleaned !== row) correctedRows.push(cleaned);
+        return cleaned;
+      });
+      if (correctedRows.length) await idbBulkPut(correctedRows);
       setLoadingProgress(72);
       setLoadingDetail(`Preparando ${rows.length.toLocaleString('es-AR')} articulos`);
       const local = await idbGet('meta', 'principal').catch(() => null);
@@ -2829,8 +2876,10 @@
     });
     el.viewport.addEventListener('scroll', requestSlice);
     el.rows.addEventListener('focusin', (event) => {
-      const cell = event.target.closest('.row [data-col="2"]');
-      if (cell) selectPriceCellRaw(cell);
+      const cell = event.target.closest('.row [data-col]');
+      if (!cell) return;
+      if (Number(cell.dataset.col) === 2) selectPriceCellRaw(cell);
+      else selectCellText(cell);
     });
     el.rows.addEventListener('focusout', (event) => {
       const cell = event.target.closest('.row [data-col="2"]');
@@ -2846,7 +2895,10 @@
       const clickedCell = event.target.closest('[data-col]');
       const clickedCol = Number(clickedCell?.dataset.col) || 0;
       state.tableNav.col = clickedCol;
-      if (clickedCol === 2) selectPriceCellRaw(clickedCell);
+      if (clickedCell) {
+        if (clickedCol === 2) selectPriceCellRaw(clickedCell);
+        else selectCellText(clickedCell);
+      }
       if (event.detail === 2 && clickedCol === 3) {
         if (openProviderPage(row)) event.preventDefault();
         return;
