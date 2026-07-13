@@ -187,6 +187,66 @@
       text-align: center;
       white-space: nowrap;
     }
+    .branch-combo {
+      position: relative;
+      width: 210px;
+      min-width: 210px;
+    }
+    .branch-combo-input {
+      width: 100%;
+      height: 30px;
+      box-sizing: border-box;
+      border: 1px solid #cfc7ff;
+      border-radius: 9px;
+      background: #fff;
+      color: #302574;
+      padding: 4px 30px 4px 9px;
+      font: 800 13px Barlow, Arial, sans-serif;
+      outline: 0;
+    }
+    .branch-combo-input:focus { box-shadow: 0 0 0 2px rgba(109,93,247,.25); }
+    .branch-combo-toggle {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 27px;
+      height: 26px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--violeta);
+      font-size: 15px;
+      font-weight: 900;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity .12s ease, background .12s ease;
+    }
+    .branch-combo:hover .branch-combo-toggle,
+    .branch-combo:focus-within .branch-combo-toggle { opacity: 1; }
+    .branch-combo-toggle:hover { background: #eeeaff; }
+    .branch-combo-list {
+      position: absolute;
+      z-index: 80;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      display: none;
+      overflow: hidden;
+      border: 1px solid #cfc7ff;
+      border-radius: 9px;
+      background: #fff;
+      box-shadow: 0 12px 28px rgba(48,37,116,.2);
+    }
+    .branch-combo-list.open { display: block; }
+    .branch-combo-option {
+      padding: 7px 10px;
+      color: #302574;
+      font: 800 13px Barlow, Arial, sans-serif;
+      cursor: pointer;
+    }
+    .branch-combo-option:hover,
+    .branch-combo-option.active { color: #fff; background: var(--violeta); }
+    .branch-combo-empty { padding: 7px 10px; color: #77718f; font: 700 13px Barlow, Arial, sans-serif; }
     .top-link { margin-left: 0; }
 
     .canvas {
@@ -934,8 +994,16 @@
         flex: 1;
         font-size: calc(13px * var(--mobile-font-keep));
       }
-      .top-link {
+      .branch-combo {
         order: 5;
+        width: auto;
+        min-width: 0;
+        flex: 1 1 210px;
+      }
+      .branch-combo-input { height: 40px; }
+      .branch-combo-toggle { height: 36px; }
+      .top-link {
+        order: 6;
         min-height: 48px;
         display: inline-flex;
         align-items: center;
@@ -1253,8 +1321,9 @@
       }
     }
   </style>
+  <script src="corralon-system.js"></script>
   <script src="nav-helper.js"></script>
-  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="caja"></script>
+  <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="caja"></script>
 </head>
 <body>
   <div class="app">
@@ -1273,6 +1342,11 @@
         <button class="date-nav-btn" id="prevCajaDayBtn" type="button" aria-label="Dia anterior">&lt;</button>
         <span class="date-nav-label" id="cajaDateLabel"></span>
         <button class="date-nav-btn" id="nextCajaDayBtn" type="button" aria-label="Dia siguiente">&gt;</button>
+      </div>
+      <div class="branch-combo" id="cajaBranchCombo">
+        <input class="branch-combo-input" id="cajaBranchInput" type="text" autocomplete="off" role="combobox" aria-label="Sucursal" aria-expanded="false" aria-controls="cajaBranchList">
+        <button class="branch-combo-toggle" id="cajaBranchToggle" type="button" aria-label="Desplegar sucursales">&#9662;</button>
+        <div class="branch-combo-list" id="cajaBranchList" role="listbox"></div>
       </div>
       <a class="top-link" href="menu.html">Volver al menu</a>
     </header>
@@ -1519,6 +1593,7 @@
 
   <script>
     const STORAGE_KEY_BASE = 'corralon_control_caja_v1';
+    const CAJA_BRANCH_KEY = 'corralon_control_caja_sucursal_v1';
     const LEGACY_STORAGE_KEY = STORAGE_KEY_BASE;
     const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
@@ -1562,7 +1637,8 @@
       transfers: [],
       system: [],
       summaryManual: { ...DEFAULT_SUMMARY_MANUAL },
-      movements: MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 }))
+      movements: MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 })),
+      movementsByBranch: {}
     };
 
     const el = {
@@ -1584,6 +1660,10 @@
       systemDiff: document.getElementById('systemDiff'),
       dailyTotal: document.getElementById('dailyTotal'),
       cajaDateLabel: document.getElementById('cajaDateLabel'),
+      cajaBranchCombo: document.getElementById('cajaBranchCombo'),
+      cajaBranchInput: document.getElementById('cajaBranchInput'),
+      cajaBranchToggle: document.getElementById('cajaBranchToggle'),
+      cajaBranchList: document.getElementById('cajaBranchList'),
       prevCajaDayBtn: document.getElementById('prevCajaDayBtn'),
       nextCajaDayBtn: document.getElementById('nextCajaDayBtn'),
       transferCount: document.getElementById('transferCount'),
@@ -1615,6 +1695,9 @@
     let firebaseSaveTimer = null;
     let applyingFirebaseSummary = false;
     let lastPublicCajaSignature = '';
+    let activeCajaBranchId = '';
+    let cajaBranches = [];
+    let activeCajaBranchOption = -1;
 
     function storageKeyForDate(dateKey = selectedDateKey) {
       return `${STORAGE_KEY_BASE}_${dateKey}`;
@@ -1652,6 +1735,90 @@
       el.cajaDateLabel.textContent = formatDateLabel();
     }
 
+    function loadCajaBranches() {
+      cajaBranches = Array.isArray(window.CorralonSystem?.BRANCHES) ? CorralonSystem.BRANCHES : [];
+      const saved = localStorage.getItem(CAJA_BRANCH_KEY) || cajaBranches[0]?.id || '';
+      const branch = cajaBranches.find((item) => item.id === saved) || cajaBranches[0] || null;
+      activeCajaBranchId = branch?.id || '';
+      el.cajaBranchInput.value = branch?.label || '';
+      el.cajaBranchInput.dataset.branchId = activeCajaBranchId;
+      renderCajaBranchOptions('');
+    }
+
+    function selectedCajaBranchId() {
+      return el.cajaBranchInput?.dataset.branchId || activeCajaBranchId || '';
+    }
+
+    function matchingCajaBranches(query = '') {
+      const filter = normalizarTexto(query);
+      return cajaBranches.filter((branch) => !filter || normalizarTexto(`${branch.label || ''} ${branch.id || ''}`).includes(filter));
+    }
+
+    function renderCajaBranchOptions(query = '') {
+      const options = matchingCajaBranches(query);
+      activeCajaBranchOption = options.length ? 0 : -1;
+      el.cajaBranchList.innerHTML = options.length
+        ? options.map((branch, index) => `<div class="branch-combo-option${index === 0 ? ' active' : ''}" role="option" data-branch-id="${escapeHtml(branch.id)}">${escapeHtml(branch.label || branch.id)}</div>`).join('')
+        : '<div class="branch-combo-empty">Sin coincidencias</div>';
+    }
+
+    function openCajaBranchList(showAll = false) {
+      renderCajaBranchOptions(showAll ? '' : el.cajaBranchInput.value);
+      el.cajaBranchList.classList.add('open');
+      el.cajaBranchInput.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeCajaBranchList() {
+      el.cajaBranchList.classList.remove('open');
+      el.cajaBranchInput.setAttribute('aria-expanded', 'false');
+      activeCajaBranchOption = -1;
+    }
+
+    function restoreActiveCajaBranchInput() {
+      if (el.cajaBranchInput.dataset.branchId) return;
+      const branch = cajaBranches.find((item) => item.id === activeCajaBranchId);
+      el.cajaBranchInput.value = branch?.label || '';
+      el.cajaBranchInput.dataset.branchId = branch?.id || '';
+    }
+
+    function moveCajaBranchOption(delta) {
+      const options = [...el.cajaBranchList.querySelectorAll('[data-branch-id]')];
+      if (!options.length) return;
+      activeCajaBranchOption = (activeCajaBranchOption + delta + options.length) % options.length;
+      options.forEach((option, index) => option.classList.toggle('active', index === activeCajaBranchOption));
+      options[activeCajaBranchOption].scrollIntoView({ block: 'nearest' });
+    }
+
+    function selectCajaBranch(branchId) {
+      const branch = cajaBranches.find((item) => item.id === branchId);
+      if (!branch) return false;
+      rememberBranchMovements(activeCajaBranchId);
+      activeCajaBranchId = branch.id;
+      el.cajaBranchInput.value = branch.label || branch.id;
+      el.cajaBranchInput.dataset.branchId = branch.id;
+      closeCajaBranchList();
+      state.movements = cloneMovements(state.movementsByBranch[activeCajaBranchId] || []);
+      localStorage.setItem(CAJA_BRANCH_KEY, activeCajaBranchId);
+      persistLocalState();
+      renderMovementRows();
+      updateTotals();
+      lastPublicCajaSignature = '';
+      loadPublicCajaData({ force: true, showPublicLoading: true });
+      return true;
+    }
+
+    function cloneMovements(rows = []) {
+      return MOVEMENT_TYPES.map((type, idx) => {
+        const item = rows.find((row) => row?.type === type) || rows[idx] || {};
+        return { type, initial: Number(item.initial || 0), day: Number(item.day || 0), ie: Number(item.ie || 0) };
+      });
+    }
+
+    function rememberBranchMovements(branchId = activeCajaBranchId) {
+      if (!branchId) return;
+      state.movementsByBranch[branchId] = cloneMovements(state.movements);
+    }
+
     function formatDolarValue(value) {
       const number = Number(value || 0);
       return number ? `$ ${number.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '...';
@@ -1684,6 +1851,7 @@
       state.system = [];
       state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
       state.movements = MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 }));
+      state.movementsByBranch = {};
       selectedTransferId = '';
       selectedTransferRows.clear();
       selectedSystemRows.clear();
@@ -1913,21 +2081,25 @@
     }
 
     function statePayload() {
+      rememberBranchMovements();
       return {
         cash: state.cash,
         transfers: state.transfers,
         system: state.system,
         summaryManual: state.summaryManual,
-        movements: state.movements
+        movements: state.movements,
+        movementsByBranch: state.movementsByBranch
       };
     }
 
     function remoteStatePayload() {
+      rememberBranchMovements();
       return {
         cash: state.cash,
         transfers: state.transfers,
         system: state.system,
-        movements: state.movements
+        movements: state.movements,
+        movementsByBranch: state.movementsByBranch
       };
     }
 
@@ -1939,7 +2111,10 @@
       const hasMovements = Array.isArray(payload.movements) && payload.movements.some((row) => (
         Number(row?.initial || 0) || Number(row?.day || 0) || Number(row?.ie || 0)
       ));
-      return hasCash || hasTransfers || hasSystem || hasMovements;
+      const hasBranchMovements = Object.values(payload.movementsByBranch || {}).some((rows) => (
+        Array.isArray(rows) && rows.some((row) => Number(row?.initial || 0) || Number(row?.day || 0) || Number(row?.ie || 0))
+      ));
+      return hasCash || hasTransfers || hasSystem || hasMovements || hasBranchMovements;
     }
 
     function hasStateData() {
@@ -1978,12 +2153,18 @@
             state.summaryManual[key] = Number(saved.summaryManual[key] || 0);
           });
         }
-        if (Array.isArray(saved.movements)) {
-          state.movements = MOVEMENT_TYPES.map((type, idx) => {
-            const item = saved.movements.find((row) => row.type === type) || saved.movements[idx] || {};
-            return { type, initial: Number(item.initial || 0), day: Number(item.day || 0), ie: Number(item.ie || 0) };
-          });
-        }
+        state.movementsByBranch = {};
+        Object.entries(saved.movementsByBranch || {}).forEach(([branchId, rows]) => {
+          if (Array.isArray(rows)) state.movementsByBranch[branchId] = cloneMovements(rows);
+        });
+        const branchId = selectedCajaBranchId();
+        const defaultBranchId = window.CorralonSystem?.BRANCHES?.[0]?.id || 'progreso_ruta';
+        const savedBranchMovements = state.movementsByBranch[branchId];
+        const savedMovements = Array.isArray(savedBranchMovements)
+          ? savedBranchMovements
+          : (branchId === defaultBranchId && Array.isArray(saved.movements) ? saved.movements : []);
+        state.movements = cloneMovements(savedMovements);
+        if (branchId) state.movementsByBranch[branchId] = cloneMovements(state.movements);
       return true;
     }
 
@@ -3307,7 +3488,19 @@
       return !fecha || fecha === selectedDateKey;
     }
 
-    function rowsFromPublicPayload(payload) {
+    function rowsFromPublicPayload(payload, options = {}) {
+      if (options.branchAware) {
+        const branchId = selectedCajaBranchId();
+        const defaultBranchId = window.CorralonSystem?.BRANCHES?.[0]?.id || 'progreso_ruta';
+        if (Array.isArray(payload)) return branchId && branchId !== defaultBranchId ? [] : payload;
+        if (payload?.branches && typeof payload.branches === 'object') {
+          const branchPayload = payload.branches[branchId];
+          if (Array.isArray(branchPayload)) return branchPayload;
+          if (Array.isArray(branchPayload?.rows)) return branchPayload.rows;
+          return [];
+        }
+        if (branchId && branchId !== defaultBranchId) return [];
+      }
       if (Array.isArray(payload)) return payload;
       if (Array.isArray(payload?.rows)) return payload.rows;
       return [];
@@ -3315,8 +3508,11 @@
 
     function applyPublicCajaMovements(payload) {
       if (!cajaPublicPayloadMatchesDate(payload)) return false;
-      const rows = rowsFromPublicPayload(payload);
-      if (!rows.length) return false;
+      const rows = rowsFromPublicPayload(payload, { branchAware: true });
+      const hasApplicablePayload = Array.isArray(payload)
+        || Array.isArray(payload?.rows)
+        || Boolean(payload?.branches && typeof payload.branches === 'object');
+      if (!rows.length && !hasApplicablePayload) return false;
       const amountsByType = new Map(rows.map((row) => [movementTypeKey(row.type || row.tipo || row.TipoPago), row]));
       state.movements = MOVEMENT_TYPES.map((type) => {
         const row = amountsByType.get(movementTypeKey(type)) || {};
@@ -3327,6 +3523,7 @@
           ie: Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0
         };
       });
+      rememberBranchMovements(selectedCajaBranchId());
       return true;
     }
 
@@ -3369,7 +3566,7 @@
         const data = snap.data() || {};
         const payload = data.payload || (data.payloadJson ? JSON.parse(data.payloadJson) : null);
         if (!payload || typeof payload !== 'object') return false;
-        applySavedPayload(payload);
+        applySavedState(payload);
         persistLocalState();
         renderAll();
         return true;
@@ -3380,13 +3577,14 @@
 
     function publicCajaSignature(config, movementsPayload, systemPayload) {
       return [
+        selectedCajaBranchId(),
         config?.updatedAt || '',
         config?.urlTabla || '',
         config?.urlTransferencias || '',
         movementsPayload?.generatedAt || '',
         systemPayload?.generatedAt || '',
         movementsPayload?.idRecibo || '',
-        rowsFromPublicPayload(movementsPayload).length,
+        rowsFromPublicPayload(movementsPayload, { branchAware: true }).length,
         rowsFromPublicPayload(systemPayload).length
       ].join('|');
     }
@@ -3878,6 +4076,65 @@
     document.getElementById('findDiffBtn').addEventListener('click', openDiffModal);
     el.prevCajaDayBtn.addEventListener('click', () => switchCajaDate(-1));
     el.nextCajaDayBtn.addEventListener('click', () => switchCajaDate(1));
+    el.cajaBranchInput.addEventListener('input', () => {
+      el.cajaBranchInput.dataset.branchId = '';
+      openCajaBranchList(false);
+    });
+    el.cajaBranchInput.addEventListener('keydown', (event) => {
+      const isOpen = el.cajaBranchList.classList.contains('open');
+      if (event.key === 'F4') {
+        event.preventDefault();
+        if (isOpen) closeCajaBranchList();
+        else openCajaBranchList(true);
+        return;
+      }
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && isOpen) {
+        event.preventDefault();
+        moveCajaBranchOption(event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (event.key === 'Enter') {
+        if (!el.cajaBranchInput.value.trim()) {
+          event.preventDefault();
+          closeCajaBranchList();
+          return;
+        }
+        if (isOpen) {
+          const options = [...el.cajaBranchList.querySelectorAll('[data-branch-id]')];
+          const option = options[activeCajaBranchOption];
+          if (option) {
+            event.preventDefault();
+            selectCajaBranch(option.dataset.branchId);
+          }
+        }
+        return;
+      }
+      if (event.key === 'Escape' && isOpen) {
+        event.preventDefault();
+        closeCajaBranchList();
+        restoreActiveCajaBranchInput();
+      }
+    });
+    el.cajaBranchToggle.addEventListener('mousedown', (event) => event.preventDefault());
+    el.cajaBranchToggle.addEventListener('click', () => {
+      el.cajaBranchInput.focus();
+      if (el.cajaBranchList.classList.contains('open')) closeCajaBranchList();
+      else openCajaBranchList(true);
+    });
+    el.cajaBranchList.addEventListener('mousedown', (event) => {
+      const option = event.target.closest('[data-branch-id]');
+      if (!option) return;
+      event.preventDefault();
+      selectCajaBranch(option.dataset.branchId);
+      el.cajaBranchInput.focus();
+    });
+    el.cajaBranchCombo.addEventListener('focusout', () => {
+      setTimeout(() => {
+        if (el.cajaBranchCombo.contains(document.activeElement)) return;
+        closeCajaBranchList();
+        restoreActiveCajaBranchInput();
+      }, 0);
+    });
     document.getElementById('updateTotalsBtn').addEventListener('click', async () => {
       await loadPublicCajaData({ force: true, showPublicLoading: true });
       updateTotals();
@@ -4079,6 +4336,7 @@
       saveState();
     });
 
+    loadCajaBranches();
     updateDateLabel();
     loadDolarCards();
     loadState(selectedDateKey);
@@ -4088,6 +4346,3 @@
   </script>
 </body>
 </html>
-
-
-
