@@ -1661,6 +1661,7 @@
     const STORAGE_KEY_BASE = 'corralon_control_caja_v1';
     const CAJA_BRANCH_KEY = 'corralon_control_caja_sucursal_v1';
     const CAJA_ALL_BRANCHES_ID = 'todas';
+    const CAJA_GLOBAL_ONLY_BRANCH_ID = '__global__';
     const CAJA_MOVEMENT_SEPARATION_KEY = 'corralon_control_caja_separar_v1';
     const LEGACY_STORAGE_KEY = STORAGE_KEY_BASE;
     const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
@@ -1687,6 +1688,7 @@
     const FIREBASE_CAJA_CONFIG_COLLECTION = 'config';
     const FIREBASE_CAJA_CONFIG_DOC = 'cajaActual';
     const FIREBASE_CAJA_ESTADOS_COLLECTION = 'control_caja_estados';
+    const FIREBASE_CAJA_MANUAL_COLLECTION = 'control_caja_manual';
     const DEFAULT_SUMMARY_MANUAL = { mercadoPago: 0, lapos: 0, getnet: 0, providerTransfers: 0 };
     const UI_NOISE = new Set([
       'saltar al contenido', 'comentar sobre accesibilidad', 'mercado pago logo',
@@ -1767,6 +1769,7 @@
     let systemContextIndex = -1;
     let firebaseDb = null;
     let firebaseSaveTimer = null;
+    let firebaseManualSaveTimer = null;
     let applyingFirebaseSummary = false;
     let lastPublicCajaSignature = '';
     let activeCajaBranchId = '';
@@ -1931,18 +1934,26 @@
     }
 
     function combinedBranchMovements(branchMap = {}) {
+      const globalRows = Array.isArray(branchMap[CAJA_GLOBAL_ONLY_BRANCH_ID])
+        ? branchMap[CAJA_GLOBAL_ONLY_BRANCH_ID]
+        : [];
       const branchEntries = Object.entries(branchMap)
-        .filter(([branchId, rows]) => branchId !== CAJA_ALL_BRANCHES_ID && Array.isArray(rows));
-      if (!branchEntries.length) return [];
+        .filter(([branchId, rows]) => (
+          branchId !== CAJA_ALL_BRANCHES_ID
+          && branchId !== CAJA_GLOBAL_ONLY_BRANCH_ID
+          && Array.isArray(rows)
+        ));
+      if (!branchEntries.length && !globalRows.length) return [];
       return MOVEMENT_TYPES.map((type) => {
         const rows = branchEntries
           .filter(([branchId]) => isMovementBranchIncluded(type, branchId))
-          .map(([, items]) => items.find((row) => row?.type === type) || {});
+          .map(([, items]) => items.find((row) => movementTypeKey(row?.type) === movementTypeKey(type)) || {});
+        const globalRow = globalRows.find((row) => movementTypeKey(row?.type) === movementTypeKey(type)) || {};
         return {
           type,
-          initial: rows.reduce((sum, row) => sum + Number(row.initial || 0), 0),
-          day: rows.reduce((sum, row) => sum + Number(row.day || 0), 0),
-          ie: rows.reduce((sum, row) => sum + Number(row.ie || 0), 0)
+          initial: rows.reduce((sum, row) => sum + Number(row.initial || 0), 0) + Number(globalRow.initial || 0),
+          day: rows.reduce((sum, row) => sum + Number(row.day || 0), 0) + Number(globalRow.day || 0),
+          ie: rows.reduce((sum, row) => sum + Number(row.ie || 0), 0) + Number(globalRow.ie || 0)
         };
       });
     }
@@ -1998,6 +2009,55 @@
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
       firebaseDb = firebase.firestore();
       return firebaseDb;
+    }
+
+    function cajaManualPayload(source = state) {
+      return {
+        cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
+        transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row)))
+      };
+    }
+
+    function hasCajaManualData(payload) {
+      return Boolean((payload?.transfers || []).length || (payload?.cash || []).some((row) => Number(row.bills || 0) || Number(row.packs || 0)));
+    }
+
+    function applyCajaManualPayload(payload) {
+      if (Array.isArray(payload?.cash)) state.cash = CASH_DENOMS.map((denom, idx) => {
+        const row = payload.cash.find((item) => Number(item.denom) === denom) || payload.cash[idx] || {};
+        return { denom, bills: Number(row.bills || 0), packs: Number(row.packs || 0) };
+      });
+      if (Array.isArray(payload?.transfers)) state.transfers = payload.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
+    }
+
+    async function loadFirebaseCajaManual(dateKey = selectedDateKey) {
+      const db = firebaseDatabase();
+      if (!db) return null;
+      try {
+        const snap = await db.collection(FIREBASE_CAJA_MANUAL_COLLECTION).doc(dateKey).get();
+        if (!snap.exists || dateKey !== selectedDateKey) return null;
+        return snap.data() || {};
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function queueFirebaseCajaManualSave(dateKey = selectedDateKey, values = cajaManualPayload()) {
+      const db = firebaseDatabase();
+      if (!db || applyingRemoteState) return;
+      clearTimeout(firebaseManualSaveTimer);
+      firebaseManualSaveTimer = setTimeout(async () => {
+        try {
+          await db.collection(FIREBASE_CAJA_MANUAL_COLLECTION).doc(dateKey).set({
+            fecha: dateKey,
+            cash: values.cash,
+            transfers: values.transfers,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (error) {
+          showToast('No pude guardar los datos manuales de caja en Firebase.');
+        }
+      }, 150);
     }
 
     function summaryManualPayload() {
@@ -2312,6 +2372,7 @@
 
     function saveState() {
       persistLocalState();
+      queueFirebaseCajaManualSave();
       queueRemoteSave();
     }
 
@@ -3671,10 +3732,10 @@
       return !fecha || fecha === selectedDateKey;
     }
 
-    function combinedPublicBranchRows(branches = {}) {
+    function combinedPublicBranchRows(branches = {}, globalOnlyRows = []) {
       const totals = new Map();
       Object.entries(branches).forEach(([branchId, branch]) => {
-        if (branchId === CAJA_ALL_BRANCHES_ID) return;
+        if (branchId === CAJA_ALL_BRANCHES_ID || branchId === CAJA_GLOBAL_ONLY_BRANCH_ID) return;
         const rows = Array.isArray(branch) ? branch : (Array.isArray(branch?.rows) ? branch.rows : []);
         rows.forEach((row) => {
           const type = row.type || row.tipo || row.TipoPago || '';
@@ -3686,6 +3747,15 @@
           current.ie += Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0;
           totals.set(key, current);
         });
+      });
+      globalOnlyRows.forEach((row) => {
+        const type = row.type || row.tipo || row.TipoPago || '';
+        const key = movementTypeKey(type);
+        const current = totals.get(key) || { type, initial: 0, day: 0, ie: 0 };
+        current.initial += Number(row.initial ?? row.inicial ?? row.ImpAnt ?? 0) || 0;
+        current.day += Number(row.day ?? row.movDia ?? row.Importe ?? 0) || 0;
+        current.ie += Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0;
+        totals.set(key, current);
       });
       return [...totals.values()];
     }
@@ -3702,6 +3772,14 @@
           ie: Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0
         })));
       });
+      if (Array.isArray(payload.globalOnlyRows)) {
+        state.movementsByBranch[CAJA_GLOBAL_ONLY_BRANCH_ID] = cloneMovements(payload.globalOnlyRows.map((row) => ({
+          type: row.type || row.tipo || row.TipoPago || '',
+          initial: Number(row.initial ?? row.inicial ?? row.ImpAnt ?? 0) || 0,
+          day: Number(row.day ?? row.movDia ?? row.Importe ?? 0) || 0,
+          ie: Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0
+        })));
+      }
     }
 
     function rowsFromPublicPayload(payload, options = {}) {
@@ -3710,7 +3788,12 @@
         const defaultBranchId = window.CorralonSystem?.BRANCHES?.[0]?.id || 'progreso_ruta';
         if (Array.isArray(payload)) return branchId && branchId !== defaultBranchId ? [] : payload;
         if (payload?.branches && typeof payload.branches === 'object') {
-          if (branchId === CAJA_ALL_BRANCHES_ID) return combinedPublicBranchRows(payload.branches);
+          if (branchId === CAJA_ALL_BRANCHES_ID) {
+            return combinedPublicBranchRows(
+              payload.branches,
+              Array.isArray(payload.globalOnlyRows) ? payload.globalOnlyRows : []
+            );
+          }
           const branchPayload = payload.branches[branchId];
           if (Array.isArray(branchPayload)) return branchPayload;
           if (Array.isArray(branchPayload?.rows)) return branchPayload.rows;
@@ -3780,11 +3863,24 @@
       if (!db) return false;
       try {
         const snap = await db.collection(FIREBASE_CAJA_ESTADOS_COLLECTION).doc(dateKey).get();
-        if (!snap.exists || dateKey !== selectedDateKey) return false;
-        const data = snap.data() || {};
-        const payload = data.payload || (data.payloadJson ? JSON.parse(data.payloadJson) : null);
-        if (!payload || typeof payload !== 'object') return false;
-        applySavedState(payload);
+        if (dateKey !== selectedDateKey) return false;
+        const manualPayload = await loadFirebaseCajaManual(dateKey);
+        if (!snap.exists && !manualPayload) return false;
+        resetState();
+        let loaded = false;
+        if (snap.exists) {
+          const data = snap.data() || {};
+          const payload = data.payload || (data.payloadJson ? JSON.parse(data.payloadJson) : null);
+          if (payload && typeof payload === 'object') {
+            applySavedState(payload);
+            loaded = true;
+          }
+        }
+        if (manualPayload) {
+          applyCajaManualPayload(manualPayload);
+          loaded = true;
+        }
+        if (!loaded || dateKey !== selectedDateKey) return false;
         persistLocalState();
         renderAll();
         return true;
