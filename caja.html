@@ -205,6 +205,7 @@
       outline: 0;
     }
     .branch-combo-input:focus { box-shadow: 0 0 0 2px rgba(109,93,247,.25); }
+    .branch-combo:hover .branch-combo-input { border-color: var(--violeta); }
     .branch-combo-toggle {
       position: absolute;
       top: 2px;
@@ -914,6 +915,57 @@
       font-size: 13px;
       font-weight: 700;
     }
+    .movement-separate-column {
+      width: 74px !important;
+      min-width: 74px;
+      text-align: center;
+    }
+    .movement-separate-trigger {
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--violeta);
+      border-radius: 4px;
+      background: #fff;
+      color: #fff;
+      cursor: pointer;
+      vertical-align: middle;
+    }
+    .movement-separate-trigger.checked { background: var(--violeta); }
+    .movement-separate-trigger.mixed {
+      background: #e8e1ff;
+      color: var(--violeta-oscuro);
+    }
+    .movement-separate-trigger.checked::after { content: '✓'; font-size: 14px; font-weight: 900; }
+    .movement-separate-trigger.mixed::after { content: '−'; font-size: 15px; font-weight: 900; }
+    .movement-separate-trigger:focus { outline: 2px solid rgba(108,79,199,.28); outline-offset: 1px; }
+    .movement-separate-modal { width: min(460px, 94vw); }
+    .movement-separate-list { display: grid; gap: 8px; }
+    .movement-separate-row {
+      min-height: 46px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 9px 12px;
+      border: 1px solid var(--borde);
+      border-radius: 9px;
+      background: #fff;
+      color: var(--violeta-oscuro);
+      font-size: 15px;
+      font-weight: 850;
+      cursor: pointer;
+      user-select: none;
+    }
+    .movement-separate-row:hover { border-color: var(--violeta); background: #f7f4ff; }
+    .movement-separate-row input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--violeta);
+      cursor: pointer;
+    }
 
     @media (max-width: 900px) {
       :root {
@@ -1113,6 +1165,7 @@
       .movements th:nth-child(1) { width: 24px !important; }
       .movements th:nth-child(2) { width: 21% !important; }
       .movements th:nth-child(n+3) { width: 17.5% !important; }
+      .movements th.movement-separate-column { width: 68px !important; min-width: 68px; }
       th {
         height: 30px;
         padding: 4px 2px;
@@ -1478,7 +1531,7 @@
               </div>
             </div>
             <div class="grid-box tall">
-              <table>
+              <table id="movementTable">
                 <thead>
                   <tr>
                     <th class="row-selector-head"></th>
@@ -1486,6 +1539,7 @@
                     <th data-copy-col style="width:130px">Caja Inicial</th>
                     <th data-copy-col style="width:130px">Movs. Dia</th>
                     <th data-copy-col style="width:130px">Imp. I/E</th>
+                    <th class="movement-separate-column" id="movementSeparateHeader" hidden>Separar</th>
                     <th data-copy-col style="width:130px">Imp. Final</th>
                   </tr>
                 </thead>
@@ -1586,6 +1640,18 @@
     </div>
   </div>
 
+  <div class="modal-bg" id="movementSeparateModal">
+    <div class="modal movement-separate-modal">
+      <div class="modal-head">
+        <h2 class="modal-title" id="movementSeparateTitle">Separar</h2>
+        <button class="access-btn small" id="closeMovementSeparateModalBtn" type="button">Cerrar</button>
+      </div>
+      <div class="modal-body">
+        <div class="movement-separate-list" id="movementSeparateList"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
   <div class="context-menu" id="systemRowMenu">
     <button type="button" id="deleteSystemRowMenuBtn">Eliminar fila</button>
@@ -1594,6 +1660,8 @@
   <script>
     const STORAGE_KEY_BASE = 'corralon_control_caja_v1';
     const CAJA_BRANCH_KEY = 'corralon_control_caja_sucursal_v1';
+    const CAJA_ALL_BRANCHES_ID = 'todas';
+    const CAJA_MOVEMENT_SEPARATION_KEY = 'corralon_control_caja_separar_v1';
     const LEGACY_STORAGE_KEY = STORAGE_KEY_BASE;
     const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
@@ -1646,6 +1714,12 @@
       transferRows: document.getElementById('transferRows'),
       systemRows: document.getElementById('systemRows'),
       movementRows: document.getElementById('movementRows'),
+      movementTable: document.getElementById('movementTable'),
+      movementSeparateHeader: document.getElementById('movementSeparateHeader'),
+      movementSeparateModal: document.getElementById('movementSeparateModal'),
+      movementSeparateTitle: document.getElementById('movementSeparateTitle'),
+      movementSeparateList: document.getElementById('movementSeparateList'),
+      closeMovementSeparateModalBtn: document.getElementById('closeMovementSeparateModalBtn'),
       summaryRows: document.getElementById('summaryRows'),
       diffModal: document.getElementById('diffModal'),
       diffSummary: document.getElementById('diffSummary'),
@@ -1698,6 +1772,8 @@
     let activeCajaBranchId = '';
     let cajaBranches = [];
     let activeCajaBranchOption = -1;
+    let separateMovementType = '';
+    let movementBranchExclusions = loadMovementBranchExclusions();
 
     function storageKeyForDate(dateKey = selectedDateKey) {
       return `${STORAGE_KEY_BASE}_${dateKey}`;
@@ -1736,7 +1812,8 @@
     }
 
     function loadCajaBranches() {
-      cajaBranches = Array.isArray(window.CorralonSystem?.BRANCHES) ? CorralonSystem.BRANCHES : [];
+      const systemBranches = Array.isArray(window.CorralonSystem?.BRANCHES) ? CorralonSystem.BRANCHES : [];
+      cajaBranches = [...systemBranches, { id: CAJA_ALL_BRANCHES_ID, label: 'Todas las sucursales' }];
       const saved = localStorage.getItem(CAJA_BRANCH_KEY) || cajaBranches[0]?.id || '';
       const branch = cajaBranches.find((item) => item.id === saved) || cajaBranches[0] || null;
       activeCajaBranchId = branch?.id || '';
@@ -1756,9 +1833,11 @@
 
     function renderCajaBranchOptions(query = '') {
       const options = matchingCajaBranches(query);
-      activeCajaBranchOption = options.length ? 0 : -1;
+      const selectedId = selectedCajaBranchId();
+      const selectedIndex = options.findIndex((branch) => branch.id === selectedId);
+      activeCajaBranchOption = selectedIndex >= 0 ? selectedIndex : (options.length ? 0 : -1);
       el.cajaBranchList.innerHTML = options.length
-        ? options.map((branch, index) => `<div class="branch-combo-option${index === 0 ? ' active' : ''}" role="option" data-branch-id="${escapeHtml(branch.id)}">${escapeHtml(branch.label || branch.id)}</div>`).join('')
+        ? options.map((branch, index) => `<div class="branch-combo-option${index === activeCajaBranchOption ? ' active' : ''}" role="option" aria-selected="${branch.id === selectedId ? 'true' : 'false'}" data-branch-id="${escapeHtml(branch.id)}">${escapeHtml(branch.label || branch.id)}</div>`).join('')
         : '<div class="branch-combo-empty">Sin coincidencias</div>';
     }
 
@@ -1797,7 +1876,9 @@
       el.cajaBranchInput.value = branch.label || branch.id;
       el.cajaBranchInput.dataset.branchId = branch.id;
       closeCajaBranchList();
-      state.movements = cloneMovements(state.movementsByBranch[activeCajaBranchId] || []);
+      state.movements = activeCajaBranchId === CAJA_ALL_BRANCHES_ID
+        ? cloneMovements(combinedBranchMovements(state.movementsByBranch))
+        : cloneMovements(state.movementsByBranch[activeCajaBranchId] || []);
       localStorage.setItem(CAJA_BRANCH_KEY, activeCajaBranchId);
       persistLocalState();
       renderMovementRows();
@@ -1814,8 +1895,60 @@
       });
     }
 
+    function loadMovementBranchExclusions() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(CAJA_MOVEMENT_SEPARATION_KEY) || '{}');
+        if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
+        return Object.fromEntries(Object.entries(saved).map(([typeKey, branchIds]) => [
+          typeKey,
+          Array.isArray(branchIds) ? [...new Set(branchIds.map(String))] : []
+        ]));
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function saveMovementBranchExclusions() {
+      localStorage.setItem(CAJA_MOVEMENT_SEPARATION_KEY, JSON.stringify(movementBranchExclusions));
+    }
+
+    function realCajaBranches() {
+      return cajaBranches.filter((branch) => branch.id !== CAJA_ALL_BRANCHES_ID);
+    }
+
+    function isMovementBranchIncluded(type, branchId) {
+      return !(movementBranchExclusions[movementTypeKey(type)] || []).includes(String(branchId));
+    }
+
+    function setMovementBranchIncluded(type, branchId, included) {
+      const typeKey = movementTypeKey(type);
+      const excluded = new Set(movementBranchExclusions[typeKey] || []);
+      if (included) excluded.delete(String(branchId));
+      else excluded.add(String(branchId));
+      if (excluded.size) movementBranchExclusions[typeKey] = [...excluded];
+      else delete movementBranchExclusions[typeKey];
+      saveMovementBranchExclusions();
+    }
+
+    function combinedBranchMovements(branchMap = {}) {
+      const branchEntries = Object.entries(branchMap)
+        .filter(([branchId, rows]) => branchId !== CAJA_ALL_BRANCHES_ID && Array.isArray(rows));
+      if (!branchEntries.length) return [];
+      return MOVEMENT_TYPES.map((type) => {
+        const rows = branchEntries
+          .filter(([branchId]) => isMovementBranchIncluded(type, branchId))
+          .map(([, items]) => items.find((row) => row?.type === type) || {});
+        return {
+          type,
+          initial: rows.reduce((sum, row) => sum + Number(row.initial || 0), 0),
+          day: rows.reduce((sum, row) => sum + Number(row.day || 0), 0),
+          ie: rows.reduce((sum, row) => sum + Number(row.ie || 0), 0)
+        };
+      });
+    }
+
     function rememberBranchMovements(branchId = activeCajaBranchId) {
-      if (!branchId) return;
+      if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return;
       state.movementsByBranch[branchId] = cloneMovements(state.movements);
     }
 
@@ -2159,12 +2292,14 @@
         });
         const branchId = selectedCajaBranchId();
         const defaultBranchId = window.CorralonSystem?.BRANCHES?.[0]?.id || 'progreso_ruta';
-        const savedBranchMovements = state.movementsByBranch[branchId];
+        const savedBranchMovements = branchId === CAJA_ALL_BRANCHES_ID
+          ? combinedBranchMovements(state.movementsByBranch)
+          : state.movementsByBranch[branchId];
         const savedMovements = Array.isArray(savedBranchMovements)
           ? savedBranchMovements
           : (branchId === defaultBranchId && Array.isArray(saved.movements) ? saved.movements : []);
         state.movements = cloneMovements(savedMovements);
-        if (branchId) state.movementsByBranch[branchId] = cloneMovements(state.movements);
+        if (branchId && branchId !== CAJA_ALL_BRANCHES_ID) state.movementsByBranch[branchId] = cloneMovements(state.movements);
       return true;
     }
 
@@ -2268,6 +2403,7 @@
       hideSystemRowMenu();
       closePasteModal();
       closeDiffModal();
+      closeMovementSeparateModal();
       clearTimeout(remoteSaveTimer);
       saveState();
       const previousDate = selectedDateKey;
@@ -2454,18 +2590,65 @@
       updateSystemSortHeaders();
     }
 
+    function movementBranchSelectionStats(type) {
+      const branches = realCajaBranches();
+      const selected = branches.filter((branch) => isMovementBranchIncluded(type, branch.id)).length;
+      return { selected, total: branches.length };
+    }
+
+    function renderMovementSeparateList() {
+      const branches = realCajaBranches();
+      el.movementSeparateList.innerHTML = branches.map((branch) => `
+        <label class="movement-separate-row">
+          <input type="checkbox" data-movement-separate-branch="${escapeHtml(branch.id)}"${isMovementBranchIncluded(separateMovementType, branch.id) ? ' checked' : ''}>
+          <span>${escapeHtml(branch.label || branch.id)}</span>
+        </label>`).join('');
+    }
+
+    function openMovementSeparateModal(type) {
+      if (selectedCajaBranchId() !== CAJA_ALL_BRANCHES_ID || !type) return;
+      separateMovementType = type;
+      el.movementSeparateTitle.textContent = `Separar - ${type}`;
+      renderMovementSeparateList();
+      el.movementSeparateModal.classList.add('open');
+      el.movementSeparateList.querySelector('input')?.focus();
+    }
+
+    function closeMovementSeparateModal() {
+      el.movementSeparateModal.classList.remove('open');
+      separateMovementType = '';
+    }
+
+    function recalculateAllBranchesMovements() {
+      if (selectedCajaBranchId() !== CAJA_ALL_BRANCHES_ID) return;
+      state.movements = cloneMovements(combinedBranchMovements(state.movementsByBranch));
+      persistLocalState();
+      renderMovementRows();
+      updateTotals();
+    }
+
     function renderMovementRows() {
+      const showSeparate = selectedCajaBranchId() === CAJA_ALL_BRANCHES_ID;
+      el.movementSeparateHeader.hidden = !showSeparate;
+      el.movementTable.classList.toggle('all-branches', showSeparate);
       el.movementRows.innerHTML = state.movements.map((row, idx) => {
         const finalAmount = Number(row.initial || 0) + Number(row.day || 0) + Number(row.ie || 0);
+        const stats = movementBranchSelectionStats(row.type);
+        const selectionState = stats.total && stats.selected === stats.total ? 'checked' : (stats.selected ? 'mixed' : '');
+        const ariaChecked = stats.total && stats.selected === stats.total ? 'true' : (stats.selected ? 'mixed' : 'false');
+        const separateCell = showSeparate
+          ? `<td class="movement-separate-column">${row.type ? `<button class="movement-separate-trigger ${selectionState}" type="button" role="checkbox" aria-checked="${ariaChecked}" aria-label="Separar ${escapeHtml(row.type)}" data-movement-separate-index="${idx}"></button>` : ''}</td>`
+          : '';
         return `<tr>
           <td class="row-selector-cell"></td>
           <td>${escapeHtml(row.type)}</td>
           <td class="money">${formatMoney(row.initial)}</td>
           <td class="money">${formatMoney(row.day)}</td>
           <td class="money">${formatMoney(row.ie)}</td>
+          ${separateCell}
           <td class="money">${formatMoney(finalAmount)}</td>
         </tr>`;
-      }).join('') + blankRows(2, 6);
+      }).join('') + blankRows(2, showSeparate ? 7 : 6);
     }
 
     function summaryRowsData(totals = calculateTotals()) {
@@ -3488,12 +3671,46 @@
       return !fecha || fecha === selectedDateKey;
     }
 
+    function combinedPublicBranchRows(branches = {}) {
+      const totals = new Map();
+      Object.entries(branches).forEach(([branchId, branch]) => {
+        if (branchId === CAJA_ALL_BRANCHES_ID) return;
+        const rows = Array.isArray(branch) ? branch : (Array.isArray(branch?.rows) ? branch.rows : []);
+        rows.forEach((row) => {
+          const type = row.type || row.tipo || row.TipoPago || '';
+          if (!isMovementBranchIncluded(type, branchId)) return;
+          const key = movementTypeKey(type);
+          const current = totals.get(key) || { type, initial: 0, day: 0, ie: 0 };
+          current.initial += Number(row.initial ?? row.inicial ?? row.ImpAnt ?? 0) || 0;
+          current.day += Number(row.day ?? row.movDia ?? row.Importe ?? 0) || 0;
+          current.ie += Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0;
+          totals.set(key, current);
+        });
+      });
+      return [...totals.values()];
+    }
+
+    function rememberPublicBranchMovements(payload) {
+      if (!payload?.branches || typeof payload.branches !== 'object') return;
+      Object.entries(payload.branches).forEach(([branchId, branch]) => {
+        if (branchId === CAJA_ALL_BRANCHES_ID) return;
+        const rows = Array.isArray(branch) ? branch : (Array.isArray(branch?.rows) ? branch.rows : []);
+        state.movementsByBranch[branchId] = cloneMovements(rows.map((row) => ({
+          type: row.type || row.tipo || row.TipoPago || '',
+          initial: Number(row.initial ?? row.inicial ?? row.ImpAnt ?? 0) || 0,
+          day: Number(row.day ?? row.movDia ?? row.Importe ?? 0) || 0,
+          ie: Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0) || 0
+        })));
+      });
+    }
+
     function rowsFromPublicPayload(payload, options = {}) {
       if (options.branchAware) {
         const branchId = selectedCajaBranchId();
         const defaultBranchId = window.CorralonSystem?.BRANCHES?.[0]?.id || 'progreso_ruta';
         if (Array.isArray(payload)) return branchId && branchId !== defaultBranchId ? [] : payload;
         if (payload?.branches && typeof payload.branches === 'object') {
+          if (branchId === CAJA_ALL_BRANCHES_ID) return combinedPublicBranchRows(payload.branches);
           const branchPayload = payload.branches[branchId];
           if (Array.isArray(branchPayload)) return branchPayload;
           if (Array.isArray(branchPayload?.rows)) return branchPayload.rows;
@@ -3508,6 +3725,7 @@
 
     function applyPublicCajaMovements(payload) {
       if (!cajaPublicPayloadMatchesDate(payload)) return false;
+      rememberPublicBranchMovements(payload);
       const rows = rowsFromPublicPayload(payload, { branchAware: true });
       const hasApplicablePayload = Array.isArray(payload)
         || Array.isArray(payload?.rows)
@@ -4200,6 +4418,19 @@
       renderSystemRows();
       document.querySelector(`[data-system-select="${index}"]`)?.focus();
     });
+    el.movementRows.addEventListener('click', (event) => {
+      const trigger = event.target.closest('[data-movement-separate-index]');
+      if (!trigger) return;
+      const row = state.movements[Number(trigger.dataset.movementSeparateIndex)];
+      if (row?.type) openMovementSeparateModal(row.type);
+    });
+    el.movementSeparateList.addEventListener('change', (event) => {
+      const checkbox = event.target.closest('[data-movement-separate-branch]');
+      if (!checkbox || !separateMovementType) return;
+      setMovementBranchIncluded(separateMovementType, checkbox.dataset.movementSeparateBranch, checkbox.checked);
+      recalculateAllBranchesMovements();
+    });
+    el.closeMovementSeparateModalBtn.addEventListener('click', closeMovementSeparateModal);
     el.systemRows.addEventListener('contextmenu', (event) => {
       const row = event.target.closest('[data-system-row]');
       if (!row) return;
@@ -4222,6 +4453,9 @@
     });
     el.diffModal.addEventListener('click', (event) => {
       if (event.target === el.diffModal) closeDiffModal();
+    });
+    el.movementSeparateModal.addEventListener('click', (event) => {
+      if (event.target === el.movementSeparateModal) closeMovementSeparateModal();
     });
     el.diffMercadoBoard.addEventListener('scroll', () => {
       syncDiffBoardScroll(el.diffMercadoBoard, el.diffSystemBoard);
@@ -4266,6 +4500,7 @@
       if (copySelectedArea(event)) return;
       if (event.key === 'Escape' && el.pasteModal.classList.contains('open')) closePasteModal();
       if (event.key === 'Escape' && el.diffModal.classList.contains('open')) closeDiffModal();
+      if (event.key === 'Escape' && el.movementSeparateModal.classList.contains('open')) closeMovementSeparateModal();
       if (handleDiffModalKey(event)) return;
       if (handleSystemQuickAdd(event)) return;
       if ((event.key === 'Delete' || event.key === 'Del' || event.key === 'Supr') && event.target.closest('[data-row-select="transfer"]')) {
