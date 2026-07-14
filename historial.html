@@ -303,6 +303,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     <div class="detalle-body" id="detalleBody"></div>
     <div class="detalle-acciones">
       <button id="btnDetallePdf" class="btn-det pdf" onclick="verPDFDetalle()">📄 PDF</button>
+      <button id="btnDetalleCopy" class="btn-det edit" onclick="copiarContenidoDetalle()">Copiar contenido</button>
       <button id="btnDetalleEdit" class="btn-det edit" onclick="abrirEditar()">✏️ Editar</button>
       <button id="btnDetalleDel" class="btn-det del" onclick="confirmarEliminar()">🗑 Eliminar</button>
     </div>
@@ -990,30 +991,28 @@ function centroTouches(touches) {
 function setAccionesDetalleModo(modo) {
   const esRemito = modo === 'remito';
   const btnPdf = document.getElementById('btnDetallePdf');
+  const btnCopy = document.getElementById('btnDetalleCopy');
   const btnEdit = document.getElementById('btnDetalleEdit');
   const btnDel = document.getElementById('btnDetalleDel');
   if (btnPdf) btnPdf.textContent = esRemito ? 'PDF' : 'Ver PDF';
+  if (btnCopy) btnCopy.style.display = esRemito ? 'none' : '';
   if (btnEdit) btnEdit.style.display = esRemito ? '' : 'none';
   if (btnDel) btnDel.style.display = esRemito ? '' : 'none';
 }
 
-async function copiarPresupuestoColumna(tipo) {
-  const items = Array.isArray(_presupuestoDetalleActual?.items) ? _presupuestoDetalleActual.items : [];
+async function copiarContenidoDetalle() {
+  const items = _detalleTipoActual === 'remito'
+    ? (Array.isArray(_remitoDetalleActual?.items) ? _remitoDetalleActual.items : [])
+    : (Array.isArray(_presupuestoDetalleActual?.items) ? _presupuestoDetalleActual.items : []);
   const texto = items.map((it) => {
-    if (tipo === 'cantidad') return fmtCantidad(it.cantidad);
-    if (tipo === 'completo') {
-      const idart = it.idart || it.idArt || it.codigo || '';
-      const descripcion = it.nombre || it.descripcion || it.articulo || '';
-      const cantidad = fmtCantidad(it.cantidad);
-      return [idart, descripcion, cantidad].join('\t');
-    }
-    return it.idart || it.idArt || it.codigo || '';
+    const idart = it.idart || it.idArt || it.codigo || '';
+    const cantidad = fmtCantidad(it.cantidad ?? it.cant);
+    return [idart, cantidad].join('\t');
   }).join('\n');
   if (!texto.trim()) { toast('No hay datos para copiar'); return; }
-  const mensaje = tipo === 'cantidad' ? 'Cantidades copiadas' : tipo === 'completo' ? 'Presupuesto completo copiado' : 'IDArt copiados';
   try {
     await navigator.clipboard.writeText(texto);
-    toast(mensaje);
+    toast('IDArt y cantidades copiados');
   } catch (_) {
     const area = document.createElement('textarea');
     area.value = texto;
@@ -1021,7 +1020,7 @@ async function copiarPresupuestoColumna(tipo) {
     area.select();
     document.execCommand('copy');
     area.remove();
-    toast(mensaje);
+    toast('IDArt y cantidades copiados');
   }
 }
 
@@ -1083,11 +1082,7 @@ function abrirDetallePresupuesto(index) {
       <div class="detalle-total-lbl">Total</div>
       <div class="detalle-total-val">$${Number(total).toLocaleString('es-AR')}</div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('idart')">Copiar IDArt</button>
-      <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('completo')">Copiar completo</button>
-      <button class="btn-det" type="button" onclick="copiarPresupuestoColumna('cantidad')">Copiar cantidades</button>
-    </div>`;
+    `;
 
   document.getElementById('detalleBg').classList.add('open');
 }
@@ -1732,7 +1727,5 @@ document.getElementById('remitosSearch')?.addEventListener('input', renderRemito
 </script>
 </body>
 </html>
-
-
 
 
