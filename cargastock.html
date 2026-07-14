@@ -265,15 +265,15 @@
     <div class="provider-modal-grid">
       <label>IDProveedor</label><input id="modalProviderId" readonly>
       <label>Proveedor</label><input id="modalProviderName" readonly>
-      <label>Desc. factura</label><input id="modalDiscountInvoice" readonly>
-      <label>Desc. final factura</label><input id="modalDiscountFinalInvoice" readonly>
-      <label>Desc. lista</label><input id="modalDiscountList" readonly>
+      <label>Desc. factura</label><input id="modalDiscountInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
+      <label>Desc. final factura</label><input id="modalDiscountFinalInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
+      <label>Desc. lista</label><input id="modalDiscountList" class="provider-percent-live" type="text" inputmode="decimal" readonly>
       <label>Ultima act.</label><input id="modalDate" readonly>
       <label>Vendedor</label><input id="modalSeller" readonly>
       <label>Telefono</label><input id="modalPhone" readonly>
       <label>Pagina</label><input id="modalPageLink" readonly>
-      <label>Porc. flete</label><input id="modalFreight" readonly>
-      <label>Porc. IVA</label><input id="modalIva" readonly>
+      <label>Porc. flete</label><input id="modalFreight" class="provider-percent-live" type="text" inputmode="decimal" readonly>
+      <label>Porc. IVA</label><input id="modalIva" class="provider-percent-live" type="text" inputmode="decimal" readonly>
       <label>Iva incluido?</label><input id="modalIvaIncluded" type="checkbox" disabled>
       <label>Nota</label><textarea id="modalNote" readonly></textarea>
     </div>
@@ -351,6 +351,9 @@ const INDEX_CODES_CACHE_KEY = 'corralon_carga_stock_index_code_providers_v2';
 let providers = [];
 let provider = null;
 let modalEditingProviderId = null;
+let providerModalActiveField = null;
+let providerModalMouseEditField = null;
+let providerModalReturnFocus = null;
 let rowsData = [];
 let indexCodeProviders = new Map();
 let indexCodeMatchCounts = new Map();
@@ -759,6 +762,119 @@ function pickProviderById(id) {
 function selectedProvider() {
   return provider || providers.find((item) => norm(providerLabel(item)) === norm(el.providerInput.value) || String(item.id_proveedor || '') === String(el.providerInput.value).trim()) || null;
 }
+function providerModalRows() {
+  const ids = [
+    ['modalProviderId', 'modalProviderName'],
+    ['modalDiscountInvoice', 'modalDiscountFinalInvoice'],
+    ['modalDiscountList', 'modalDate'],
+    ['modalSeller', 'modalPhone'],
+    ['modalPageLink', 'modalFreight'],
+    ['modalIva', 'modalIvaIncluded'],
+    ['modalNote'],
+    ['deleteProviderModalBtn', 'saveProviderModalBtn', 'closeProviderModalActionBtn']
+  ];
+  return ids.map((row) => row.map(modalValue).filter((field) => {
+    if (!field || field.disabled || field.hidden || field.closest?.('.provider-hidden')) return false;
+    const style = getComputedStyle(field);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  })).filter((row) => row.length);
+}
+function focusProviderModalControl(field) {
+  if (!field || field.disabled) return false;
+  providerModalActiveField = field;
+  providerModalMouseEditField = null;
+  field.focus?.({ preventScroll: true });
+  if (field.matches?.('input:not([type="checkbox"]), textarea')) scheduleFullSelect(field);
+  field.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  return true;
+}
+function moveProviderModalControl(field, direction, vertical = false) {
+  const rows = providerModalRows();
+  const rowIndex = rows.findIndex((row) => row.includes(field));
+  if (rowIndex < 0) return false;
+  const colIndex = rows[rowIndex].indexOf(field);
+  if (vertical) {
+    const nextRow = rows[rowIndex + direction];
+    return !!nextRow && focusProviderModalControl(nextRow[Math.min(colIndex, nextRow.length - 1)]);
+  }
+  const fields = rows.flat();
+  const index = fields.indexOf(field);
+  return focusProviderModalControl(fields[index + direction]);
+}
+function setupProviderModalFuncionesTxt() {
+  const modal = modalValue('providerModal');
+  if (!modal || modal.dataset.funcionesTxt === '1') return;
+  modal.dataset.funcionesTxt = '1';
+  const fieldSelector = '.provider-modal-grid input, .provider-modal-grid textarea, .provider-modal-actions button';
+
+  modal.addEventListener('pointerdown', (event) => {
+    const field = event.target.closest(fieldSelector);
+    if (!field || field.disabled || field.matches('button, input[type="checkbox"]')) return;
+    if (providerModalActiveField === field && document.activeElement === field) {
+      providerModalMouseEditField = field;
+      field.dataset.fullSelected = '0';
+      return;
+    }
+    event.preventDefault();
+    focusProviderModalControl(field);
+  }, true);
+
+  modal.addEventListener('focusin', (event) => {
+    const field = event.target.closest(fieldSelector);
+    if (!field) return;
+    if (providerModalMouseEditField === field) return;
+    providerModalActiveField = field;
+    if (field.matches('input:not([type="checkbox"]), textarea')) scheduleFullSelect(field);
+  });
+
+  modal.addEventListener('input', (event) => {
+    const field = event.target.closest('input, textarea');
+    if (field) field.dataset.fullSelected = '0';
+  });
+
+  modal.addEventListener('focusout', (event) => {
+    const field = event.target;
+    if (field?.id !== 'modalDate' || field.readOnly || !String(field.value || '').trim()) return;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(field.value.trim())) return;
+    const parsed = FX.parseFechaFlexible?.(field.value);
+    if (parsed) field.value = parsed.text;
+  });
+
+  modal.addEventListener('keydown', (event) => {
+    const field = event.target.closest(fieldSelector);
+    if (!field) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeProviderModal();
+      return;
+    }
+    if (event.key === 'F2' && field.matches('input:not([type="checkbox"]), textarea')) {
+      event.preventDefault();
+      if (isTextFullySelected(field)) {
+        const end = String(field.value || '').length;
+        field.setSelectionRange?.(end, end);
+        field.dataset.fullSelected = '0';
+      } else {
+        scheduleFullSelect(field);
+      }
+      return;
+    }
+    if (field.matches('textarea') && event.key === 'Enter' && event.shiftKey && !field.readOnly) return;
+    if (field.matches('button') && event.key === 'Enter') return;
+    if (field.matches('input[type="checkbox"]') && event.key === ' ') return;
+
+    let moved = false;
+    if (event.key === 'Tab' || event.key === 'Enter') moved = moveProviderModalControl(field, event.shiftKey ? -1 : 1, false);
+    else if (event.key === 'ArrowUp') moved = moveProviderModalControl(field, -1, true);
+    else if (event.key === 'ArrowDown') moved = moveProviderModalControl(field, 1, true);
+    else if (event.key === 'ArrowLeft' && (field.matches('button, input[type="checkbox"]') || canNavigateWithArrow(field, event.key))) moved = moveProviderModalControl(field, -1, false);
+    else if (event.key === 'ArrowRight' && (field.matches('button, input[type="checkbox"]') || canNavigateWithArrow(field, event.key))) moved = moveProviderModalControl(field, 1, false);
+    if (moved) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+}
 function setProviderModalEditing(enabled) {
   ['modalProviderId','modalProviderName','modalDiscountInvoice','modalDiscountFinalInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
     const field = modalValue(id);
@@ -767,6 +883,7 @@ function setProviderModalEditing(enabled) {
   modalValue('modalIvaIncluded').disabled = !enabled;
   modalValue('saveProviderModalBtn')?.classList.toggle('provider-hidden', !enabled);
   modalValue('deleteProviderModalBtn')?.classList.toggle('provider-hidden', !enabled);
+  if (enabled) requestAnimationFrame(() => focusProviderModalControl(modalValue('modalProviderId')));
 }
 function openProviderModal() {
   const current = selectedProvider();
@@ -775,6 +892,7 @@ function openProviderModal() {
     show('Elegí un proveedor');
     return;
   }
+  providerModalReturnFocus = document.activeElement;
   setProviderModalEditing(false);
   modalEditingProviderId = current.id_proveedor || null;
   modalValue('modalProviderId').value = current.id_proveedor || '';
@@ -791,11 +909,17 @@ function openProviderModal() {
   modalValue('modalIvaIncluded').checked = boolInput(current.iva_incluido);
   modalValue('modalNote').value = current.nota || '';
   modalValue('providerModal').classList.add('visible');
+  requestAnimationFrame(() => focusProviderModalControl(modalValue('modalProviderId')));
 }
 function closeProviderModal() {
   modalValue('providerModal').classList.remove('visible');
   modalEditingProviderId = null;
   setProviderModalEditing(false);
+  providerModalActiveField = null;
+  providerModalMouseEditField = null;
+  const returnFocus = providerModalReturnFocus;
+  providerModalReturnFocus = null;
+  requestAnimationFrame(() => returnFocus?.focus?.({ preventScroll: true }));
 }
 async function saveProviderModal() {
   const id = String(modalValue('modalProviderId').value || '').trim();
@@ -1916,6 +2040,18 @@ function initFuncionesJsBindings() {
     decimals: 2,
     suffix: ' %'
   });
+
+  if (FX.bindLiveLocaleNumber) FX.bindLiveLocaleNumber({
+    root: modalValue('providerModal'),
+    selector: '.provider-percent-live',
+    decimals: 2,
+    suffix: ' %'
+  });
+  if (FX.bindShiftEnterNewLine) FX.bindShiftEnterNewLine({
+    root: modalValue('providerModal'),
+    selector: '#modalNote'
+  });
+  setupProviderModalFuncionesTxt();
 
   if (FX.bindTableSelectPaste) tableSelectionApi = FX.bindTableSelectPaste({
     root: document.querySelector('.table-wrap'),
