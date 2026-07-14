@@ -2883,9 +2883,15 @@
       }
     });
     el.viewport.addEventListener('scroll', requestSlice);
+    let tableFocusFromPointer = false;
+    el.rows.addEventListener('pointerdown', (event) => {
+      tableFocusFromPointer = Boolean(event.target.closest('.row [data-col]'));
+    });
+    document.addEventListener('pointerup', () => { tableFocusFromPointer = false; });
     el.rows.addEventListener('focusin', (event) => {
       const cell = event.target.closest('.row [data-col]');
       if (!cell) return;
+      if (tableFocusFromPointer) return;
       if (Number(cell.dataset.col) === 2) selectPriceCellRaw(cell);
       else selectCellText(cell);
     });
@@ -2903,10 +2909,6 @@
       const clickedCell = event.target.closest('[data-col]');
       const clickedCol = Number(clickedCell?.dataset.col) || 0;
       state.tableNav.col = clickedCol;
-      if (clickedCell) {
-        if (clickedCol === 2) selectPriceCellRaw(clickedCell);
-        else selectCellText(clickedCell);
-      }
       if (event.detail === 2 && clickedCol === 3) {
         if (openProviderPage(row)) event.preventDefault();
         return;
