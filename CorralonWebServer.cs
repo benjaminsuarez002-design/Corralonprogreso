@@ -76,14 +76,16 @@ internal sealed class ServerForm : Form
         status = new Label { Text = "Estado: detenido", Left = 18, Top = 48, Width = 380, Font = new Font("Segoe UI", 9) };
         urlBox = new TextBox { Left = 18, Top = 76, Width = 390, ReadOnly = true, Text = "http://localhost:8080/actualizar%20articulos.html" };
         startWithWindows = new CheckBox { Text = "Iniciar con Windows", Left = 18, Top = 108, Width = 200, Checked = IsStartWithWindowsEnabled() };
-        var openButton = new Button { Text = "Abrir HTML", Left = 18, Top = 112, Width = 110 };
+        var openButton = new Button { Text = "Abrir HTML", Left = 18, Top = 112, Width = 92 };
         openButton.Top = 140;
-        startStopButton = new Button { Text = "Detener", Left = 138, Top = 140, Width = 110 };
-        var hideButton = new Button { Text = "Minimizar", Left = 258, Top = 140, Width = 110 };
+        startStopButton = new Button { Text = "Detener", Left = 116, Top = 140, Width = 92 };
+        var hideButton = new Button { Text = "Minimizar", Left = 214, Top = 140, Width = 92 };
+        var uploadButton = new Button { Text = "Subir GitHub", Left = 312, Top = 140, Width = 92 };
 
         openButton.Click += (s, e) => Process.Start(urlBox.Text);
         startStopButton.Click += (s, e) => { if (listener != null && listener.IsListening) StopServer(); else StartServer(); };
         hideButton.Click += (s, e) => HideToTray();
+        uploadButton.Click += (s, e) => OpenGitUploader();
         startWithWindows.CheckedChanged += (s, e) => SetStartWithWindows(startWithWindows.Checked);
 
         Controls.Add(title);
@@ -93,6 +95,7 @@ internal sealed class ServerForm : Form
         Controls.Add(openButton);
         Controls.Add(startStopButton);
         Controls.Add(hideButton);
+        Controls.Add(uploadButton);
     }
 
     private void BuildTrayIcon()
@@ -105,6 +108,7 @@ internal sealed class ServerForm : Form
         menu.Items.Add("Abrir", null, (s, e) => ShowFromTray());
         menu.Items.Add("Abrir HTML", null, (s, e) => Process.Start(urlBox.Text));
         menu.Items.Add("Abrir Facturas Web", null, (s, e) => Process.Start("http://localhost:8080/facturas"));
+        menu.Items.Add("Subir a GitHub", null, (s, e) => OpenGitUploader());
         menu.Items.Add("Salir", null, (s, e) => { exiting = true; Close(); });
         trayIcon.ContextMenuStrip = menu;
         trayIcon.DoubleClick += (s, e) => ShowFromTray();
@@ -122,6 +126,31 @@ internal sealed class ServerForm : Form
         ShowInTaskbar = true;
         WindowState = FormWindowState.Normal;
         Activate();
+    }
+
+    private void OpenGitUploader()
+    {
+        string uploader = Path.Combine(root, "subir_archivos_github.ps1");
+        if (!File.Exists(uploader))
+        {
+            MessageBox.Show("No encontre el archivo:\r\n" + uploader, "Subir a GitHub", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo("powershell.exe");
+            startInfo.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + uploader + "\"";
+            startInfo.WorkingDirectory = root;
+            startInfo.UseShellExecute = false;
+            startInfo.CreateNoWindow = true;
+            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+            Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "No pude abrir Subir a GitHub", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private static bool IsStartWithWindowsEnabled()
