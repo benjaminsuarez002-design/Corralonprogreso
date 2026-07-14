@@ -8479,6 +8479,19 @@ setTimeout(iniciarCargaListaArticulos, 0);
 let carrito = {};
 function guardarCarrito() { localStorage.setItem(CARRITO_STORAGE_KEY, JSON.stringify(carrito)); }
 function cargarCarrito() { try { carrito = JSON.parse(localStorage.getItem(CARRITO_STORAGE_KEY)) || {}; } catch(e) { carrito = {}; } actualizarVistaCarrito(); }
+function numeroCantidadCarrito(value) {
+  let text = String(value ?? '').trim().replace(/\s+/g, '');
+  const dot = text.lastIndexOf('.');
+  const comma = text.lastIndexOf(',');
+  if (dot >= 0 && comma >= 0) {
+    text = comma > dot
+      ? text.replace(/\./g, '').replace(',', '.')
+      : text.replace(/,/g, '');
+  } else if (comma >= 0) {
+    text = text.replace(',', '.');
+  }
+  return Number(text);
+}
 function parseCantidadCarrito(value, fallback = 1, articulo = null) {
   const raw = String(value ?? '').trim();
   const placasMatch = raw.match(/^(-?\d+(?:[.,]\d+)?)\s*p$/i);
@@ -8486,12 +8499,11 @@ function parseCantidadCarrito(value, fallback = 1, articulo = null) {
     if (!MODO_A_DESCONTAR) return fallback;
     const placasPorCaja = sanitizePlacas(articulo?.ceramicoPlacas);
     if (placasPorCaja <= 0) return { error: 'sin_placas' };
-    const placas = Number(placasMatch[1].replace(/\./g, '').replace(',', '.'));
+    const placas = numeroCantidadCarrito(placasMatch[1]);
     if (!Number.isFinite(placas) || placas <= 0) return fallback;
     return -Math.round((placas / placasPorCaja) * 1000) / 1000;
   }
-  const text = raw.replace(/\./g, '').replace(',', '.');
-  const number = Number(text);
+  const number = numeroCantidadCarrito(raw);
   if (!Number.isFinite(number) || number <= 0) return fallback;
   return MODO_A_DESCONTAR ? -Math.abs(number) : number;
 }
@@ -8990,7 +9002,6 @@ cargarCarrito();
 </div>
 
 </body></html>
-
 
 
 
