@@ -433,6 +433,7 @@ let _fotoDragStart = null;
 let _fotoPinchStart = null;
 let _detalleTipoActual = 'remito';
 let editItems = [];
+let editFocusedField = null;
 let _confirmCallback = null;
 let logoCacheData = null;
 let _pdfDetalleActual = null;
@@ -1355,6 +1356,7 @@ function abrirEditar() {
   const r = _remitoDetalleActual;
   if(!r) return;
   editItems = (r.items||[]).map(it => ({ id: it.id, cant: it.cant, desc: it.descripcion, precio: it.precio }));
+  editFocusedField = null;
   renderEditForm();
   document.getElementById('editBg').classList.add('open');
 }
@@ -1362,6 +1364,7 @@ function abrirEditar() {
 function cerrarEditar() {
   document.getElementById('editBg').classList.remove('open');
   editItems = [];
+  editFocusedField = null;
 }
 
 function renderEditForm() {
@@ -1402,6 +1405,32 @@ function renderEditForm() {
       </div>
     </div>`;
   renderEditItems();
+  aplicarFuncionesTxtEdicion();
+}
+
+function aplicarFuncionesTxtEdicion() {
+  const root = document.getElementById('editBg');
+  const helpers = window.CorralonFunciones;
+  if (!root || !helpers || root.dataset.funcionesTxtEdicion) return;
+  root.dataset.funcionesTxtEdicion = '1';
+  helpers.bindLiveLocaleNumber?.({ root, selector: '.edit-item-inp.num', decimals: 2 });
+  helpers.bindLabelSelect?.({ root });
+  root.addEventListener('focusin', (event) => {
+    const field = event.target?.closest?.('input,textarea');
+    if (!field || !root.contains(field) || field === editFocusedField) return;
+    editFocusedField = field;
+    requestAnimationFrame(() => { if (document.activeElement === field) field.select?.(); });
+  });
+  root.addEventListener('keydown', (event) => {
+    if (event.key !== 'F2') return;
+    const field = event.target?.closest?.('input,textarea');
+    if (!field || !root.contains(field) || typeof field.select !== 'function') return;
+    event.preventDefault();
+    const value = String(field.value || '');
+    const selected = field.selectionStart === 0 && field.selectionEnd === value.length;
+    if (selected) field.setSelectionRange(value.length, value.length);
+    else field.select();
+  });
 }
 
 function renderEditItems() {
@@ -1548,12 +1577,15 @@ document.addEventListener('keydown', function(e) {
   const rows = [...document.querySelectorAll('.edit-item-row')];
   const agInputs = [document.getElementById('eNuevoCant'), document.getElementById('eNuevoDesc'), document.getElementById('eNuevoPrecio'), document.getElementById('eNuevoSubtotal')];
   const COL = 4;
+  const fullSelection = (field) => field.selectionStart === 0 && field.selectionEnd === String(field.value || '').length;
+  const canRight = (field) => fullSelection(field) || field.selectionStart === String(field.value || '').length;
+  const canLeft = (field) => fullSelection(field) || field.selectionStart === 0;
   function focusEditCell(rowIdx, colIdx) {
     colIdx = Math.max(0, Math.min(COL-1, colIdx));
     if(rowIdx === rows.length) { agInputs[colIdx] && agInputs[colIdx].focus(); }
     else if(rowIdx >= 0 && rowIdx < rows.length) {
-    const ins = [...rows[rowIdx].querySelectorAll('input.edit-item-inp')];
-      ins[colIdx] && ins[colIdx].focus();
+      const ins = [...rows[rowIdx].querySelectorAll('input.edit-item-inp')];
+      if(ins[colIdx]) { ins[colIdx].focus(); ins[colIdx].select(); }
     }
   }
   if(active.classList.contains('edit-item-inp') && active.closest('.edit-item-row')) {
@@ -1561,18 +1593,37 @@ document.addEventListener('keydown', function(e) {
     const rowIdx = rows.indexOf(row);
     const inputs = [...row.querySelectorAll('input.edit-item-inp')];
     const colIdx = inputs.indexOf(active);
-    if(e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); focusEditCell(rowIdx+1, colIdx); }
+    if(e.ctrlKey && e.key === 'ArrowRight' && canRight(active)) { e.preventDefault(); focusEditCell(rows.length-1, COL-1); return; }
+    if(e.ctrlKey && e.key === 'ArrowLeft' && canLeft(active)) { e.preventDefault(); focusEditCell(0, 0); return; }
+    if(e.ctrlKey && e.key === 'ArrowDown') { e.preventDefault(); focusEditCell(rows.length-1, colIdx); return; }
+    if(e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); focusEditCell(0, colIdx); return; }
+    if(e.key === 'Enter' && colIdx === COL-1 && rowIdx === rows.length-1 && editItems[rowIdx] && (String(editItems[rowIdx].desc||'').trim() || Number(editItems[rowIdx].cant) || Number(editItems[rowIdx].precio))) {
+      e.preventDefault();
+      agInputs[0]?.focus();
+      agInputs[0]?.select();
+    }
+    else if(e.key === 'Enter') { e.preventDefault(); if(colIdx<COL-1) focusEditCell(rowIdx, colIdx+1); else focusEditCell(rowIdx+1, 0); }
+    else if(e.key === 'ArrowDown') { e.preventDefault(); focusEditCell(rowIdx+1, colIdx); }
     else if(e.key === 'ArrowUp') { e.preventDefault(); if(rowIdx>0) focusEditCell(rowIdx-1, colIdx); }
-    else if(e.key === 'ArrowRight' && active.selectionStart === active.value.length) { e.preventDefault(); if(colIdx<COL-1) focusEditCell(rowIdx, colIdx+1); else focusEditCell(rowIdx+1, 0); }
-    else if(e.key === 'ArrowLeft' && active.selectionStart === 0) { e.preventDefault(); if(colIdx>0) focusEditCell(rowIdx, colIdx-1); else if(rowIdx>0) focusEditCell(rowIdx-1, COL-1); }
+    else if(e.key === 'ArrowRight' && canRight(active)) { e.preventDefault(); if(colIdx<COL-1) focusEditCell(rowIdx, colIdx+1); else focusEditCell(rowIdx+1, 0); }
+    else if(e.key === 'ArrowLeft' && canLeft(active)) { e.preventDefault(); if(colIdx>0) focusEditCell(rowIdx, colIdx-1); else if(rowIdx>0) focusEditCell(rowIdx-1, COL-1); }
     return;
   }
   const agIdx = agInputs.indexOf(active);
   if(agIdx !== -1) {
-    if(e.key === 'Enter' && agIdx === COL-1) { e.preventDefault(); calcularPrecioNuevoDesdeSubtotal(); editAgregarItem(); return; }
+    if(e.ctrlKey && e.key === 'ArrowRight' && canRight(active)) { e.preventDefault(); focusEditCell(rows.length-1, COL-1); return; }
+    if(e.ctrlKey && e.key === 'ArrowLeft' && canLeft(active)) { e.preventDefault(); focusEditCell(0, 0); return; }
+    if(e.ctrlKey && e.key === 'ArrowDown') { e.preventDefault(); focusEditCell(rows.length-1, agIdx); return; }
+    if(e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); if(rows.length) focusEditCell(0, agIdx); return; }
+    if(e.key === 'Enter') {
+      e.preventDefault();
+      if(agIdx < COL-1) agInputs[agIdx+1]?.focus();
+      else document.querySelector('.edit-add-row .btn-add')?.click();
+      return;
+    }
     if(e.key === 'ArrowUp' && rows.length>0) { e.preventDefault(); focusEditCell(rows.length-1, agIdx); }
-    else if(e.key === 'ArrowRight' && active.selectionStart === active.value.length && agIdx < COL-1) { e.preventDefault(); agInputs[agIdx+1].focus(); }
-    else if(e.key === 'ArrowLeft' && active.selectionStart === 0 && agIdx > 0) { e.preventDefault(); agInputs[agIdx-1].focus(); }
+    else if(e.key === 'ArrowRight' && canRight(active) && agIdx < COL-1) { e.preventDefault(); agInputs[agIdx+1].focus(); }
+    else if(e.key === 'ArrowLeft' && canLeft(active) && agIdx > 0) { e.preventDefault(); agInputs[agIdx-1].focus(); }
     return;
   }
   if(e.key === 'Enter') {
@@ -1727,5 +1778,3 @@ document.getElementById('remitosSearch')?.addEventListener('input', renderRemito
 </script>
 </body>
 </html>
-
-
