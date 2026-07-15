@@ -93,6 +93,7 @@
     .table-context-menu.visible{display:block}
     .table-context-menu button{width:100%;height:34px;border:0;box-shadow:none;text-align:left;color:#24315f;background:#fff}
     .table-context-menu button:hover{background:#eef8ff}
+    .table-context-menu button:disabled{color:#9aa4b8;background:#f5f7fb;cursor:not-allowed}
     .table-context-menu button[hidden]{display:none}
     .table-context-menu button.danger-item{color:var(--bad2)}
     .table-context-menu button.danger-item:hover{background:#fff0f3}
@@ -291,6 +292,9 @@
   <button type="button" id="searchListsContextBtn">Buscar en listas</button>
   <button type="button" class="danger-item" id="clearTableContextBtn">Limpiar tabla</button>
 </div>
+<div class="table-context-menu" id="providerContextMenu">
+  <button type="button" id="openProviderPageContextBtn">Abrir página web</button>
+</div>
 <div class="modal-backdrop" id="calcBackdrop">
   <div class="calc-modal" role="dialog" aria-modal="true" aria-labelledby="calcTitle">
     <h2 class="calc-title" id="calcTitle">Dividir / multiplicar</h2>
@@ -412,6 +416,8 @@ const el = {
   totalFinal: document.getElementById('totalFinal'),
   copySummary: document.getElementById('copySummary'),
   tableContextMenu: document.getElementById('tableContextMenu'),
+  providerContextMenu: document.getElementById('providerContextMenu'),
+  openProviderPageContextBtn: document.getElementById('openProviderPageContextBtn'),
   calcPriceContextBtn: document.getElementById('calcPriceContextBtn'),
   applyDiscountContextBtn: document.getElementById('applyDiscountContextBtn'),
   recalculateContextBtn: document.getElementById('recalculateContextBtn'),
@@ -2361,6 +2367,23 @@ document.querySelector('.table-wrap').addEventListener('contextmenu', (event) =>
   el.tableContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - menuHeight - 8)}px`;
   el.tableContextMenu.classList.add('visible');
 });
+el.providerInput.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  closeTableContextMenu();
+  const current = selectedProvider();
+  const page = String(current?.pagina_link || current?.pagina || '').trim();
+  el.openProviderPageContextBtn.disabled = !/^https?:\/\//i.test(page);
+  el.openProviderPageContextBtn.dataset.url = page;
+  el.providerContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 210)}px`;
+  el.providerContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 52)}px`;
+  el.providerContextMenu.classList.add('visible');
+});
+el.openProviderPageContextBtn.addEventListener('click', () => {
+  const url = el.openProviderPageContextBtn.dataset.url || '';
+  el.providerContextMenu.classList.remove('visible');
+  if (!/^https?:\/\//i.test(url)) return;
+  window.open(url, '_blank', 'noopener,noreferrer');
+});
 el.calcPriceContextBtn.addEventListener('click', () => {
   const rowIndex = contextMenuRowIndex;
   closeTableContextMenu();
@@ -2436,6 +2459,7 @@ el.calcBackdrop.addEventListener('keydown', (event) => {
 });
 document.addEventListener('mousedown', (event) => {
   if (!event.target.closest('#tableContextMenu')) closeTableContextMenu();
+  if (!event.target.closest('#providerContextMenu')) el.providerContextMenu.classList.remove('visible');
 }, true);
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeTableContextMenu();

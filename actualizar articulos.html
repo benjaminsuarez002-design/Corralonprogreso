@@ -59,7 +59,7 @@
     .merge-check{height:36px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;background:#f4fbff;padding:0 10px;color:var(--muted);font:800 16px 'Barlow Condensed';white-space:nowrap}
     .merge-check input{width:16px;height:16px;accent-color:var(--purple)}
     .context-menu{position:fixed;z-index:3000;display:none;min-width:190px;border:1px solid #9bcfff;border-radius:8px;background:#fff;box-shadow:0 16px 38px #10203b2b;overflow:hidden}
-    .context-menu.visible{display:block}.context-menu button{width:100%;height:34px;border:0;border-radius:0;box-shadow:none;background:#fff;color:#172033;text-align:left;padding:6px 12px}.context-menu button:hover{background:#e8f6ff;color:var(--red2)}
+    .context-menu.visible{display:block}.context-menu button{width:100%;height:34px;border:0;border-radius:0;box-shadow:none;background:#fff;color:#172033;text-align:left;padding:6px 12px}.context-menu button:hover{background:#e8f6ff;color:var(--red2)}.context-menu button:disabled{color:#a7adbd;background:#f5f7fb;cursor:not-allowed}.context-menu button:disabled:hover{color:#a7adbd;background:#f5f7fb}
     .modal-backdrop{position:fixed;inset:0;z-index:3100;display:none;align-items:center;justify-content:center;background:rgba(23,32,51,.45)}.modal-backdrop.visible{display:flex}
     .calc-modal{width:min(94vw,540px);background:#fff;border:2px solid #9bcfff;border-radius:14px;padding:22px;box-shadow:0 20px 50px #10203b45}.calc-title{margin:0 0 14px;font:900 34px 'Barlow Condensed';color:var(--red2)}
     .calc-grid{display:grid;grid-template-columns:190px 1fr;border:1px solid #9bcfff}.calc-label,.calc-field{min-height:38px;border-bottom:1px solid #d9edff;padding:6px 10px;font:700 21px 'Barlow Condensed'}.calc-label{background:#eef8ff;color:var(--muted);cursor:pointer}.calc-field{padding:0}.calc-field input{width:100%;height:100%;border:0;padding:0 10px;text-align:right}.calc-label.last,.calc-field.last{border-bottom:0}.calc-result{font:800 21px 'Barlow Condensed';color:#172033;background:#fff}
@@ -68,7 +68,7 @@
     .hidden{display:none}.toast{position:fixed;left:50%;bottom:26px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none}.toast.visible{opacity:1}
   </style>
   <script src="nav-helper.js"></script>
-  <script src="menu-auth-guard.js?v=20260604-guard2" data-menu-guard="actualizar_articulos"></script>
+  <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="actualizar_articulos"></script>
 </head>
 <body>
 <div class="app">
@@ -119,6 +119,7 @@
 </div>
 <div class="toast" id="toast"></div>
 <div class="context-menu" id="rowContextMenu"><button type="button" id="calcContextBtn">Dividir / multiplicar</button></div>
+<div class="context-menu" id="providerContextMenu"><button type="button" id="openProviderPageContextBtn">Abrir página web</button></div>
 <div class="modal-backdrop" id="providerEditBackdrop">
   <form class="provider-modal" id="providerEditForm">
     <div class="provider-modal-head"><span id="providerEditTitle">Proveedor</span><span class="provider-admin-note" id="providerEditMode"></span><button type="button" id="providerEditCloseBtn">x</button></div>
@@ -167,6 +168,8 @@ const statusEl = document.getElementById('status');
 const syncProgress = document.getElementById('syncProgress');
 const syncProgressFill = document.getElementById('syncProgressFill');
 const mergeExistingList = document.getElementById('mergeExistingList');
+const providerContextMenu = document.getElementById('providerContextMenu');
+const openProviderPageContextBtn = document.getElementById('openProviderPageContextBtn');
 function h(extra={}){return CorralonSystem.headers(extra)}
 function norm(v){return CorralonSystem.norm(v)}
 function money(v){return `$ ${Number(v||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`}
@@ -345,11 +348,13 @@ providerSearch.addEventListener('focus',()=>{providerSearch.select();openProvide
 providerSearch.addEventListener('input',()=>{comboActive=0;openProviderCombo()});
 providerSearch.addEventListener('dblclick',(event)=>{if(openCurrentProviderPage())event.preventDefault()});
 provName.addEventListener('dblclick',(event)=>{if(openCurrentProviderPage())event.preventDefault()});
+providerSearch.addEventListener('contextmenu',(event)=>{event.preventDefault();closeProviderCombo();hideRowContext();const url=currentProviderUrl();openProviderPageContextBtn.disabled=!url;openProviderPageContextBtn.dataset.url=url;providerContextMenu.style.left=`${Math.min(event.clientX,window.innerWidth-220)}px`;providerContextMenu.style.top=`${Math.min(event.clientY,window.innerHeight-42)}px`;providerContextMenu.classList.add('visible')});
+openProviderPageContextBtn.addEventListener('click',()=>{const url=openProviderPageContextBtn.dataset.url||'';providerContextMenu.classList.remove('visible');if(!url)return;window.open(url,'_blank','noopener,noreferrer')});
 providerSearch.addEventListener('change',()=>selectProviderByText(providerSearch.value));
 providerSearch.addEventListener('keydown',(event)=>{if(event.key==='ArrowDown'){event.preventDefault();moveProviderCombo(1)}else if(event.key==='ArrowUp'){event.preventDefault();moveProviderCombo(-1)}else if(event.key==='Enter'){event.preventDefault();chooseProviderCombo()}else if(event.key==='Escape'){event.preventDefault();closeProviderCombo()}});
 providerComboBtn.addEventListener('mousedown',(event)=>{event.preventDefault();providerCombo.classList.contains('open')?closeProviderCombo():openProviderCombo();providerSearch.focus()});
 providerDropdown.addEventListener('mousedown',(event)=>{event.preventDefault();const option=event.target.closest('.combo-option');if(!option)return;comboActive=Number(option.dataset.index)||0;chooseProviderCombo()});
-document.addEventListener('mousedown',(event)=>{if(!providerCombo.contains(event.target))closeProviderCombo();if(!event.target.closest('.table'))clearTableSelection();if(!event.target.closest('#rowContextMenu'))hideRowContext()});
+document.addEventListener('mousedown',(event)=>{if(!providerCombo.contains(event.target))closeProviderCombo();if(!event.target.closest('.table'))clearTableSelection();if(!event.target.closest('#rowContextMenu'))hideRowContext();if(!event.target.closest('#providerContextMenu'))providerContextMenu.classList.remove('visible')});
 document.querySelector('.body').addEventListener('scroll',(event)=>{const box=event.currentTarget;if(box.scrollTop+box.clientHeight>=box.scrollHeight-80)loadMoreRows()});
 rows.addEventListener('focusin',(event)=>{const cell=event.target.closest('.nav-cell');if(cell)selectCellText(cell)});
 rows.addEventListener('keydown',(event)=>{const cell=event.target.closest('.nav-cell');if(!cell)return;let moved=false;if(event.key==='Enter')moved=moveTableCell(cell,event.shiftKey?-1:1,0);else if(event.key==='Tab')moved=moveTableCell(cell,0,event.shiftKey?-1:1);else if(event.key==='ArrowDown')moved=moveTableCell(cell,1,0);else if(event.key==='ArrowUp')moved=moveTableCell(cell,-1,0);else if(event.key==='ArrowRight')moved=moveTableCell(cell,0,1);else if(event.key==='ArrowLeft')moved=moveTableCell(cell,0,-1);if(moved){event.preventDefault();event.stopPropagation()}});
@@ -383,6 +388,3 @@ filterInput.oninput=render;clearBtn.onclick=()=>{if(confirm('Eliminar todos los 
 </script>
 </body>
 </html>
-
-
-
