@@ -384,6 +384,7 @@ const selectedCols = new Set();
 let rowSelectionAnchor = null;
 let colSelectionAnchor = null;
 let lastFocusedTableCell = null;
+let pendingPasteFocus = null;
 let contextMenuRowIndex = null;
 let contextMenuField = '';
 let calcRowIndex = null;
@@ -2065,8 +2066,25 @@ function initFuncionesJsBindings() {
     findCell: editableCellAt,
     getCellValue: getEditableCellValue,
     setCellValue: setEditableCellValue,
-    pasteText: (text, activeCell) => pasteIntoSelectedColumns(text) || pasteIntoTableFromCell(text, activeCell),
-    afterPaste: (rows) => finishTableEditUndo(`${rows.length} fila${rows.length === 1 ? '' : 's'} pegada${rows.length === 1 ? '' : 's'}`),
+    pasteText: (text, activeCell) => {
+      const position = editableCellPosition(activeCell);
+      const pasted = pasteIntoSelectedColumns(text) || pasteIntoTableFromCell(text, activeCell);
+      if (pasted && Number.isFinite(position.row) && Number.isFinite(position.col)) {
+        pendingPasteFocus = position;
+        setTimeout(() => requestAnimationFrame(() => {
+          const focusPosition = pendingPasteFocus;
+          pendingPasteFocus = null;
+          if (focusPosition) focusNavigationTarget(editableCellAt(focusPosition.row, focusPosition.col));
+        }), 0);
+      }
+      return pasted;
+    },
+    afterPaste: (rows) => {
+      finishTableEditUndo(`${rows.length} fila${rows.length === 1 ? '' : 's'} pegada${rows.length === 1 ? '' : 's'}`);
+      const position = pendingPasteFocus;
+      pendingPasteFocus = null;
+      if (position) requestAnimationFrame(() => focusNavigationTarget(editableCellAt(position.row, position.col)));
+    },
     afterClear: () => finishTableEditUndo('Celdas borradas'),
     selectOnCellMouseDown: true,
     afterSelect: (cells) => {
