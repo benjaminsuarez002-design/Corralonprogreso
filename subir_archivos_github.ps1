@@ -2,6 +2,21 @@ Add-Type -AssemblyName System.Windows.Forms
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$dialogOwner = $null
+
+function New-DialogOwner {
+    $owner = New-Object System.Windows.Forms.Form
+    $owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+    $owner.ShowInTaskbar = $false
+    $owner.TopMost = $true
+    $owner.Size = New-Object System.Drawing.Size(1, 1)
+    $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $owner.Location = New-Object System.Drawing.Point(-32000, -32000)
+    $owner.Opacity = 0.01
+    $owner.Show()
+    $owner.Activate()
+    return $owner
+}
 
 function Show-Message {
     param(
@@ -9,12 +24,11 @@ function Show-Message {
         [string]$Title = 'Subir a GitHub',
         [System.Windows.Forms.MessageBoxIcon]$Icon = [System.Windows.Forms.MessageBoxIcon]::Information
     )
-    [System.Windows.Forms.MessageBox]::Show(
-        $Text,
-        $Title,
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        $Icon
-    ) | Out-Null
+    if ($script:dialogOwner) {
+        [System.Windows.Forms.MessageBox]::Show($script:dialogOwner, $Text, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, $Icon) | Out-Null
+    } else {
+        [System.Windows.Forms.MessageBox]::Show($Text, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, $Icon) | Out-Null
+    }
 }
 
 function Run-Git {
@@ -47,6 +61,7 @@ $uploadWorktree = $null
 $scriptExitCode = 0
 
 try {
+    $dialogOwner = New-DialogOwner
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         throw 'Git no esta instalado o no se encuentra en PATH.'
     }
@@ -61,7 +76,7 @@ try {
     $dialog.CheckFileExists = $true
     $dialog.RestoreDirectory = $true
 
-    if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+    if ($dialog.ShowDialog($dialogOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
         return
     }
 
@@ -79,6 +94,7 @@ try {
         (($fileNames | ForEach-Object { "- $_" }) -join "`r`n") +
         "`r`n`r`nDespues se subiran a la rama main. ¿Continuar?"
     $answer = [System.Windows.Forms.MessageBox]::Show(
+        $dialogOwner,
         $confirmationText,
         'Confirmar subida',
         [System.Windows.Forms.MessageBoxButtons]::YesNo,
@@ -128,6 +144,10 @@ try {
     if ($uploadWorktree) {
         & git -C $repoRoot worktree remove --force $uploadWorktree 2>$null | Out-Null
         & git -C $repoRoot worktree prune 2>$null | Out-Null
+    }
+    if ($dialogOwner) {
+        $dialogOwner.Close()
+        $dialogOwner.Dispose()
     }
 }
 
