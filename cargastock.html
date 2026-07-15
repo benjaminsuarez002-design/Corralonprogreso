@@ -286,6 +286,7 @@
 </div>
 <div class="table-context-menu" id="tableContextMenu">
   <button type="button" id="calcPriceContextBtn" hidden>Dividir / multiplicar</button>
+  <button type="button" id="applyDiscountContextBtn" hidden>Aplicar desc. a todos</button>
   <button type="button" id="recalculateContextBtn">Recalcular</button>
   <button type="button" id="searchListsContextBtn">Buscar en listas</button>
   <button type="button" class="danger-item" id="clearTableContextBtn">Limpiar tabla</button>
@@ -412,6 +413,7 @@ const el = {
   copySummary: document.getElementById('copySummary'),
   tableContextMenu: document.getElementById('tableContextMenu'),
   calcPriceContextBtn: document.getElementById('calcPriceContextBtn'),
+  applyDiscountContextBtn: document.getElementById('applyDiscountContextBtn'),
   recalculateContextBtn: document.getElementById('recalculateContextBtn'),
   searchListsContextBtn: document.getElementById('searchListsContextBtn'),
   clearTableContextBtn: document.getElementById('clearTableContextBtn'),
@@ -2348,9 +2350,13 @@ document.querySelector('.table-wrap').addEventListener('contextmenu', (event) =>
   const canCalculatePrice = contextMenuField === 'precio'
     && Number.isFinite(contextMenuRowIndex)
     && !isBlankStockRow(rowsData[contextMenuRowIndex]);
+  const canApplyDiscount = contextMenuField === 'descuento'
+    && Number.isFinite(contextMenuRowIndex)
+    && !isBlankStockRow(rowsData[contextMenuRowIndex]);
   el.calcPriceContextBtn.hidden = !canCalculatePrice;
+  el.applyDiscountContextBtn.hidden = !canApplyDiscount;
   const menuWidth = 190;
-  const menuHeight = canCalculatePrice ? 150 : 116;
+  const menuHeight = (canCalculatePrice || canApplyDiscount) ? 150 : 116;
   el.tableContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - menuWidth - 8)}px`;
   el.tableContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - menuHeight - 8)}px`;
   el.tableContextMenu.classList.add('visible');
@@ -2359,6 +2365,21 @@ el.calcPriceContextBtn.addEventListener('click', () => {
   const rowIndex = contextMenuRowIndex;
   closeTableContextMenu();
   openUnitPriceCalc(rowIndex);
+});
+el.applyDiscountContextBtn.addEventListener('click', () => {
+  const discount = Number(rowsData[contextMenuRowIndex]?.descuentoAdicional);
+  closeTableContextMenu();
+  if (!Number.isFinite(discount)) {
+    show('La fila no tiene descuento adicional');
+    return;
+  }
+  pushUndoSnapshot();
+  rowsData.forEach((row) => {
+    if (!isBlankStockRow(row)) row.descuentoAdicional = discount;
+  });
+  saveRows();
+  render();
+  show('Descuento aplicado a todos');
 });
 el.recalculateContextBtn.addEventListener('click', async () => {
   closeTableContextMenu();
