@@ -134,19 +134,28 @@
     .compare-stock-guide{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #cfe8ff}
     .compare-stock-guide>div{padding:9px 14px;background:#f8fcff;color:#33416b;font:900 19px 'Barlow Condensed'}
     .compare-stock-guide>div+div{border-left:3px solid #8bc7ff}
-    .compare-stock-wrap{min-height:0;overflow:auto;background:#fff}
-    .compare-stock-table{min-width:1480px}
-    .compare-stock-row{display:grid;grid-template-columns:135px minmax(260px,1fr) 90px 125px 145px 135px minmax(260px,1fr) 90px 125px 145px}
+    .compare-stock-wrap{min-height:0;overflow:hidden;background:#fff}
+    .compare-stock-tables{height:100%;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+    .compare-side-scroll{min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden}
+    .compare-side-scroll+ .compare-side-scroll{border-left:3px solid #8bc7ff}
+    .compare-stock-table{width:100%;min-width:0}
+    .compare-stock-row{display:grid;grid-template-columns:28px minmax(90px,15%) minmax(180px,1fr) minmax(72px,11%) minmax(105px,17%) minmax(115px,19%)}
     .compare-stock-row>div{min-height:31px;padding:5px 7px;border-right:1px solid #d9edff;border-bottom:1px solid #e6f1fb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 14px Barlow}
-    .compare-stock-row>div:nth-child(5){border-right:3px solid #8bc7ff}
     .compare-stock-row.head{position:sticky;top:0;z-index:2;background:#eaf7ff;color:#3b2fa3}
     .compare-stock-row.head>div{font:900 16px 'Barlow Condensed'}
+    .compare-row-selector,.compare-corner{padding:5px 2px!important;text-align:center;background:#f3f9ff;color:#6b76a0;cursor:pointer!important;user-select:none}
+    .compare-row-selector:hover,.compare-corner:hover{background:#ddecff}
     .compare-stock-row .num{text-align:right;font-variant-numeric:tabular-nums}
     .compare-stock-row .same{background:#e1f8e9}
     .compare-stock-row .different{background:#ffe0e6;color:#a10f32;box-shadow:inset 0 0 0 1px #ff829a}
     .compare-stock-row .missing{background:#e8183a;color:#fff;font-weight:900}
-    .compare-stock-row [data-compare-side]{cursor:pointer;user-select:none}
+    .compare-stock-row [data-compare-side]{cursor:default;user-select:none;outline:none}
     .compare-stock-row .compare-selected{background:#dcd6ff!important;color:#30208f!important;box-shadow:inset 0 0 0 2px #6d5df7!important}
+    .compare-stock-row.compare-row-active{position:relative;z-index:1;box-shadow:inset 4px 0 0 #6d5df7,inset 0 1px 0 rgba(109,93,247,.35),inset 0 -1px 0 rgba(109,93,247,.35)}
+    .compare-stock-row.compare-row-active>div:not(.compare-active){background:#e8e4ff!important}
+    .compare-stock-row.compare-row-active .compare-active,.compare-stock-row.compare-row-active .compare-active[contenteditable="true"]{background:#bab3e6!important;box-shadow:inset 0 0 0 2px rgba(109,93,247,.65)!important}
+    .compare-stock-row.head>div:not(.compare-corner){cursor:pointer;user-select:none}
+    .compare-stock-row [contenteditable="true"]{cursor:text;user-select:text;color:inherit}
     .compare-stock-empty{padding:36px;text-align:center;color:var(--muted);font:900 22px 'Barlow Condensed'}
     .compare-context-menu{min-width:210px}
     .compare-context-menu button:disabled{opacity:.45;cursor:not-allowed;background:#fff}
@@ -239,7 +248,10 @@
       <div>Sistema</div>
     </div>
     <div class="compare-stock-wrap">
-      <div class="compare-stock-table" id="compareStockTable"></div>
+      <div class="compare-stock-tables" id="compareStockTables">
+        <div class="compare-side-scroll" data-compare-table-side="left"><div class="compare-stock-table" id="compareStockLeftTable"></div></div>
+        <div class="compare-side-scroll" data-compare-table-side="right"><div class="compare-stock-table" id="compareStockRightTable"></div></div>
+      </div>
     </div>
   </section>
 </div>
@@ -366,7 +378,12 @@ let indexCodeDescriptions = new Map();
 let compareSystemRows = [];
 let comparePairs = [];
 const compareSelections = { left: new Set(), right: new Set() };
+const compareColumnSelections = { left: new Set(), right: new Set() };
 let compareActiveCell = null;
+const compareRowSelectionAnchor = { left: null, right: null };
+const compareColumnSelectionAnchor = { left: null, right: null };
+const compareSortState = { left: { col: -1, dir: 1 }, right: { col: -1, dir: 1 } };
+let compareReturnFocus = null;
 let compareContextSide = '';
 let compareContextIndex = -1;
 let undoStack = null;
@@ -1339,9 +1356,7 @@ async function copyGreen() {
   document.getElementById('copyResultBackdrop').classList.add('visible');
 }
 function parseCompareSystemRows(text) {
-  const matrix = FX.parseClipboardTable
-    ? FX.parseClipboardTable(text)
-    : String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').map((line) => line.split('\t'));
+  const matrix = parseCompareClipboard(text);
   const nonEmptyRows = matrix.filter((cols) => cols.some((value) => String(value || '').trim()));
   const headerKey = (value) => norm(value).replace(/[^A-Z0-9]/g, '');
   const headerIndex = nonEmptyRows.findIndex((cols) => cols.some((value) => headerKey(value) === 'CODPROV'));
@@ -1401,6 +1416,9 @@ function buildCompareStockPairs(leftRows = currentCompareLeftRows(), rightRows =
 function compareQuantity(value) {
   return Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+function compareRoundedNumber(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
 function compareNear(left, right) {
   return Math.abs(Number(left || 0) - Number(right || 0)) <= 0.011;
 }
@@ -1413,54 +1431,81 @@ function comparePriceNear(left, right) {
 function compareRowHasData(row) {
   return !!row && (!!String(row.codigo || '').trim() || !!String(row.descripcion || '').trim() || !!Number(row.cantidad) || !!Number(row.precioFinal) || !!Number(row.precioFinalCantidad));
 }
-function compareCell(value, type, matched, missing, comparisonActive, side, index) {
+function compareCell(value, type, matched, missing, comparisonActive, side, index, col) {
   const cssClass = !comparisonActive ? '' : (missing ? 'missing' : (matched ? 'same' : 'different'));
-  const selectedClass = compareSelections[side].has(index) ? ' compare-selected' : '';
+  const selectedClass = compareSelections[side].has(index) || compareColumnSelections[side].has(col) ? ' compare-selected' : '';
+  const activeClass = compareActiveCell?.side === side && compareActiveCell?.index === index && compareActiveCell?.col === col ? ' compare-active' : '';
   const display = value === null || value === undefined || value === ''
     ? '—'
     : type === 'money' ? money(value) : type === 'quantity' ? compareQuantity(value) : String(value);
-  return `<div data-compare-side="${side}" data-compare-index="${index}" class="${type === 'money' || type === 'quantity' ? 'num ' : ''}${cssClass}${selectedClass}" title="${escapeHtml(display)}">${escapeHtml(display)}</div>`;
+  return `<div tabindex="-1" data-compare-side="${side}" data-compare-index="${index}" data-compare-col="${col}" class="${type === 'money' || type === 'quantity' ? 'num ' : ''}${cssClass}${selectedClass}${activeClass}" title="${escapeHtml(display)}">${escapeHtml(display)}</div>`;
+}
+function compareMatchesForPair(pair) {
+  const left = pair?.left;
+  const right = pair?.right;
+  const missing = !compareRowHasData(left) || !compareRowHasData(right);
+  return {
+    missing,
+    values: [
+      !missing && codeKey(left.codigo) === codeKey(right.codigo),
+      !missing && codeKey(left.codigo) === codeKey(right.codigo),
+      !missing && compareNear(moneyNumber(left.cantidad), right.cantidad),
+      !missing && comparePriceNear(left.precioFinal, right.precioFinal),
+      !missing && comparePriceNear(left.precioFinalCantidad, right.precioFinalCantidad)
+    ]
+  };
+}
+function renderCompareSide(side, comparisonActive) {
+  const table = document.getElementById(side === 'left' ? 'compareStockLeftTable' : 'compareStockRightTable');
+  const labels = side === 'left'
+    ? ['Código', 'Descripción', 'Cantidad', 'Precio final', 'Final x cantidad']
+    : ['CodProv', 'Descripción', 'Cantidad', 'PrecioUni', 'Importe'];
+  const types = ['text', 'text', 'quantity', 'money', 'money'];
+  const fields = ['codigo', 'descripcion', 'cantidad', 'precioFinal', 'precioFinalCantidad'];
+  const head = `<div class="compare-stock-row head">
+    <div class="compare-corner${compareSelections[side].size === comparePairs.length && comparePairs.length ? ' compare-selected' : ''}" data-compare-corner="${side}">▾</div>
+    ${labels.map((label, col) => `<div data-compare-head-side="${side}" data-compare-head-col="${col}" class="${compareColumnSelections[side].has(col) ? 'compare-selected' : ''}">${label}</div>`).join('')}
+  </div>`;
+  const body = comparePairs.map((pair, index) => {
+    const row = pair?.[side];
+    const match = compareMatchesForPair(pair);
+    return `<div class="compare-stock-row${compareActiveCell?.side === side && compareActiveCell?.index === index ? ' compare-row-active' : ''}" data-compare-row-side="${side}" data-compare-row-index="${index}">
+      <div class="compare-row-selector${compareSelections[side].has(index) ? ' compare-selected' : ''}" data-compare-row-selector="${side}" data-compare-index="${index}">${index + 1}</div>
+      ${fields.map((field, col) => compareCell(row?.[field], types[col], match.values[col], match.missing, comparisonActive, side, index, col)).join('')}
+    </div>`;
+  }).join('');
+  table.innerHTML = head + body;
 }
 function renderStockComparison() {
-  const table = document.getElementById('compareStockTable');
   const status = document.getElementById('compareStockStatus');
+  const scrollState = {};
+  document.querySelectorAll('.compare-side-scroll[data-compare-table-side]').forEach((wrap) => {
+    scrollState[wrap.dataset.compareTableSide] = { top: wrap.scrollTop, left: wrap.scrollLeft };
+  });
   const comparisonActive = comparePairs.some((pair) => compareRowHasData(pair.right));
   const pairs = comparePairs;
   const leftCount = pairs.filter((pair) => compareRowHasData(pair.left)).length;
   const rightCount = pairs.filter((pair) => compareRowHasData(pair.right)).length;
   if (!pairs.length) {
-    table.innerHTML = '<div class="compare-stock-empty">No hay filas para comparar.</div>';
+    document.getElementById('compareStockLeftTable').innerHTML = '<div class="compare-stock-empty">No hay filas para comparar.</div>';
+    document.getElementById('compareStockRightTable').innerHTML = '<div class="compare-stock-empty">No hay filas para comparar.</div>';
     status.textContent = 'No hay filas en Cargar Stock.';
     return;
   }
   let differences = 0;
-  const rowsHtml = pairs.map(({ left, right }, index) => {
-    const missing = !compareRowHasData(left) || !compareRowHasData(right);
-    const matches = {
-      codigo: !missing && codeKey(left.codigo) === codeKey(right.codigo),
-      descripcion: !missing && codeKey(left.codigo) === codeKey(right.codigo),
-      cantidad: !missing && compareNear(moneyNumber(left.cantidad), right.cantidad),
-      precio: !missing && comparePriceNear(left.precioFinal, right.precioFinal),
-      importe: !missing && comparePriceNear(left.precioFinalCantidad, right.precioFinalCantidad)
-    };
-    if (comparisonActive && (missing || Object.values(matches).some((value) => !value))) differences += 1;
-    return `<div class="compare-stock-row">
-      ${compareCell(left?.codigo, 'text', matches.codigo, missing, comparisonActive, 'left', index)}
-      ${compareCell(left?.descripcion, 'text', matches.descripcion, missing, comparisonActive, 'left', index)}
-      ${compareCell(left?.cantidad, 'quantity', matches.cantidad, missing, comparisonActive, 'left', index)}
-      ${compareCell(left?.precioFinal, 'money', matches.precio, missing, comparisonActive, 'left', index)}
-      ${compareCell(left?.precioFinalCantidad, 'money', matches.importe, missing, comparisonActive, 'left', index)}
-      ${compareCell(right?.codigo, 'text', matches.codigo, missing, comparisonActive, 'right', index)}
-      ${compareCell(right?.descripcion, 'text', matches.descripcion, missing, comparisonActive, 'right', index)}
-      ${compareCell(right?.cantidad, 'quantity', matches.cantidad, missing, comparisonActive, 'right', index)}
-      ${compareCell(right?.precioFinal, 'money', matches.precio, missing, comparisonActive, 'right', index)}
-      ${compareCell(right?.precioFinalCantidad, 'money', matches.importe, missing, comparisonActive, 'right', index)}
-    </div>`;
-  }).join('');
-  table.innerHTML = `<div class="compare-stock-row head">
-    <div>Código</div><div>Descripción</div><div>Cantidad</div><div>Precio final</div><div>Final x cantidad</div>
-    <div>CodProv</div><div>Descripción</div><div>Cantidad</div><div>PrecioUni</div><div>Importe</div>
-  </div>${rowsHtml}`;
+  pairs.forEach((pair) => {
+    const match = compareMatchesForPair(pair);
+    if (comparisonActive && (match.missing || match.values.some((value) => !value))) differences += 1;
+  });
+  renderCompareSide('left', comparisonActive);
+  renderCompareSide('right', comparisonActive);
+  document.querySelectorAll('.compare-side-scroll[data-compare-table-side]').forEach((wrap) => {
+    const saved = scrollState[wrap.dataset.compareTableSide];
+    if (saved) {
+      wrap.scrollTop = saved.top;
+      wrap.scrollLeft = saved.left;
+    }
+  });
   status.textContent = comparisonActive
     ? `${leftCount} de Cargar Stock · ${rightCount} de Sistema · ${differences} con diferencias`
     : `${leftCount} filas de Cargar Stock · Pegá la tabla de Sistema para comparar.`;
@@ -1511,7 +1556,7 @@ function unifySelectedCompareRows() {
   setCompareSideSequences(sequences.left, sequences.right);
   compareSelections[side].clear();
   compareSelections[side].add(first);
-  compareActiveCell = { side, index: first };
+  compareActiveCell = { side, index: first, col: compareActiveCell?.col ?? 0 };
   closeCompareContextMenu();
   renderStockComparison();
 }
@@ -1535,7 +1580,7 @@ function insertCompareRow(position) {
   setCompareSideSequences(sequences.left, sequences.right);
   compareSelections[side].clear();
   compareSelections[side].add(insertAt);
-  compareActiveCell = { side, index: insertAt };
+  compareActiveCell = { side, index: insertAt, col: compareActiveCell?.col ?? 0 };
   closeComparePositionPopup();
   renderStockComparison();
 }
@@ -1550,30 +1595,285 @@ function deleteSelectedCompareRows() {
   setCompareSideSequences(sequences.left, sequences.right);
   compareSelections[side].clear();
   const nextIndex = Math.min(index, Math.max(0, comparePairs.length - 1));
-  compareActiveCell = comparePairs.length ? { side, index: nextIndex } : null;
+  compareActiveCell = comparePairs.length ? { side, index: nextIndex, col: compareActiveCell?.col ?? 0 } : null;
   if (compareActiveCell) compareSelections[side].add(nextIndex);
   closeCompareContextMenu();
   renderStockComparison();
 }
-function selectCompareCell(cell, additive = false) {
+function clearCompareSelections() {
+  compareSelections.left.clear();
+  compareSelections.right.clear();
+  compareColumnSelections.left.clear();
+  compareColumnSelections.right.clear();
+}
+function focusCompareCell(side, index, col, repaint = false) {
+  if (!comparePairs.length) return;
+  index = Math.max(0, Math.min(comparePairs.length - 1, index));
+  col = Math.max(0, Math.min(4, col));
+  compareActiveCell = { side, index, col };
+  document.querySelectorAll('.compare-active').forEach((cell) => cell.classList.remove('compare-active'));
+  if (repaint) renderStockComparison();
+  requestAnimationFrame(() => {
+    const cell = document.querySelector(`[data-compare-side="${side}"][data-compare-index="${index}"][data-compare-col="${col}"]`);
+    cell?.classList.add('compare-active');
+    cell?.focus({ preventScroll: true });
+    cell?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
+}
+function selectCompareCell(cell, edit = true) {
+  if (cell.isContentEditable) return;
   const side = cell.dataset.compareSide;
   const index = Number(cell.dataset.compareIndex);
-  if (!side || !Number.isFinite(index)) return;
-  if (!additive) compareSelections[side].clear();
-  if (additive && compareSelections[side].has(index)) compareSelections[side].delete(index);
-  else compareSelections[side].add(index);
-  compareActiveCell = { side, index };
+  const col = Number(cell.dataset.compareCol);
+  if (!side || !Number.isFinite(index) || !Number.isFinite(col)) return;
+  clearCompareSelections();
+  compareActiveCell = { side, index, col };
+  renderStockComparison();
+  focusCompareCell(side, index, col);
+  if (edit) requestAnimationFrame(() => {
+    const current = document.querySelector(`[data-compare-side="${side}"][data-compare-index="${index}"][data-compare-col="${col}"]`);
+    if (current) editCompareCell(current);
+  });
+}
+function selectCompareRow(side, index, additive = false, range = false) {
+  compareColumnSelections.left.clear();
+  compareColumnSelections.right.clear();
+  compareSelections[side === 'left' ? 'right' : 'left'].clear();
+  if (range && compareRowSelectionAnchor[side] !== null) {
+    if (!additive) compareSelections[side].clear();
+    const first = Math.min(compareRowSelectionAnchor[side], index);
+    const last = Math.max(compareRowSelectionAnchor[side], index);
+    for (let row = first; row <= last; row += 1) compareSelections[side].add(row);
+  } else {
+    if (!additive) compareSelections[side].clear();
+    if (additive && compareSelections[side].has(index)) compareSelections[side].delete(index);
+    else compareSelections[side].add(index);
+    compareRowSelectionAnchor[side] = index;
+  }
+  compareActiveCell = { side, index, col: compareActiveCell?.side === side ? compareActiveCell.col : 0 };
+  renderStockComparison();
+  focusCompareCell(side, index, compareActiveCell.col);
+}
+function selectAllCompareRows(side, additive = false) {
+  if (!additive) clearCompareSelections();
+  for (let index = 0; index < comparePairs.length; index += 1) compareSelections[side].add(index);
+  compareRowSelectionAnchor[side] = 0;
+  compareActiveCell = { side, index: 0, col: 0 };
+  renderStockComparison();
+  focusCompareCell(side, 0, 0);
+}
+function compareFieldForCol(col) {
+  return ['codigo', 'descripcion', 'cantidad', 'precioFinal', 'precioFinalCantidad'][col] || '';
+}
+function setCompareCellValue(side, index, col, value) {
+  const sequences = compareSideSequences();
+  while (sequences[side].length <= index) sequences[side].push(null);
+  const row = compareRowHasData(sequences[side][index]) ? { ...sequences[side][index] } : blankCompareRow();
+  const field = compareFieldForCol(col);
+  if (!field) return;
+  row[field] = col >= 2 ? compareRoundedNumber(moneyNumber(value)) : String(value ?? '').trim();
+  sequences[side][index] = row;
+  setCompareSideSequences(sequences.left, sequences.right);
+}
+function parseCompareClipboard(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  const source = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '"') {
+      if (quoted && source[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else quoted = !quoted;
+    } else if (char === '\t' && !quoted) {
+      row.push(cell);
+      cell = '';
+    } else if (char === '\n' && !quoted) {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else cell += char;
+  }
+  row.push(cell);
+  if (row.length > 1 || row[0] !== '' || !rows.length) rows.push(row);
+  return rows;
+}
+function formatCompareClipboard(matrix) {
+  return matrix.map((row) => row.map((value) => {
+    const text = String(value ?? '');
+    return /[\t\n"]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }).join('\t')).join('\n');
+}
+function pasteIntoCompareTable(text) {
+  if (!compareActiveCell) return false;
+  const matrix = parseCompareClipboard(text);
+  if (!matrix.length) return false;
+  const side = compareActiveCell.side;
+  const hasColumns = compareColumnSelections[side].size > 0;
+  const index = hasColumns ? 0 : (compareSelections[side].size ? selectedCompareIndexes(side)[0] : compareActiveCell.index);
+  const col = hasColumns ? Math.min(...compareColumnSelections[side]) : compareActiveCell.col;
+  matrix.forEach((values, rowOffset) => values.forEach((value, colOffset) => {
+    const targetCol = col + colOffset;
+    if (targetCol <= 4) setCompareCellValue(side, index + rowOffset, targetCol, value);
+  }));
+  clearCompareSelections();
+  compareActiveCell = { side, index, col };
+  renderStockComparison();
+  focusCompareCell(side, index, col);
+  return true;
+}
+function copyCompareSelection() {
+  if (!compareActiveCell) return;
+  const { side, index } = compareActiveCell;
+  const fields = ['codigo', 'descripcion', 'cantidad', 'precioFinal', 'precioFinalCantidad'];
+  const hasRows = compareSelections[side].size > 0;
+  const hasColumns = compareColumnSelections[side].size > 0;
+  const columns = hasColumns ? [...compareColumnSelections[side]].sort((a, b) => a - b) : (hasRows ? fields.map((_, col) => col) : [compareActiveCell.col]);
+  const rowsToCopy = hasRows ? selectedCompareIndexes(side) : (hasColumns ? comparePairs.map((_, rowIndex) => rowIndex).filter((rowIndex) => compareRowHasData(comparePairs[rowIndex]?.[side])) : [index]);
+  const matrix = rowsToCopy.map((rowIndex) => {
+    const row = comparePairs[rowIndex]?.[side] || blankCompareRow();
+    return columns.map((col) => row[fields[col]] ?? '');
+  });
+  navigator.clipboard?.writeText(formatCompareClipboard(matrix));
+}
+function selectCompareColumn(side, col, additive = false, range = false) {
+  compareSelections.left.clear();
+  compareSelections.right.clear();
+  compareColumnSelections[side === 'left' ? 'right' : 'left'].clear();
+  if (range && compareColumnSelectionAnchor[side] !== null) {
+    if (!additive) compareColumnSelections[side].clear();
+    const first = Math.min(compareColumnSelectionAnchor[side], col);
+    const last = Math.max(compareColumnSelectionAnchor[side], col);
+    for (let index = first; index <= last; index += 1) compareColumnSelections[side].add(index);
+  } else {
+    if (!additive) compareColumnSelections[side].clear();
+    if (additive && compareColumnSelections[side].has(col)) compareColumnSelections[side].delete(col);
+    else compareColumnSelections[side].add(col);
+    compareColumnSelectionAnchor[side] = col;
+  }
+  compareActiveCell = { side, index: compareActiveCell?.side === side ? compareActiveCell.index : 0, col };
+  renderStockComparison();
+  focusCompareCell(side, compareActiveCell?.index ?? 0, col);
+}
+function clearSelectedCompareColumns() {
+  const sequences = compareSideSequences();
+  for (const side of ['left', 'right']) {
+    for (const col of compareColumnSelections[side]) {
+      const field = compareFieldForCol(col);
+      sequences[side] = sequences[side].map((row) => compareRowHasData(row) ? { ...row, [field]: col >= 2 ? 0 : '' } : row);
+    }
+  }
+  setCompareSideSequences(sequences.left, sequences.right);
   renderStockComparison();
 }
-function openCompareContextMenu(event, cell) {
-  event.preventDefault();
+function sortCompareColumn(side, col) {
+  const field = compareFieldForCol(col);
+  const state = compareSortState[side];
+  state.dir = state.col === col ? -state.dir : 1;
+  state.col = col;
+  comparePairs.sort((a, b) => {
+    const left = a?.[side];
+    const right = b?.[side];
+    if (!compareRowHasData(left)) return 1;
+    if (!compareRowHasData(right)) return -1;
+    const result = col >= 2
+      ? Number(left[field] || 0) - Number(right[field] || 0)
+      : String(left[field] || '').localeCompare(String(right[field] || ''), 'es', { numeric: true, sensitivity: 'base' });
+    return result * state.dir;
+  });
+  clearCompareSelections();
+  renderStockComparison();
+}
+function editCompareCell(cell) {
+  if (!cell || cell.isContentEditable) return;
   const side = cell.dataset.compareSide;
   const index = Number(cell.dataset.compareIndex);
+  const col = Number(cell.dataset.compareCol);
+  const row = comparePairs[index]?.[side] || blankCompareRow();
+  cell.textContent = col >= 2 ? compareQuantity(compareRoundedNumber(row[compareFieldForCol(col)] ?? 0)) : String(row[compareFieldForCol(col)] ?? '');
+  cell.contentEditable = 'true';
+  cell.focus();
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  cell.dataset.compareEditing = '1';
+  cell.addEventListener('blur', () => finishCompareCell(cell), { once: true });
+}
+function finishCompareCell(cell, refocus = true) {
+  if (!cell || cell.dataset.compareEditing !== '1') return;
+  const side = cell.dataset.compareSide;
+  const index = Number(cell.dataset.compareIndex);
+  const col = Number(cell.dataset.compareCol);
+  delete cell.dataset.compareEditing;
+  setCompareCellValue(side, index, col, cell.textContent === '—' ? '' : cell.textContent);
+  cell.contentEditable = 'false';
+  renderStockComparison();
+  if (refocus) focusCompareCell(side, index, col);
+}
+function compareCaretState(cell) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return { all: false, start: false, end: false };
+  const range = selection.getRangeAt(0);
+  if (!cell.contains(range.startContainer) || !cell.contains(range.endContainer)) return { all: false, start: false, end: false };
+  const before = document.createRange();
+  before.selectNodeContents(cell);
+  before.setEnd(range.startContainer, range.startOffset);
+  const through = document.createRange();
+  through.selectNodeContents(cell);
+  through.setEnd(range.endContainer, range.endOffset);
+  const start = before.toString().length;
+  const end = through.toString().length;
+  const length = cell.textContent.length;
+  return { all: start === 0 && end === length, start: start === 0 && end === 0, end: start === length && end === length };
+}
+function clearActiveCompareCell() {
+  if (!compareActiveCell) return;
+  setCompareCellValue(compareActiveCell.side, compareActiveCell.index, compareActiveCell.col, '');
+  renderStockComparison();
+  focusCompareCell(compareActiveCell.side, compareActiveCell.index, compareActiveCell.col);
+}
+function moveCompareActive(key, ctrlKey = false, shiftKey = false) {
+  if (!compareActiveCell || !comparePairs.length) return;
+  let { side, index, col } = compareActiveCell;
+  if (key === 'ArrowUp') index = ctrlKey ? 0 : index - 1;
+  if (key === 'ArrowDown') index = ctrlKey ? comparePairs.length - 1 : index + 1;
+  if (key === 'ArrowLeft') col = ctrlKey ? 0 : col - 1;
+  if (key === 'ArrowRight') col = ctrlKey ? 4 : col + 1;
+  if (key === 'Enter' || key === 'Tab') col += shiftKey ? -1 : 1;
+  if ((key === 'Enter' || key === 'Tab') && col < 0) {
+    col = 4;
+    index -= 1;
+  }
+  if ((key === 'Enter' || key === 'Tab') && col > 4) {
+    col = 0;
+    index += 1;
+    if (index >= comparePairs.length) {
+      const sequences = compareSideSequences();
+      sequences[side].push(blankCompareRow());
+      setCompareSideSequences(sequences.left, sequences.right);
+      renderStockComparison();
+    }
+  }
+  index = Math.max(0, Math.min(comparePairs.length - 1, index));
+  col = Math.max(0, Math.min(4, col));
+  clearCompareSelections();
+  focusCompareCell(side, index, col, true);
+}
+function openCompareContextMenu(event, target) {
+  event.preventDefault();
+  const side = target.dataset.compareSide || target.dataset.compareRowSelector;
+  const index = Number(target.dataset.compareIndex);
   if (!compareSelections[side].has(index)) {
     compareSelections[side].clear();
     compareSelections[side].add(index);
   }
-  compareActiveCell = { side, index };
+  compareActiveCell = { side, index, col: Number(target.dataset.compareCol) || 0 };
   compareContextSide = side;
   compareContextIndex = index;
   renderStockComparison();
@@ -1586,9 +1886,11 @@ function openCompareContextMenu(event, cell) {
   menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))}px`;
 }
 function openStockComparison() {
-  compareSelections.left.clear();
-  compareSelections.right.clear();
+  compareReturnFocus = document.activeElement;
+  clearCompareSelections();
   compareActiveCell = null;
+  compareRowSelectionAnchor.left = compareRowSelectionAnchor.right = null;
+  compareColumnSelectionAnchor.left = compareColumnSelectionAnchor.right = null;
   comparePairs = buildCompareStockPairs();
   renderStockComparison();
   document.getElementById('compareStockBackdrop').classList.add('visible');
@@ -1597,6 +1899,7 @@ function closeStockComparison() {
   closeCompareContextMenu();
   closeComparePositionPopup();
   document.getElementById('compareStockBackdrop').classList.remove('visible');
+  compareReturnFocus?.focus?.();
 }
 function applyStockComparisonPaste(text) {
   const parsed = parseCompareSystemRows(text);
@@ -1605,9 +1908,10 @@ function applyStockComparisonPaste(text) {
     return;
   }
   compareSystemRows = parsed;
-  compareSelections.left.clear();
-  compareSelections.right.clear();
+  clearCompareSelections();
   compareActiveCell = null;
+  compareRowSelectionAnchor.left = compareRowSelectionAnchor.right = null;
+  compareColumnSelectionAnchor.left = compareColumnSelectionAnchor.right = null;
   comparePairs = buildCompareStockPairs();
   renderStockComparison();
   show(`${parsed.length} filas de Sistema pegadas`);
@@ -2251,13 +2555,50 @@ document.getElementById('pasteCompareStockBtn').addEventListener('click', async 
 document.getElementById('compareStockBackdrop').addEventListener('mousedown', (event) => {
   if (event.target === event.currentTarget) closeStockComparison();
 });
-document.getElementById('compareStockTable').addEventListener('click', (event) => {
-  const cell = event.target.closest('[data-compare-side][data-compare-index]');
-  if (cell) selectCompareCell(cell, event.ctrlKey || event.metaKey);
+document.getElementById('compareStockTables').addEventListener('mousedown', (event) => {
+  const previous = document.querySelector('[data-compare-editing="1"]');
+  if (previous && !previous.contains(event.target)) finishCompareCell(previous, false);
+  const cell = event.target.closest('[data-compare-side][data-compare-index][data-compare-col]');
+  if (!cell || cell.isContentEditable) return;
+  event.preventDefault();
+  const side = cell.dataset.compareSide;
+  const index = Number(cell.dataset.compareIndex);
+  const col = Number(cell.dataset.compareCol);
+  clearCompareSelections();
+  compareActiveCell = { side, index, col };
+  renderStockComparison();
+  focusCompareCell(side, index, col);
+  requestAnimationFrame(() => {
+    const current = document.querySelector(`[data-compare-side="${side}"][data-compare-index="${index}"][data-compare-col="${col}"]`);
+    if (current) editCompareCell(current);
+  });
 });
-document.getElementById('compareStockTable').addEventListener('contextmenu', (event) => {
-  const cell = event.target.closest('[data-compare-side][data-compare-index]');
-  if (cell) openCompareContextMenu(event, cell);
+document.getElementById('compareStockTables').addEventListener('click', (event) => {
+  const corner = event.target.closest('[data-compare-corner]');
+  if (corner) {
+    selectAllCompareRows(corner.dataset.compareCorner, event.ctrlKey || event.metaKey);
+    return;
+  }
+  const rowSelector = event.target.closest('[data-compare-row-selector][data-compare-index]');
+  if (rowSelector) {
+    selectCompareRow(rowSelector.dataset.compareRowSelector, Number(rowSelector.dataset.compareIndex), event.ctrlKey || event.metaKey, event.shiftKey);
+    return;
+  }
+  const head = event.target.closest('[data-compare-head-side][data-compare-head-col]');
+  if (head) {
+    selectCompareColumn(head.dataset.compareHeadSide, Number(head.dataset.compareHeadCol), event.ctrlKey || event.metaKey, event.shiftKey);
+    return;
+  }
+});
+document.getElementById('compareStockTables').addEventListener('dblclick', (event) => {
+  const head = event.target.closest('[data-compare-head-side][data-compare-head-col]');
+  if (head) {
+    sortCompareColumn(head.dataset.compareHeadSide, Number(head.dataset.compareHeadCol));
+  }
+});
+document.getElementById('compareStockTables').addEventListener('contextmenu', (event) => {
+  const target = event.target.closest('[data-compare-row-selector][data-compare-index],[data-compare-side][data-compare-index]');
+  if (target) openCompareContextMenu(event, target);
 });
 document.getElementById('unifyCompareRowsBtn').addEventListener('click', unifySelectedCompareRows);
 document.getElementById('addCompareRowBtn').addEventListener('click', openComparePositionPopup);
@@ -2271,7 +2612,53 @@ document.addEventListener('mousedown', (event) => {
   if (!event.target.closest('#compareContextMenu')) closeCompareContextMenu();
 });
 document.addEventListener('keydown', (event) => {
-  if (!document.getElementById('compareStockBackdrop').classList.contains('visible') || !compareActiveCell) return;
+  if (!document.getElementById('compareStockBackdrop').classList.contains('visible')) return;
+  const editor = document.activeElement?.closest?.('[data-compare-side][data-compare-index][contenteditable="true"]');
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    editor?.blur();
+    if (document.getElementById('comparePositionBackdrop').classList.contains('visible')) closeComparePositionPopup();
+    else if (document.getElementById('compareContextMenu').classList.contains('visible')) closeCompareContextMenu();
+    else requestAnimationFrame(closeStockComparison);
+    return;
+  }
+  if (editor) {
+    if (event.key === 'F2') {
+      event.preventDefault();
+      const state = compareCaretState(editor);
+      const selection = window.getSelection();
+      if (state.all) selection.collapseToEnd();
+      else {
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      return;
+    }
+    if (event.code === 'NumpadDecimal') {
+      event.preventDefault();
+      document.execCommand('insertText', false, ',');
+      return;
+    }
+    const state = compareCaretState(editor);
+    const horizontalMove = event.key === 'ArrowLeft'
+      ? state.all || state.start
+      : event.key === 'ArrowRight'
+        ? state.all || state.end
+        : false;
+    const shouldMove = event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Enter' || event.key === 'Tab' || horizontalMove;
+    if (shouldMove) {
+      event.preventDefault();
+      const key = event.key;
+      const ctrlKey = event.ctrlKey || event.metaKey;
+      const shiftKey = event.shiftKey;
+      editor.blur();
+      requestAnimationFrame(() => moveCompareActive(key, ctrlKey, shiftKey));
+    }
+    return;
+  }
+  if (!compareActiveCell) return;
   const addShortcut = event.ctrlKey && (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd');
   const deleteShortcut = event.ctrlKey && (event.key === '-' || event.code === 'NumpadSubtract');
   if (addShortcut) {
@@ -2280,6 +2667,31 @@ document.addEventListener('keydown', (event) => {
   } else if (deleteShortcut) {
     event.preventDefault();
     deleteSelectedCompareRows();
+  } else if (event.key === 'Delete' || event.key === 'Backspace') {
+    event.preventDefault();
+    if (compareColumnSelections.left.size || compareColumnSelections.right.size) clearSelectedCompareColumns();
+    else if (compareSelections[compareActiveCell.side].size) deleteSelectedCompareRows();
+    else clearActiveCompareCell();
+  } else if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'a') {
+    event.preventDefault();
+    selectAllCompareRows(compareActiveCell.side);
+  } else if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'c') {
+    event.preventDefault();
+    copyCompareSelection();
+  } else if (event.key === 'F2') {
+    event.preventDefault();
+    const cell = document.querySelector(`[data-compare-side="${compareActiveCell.side}"][data-compare-index="${compareActiveCell.index}"][data-compare-col="${compareActiveCell.col}"]`);
+    if (cell) editCompareCell(cell);
+  } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Tab'].includes(event.key)) {
+    event.preventDefault();
+    moveCompareActive(event.key, event.ctrlKey || event.metaKey, event.shiftKey);
+  } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    const cell = document.querySelector(`[data-compare-side="${compareActiveCell.side}"][data-compare-index="${compareActiveCell.index}"][data-compare-col="${compareActiveCell.col}"]`);
+    if (cell) {
+      editCompareCell(cell);
+      requestAnimationFrame(() => document.execCommand('insertText', false, event.key));
+    }
   }
 });
 document.addEventListener('paste', (event) => {
@@ -2287,7 +2699,7 @@ document.addEventListener('paste', (event) => {
   const text = event.clipboardData?.getData('text/plain') || '';
   if (!text) return;
   event.preventDefault();
-  applyStockComparisonPaste(text);
+  if (!pasteIntoCompareTable(text)) applyStockComparisonPaste(text);
 });
 document.getElementById('copyBtn').addEventListener('click', () => copyGreen().catch((error) => { console.error(error); show('No pude copiar'); }));
 document.getElementById('closeCopyResultBtn').addEventListener('click', () => {

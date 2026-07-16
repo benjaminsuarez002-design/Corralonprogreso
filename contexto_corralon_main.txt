@@ -1,0 +1,1087 @@
+CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
+==========================================
+
+Fecha de referencia: 16/07/2026
+Carpeta principal:
+C:\Users\Administrador\Documents\Corralonprogreso-main
+
+Este archivo sirve para darle contexto a un chat nuevo sobre cómo está armado el
+proyecto Corralón Progreso. El código actual siempre es la fuente definitiva:
+si este documento y el código difieren, primero se debe revisar el código.
+
+
+REGLAS DE TRABAJO
+=================
+
+- Trabajar en modo rápido por defecto: ubicar el código puntual, modificarlo y
+  volver con el resultado.
+- No asumir decisiones, comportamientos o alcances que el usuario no haya pedido.
+- Si aparece cualquier duda, ambigüedad o decisión con más de una interpretación,
+  preguntar al usuario antes de modificar.
+- Solo hacer una revisión profunda cuando el usuario lo pida específicamente.
+
+
+1. DESCRIPCION GENERAL
+======================
+
+Corralonprogreso-main es un sistema web para administrar y consultar distintas
+áreas del corralón:
+
+- catálogo público y carrito;
+- presupuestos;
+- remitos e historial;
+- pedidos a proveedores;
+- artículos faltantes;
+- proveedores y listas de precios;
+- carga de stock;
+- actualización de artículos;
+- control diario de caja;
+- comprobantes;
+- garantías;
+- usuarios, sesiones y permisos;
+- calculadoras;
+- administración del catálogo público.
+
+No está construido como una aplicación con un framework único. La mayor parte
+del sistema está formada por páginas HTML independientes. Cada página contiene
+su estructura, estilos y bastante lógica JavaScript dentro del propio archivo.
+
+También existen módulos JavaScript compartidos que concentran funciones usadas
+por varias páginas.
+
+Muchas páginas son archivos grandes y monolíticos. Antes de modificar una
+función conviene confirmar si:
+
+1. está definida dentro de la página;
+2. proviene de funciones.js;
+3. proviene de corralon-system.js;
+4. depende de menu-auth-guard.js;
+5. utiliza Firebase, Supabase, Cloudinary o almacenamiento local.
+
+
+2. ARCHIVOS PRINCIPALES
+=======================
+
+index.html
+----------
+
+Es la lista de precios y catálogo público.
+
+Incluye, entre otras cosas:
+
+- carga y visualización del catálogo;
+- búsqueda por código o descripción;
+- tarjetas de productos;
+- detalle ampliado del artículo;
+- stock por sucursal;
+- precios, ofertas y descuentos;
+- carrito;
+- compartir artículos;
+- presupuestos;
+- cálculo especial para cerámicos;
+- acceso a funciones administrativas cuando existe una sesión válida.
+
+La información principal de artículos proviene de un JSON publicado en
+Cloudinary. La ubicación del JSON vigente se obtiene mediante la configuración
+guardada en Firebase.
+
+Campos importantes que llegan desde la exportación de artículos:
+
+- IDArt o código interno;
+- CodProv o código de proveedor;
+- descripción;
+- stock por sucursal;
+- PrecioCpraCI: precio de costo con impuestos;
+- PrecioVta3: precio de venta al público;
+- PorcGanMin: porcentaje/margen exportado desde Access;
+- datos de rubro, imágenes, ofertas y metadatos.
+
+El sistema de descuentos del catálogo utiliza el costo con impuestos y el precio
+de venta para calcular el margen real. El descuento:
+
+- no se aplica a artículos que ya están en oferta;
+- tiene un máximo del 25%;
+- no debe dejar un margen final inferior al 3%;
+- se refleja en el detalle del producto;
+- se mantiene al agregar el artículo al carrito;
+- también se usa en el presupuesto de cerámicos;
+- se identifica con chips verdes de “Oferta” o “Descuento”.
+
+
+menu.html
+---------
+
+Es el menú interno principal y también administra el inicio de sesión interno.
+
+Funciones principales:
+
+- inicio y cierre de sesión;
+- sesión persistente o sesión temporal de una hora;
+- permisos por usuario;
+- accesos a las distintas páginas;
+- notificaciones;
+- pendientes rápidos;
+- cotización del dólar oficial;
+- usuario activo;
+- objetivos y otros datos internos.
+
+La cotización del dólar se muestra para todos los usuarios y comparte el origen
+utilizado por caja.html.
+
+El alta rápida de pendientes permite guardar con Enter, limpiar y recuperar el
+foco inmediatamente, mientras la publicación se completa en segundo plano.
+
+
+usuarios.html
+-------------
+
+Administra los usuarios internos del menú:
+
+- nombre de usuario;
+- clave;
+- rol;
+- permisos;
+- accesos habilitados.
+
+La colección principal de usuarios internos en Firebase se llama:
+
+menuUsuarios
+
+
+soloadmin.html
+--------------
+
+Panel de administración del catálogo público.
+
+Maneja datos como:
+
+- imágenes;
+- ofertas;
+- etiquetas;
+- información publicada;
+- ajustes visuales o comerciales del catálogo;
+- metadatos adicionales de artículos.
+
+
+remitos.html
+------------
+
+Permite crear y emitir remitos.
+
+Se relaciona con:
+
+- historial.html;
+- notificaciones del menú;
+- generación y visualización de PDF;
+- datos de clientes y artículos.
+
+Al imprimir un remito también debe generarse o conservarse la notificación
+correspondiente. El contenido copiable del remito utiliza IDArt y cantidad.
+
+
+historial.html
+--------------
+
+Historial de presupuestos y remitos.
+
+Permite:
+
+- abrir registros anteriores;
+- consultar PDF;
+- editar remitos;
+- guardar cambios;
+- agregar y eliminar ítems;
+- copiar información del documento.
+
+El editor de ítems tiene navegación tipo Access:
+
+- Enter avanza hacia la derecha;
+- al llegar al último campo se utiliza la fila de nuevo registro;
+- no se debe guardar una fila vacía como un artículo con cantidad cero;
+- el botón morado “+” confirma/agrega el nuevo registro.
+
+
+presupuesto-shared.js
+---------------------
+
+Contiene funciones compartidas para presupuestos y documentos:
+
+- armado de datos;
+- generación de PDF;
+- vista previa;
+- formatos comunes;
+- utilidades reutilizadas por index.html e historial/remitos.
+
+
+pedidos.html
+------------
+
+Administra pedidos a proveedores.
+
+Flujo general:
+
+1. se selecciona un proveedor;
+2. se selecciona una sucursal;
+3. se buscan faltantes pendientes para esa combinación;
+4. los artículos se importan al pedido;
+5. el pedido puede quedar en edición o revisión;
+6. puede generarse PDF o Excel;
+7. al confirmarse se actualizan los faltantes asociados.
+
+Relación importante con faltantes:
+
+- un faltante importado se marca como pedido;
+- si se elimina del pedido antes de confirmarlo, debe desmarcarse;
+- si se elimina el pedido completo, se deben desmarcar sus artículos;
+- al generar el pedido definitivo, los faltantes correspondientes se eliminan
+  o se resuelven según el flujo vigente.
+
+Los botones sensibles, como eliminar pedido y determinadas exportaciones, están
+limitados según el rol del usuario, especialmente al administrador.
+
+
+faltantes.html
+--------------
+
+Tabla de artículos faltantes.
+
+Permite:
+
+- cargar faltantes;
+- asignar proveedor;
+- asignar sucursal;
+- filtrar por código de proveedor;
+- filtrar por artículo;
+- filtrar por proveedor;
+- filtrar por sucursal;
+- marcar y sincronizar el estado de pedido.
+
+Las sucursales normales son:
+
+- Suc. Progreso y Ruta;
+- Suc. Calle 5 y Espana.
+
+La lógica central de faltantes está compartida parcialmente desde
+corralon-system.js.
+
+
+proveedores.html
+----------------
+
+Administración de proveedores.
+
+Incluye:
+
+- creación;
+- edición;
+- eliminación;
+- edición de IDProveedor;
+- descuentos;
+- flete;
+- IVA;
+- página web;
+- teléfono;
+- vendedor;
+- notas;
+- fecha de actualización.
+
+Los datos de proveedores alimentan actualizar artículos, listas de proveedores,
+carga de stock, pedidos y faltantes.
+
+
+actualizar articulos.html
+-------------------------
+
+Se utiliza para actualizar artículos y precios de un proveedor.
+
+Funciones:
+
+- selección de proveedor;
+- carga o pegado de artículos;
+- aplicación de descuentos;
+- cálculo de costos;
+- exportación;
+- reemplazo de la lista del proveedor;
+- generación de archivos de salida.
+
+Utiliza:
+
+- corralon-system.js;
+- funciones.js;
+- menu-auth-guard.js;
+- biblioteca XLSX;
+- datos de proveedores y listas en Supabase.
+
+El campo proveedor permite abrir la página web guardada para el proveedor desde
+su menú contextual, cuando existe un enlace válido.
+
+
+listasproveedores.html
+----------------------
+
+Es la herramienta de consulta y comparación de listas de proveedores.
+
+Incluye:
+
+- filtros;
+- búsquedas por código y descripción;
+- comparación de listas;
+- selección parcial de celdas;
+- menús contextuales;
+- limpieza de comparaciones;
+- consulta de datos históricos o actuales.
+
+Los códigos pueden contener caracteres invisibles, saltos de línea o espacios
+copiados desde Access/Excel. Por eso las comparaciones deben normalizar el texto
+sin alterar el código visible que necesita el usuario.
+
+
+cargastock.html
+---------------
+
+Herramienta tipo planilla para preparar cargas de stock y costos.
+
+Funciones principales:
+
+- selección de proveedor;
+- carga del JSON específico del proveedor;
+- carga del índice principal de artículos;
+- pegado de filas desde Excel o Access;
+- edición por celdas;
+- validación de códigos;
+- validación del proveedor;
+- cálculo de descuentos;
+- precio final;
+- precio final por cantidad;
+- comparación contra datos del sistema;
+- copiado de las filas válidas;
+- menús contextuales;
+- unificación temporal de filas;
+- inserción y eliminación temporal de filas;
+- recálculo;
+- búsqueda en listas;
+- apertura de la web del proveedor.
+
+Reglas importantes de validación:
+
+- la coincidencia del código se comprueba estrictamente contra el índice
+  principal de index.html;
+- el código debe coincidir de forma exacta después de normalizar caracteres
+  invisibles;
+- también debe coincidir el proveedor correspondiente;
+- no se debe usar la lista JSON individual del proveedor para decidir si la fila
+  es válida en el índice;
+- las filas sin coincidencia correcta se muestran en rojo;
+- las filas válidas se muestran en verde;
+- si un código tiene más de una coincidencia en el índice, la copia continúa,
+  pero aparece una advertencia con el código y las descripciones encontradas.
+
+El índice completo no debe guardarse entero en localStorage porque puede superar
+la cuota del navegador. La carga debe funcionar en memoria y la caché local debe
+ser reducida o prescindible.
+
+El popup “Comparar” presenta dos lados:
+
+- Cargar Stock;
+- Sistema.
+
+La comparación principal se realiza por código. Las descripciones pueden ser
+diferentes y no deben invalidar una coincidencia de código. Los precios admiten
+una tolerancia del 2%.
+
+Las modificaciones realizadas dentro del comparador son temporales y no deben
+alterar la tabla original salvo que exista una acción explícita para hacerlo.
+
+
+diferencias-proveedores.html
+----------------------------
+
+Herramienta para conciliar o revisar diferencias de proveedores.
+
+Combina:
+
+- datos de listas;
+- estados persistentes;
+- almacenamiento remoto;
+- caché local;
+- filtros y comparaciones.
+
+
+caja.html
+---------
+
+Control diario de caja.
+
+Permite consultar y trabajar por:
+
+- Suc. Progreso y Ruta;
+- Suc. Calle 5 y Espana;
+- Todas las sucursales.
+
+Muestra, entre otros:
+
+- movimientos del día;
+- caja inicial;
+- ingresos/egresos;
+- importe final;
+- transferencias de Mercado Pago;
+- transferencias del sistema;
+- medios de pago;
+- diferencias;
+- cotización del dólar;
+- información guardada por fecha.
+
+Los movimientos sin sucursal asignada son globales y solo se muestran cuando se
+elige “Todas las sucursales”.
+
+La opción “Separar” permite incluir o excluir determinados medios de pago por
+sucursal. La selección se conserva localmente, pero no debe excluir movimientos
+globales.
+
+La fuente remota debe prevalecer sobre una copia local. Una caché local nunca
+debe sobrescribir Firebase o Supabase con datos vacíos o antiguos.
+
+Fuentes de publicación utilizadas por caja:
+
+- caja_dia_tabla.json en Cloudinary;
+- caja_dia_transferencias.json en Cloudinary;
+- estados y datos complementarios en Firebase/Supabase.
+
+El total de una fila se calcula como:
+
+Caja inicial + Movs. Día + Imp. I/E = Imp. Final
+
+
+comprobantes.html
+-----------------
+
+Administra comprobantes y documentación asociada.
+
+Utiliza:
+
+- Firebase;
+- Supabase Storage;
+- generación PDF;
+- exportación XLSX;
+- borradores y caché local.
+
+
+garantías.html
+--------------
+
+Emisión y gestión de garantías.
+
+Incluye:
+
+- datos del cliente/artículo;
+- fotografía de garantía;
+- selección, arrastre o pegado de imágenes;
+- vista previa antes de guardar;
+- historial o consulta de garantías emitidas.
+
+
+calculadoras.html
+-----------------
+
+Conjunto de calculadoras comerciales:
+
+- descuentos;
+- IVA;
+- flete;
+- división y multiplicación;
+- conversiones;
+- cálculos de precio.
+
+Consume datos de proveedores y utiliza comportamientos compartidos de campos.
+
+
+portal.html y login.html
+------------------------
+
+Entrada y autenticación para áreas externas o portales específicos. No deben
+confundirse con el inicio de sesión interno administrado por menu.html.
+
+
+generador-imagen-producto.html
+generar-previews-compartir.js
+cloudflare-worker-share-preview-snippet.js
+------------------------------------------------
+
+Herramientas relacionadas con:
+
+- generación de imágenes de producto;
+- vistas previas al compartir;
+- metadatos sociales;
+- enlaces públicos;
+- integración con el servidor o Cloudflare.
+
+
+3. MODULOS JAVASCRIPT COMPARTIDOS
+=================================
+
+funciones.js
+------------
+
+Expone utilidades compartidas mediante:
+
+window.CorralonFunciones
+
+Contiene comportamientos generales para campos y tablas:
+
+- selección completa al recibir foco;
+- F2 como interruptor de selección;
+- navegación con flechas;
+- Tab y Enter;
+- formato de moneda;
+- formato de porcentaje;
+- formato numérico;
+- fechas flexibles;
+- interpretación del decimal del teclado numérico;
+- listas desplegables editables;
+- apertura/cierre con F4;
+- filtrado al escribir;
+- navegación de opciones;
+- cierre al perder foco o hacer clic afuera;
+- menús contextuales;
+- navegación de grillas;
+- selección de filas y columnas;
+- copiado y pegado;
+- ordenamiento;
+- Ctrl + flechas;
+- pila de deshacer;
+- lectura de portapapeles;
+- redimensionamiento de columnas;
+- helpers de sesión;
+- métodos de pago de presupuestos.
+
+Antes de duplicar un comportamiento dentro de una página se debe comprobar si ya
+existe una función reutilizable en este archivo.
+
+
+corralon-system.js
+------------------
+
+Expone:
+
+window.CorralonSystem
+
+Centraliza buena parte de la comunicación con Supabase y la lógica de proveedores.
+
+Tablas de Supabase utilizadas:
+
+- proveedores;
+- proveedores_meta;
+- lista_precios;
+- lista_precios_meta;
+- listas_json_proveedores.
+
+También administra:
+
+- normalización de textos y códigos;
+- lectura de importes;
+- proveedores;
+- listas de precios;
+- metadatos;
+- stock por sucursal;
+- publicación de JSON por proveedor;
+- carga de archivos;
+- reemplazo de artículos;
+- integración con Cloudinary;
+- generación/exportación XLS;
+- lógica compartida de faltantes.
+
+Sucursales internas normalizadas:
+
+- progreso_ruta = Suc. Progreso y Ruta;
+- calle5_espana = Suc. Calle 5 y Espana.
+
+
+menu-auth-guard.js
+------------------
+
+Protege las páginas internas.
+
+Funciones:
+
+- lee la sesión iniciada desde menu.html;
+- valida al usuario contra Firebase;
+- verifica permisos por página;
+- oculta el contenido mientras valida;
+- redirige si la sesión o el permiso no son válidos.
+
+La sesión puede ser:
+
+- persistente: localStorage;
+- temporal: sessionStorage, con duración aproximada de una hora.
+
+Claves de almacenamiento relacionadas:
+
+- historial_keep_logged_v1;
+- corralon_menu_active_user_v1;
+- corralon_menu_active_user_snapshot_v1;
+- corralon_menu_active_user_session_v1;
+- corralon_menu_users_cache_v1.
+
+
+nav-helper.js
+-------------
+
+Controla navegación entre páginas:
+
+- clic normal abre en la misma pestaña;
+- Ctrl, Meta, Shift o clic central permiten abrir en otra pestaña;
+- evita que determinadas ventanas o popups se cierren incorrectamente al usar
+  navegación modificada.
+
+
+corralon-ai.js
+--------------
+
+Funciones de búsqueda y carga de datos de artículos para herramientas internas.
+Puede consultar cachés locales y JSON de proveedores.
+
+
+4. SERVICIOS Y ALMACENAMIENTO
+=============================
+
+El proyecto utiliza una combinación de servicios. No existe una única base de
+datos para todo.
+
+
+Firebase / Firestore
+--------------------
+
+Se utiliza principalmente para:
+
+- usuarios internos;
+- sesiones y permisos;
+- configuración del catálogo;
+- dirección del JSON vigente;
+- notificaciones;
+- pedidos;
+- faltantes sincronizados;
+- algunos estados compartidos.
+
+Algunas páginas usan Firebase modular y otras usan las librerías compat.
+
+
+Supabase
+--------
+
+Se utiliza para:
+
+- proveedores;
+- listas de precios;
+- metadatos;
+- manifiestos de JSON por proveedor;
+- estados persistentes;
+- historial y datos complementarios;
+- almacenamiento de archivos en algunos módulos.
+
+La configuración principal está centralizada parcialmente en
+corralon-system.js, aunque algunas páginas también contienen llamadas propias.
+
+
+Cloudinary
+----------
+
+Se utiliza como almacenamiento de archivos JSON grandes y otros recursos.
+
+Ejemplos:
+
+- catálogo principal;
+- listas JSON de proveedores;
+- exportaciones de caja;
+- archivos auxiliares de publicación.
+
+Firebase o Supabase pueden guardar el enlace al archivo vigente, mientras que el
+contenido grande se aloja en Cloudinary.
+
+
+localStorage, sessionStorage e IndexedDB
+----------------------------------------
+
+Se utilizan para:
+
+- cachés;
+- sesión;
+- borradores;
+- preferencias;
+- selecciones;
+- datos temporales;
+- acelerar la apertura de páginas;
+- conservar estados de interfaz.
+
+Regla de datos importante:
+
+Una copia local es auxiliar. No debe reemplazar silenciosamente información
+remota válida con datos viejos, incompletos o vacíos.
+
+
+5. FLUJO DEL CATALOGO PRINCIPAL
+===============================
+
+El catálogo público se genera aproximadamente con este recorrido:
+
+Access
+  -> exportación Excel
+  -> parseo a JSON
+  -> combinación con metadatos existentes
+  -> publicación en Cloudinary
+  -> actualización del enlace vigente en Firebase
+  -> carga del JSON desde index.html
+
+Código VBA conocido del botón de exportación:
+
+- exporta la consulta/tabla ExportArts;
+- genera C:\Update\Articulosexp.xls;
+- ejecuta C:\Update\run_sync_articulos_silent.vbs;
+- el proceso continúa mediante scripts externos.
+
+Archivos externos relacionados, ubicados normalmente en C:\Update:
+
+- Articulosexp.xls;
+- run_sync_articulos_silent.vbs;
+- run_sync_articulos.bat;
+- parse_excel_to_json.js;
+- publish_lista_from_json.js.
+
+Los scripts de parseo/publicación deben conservar:
+
+- PrecioCpraCI;
+- PrecioVta3;
+- PorcGanMin;
+- imágenes;
+- ofertas;
+- metadatos ya publicados.
+
+El MDB de Access no forma parte del repositorio web.
+
+
+6. FLUJO DE PROVEEDORES Y CARGA DE STOCK
+========================================
+
+Flujo aproximado:
+
+proveedores.html
+  -> datos de proveedor en Supabase
+  -> actualizar articulos.html
+  -> lista_precios / lista_precios_meta
+  -> JSON específico del proveedor
+  -> cargastock.html / listasproveedores.html / faltantes.html
+
+El catálogo principal y la lista específica de un proveedor cumplen funciones
+distintas:
+
+- índice principal: confirma si existe la combinación exacta de código y proveedor;
+- JSON del proveedor: ayuda a buscar descripciones, precios y artículos del
+  proveedor seleccionado.
+
+No deben intercambiarse estas responsabilidades.
+
+
+7. FLUJO FALTANTES Y PEDIDOS
+============================
+
+Flujo aproximado:
+
+faltantes.html
+  -> artículo pendiente con proveedor y sucursal
+  -> selección del proveedor en pedidos.html
+  -> selección de sucursal
+  -> importación automática
+  -> artículo marcado como pedido
+  -> revisión
+  -> PDF o Excel
+  -> confirmación y limpieza del faltante
+
+Si el artículo sale del pedido antes de completarse, el vínculo con faltantes
+debe revertirse.
+
+
+8. FLUJO DE REMITOS, PRESUPUESTOS Y NOTIFICACIONES
+==================================================
+
+index.html
+  -> presupuesto web
+  -> historial.html
+  -> notificación en menu.html
+
+remitos.html
+  -> remito
+  -> PDF/impresión
+  -> historial.html
+  -> notificación en menu.html
+
+Las notificaciones deben incluir el número y, cuando corresponda, el cliente.
+Imprimir no debe impedir que quede registrada la notificación.
+
+
+9. FLUJO DE CAJA
+================
+
+Access genera informes diarios que luego se transforman y publican para
+caja.html.
+
+Flujo aproximado:
+
+Access / informe diario
+  -> archivo de exportación
+  -> JSON de caja
+  -> Cloudinary
+  -> caja.html
+  -> combinación con estados guardados en Firebase/Supabase
+
+Los datos se separan por texto/origen:
+
+- PROGRESO se asigna a Suc. Progreso y Ruta;
+- A. GOMEZ se asigna a Suc. Calle 5 y Espana;
+- registros sin sucursal quedan como globales;
+- los globales aparecen únicamente en Todas las sucursales.
+
+Los ingresos/egresos globales y cobros de cuenta corriente deben integrarse al
+resultado de “Actualizar saldo”.
+
+
+10. SERVIDOR LOCAL
+==================
+
+Archivos relacionados:
+
+- CorralonWebServer.cs;
+- CorralonWebServer.exe;
+- archivos de respaldo y registro del servidor.
+
+El servidor local:
+
+- publica la carpeta del proyecto por HTTP;
+- normalmente utiliza el puerto 8080;
+- permite abrir el sistema en localhost y en la red local;
+- atiende rutas y archivos estáticos;
+- contiene endpoints auxiliares;
+- puede guardar exportaciones XLS;
+- puede inyectar componentes auxiliares;
+- tiene una ventana de control;
+- tiene icono y menú en la bandeja;
+- puede iniciarse con Windows.
+
+Dirección habitual:
+
+http://localhost:8080/
+
+Dirección de red documentada:
+
+http://192.168.100.28:8080/
+
+El servidor posee accesos como:
+
+- Abrir;
+- Abrir HTML;
+- Abrir Facturas Web;
+- subir archivos a GitHub;
+- detener;
+- minimizar;
+- salir.
+
+Los procesos auxiliares que abre deben ejecutarse ocultos cuando no necesitan
+interacción. Los selectores o confirmaciones que sí requieren interacción deben
+mostrarse delante de las demás ventanas y recibir foco.
+
+
+11. SUBIDA RAPIDA A GITHUB
+==========================
+
+Archivos:
+
+- Subir a GitHub.bat;
+- subir_archivos_github.ps1.
+
+El flujo permite:
+
+1. abrir un selector de archivos;
+2. elegir archivos del proyecto;
+3. preparar una copia temporal basada en origin/main;
+4. copiar solamente los archivos elegidos;
+5. crear un commit;
+6. subir directamente a main;
+7. limpiar la copia temporal.
+
+La ventana de selección/confirmación debe aparecer en primer plano.
+No se debe subir accidentalmente desde una rama de trabajo incorrecta.
+
+
+12. CLOUDFLARE
+==============
+
+wrangler.jsonc contiene la configuración de Cloudflare para servir el proyecto
+como sitio estático.
+
+El proyecto se identifica como:
+
+corralonprogreso
+
+Los archivos estáticos se toman desde la carpeta del proyecto.
+
+El snippet del worker de vistas previas se utiliza para metadatos de enlaces
+compartidos y no debe confundirse con la lógica principal de las páginas.
+
+
+13. FUNCIONAMIENTO GENERAL DE CAMPOS Y TABLAS
+==============================================
+
+Muchas herramientas internas imitan el comportamiento de Access o de una
+planilla.
+
+Comportamientos compartidos esperados:
+
+- al entrar a un campo se selecciona su contenido;
+- F2 alterna entre seleccionar todo y editar;
+- Enter avanza al campo de la derecha;
+- arriba y abajo cambian de fila;
+- izquierda/derecha respetan la posición del cursor;
+- Tab navega entre campos;
+- Ctrl + flechas lleva al extremo cuando se cumplen las mismas condiciones de
+  navegación normal;
+- moneda, porcentaje y números se formatean con configuración argentina;
+- el decimal del teclado numérico se interpreta como decimal;
+- las listas se filtran al escribir;
+- F4 abre y cierra listas;
+- clic afuera cierra listas y menús;
+- las tablas admiten selección de filas/columnas;
+- Ctrl y Shift amplían selecciones;
+- Supr elimina filas seleccionadas cuando corresponde;
+- copiar y pegar debe conservar filas y columnas;
+- el puntero de texto solo aparece al editar realmente una celda;
+- un popup abierto desde una celda debe devolver el foco a la celda original.
+
+La implementación común está principalmente en funciones.js, pero algunas
+páginas tienen adaptaciones propias.
+
+
+14. ARCHIVOS QUE REQUIEREN CUIDADO ESPECIAL
+===========================================
+
+aplica funciones.txt
+--------------------
+
+Documento de referencia de reglas de campos y tablas. No modificar salvo pedido
+explícito del usuario.
+
+
+Ariel2App.mdb
+-------------
+
+Ubicación conocida:
+
+C:\Update\Ariel2App.mdb
+
+No modificar automáticamente.
+
+Si un cambio requiere VBA, consultas, formularios o informes dentro del MDB:
+
+1. indicar al usuario exactamente qué formulario, módulo o evento debe abrir;
+2. entregar el código exacto;
+3. explicar brevemente qué reemplaza o agrega;
+4. el usuario realiza el cambio manualmente.
+
+
+Archivos prode / reference / minificados
+----------------------------------------
+
+Existen archivos grandes de referencia o aplicaciones separadas relacionadas
+con Prode. No se deben modificar como parte del sistema principal salvo pedido
+explícito.
+
+
+Carpeta onepace
+---------------
+
+No pertenece al núcleo funcional de Corralón Progreso. No tocar salvo pedido
+explícito.
+
+
+15. CRITERIO PARA UBICAR UN CAMBIO
+==================================
+
+Ante un pedido sobre una pantalla:
+
+1. identificar el HTML de la pantalla;
+2. buscar el texto visible, ID, clase o función relacionada;
+3. comprobar qué scripts compartidos carga;
+4. revisar si los datos vienen de Firebase, Supabase, Cloudinary o almacenamiento
+   local;
+5. modificar solamente el punto pedido;
+6. no extender el cambio a otras páginas sin confirmación.
+
+Mapa rápido:
+
+- catálogo, carrito, ofertas, descuentos: index.html;
+- menú, sesión, notificaciones, pendientes: menu.html;
+- permisos de usuarios: usuarios.html;
+- remitos nuevos: remitos.html;
+- remitos/presupuestos guardados: historial.html;
+- pedidos a proveedores: pedidos.html;
+- artículos faltantes: faltantes.html;
+- proveedores: proveedores.html;
+- listas: listasproveedores.html;
+- carga de stock: cargastock.html;
+- actualización de listas: actualizar articulos.html;
+- caja: caja.html;
+- comprobantes: comprobantes.html;
+- garantías: garantías.html;
+- calculadoras: calculadoras.html;
+- administración del catálogo: soloadmin.html;
+- comportamiento común de campos: funciones.js;
+- datos comunes de proveedores: corralon-system.js;
+- permisos de páginas: menu-auth-guard.js;
+- navegación entre páginas: nav-helper.js;
+- PDF de presupuestos: presupuesto-shared.js;
+- servidor local: CorralonWebServer.cs.
+
+
+16. RESUMEN DE DEPENDENCIAS
+===========================
+
+Frontend:
+
+- HTML;
+- CSS;
+- JavaScript sin framework central;
+- bibliotecas cargadas desde CDN en páginas puntuales;
+- XLSX;
+- jsPDF;
+- Firebase SDK;
+- llamadas REST a Supabase.
+
+Datos:
+
+- Firebase/Firestore;
+- Supabase;
+- Cloudinary;
+- localStorage;
+- sessionStorage;
+- IndexedDB;
+- JSON publicados;
+- Excel/Access como origen de determinadas exportaciones.
+
+Ejecución:
+
+- archivo local file:// para pruebas simples;
+- servidor local HTTP en puerto 8080 para funciones completas;
+- Cloudflare para publicación web;
+- GitHub como repositorio.
+
+
+17. NOTA FINAL PARA UN CHAT NUEVO
+================================
+
+Este proyecto tiene muchas funciones conectadas entre páginas. Un cambio visual
+puede estar dentro del HTML, pero un cambio de datos puede depender de un módulo
+compartido o de un publicador externo.
+
+No asumir qué fuente debe prevalecer ni ampliar un cambio a otros módulos.
+Si existe una duda sobre el alcance, la fuente de datos, el comportamiento
+esperado o si también debe aplicarse en otra pantalla, consultar al usuario.
+
+Salvo que el usuario pida revisar cuidadosamente un problema, trabajar en modo
+rápido y modificar únicamente lo solicitado.
