@@ -206,6 +206,29 @@
     }
     .branch-combo-input:focus { box-shadow: 0 0 0 2px rgba(109,93,247,.25); }
     .branch-combo:hover .branch-combo-input { border-color: var(--violeta); }
+    .branch-combo-button {
+      width: 100%;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 7px;
+      box-sizing: border-box;
+      border: 1px solid #cfc7ff;
+      border-radius: 9px;
+      background: #fff;
+      color: #302574;
+      padding: 4px 9px;
+      font: 800 13px Barlow, Arial, sans-serif;
+      text-align: left;
+      cursor: pointer;
+      outline: 0;
+    }
+    .branch-combo-button:hover,
+    .branch-combo-button:focus,
+    .branch-combo-button[aria-expanded="true"] { border-color: var(--violeta); box-shadow: 0 0 0 2px rgba(109,93,247,.18); }
+    .branch-combo-button-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .branch-combo-button-arrow { color: var(--violeta); font-size: 11px; flex: 0 0 auto; }
     .branch-combo-toggle {
       position: absolute;
       top: 2px;
@@ -322,6 +345,54 @@
     .movements .head-actions {
       justify-content: flex-end;
     }
+    .movement-view-controls {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .movement-view-label {
+      color: var(--violeta-oscuro);
+      font-size: 14px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    .movement-view-combo { width: 205px; }
+    .movement-view-combo .branch-combo-input {
+      height: 34px;
+      padding: 5px 31px 5px 9px;
+      font-size: 13px;
+    }
+    .movement-view-combo .branch-combo-button { height: 34px; }
+    .movement-view-combo .branch-combo-toggle {
+      height: 30px;
+    }
+    .cash-movement-branch-cell { overflow: visible; padding: 2px 4px !important; }
+    .cash-row-branch-combo { width: 100%; min-width: 0; }
+    .cash-row-branch-button {
+      width: 100%;
+      height: 25px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 5px;
+      box-sizing: border-box;
+      border: 1px solid #cfc7ff;
+      border-radius: 5px;
+      padding: 2px 6px;
+      background: #f8f6ff;
+      color: var(--violeta-oscuro);
+      font: 800 12px Barlow, Arial, sans-serif;
+      text-align: left;
+      cursor: pointer;
+    }
+    .cash-row-branch-button:hover,
+    .cash-row-branch-button:focus,
+    .cash-row-branch-button[aria-expanded="true"] { border-color: var(--violeta); background: #eeeaff; outline: 0; }
+    .cash-row-branch-arrow { color: var(--violeta); font-size: 11px; flex: 0 0 auto; }
+    .cash-row-branch-combo .branch-combo-list { z-index: 120; min-width: 205px; }
+    .cash-movement-note { text-align: left; }
+    .cash-movement-positive { color: #087b49; font-weight: 900; }
+    .cash-movement-negative { color: #c7193e; font-weight: 900; }
     .subform.paste-corner .subform-head {
       padding-right: 84px;
     }
@@ -1404,8 +1475,7 @@
         <button class="date-nav-btn" id="nextCajaDayBtn" type="button" aria-label="Dia siguiente">&gt;</button>
       </div>
       <div class="branch-combo" id="cajaBranchCombo">
-        <input class="branch-combo-input" id="cajaBranchInput" type="text" autocomplete="off" role="combobox" aria-label="Sucursal" aria-expanded="false" aria-controls="cajaBranchList">
-        <button class="branch-combo-toggle" id="cajaBranchToggle" type="button" aria-label="Desplegar sucursales">&#9662;</button>
+        <button class="branch-combo-button" id="cajaBranchButton" type="button" aria-label="Sucursal" aria-haspopup="listbox" aria-expanded="false" aria-controls="cajaBranchList"><span class="branch-combo-button-label" id="cajaBranchLabel"></span><span class="branch-combo-button-arrow">&#9662;</span></button>
         <div class="branch-combo-list" id="cajaBranchList" role="listbox"></div>
       </div>
       <a class="top-link" href="menu.html">Volver al menu</a>
@@ -1534,6 +1604,13 @@
             <div class="subform-head">
               <div class="subform-title">Movimientos del dia</div>
               <div class="head-actions">
+                <div class="movement-view-controls">
+                  <span class="movement-view-label">Ver:</span>
+                  <div class="branch-combo movement-view-combo" id="movementViewCombo">
+                    <button class="branch-combo-button" id="movementViewButton" type="button" aria-label="Ver tabla" aria-haspopup="listbox" aria-expanded="false" aria-controls="movementViewList"><span class="branch-combo-button-label" id="movementViewLabel"></span><span class="branch-combo-button-arrow">&#9662;</span></button>
+                    <div class="branch-combo-list" id="movementViewList" role="listbox"></div>
+                  </div>
+                </div>
                 <button class="access-btn primary paste-action" id="pasteMovementsBtn" type="button">Pegar</button>
               </div>
             </div>
@@ -1552,6 +1629,18 @@
                 </thead>
                 <tbody id="movementRows"></tbody>
               </table>
+              <table id="cashMovementTable" hidden>
+                <thead>
+                  <tr>
+                    <th class="row-selector-head"></th>
+                    <th data-copy-col style="width:150px">Ingreso / Egreso</th>
+                    <th data-copy-col style="width:80px">Hora</th>
+                    <th data-copy-col style="width:190px">Sucursal</th>
+                    <th data-copy-col>Nota</th>
+                  </tr>
+                </thead>
+                <tbody id="cashMovementRows"></tbody>
+              </table>
               <div class="movements-loading" id="movementsLoading" aria-live="polite">
                 <div class="movements-loading-box">
                   <div class="movements-loading-text">Cargando movimientos</div>
@@ -1561,7 +1650,7 @@
             </div>
             <div class="navigator">
               <span>Registro:</span><span class="nav-icons">|&lt; &lt; &gt; &gt;|</span>
-              <span class="nav-count">1 de 12</span>
+              <span class="nav-count" id="movementCount">1 de 12</span>
               <span class="nav-filter">Sin filtro</span>
               <input class="nav-search" value="Buscar" aria-label="Buscar movimientos">
             </div>
@@ -1690,13 +1779,18 @@
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
     const CAJA_PUBLIC_JSON_FALLBACK = {
       movements: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_tabla.json',
-      system: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_transferencias.json'
+      system: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_transferencias.json',
+      cashMovements: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_ingresos_egresos.json'
     };
     const FIREBASE_CAJA_CONFIG_COLLECTION = 'config';
     const FIREBASE_CAJA_CONFIG_DOC = 'cajaActual';
     const FIREBASE_CAJA_ESTADOS_COLLECTION = 'control_caja_estados';
     const FIREBASE_CAJA_MANUAL_COLLECTION = 'control_caja_manual';
     const DEFAULT_SUMMARY_MANUAL = { mercadoPago: 0, lapos: 0, getnet: 0, providerTransfers: 0 };
+    const MOVEMENT_VIEW_OPTIONS = [
+      { id: 'movements', label: 'Movimientos del día' },
+      { id: 'cashMovements', label: 'Ingresos y egresos' }
+    ];
     const UI_NOISE = new Set([
       'saltar al contenido', 'comentar sobre accesibilidad', 'mercado pago logo',
       'actividad', 'meli+', 'inicio', 'cuenta', 'tu dinero', 'reportes de tenencias',
@@ -1715,7 +1809,8 @@
       system: [],
       summaryManual: { ...DEFAULT_SUMMARY_MANUAL },
       movements: MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 })),
-      movementsByBranch: {}
+      movementsByBranch: {},
+      cashMovements: []
     };
 
     const el = {
@@ -1724,6 +1819,13 @@
       systemRows: document.getElementById('systemRows'),
       movementRows: document.getElementById('movementRows'),
       movementTable: document.getElementById('movementTable'),
+      cashMovementRows: document.getElementById('cashMovementRows'),
+      cashMovementTable: document.getElementById('cashMovementTable'),
+      movementCount: document.getElementById('movementCount'),
+      movementViewCombo: document.getElementById('movementViewCombo'),
+      movementViewButton: document.getElementById('movementViewButton'),
+      movementViewLabel: document.getElementById('movementViewLabel'),
+      movementViewList: document.getElementById('movementViewList'),
       movementSeparateHeader: document.getElementById('movementSeparateHeader'),
       movementSeparateModal: document.getElementById('movementSeparateModal'),
       movementSeparateTitle: document.getElementById('movementSeparateTitle'),
@@ -1744,8 +1846,8 @@
       dailyTotal: document.getElementById('dailyTotal'),
       cajaDateLabel: document.getElementById('cajaDateLabel'),
       cajaBranchCombo: document.getElementById('cajaBranchCombo'),
-      cajaBranchInput: document.getElementById('cajaBranchInput'),
-      cajaBranchToggle: document.getElementById('cajaBranchToggle'),
+      cajaBranchButton: document.getElementById('cajaBranchButton'),
+      cajaBranchLabel: document.getElementById('cajaBranchLabel'),
       cajaBranchList: document.getElementById('cajaBranchList'),
       prevCajaDayBtn: document.getElementById('prevCajaDayBtn'),
       nextCajaDayBtn: document.getElementById('nextCajaDayBtn'),
@@ -1784,6 +1886,8 @@
     let activeCajaBranchOption = -1;
     let separateMovementType = '';
     let movementBranchExclusions = loadMovementBranchExclusions();
+    let movementViewId = 'movements';
+    let movementViewActiveOption = -1;
 
     function storageKeyForDate(dateKey = selectedDateKey) {
       return `${STORAGE_KEY_BASE}_${dateKey}`;
@@ -1827,13 +1931,13 @@
       const saved = localStorage.getItem(CAJA_BRANCH_KEY) || cajaBranches[0]?.id || '';
       const branch = cajaBranches.find((item) => item.id === saved) || cajaBranches[0] || null;
       activeCajaBranchId = branch?.id || '';
-      el.cajaBranchInput.value = branch?.label || '';
-      el.cajaBranchInput.dataset.branchId = activeCajaBranchId;
-      renderCajaBranchOptions('');
+      el.cajaBranchLabel.textContent = branch?.label || '';
+      el.cajaBranchButton.dataset.branchId = activeCajaBranchId;
+      renderCajaBranchOptions();
     }
 
     function selectedCajaBranchId() {
-      return el.cajaBranchInput?.dataset.branchId || activeCajaBranchId || '';
+      return el.cajaBranchButton?.dataset.branchId || activeCajaBranchId || '';
     }
 
     function matchingCajaBranches(query = '') {
@@ -1841,8 +1945,8 @@
       return cajaBranches.filter((branch) => !filter || normalizarTexto(`${branch.label || ''} ${branch.id || ''}`).includes(filter));
     }
 
-    function renderCajaBranchOptions(query = '') {
-      const options = matchingCajaBranches(query);
+    function renderCajaBranchOptions() {
+      const options = cajaBranches;
       const selectedId = selectedCajaBranchId();
       const selectedIndex = options.findIndex((branch) => branch.id === selectedId);
       activeCajaBranchOption = selectedIndex >= 0 ? selectedIndex : (options.length ? 0 : -1);
@@ -1851,23 +1955,16 @@
         : '<div class="branch-combo-empty">Sin coincidencias</div>';
     }
 
-    function openCajaBranchList(showAll = false) {
-      renderCajaBranchOptions(showAll ? '' : el.cajaBranchInput.value);
+    function openCajaBranchList() {
+      renderCajaBranchOptions();
       el.cajaBranchList.classList.add('open');
-      el.cajaBranchInput.setAttribute('aria-expanded', 'true');
+      el.cajaBranchButton.setAttribute('aria-expanded', 'true');
     }
 
     function closeCajaBranchList() {
       el.cajaBranchList.classList.remove('open');
-      el.cajaBranchInput.setAttribute('aria-expanded', 'false');
+      el.cajaBranchButton.setAttribute('aria-expanded', 'false');
       activeCajaBranchOption = -1;
-    }
-
-    function restoreActiveCajaBranchInput() {
-      if (el.cajaBranchInput.dataset.branchId) return;
-      const branch = cajaBranches.find((item) => item.id === activeCajaBranchId);
-      el.cajaBranchInput.value = branch?.label || '';
-      el.cajaBranchInput.dataset.branchId = branch?.id || '';
     }
 
     function moveCajaBranchOption(delta) {
@@ -1883,15 +1980,17 @@
       if (!branch) return false;
       rememberBranchMovements(activeCajaBranchId);
       activeCajaBranchId = branch.id;
-      el.cajaBranchInput.value = branch.label || branch.id;
-      el.cajaBranchInput.dataset.branchId = branch.id;
+      el.cajaBranchLabel.textContent = branch.label || branch.id;
+      el.cajaBranchButton.dataset.branchId = branch.id;
       closeCajaBranchList();
       state.movements = activeCajaBranchId === CAJA_ALL_BRANCHES_ID
         ? cloneMovements(combinedBranchMovements(state.movementsByBranch))
         : cloneMovements(state.movementsByBranch[activeCajaBranchId] || []);
+      if (state.cashMovements.length) applyCashMovementTotalsToBranches();
       localStorage.setItem(CAJA_BRANCH_KEY, activeCajaBranchId);
       persistLocalState();
       renderMovementRows();
+      renderMovementView();
       updateTotals();
       lastPublicCajaSignature = '';
       loadPublicCajaData({ force: true, showPublicLoading: true });
@@ -1924,6 +2023,235 @@
 
     function realCajaBranches() {
       return cajaBranches.filter((branch) => branch.id !== CAJA_ALL_BRANCHES_ID);
+    }
+
+    function cashMovementBranches() {
+      const branches = Array.isArray(window.CorralonSystem?.BRANCHES) ? CorralonSystem.BRANCHES : [];
+      return branches.map((branch) => ({ id: String(branch.id || ''), label: String(branch.label || branch.id || '') })).filter((branch) => branch.id);
+    }
+
+    function resolveCashMovementBranchId(item = {}) {
+      const branches = cashMovementBranches();
+      const explicitId = String(item.branchId || item.sucursalId || item.idSucursal || item.IDSuc || item.IDDepósito || '').trim();
+      const exact = branches.find((branch) => branch.id === explicitId);
+      if (exact) return exact.id;
+      if (explicitId === '1') return branches[0]?.id || '';
+      if (explicitId === '2') return branches[1]?.id || '';
+      const source = normalizarTexto(item.branch || item.sucursal || item.Sucursal || item.Suc || item.Descripción || item.Descripcion || item.deposito || item.Deposito || item.nota || item.Nota || '');
+      const byLabel = branches.find((branch) => {
+        const label = normalizarTexto(branch.label);
+        return source === label || source.includes(label) || label.includes(source);
+      });
+      if (byLabel) return byLabel.id;
+      if (source.includes('progreso') || source.includes('ruta')) return branches[0]?.id || '';
+      if (source.includes('calle 5') || source.includes('espana') || source.includes('gomez')) return branches[1]?.id || '';
+      return '';
+    }
+
+    function cashMovementHour(value) {
+      const text = String(value ?? '').trim();
+      const match = text.match(/(?:T|\s|^)(\d{1,2}):(\d{2})/);
+      return match ? `${String(match[1]).padStart(2, '0')}:${match[2]}` : text.slice(0, 5);
+    }
+
+    function normalizeCashMovement(item = {}, index = 0) {
+      const id = String(item.id ?? item.IDMov ?? item.idMov ?? item.IdMov ?? index + 1).trim();
+      const amount = Number(item.amount ?? item.importe ?? item.Importe ?? item['Ing(+)/Egr(-)'] ?? 0) || 0;
+      const note = String(item.note ?? item.nota ?? item.Nota ?? '').trim();
+      return {
+        id,
+        idRecibo: String(item.idRecibo ?? item.IDRecibo ?? '').trim(),
+        amount,
+        hour: cashMovementHour(item.hour ?? item.hora ?? item.Hora ?? ''),
+        note,
+        branchId: resolveCashMovementBranchId({ ...item, nota: note }),
+        branchManual: Boolean(item.branchManual ?? item.manualBranch ?? false)
+      };
+    }
+
+    function cashMovementKey(row = {}, index = 0) {
+      return `${String(row.idRecibo || '')}|${String(row.id || index + 1)}`;
+    }
+
+    function cashMovementRowsFromPayload(payload) {
+      if (!payload) return [];
+      let rows = Array.isArray(payload) ? payload : (payload.rows || payload.ingresosEgresos || payload.cashMovements || []);
+      if (!Array.isArray(rows) && payload.branches && typeof payload.branches === 'object') {
+        rows = Object.entries(payload.branches).flatMap(([branchId, branchRows]) => {
+          const list = Array.isArray(branchRows) ? branchRows : (Array.isArray(branchRows?.rows) ? branchRows.rows : []);
+          return list.map((row) => ({ ...row, branchId }));
+        });
+      }
+      return (Array.isArray(rows) ? rows : []).map(normalizeCashMovement).filter((row) => row.id && row.branchId);
+    }
+
+    function applyCashMovementTotalsToBranches() {
+      const branches = cashMovementBranches();
+      branches.forEach((branch) => {
+        const total = state.cashMovements
+          .filter((row) => row.branchId === branch.id)
+          .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const rows = cloneMovements(state.movementsByBranch[branch.id] || []);
+        const efectivo = rows.find((row) => movementTypeKey(row.type) === movementTypeKey('Efectivo'));
+        if (efectivo) efectivo.ie = total;
+        state.movementsByBranch[branch.id] = rows;
+      });
+      const branchId = selectedCajaBranchId();
+      state.movements = branchId === CAJA_ALL_BRANCHES_ID
+        ? cloneMovements(combinedBranchMovements(state.movementsByBranch))
+        : cloneMovements(state.movementsByBranch[branchId] || []);
+    }
+
+    function visibleCashMovements() {
+      const branchId = selectedCajaBranchId();
+      if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return state.cashMovements;
+      return state.cashMovements.filter((row) => row.branchId === branchId);
+    }
+
+    function renderCashMovementRows() {
+      const rows = visibleCashMovements();
+      const branches = cashMovementBranches();
+      el.cashMovementRows.innerHTML = rows.map((row, index) => {
+        const branch = branches.find((item) => item.id === row.branchId);
+        const key = cashMovementKey(row, index);
+        const listId = `cashMovementBranchList_${index}`;
+        return `<tr data-cash-movement-id="${escapeHtml(row.id)}">
+          <td class="row-selector-cell"></td>
+          <td class="money ${row.amount < 0 ? 'cash-movement-negative' : 'cash-movement-positive'}">${formatMoney(row.amount)}</td>
+          <td class="center">${escapeHtml(row.hour || '')}</td>
+          <td class="cash-movement-branch-cell">
+            <div class="branch-combo cash-row-branch-combo" data-cash-movement-key="${escapeHtml(key)}">
+              <button class="cash-row-branch-button" type="button" aria-label="Sucursal del movimiento" aria-haspopup="listbox" aria-expanded="false" aria-controls="${listId}" data-branch-id="${escapeHtml(row.branchId || '')}" data-cash-row-branch-button>
+                <span data-cash-row-branch-label>${escapeHtml(branch?.label || 'Elegir sucursal')}</span><span class="cash-row-branch-arrow">&#9662;</span>
+              </button>
+              <div class="branch-combo-list" id="${listId}" role="listbox" data-cash-row-branch-list></div>
+            </div>
+          </td>
+          <td class="cash-movement-note">${escapeHtml(row.note || '')}</td>
+        </tr>`;
+      }).join('') + blankRows(Math.max(2, 10 - rows.length), 5);
+      el.movementCount.textContent = rowCountText(rows.length);
+    }
+
+    function renderMovementView() {
+      const cashView = movementViewId === 'cashMovements';
+      el.movementTable.hidden = cashView;
+      el.cashMovementTable.hidden = !cashView;
+      if (cashView) renderCashMovementRows();
+      else el.movementCount.textContent = rowCountText(state.movements.length);
+    }
+
+    function renderMovementViewOptions() {
+      const options = MOVEMENT_VIEW_OPTIONS;
+      movementViewActiveOption = options.findIndex((option) => option.id === movementViewId);
+      if (movementViewActiveOption < 0) movementViewActiveOption = options.length ? 0 : -1;
+      el.movementViewList.innerHTML = options.length
+        ? options.map((option, index) => `<div class="branch-combo-option${index === movementViewActiveOption ? ' active' : ''}" role="option" data-movement-view-id="${option.id}">${escapeHtml(option.label)}</div>`).join('')
+        : '<div class="branch-combo-empty">Sin coincidencias</div>';
+    }
+
+    function openMovementViewList() {
+      renderMovementViewOptions();
+      el.movementViewList.classList.add('open');
+      el.movementViewButton.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeMovementViewList() {
+      el.movementViewList.classList.remove('open');
+      el.movementViewButton.setAttribute('aria-expanded', 'false');
+      movementViewActiveOption = -1;
+    }
+
+    function moveMovementViewOption(delta) {
+      const options = [...el.movementViewList.querySelectorAll('[data-movement-view-id]')];
+      if (!options.length) return;
+      movementViewActiveOption = (movementViewActiveOption + delta + options.length) % options.length;
+      options.forEach((option, index) => option.classList.toggle('active', index === movementViewActiveOption));
+      options[movementViewActiveOption].scrollIntoView({ block: 'nearest' });
+    }
+
+    function selectMovementView(id) {
+      const option = MOVEMENT_VIEW_OPTIONS.find((item) => item.id === id);
+      if (!option) return;
+      movementViewId = option.id;
+      el.movementViewLabel.textContent = option.label;
+      el.movementViewButton.dataset.viewId = option.id;
+      closeMovementViewList();
+      renderMovementView();
+    }
+
+    function cashMovementForCombo(combo) {
+      const key = combo?.dataset.cashMovementKey || '';
+      return state.cashMovements.find((row, index) => cashMovementKey(row, index) === key) || null;
+    }
+
+    function renderCashRowBranchOptions(combo) {
+      const row = cashMovementForCombo(combo);
+      const list = combo?.querySelector('[data-cash-row-branch-list]');
+      if (!row || !list) return;
+      const options = cashMovementBranches();
+      let activeIndex = options.findIndex((branch) => branch.id === row.branchId);
+      if (activeIndex < 0) activeIndex = options.length ? 0 : -1;
+      combo.dataset.activeOption = String(activeIndex);
+      list.innerHTML = options.length
+        ? options.map((branch, index) => `<div class="branch-combo-option${index === activeIndex ? ' active' : ''}" role="option" aria-selected="${branch.id === row.branchId ? 'true' : 'false'}" data-cash-row-branch-id="${escapeHtml(branch.id)}">${escapeHtml(branch.label)}</div>`).join('')
+        : '<div class="branch-combo-empty">Sin coincidencias</div>';
+    }
+
+    function openCashRowBranchList(combo) {
+      const button = combo?.querySelector('[data-cash-row-branch-button]');
+      const list = combo?.querySelector('[data-cash-row-branch-list]');
+      if (!button || !list) return;
+      el.cashMovementRows.querySelectorAll('.cash-row-branch-combo').forEach((other) => {
+        if (other !== combo) closeCashRowBranchList(other);
+      });
+      renderCashRowBranchOptions(combo);
+      list.classList.add('open');
+      button.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeCashRowBranchList(combo) {
+      const button = combo?.querySelector('[data-cash-row-branch-button]');
+      const list = combo?.querySelector('[data-cash-row-branch-list]');
+      list?.classList.remove('open');
+      button?.setAttribute('aria-expanded', 'false');
+      if (combo) combo.dataset.activeOption = '-1';
+    }
+
+    function moveCashRowBranchOption(combo, delta) {
+      const list = combo?.querySelector('[data-cash-row-branch-list]');
+      const options = [...(list?.querySelectorAll('[data-cash-row-branch-id]') || [])];
+      if (!options.length) return;
+      let activeIndex = Number(combo.dataset.activeOption ?? -1);
+      activeIndex = (activeIndex + delta + options.length) % options.length;
+      combo.dataset.activeOption = String(activeIndex);
+      options.forEach((option, index) => option.classList.toggle('active', index === activeIndex));
+      options[activeIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    function selectCashRowBranch(combo, branchId) {
+      const row = cashMovementForCombo(combo);
+      const button = combo?.querySelector('[data-cash-row-branch-button]');
+      const label = combo?.querySelector('[data-cash-row-branch-label]');
+      const branch = cashMovementBranches().find((item) => item.id === branchId);
+      if (!row || !button || !label || !branch) return false;
+      row.branchId = branch.id;
+      row.branchManual = true;
+      label.textContent = branch.label;
+      button.dataset.branchId = branch.id;
+      closeCashRowBranchList(combo);
+      applyCashMovementTotalsToBranches();
+      saveState();
+      renderMovementRows();
+      updateTotals();
+      if (movementViewId === 'cashMovements' && selectedCajaBranchId() !== CAJA_ALL_BRANCHES_ID && branch.id !== selectedCajaBranchId()) {
+        renderCashMovementRows();
+      }
+      return true;
+    }
+
+    function initializeMovementViewSelectors() {
+      selectMovementView('movements');
     }
 
     function isMovementBranchIncluded(type, branchId) {
@@ -2003,6 +2331,7 @@
       state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
       state.movements = MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 }));
       state.movementsByBranch = {};
+      state.cashMovements = [];
       selectedTransferId = '';
       selectedTransferRows.clear();
       selectedSystemRows.clear();
@@ -2018,15 +2347,42 @@
       return firebaseDb;
     }
 
+    function cashMovementBranchOverrides(source = state) {
+      return Object.fromEntries((source.cashMovements || [])
+        .map((row, index) => ({ row, key: cashMovementKey(row, index) }))
+        .filter(({ row, key }) => row.branchManual && key && row.branchId)
+        .map(({ row, key }) => [key, row.branchId]));
+    }
+
+    function applyCashMovementBranchOverrides(overrides = {}) {
+      if (!overrides || typeof overrides !== 'object') return false;
+      const validBranches = new Set(cashMovementBranches().map((branch) => branch.id));
+      let changed = false;
+      state.cashMovements.forEach((row, index) => {
+        const branchId = String(overrides[cashMovementKey(row, index)] || '');
+        if (!validBranches.has(branchId)) return;
+        row.branchId = branchId;
+        row.branchManual = true;
+        changed = true;
+      });
+      if (changed) applyCashMovementTotalsToBranches();
+      return changed;
+    }
+
     function cajaManualPayload(source = state) {
       return {
         cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
-        transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row)))
+        transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row))),
+        cashMovementBranches: cashMovementBranchOverrides(source)
       };
     }
 
     function hasCajaManualData(payload) {
-      return Boolean((payload?.transfers || []).length || (payload?.cash || []).some((row) => Number(row.bills || 0) || Number(row.packs || 0)));
+      return Boolean(
+        (payload?.transfers || []).length
+        || (payload?.cash || []).some((row) => Number(row.bills || 0) || Number(row.packs || 0))
+        || Object.keys(payload?.cashMovementBranches || {}).length
+      );
     }
 
     function applyCajaManualPayload(payload) {
@@ -2035,6 +2391,7 @@
         return { denom, bills: Number(row.bills || 0), packs: Number(row.packs || 0) };
       });
       if (Array.isArray(payload?.transfers)) state.transfers = payload.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
+      applyCashMovementBranchOverrides(payload?.cashMovementBranches || {});
     }
 
     async function loadFirebaseCajaManual(dateKey = selectedDateKey) {
@@ -2059,6 +2416,7 @@
             fecha: dateKey,
             cash: values.cash,
             transfers: values.transfers,
+            cashMovementBranches: values.cashMovementBranches,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
         } catch (error) {
@@ -2288,7 +2646,8 @@
         system: state.system,
         summaryManual: state.summaryManual,
         movements: state.movements,
-        movementsByBranch: state.movementsByBranch
+        movementsByBranch: state.movementsByBranch,
+        cashMovements: state.cashMovements
       };
     }
 
@@ -2299,7 +2658,8 @@
         transfers: state.transfers,
         system: state.system,
         movements: state.movements,
-        movementsByBranch: state.movementsByBranch
+        movementsByBranch: state.movementsByBranch,
+        cashMovements: state.cashMovements
       };
     }
 
@@ -2308,13 +2668,14 @@
       const hasCash = Array.isArray(payload.cash) && payload.cash.some((row) => Number(row?.bills || 0) || Number(row?.packs || 0));
       const hasTransfers = Array.isArray(payload.transfers) && payload.transfers.length > 0;
       const hasSystem = Array.isArray(payload.system) && payload.system.length > 0;
+      const hasCashMovements = Array.isArray(payload.cashMovements) && payload.cashMovements.length > 0;
       const hasMovements = Array.isArray(payload.movements) && payload.movements.some((row) => (
         Number(row?.initial || 0) || Number(row?.day || 0) || Number(row?.ie || 0)
       ));
       const hasBranchMovements = Object.values(payload.movementsByBranch || {}).some((rows) => (
         Array.isArray(rows) && rows.some((row) => Number(row?.initial || 0) || Number(row?.day || 0) || Number(row?.ie || 0))
       ));
-      return hasCash || hasTransfers || hasSystem || hasMovements || hasBranchMovements;
+      return hasCash || hasTransfers || hasSystem || hasCashMovements || hasMovements || hasBranchMovements;
     }
 
     function hasStateData() {
@@ -2347,6 +2708,7 @@
         if (Array.isArray(saved.system)) {
           state.system = saved.system.map(normalizeSystemRow);
         }
+        if (Array.isArray(saved.cashMovements)) state.cashMovements = saved.cashMovements.map(normalizeCashMovement).filter(Boolean);
         if (saved.summaryManual && typeof saved.summaryManual === 'object' && !applyingRemoteState) {
           state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
           Object.keys(DEFAULT_SUMMARY_MANUAL).forEach((key) => {
@@ -2366,6 +2728,7 @@
           ? savedBranchMovements
           : (branchId === defaultBranchId && Array.isArray(saved.movements) ? saved.movements : []);
         state.movements = cloneMovements(savedMovements);
+        if (state.cashMovements.length) applyCashMovementTotalsToBranches();
         if (branchId && branchId !== CAJA_ALL_BRANCHES_ID) state.movementsByBranch[branchId] = cloneMovements(state.movements);
       return true;
     }
@@ -2724,6 +3087,7 @@
           <td class="money">${formatMoney(finalAmount)}</td>
         </tr>`;
       }).join('') + blankRows(2, showSeparate ? 7 : 6);
+      if (movementViewId === 'movements') el.movementCount.textContent = rowCountText(state.movements.length);
     }
 
     function summaryRowsData(totals = calculateTotals()) {
@@ -3275,6 +3639,7 @@
       renderTransferRows();
       renderSystemRows();
       renderMovementRows();
+      renderMovementView();
       updateTotals();
     }
 
@@ -3859,6 +4224,21 @@
       return true;
     }
 
+    function applyPublicCajaCashMovements(payload) {
+      if (!payload || !cajaPublicPayloadMatchesDate(payload)) return false;
+      const hasApplicablePayload = Array.isArray(payload)
+        || Array.isArray(payload?.rows)
+        || Array.isArray(payload?.ingresosEgresos)
+        || Array.isArray(payload?.cashMovements)
+        || Boolean(payload?.branches && typeof payload.branches === 'object');
+      if (!hasApplicablePayload) return false;
+      const manualBranches = cashMovementBranchOverrides();
+      state.cashMovements = cashMovementRowsFromPayload(payload);
+      applyCashMovementBranchOverrides(manualBranches);
+      applyCashMovementTotalsToBranches();
+      return true;
+    }
+
     async function fetchPublicCajaJson(url) {
       const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(await response.text());
@@ -3903,17 +4283,21 @@
       }
     }
 
-    function publicCajaSignature(config, movementsPayload, systemPayload) {
+    function publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload) {
       return [
         selectedCajaBranchId(),
         config?.updatedAt || '',
         config?.urlTabla || '',
         config?.urlTransferencias || '',
+        config?.urlIngresosEgresos || '',
         movementsPayload?.generatedAt || '',
         systemPayload?.generatedAt || '',
+        cashMovementsPayload?.generatedAt || '',
         movementsPayload?.idRecibo || '',
+        cashMovementsPayload?.idRecibo || '',
         rowsFromPublicPayload(movementsPayload, { branchAware: true }).length,
-        rowsFromPublicPayload(systemPayload).length
+        rowsFromPublicPayload(systemPayload).length,
+        cashMovementRowsFromPayload(cashMovementsPayload).length
       ].join('|');
     }
 
@@ -3931,20 +4315,24 @@
         const config = await loadCajaPublicConfig();
         const movementsUrl = config?.urlTabla || CAJA_PUBLIC_JSON_FALLBACK.movements;
         const systemUrl = config?.urlTransferencias || CAJA_PUBLIC_JSON_FALLBACK.system;
+        const cashMovementsUrl = config?.urlIngresosEgresos || CAJA_PUBLIC_JSON_FALLBACK.cashMovements;
         if (!movementsUrl || !systemUrl) return;
-        const [movementsPayload, systemPayload] = await Promise.all([
+        const [movementsPayload, systemPayload, cashMovementsPayload] = await Promise.all([
           fetchPublicCajaJson(movementsUrl),
-          fetchPublicCajaJson(systemUrl)
+          fetchPublicCajaJson(systemUrl),
+          cashMovementsUrl ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null) : Promise.resolve(null)
         ]);
-        const signature = publicCajaSignature(config, movementsPayload, systemPayload);
+        const signature = publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload);
         if (!force && signature && signature === lastPublicCajaSignature) return;
         const appliedMovements = applyPublicCajaMovements(movementsPayload);
         const appliedSystem = applyPublicCajaSystem(systemPayload);
-        if (!appliedMovements && !appliedSystem) return;
+        const appliedCashMovements = applyPublicCajaCashMovements(cashMovementsPayload);
+        if (!appliedMovements && !appliedSystem && !appliedCashMovements) return;
         const wasAlreadyLoaded = Boolean(lastPublicCajaSignature);
         lastPublicCajaSignature = signature;
         persistLocalState();
         renderMovementRows();
+        renderMovementView();
         renderSystemRows();
         updateTotals();
         if (wasAlreadyLoaded || !silent) showToast('Caja actualizada', 5000);
@@ -4227,7 +4615,12 @@
       const target = event.target;
       if (event.key !== 'F2' || !isEditableField(target) || typeof target.select !== 'function') return false;
       event.preventDefault();
-      target.select();
+      if (hasFullSelection(target)) {
+        const end = target.value.length;
+        target.setSelectionRange(end, end);
+      } else {
+        target.select();
+      }
       return true;
     }
 
@@ -4404,63 +4797,154 @@
     document.getElementById('findDiffBtn').addEventListener('click', openDiffModal);
     el.prevCajaDayBtn.addEventListener('click', () => switchCajaDate(-1));
     el.nextCajaDayBtn.addEventListener('click', () => switchCajaDate(1));
-    el.cajaBranchInput.addEventListener('input', () => {
-      el.cajaBranchInput.dataset.branchId = '';
-      openCajaBranchList(false);
-    });
-    el.cajaBranchInput.addEventListener('keydown', (event) => {
+    el.cajaBranchButton.addEventListener('keydown', (event) => {
       const isOpen = el.cajaBranchList.classList.contains('open');
       if (event.key === 'F4') {
         event.preventDefault();
         if (isOpen) closeCajaBranchList();
-        else openCajaBranchList(true);
+        else openCajaBranchList();
         return;
       }
-      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && isOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        moveCajaBranchOption(event.key === 'ArrowDown' ? 1 : -1);
+        if (!isOpen) openCajaBranchList();
+        else moveCajaBranchOption(event.key === 'ArrowDown' ? 1 : -1);
         return;
       }
-      if (event.key === 'Enter') {
-        if (!el.cajaBranchInput.value.trim()) {
-          event.preventDefault();
-          closeCajaBranchList();
-          return;
-        }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
         if (isOpen) {
           const options = [...el.cajaBranchList.querySelectorAll('[data-branch-id]')];
           const option = options[activeCajaBranchOption];
-          if (option) {
-            event.preventDefault();
-            selectCajaBranch(option.dataset.branchId);
-          }
-        }
+          if (option) selectCajaBranch(option.dataset.branchId);
+        } else openCajaBranchList();
         return;
       }
       if (event.key === 'Escape' && isOpen) {
         event.preventDefault();
+        event.stopPropagation();
         closeCajaBranchList();
-        restoreActiveCajaBranchInput();
       }
     });
-    el.cajaBranchToggle.addEventListener('mousedown', (event) => event.preventDefault());
-    el.cajaBranchToggle.addEventListener('click', () => {
-      el.cajaBranchInput.focus();
+    el.cajaBranchButton.addEventListener('click', () => {
       if (el.cajaBranchList.classList.contains('open')) closeCajaBranchList();
-      else openCajaBranchList(true);
+      else openCajaBranchList();
     });
     el.cajaBranchList.addEventListener('mousedown', (event) => {
       const option = event.target.closest('[data-branch-id]');
       if (!option) return;
       event.preventDefault();
       selectCajaBranch(option.dataset.branchId);
-      el.cajaBranchInput.focus();
+      el.cajaBranchButton.focus();
     });
     el.cajaBranchCombo.addEventListener('focusout', () => {
       setTimeout(() => {
         if (el.cajaBranchCombo.contains(document.activeElement)) return;
         closeCajaBranchList();
-        restoreActiveCajaBranchInput();
+      }, 0);
+    });
+    el.movementViewButton.addEventListener('keydown', (event) => {
+      const isOpen = el.movementViewList.classList.contains('open');
+      if (event.key === 'F4') {
+        event.preventDefault();
+        if (isOpen) closeMovementViewList();
+        else openMovementViewList();
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (!isOpen) openMovementViewList();
+        else moveMovementViewOption(event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (isOpen) {
+          const options = [...el.movementViewList.querySelectorAll('[data-movement-view-id]')];
+          const option = options[movementViewActiveOption];
+          if (option) selectMovementView(option.dataset.movementViewId);
+        } else openMovementViewList();
+        return;
+      }
+      if (event.key === 'Escape' && isOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeMovementViewList();
+      }
+    });
+    el.movementViewButton.addEventListener('click', () => {
+      if (el.movementViewList.classList.contains('open')) closeMovementViewList();
+      else openMovementViewList();
+    });
+    el.movementViewList.addEventListener('mousedown', (event) => {
+      const option = event.target.closest('[data-movement-view-id]');
+      if (!option) return;
+      event.preventDefault();
+      selectMovementView(option.dataset.movementViewId);
+      el.movementViewButton.focus();
+    });
+    el.movementViewCombo.addEventListener('focusout', () => {
+      setTimeout(() => {
+        if (el.movementViewCombo.contains(document.activeElement)) return;
+        closeMovementViewList();
+      }, 0);
+    });
+    el.cashMovementRows.addEventListener('keydown', (event) => {
+      const button = event.target.closest('[data-cash-row-branch-button]');
+      const combo = button?.closest('[data-cash-movement-key]');
+      const list = combo?.querySelector('[data-cash-row-branch-list]');
+      if (!button || !combo || !list) return;
+      const isOpen = list.classList.contains('open');
+      if (event.key === 'F4') {
+        event.preventDefault();
+        if (isOpen) closeCashRowBranchList(combo);
+        else openCashRowBranchList(combo);
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (!isOpen) openCashRowBranchList(combo);
+        else moveCashRowBranchOption(combo, event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (isOpen) {
+          const options = [...list.querySelectorAll('[data-cash-row-branch-id]')];
+          const option = options[Number(combo.dataset.activeOption ?? -1)];
+          if (option) selectCashRowBranch(combo, option.dataset.cashRowBranchId);
+        } else openCashRowBranchList(combo);
+        return;
+      }
+      if (event.key === 'Escape' && isOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCashRowBranchList(combo);
+      }
+    });
+    el.cashMovementRows.addEventListener('mousedown', (event) => {
+      const option = event.target.closest('[data-cash-row-branch-id]');
+      if (!option) return;
+      event.preventDefault();
+      const combo = option.closest('[data-cash-movement-key]');
+      if (!combo) return;
+      selectCashRowBranch(combo, option.dataset.cashRowBranchId);
+      combo.querySelector('[data-cash-row-branch-button]')?.focus();
+    });
+    el.cashMovementRows.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-cash-row-branch-button]');
+      const combo = button?.closest('[data-cash-movement-key]');
+      if (!button || !combo) return;
+      const list = combo.querySelector('[data-cash-row-branch-list]');
+      if (list?.classList.contains('open')) closeCashRowBranchList(combo);
+      else openCashRowBranchList(combo);
+    });
+    el.cashMovementRows.addEventListener('focusout', (event) => {
+      const combo = event.target.closest('[data-cash-movement-key]');
+      if (!combo) return;
+      setTimeout(() => {
+        if (combo.contains(document.activeElement)) return;
+        closeCashRowBranchList(combo);
       }, 0);
     });
     document.getElementById('updateTotalsBtn').addEventListener('click', async () => {
@@ -4682,6 +5166,7 @@
     });
 
     loadCajaBranches();
+    initializeMovementViewSelectors();
     updateDateLabel();
     loadDolarCards();
     loadState(selectedDateKey);
