@@ -827,6 +827,33 @@
       menuDragMoved = false;
     }
 
+    function nombrePestanaMenu(url) {
+      const destino = new URL(url, window.location.href);
+      const archivo = destino.pathname.split('/').pop() || 'index.html';
+      return `corralon_${archivo.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+    }
+
+    function abrirPestanaMenu(url) {
+      const destino = new URL(url, window.location.href);
+      const nombre = nombrePestanaMenu(destino.href);
+      const pestana = window.open('', nombre);
+      if (!pestana) return false;
+      try {
+        const actual = new URL(pestana.location.href);
+        const estaVacia = actual.href === 'about:blank';
+        const mismaPagina = !estaVacia && actual.origin === destino.origin && actual.pathname === destino.pathname;
+        if (estaVacia || !mismaPagina || actual.search !== destino.search) {
+          pestana.location.href = destino.href;
+        } else if (actual.hash !== destino.hash) {
+          pestana.location.hash = destino.hash;
+        }
+      } catch (_) {
+        pestana.location.href = destino.href;
+      }
+      pestana.focus();
+      return true;
+    }
+
     function configurarArrastreMenu() {
       if (!menuGrid || menuGrid.dataset.sortableReady === '1') return;
       menuGrid.dataset.sortableReady = '1';
@@ -858,6 +885,12 @@
           event.stopImmediatePropagation();
         }
       }, true);
+      menuGrid.addEventListener('click', (event) => {
+        const enlace = event.target.closest('.menu-btn[href]');
+        if (!enlace || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        abrirPestanaMenu(enlace.href);
+      });
 
       menuGrid.addEventListener('pointerdown', (event) => {
         if (event.pointerType !== 'touch' || event.button !== 0) return;
@@ -1603,9 +1636,7 @@
     }
 
     function openNotificationTarget(url) {
-      const opened = window.open(url, '_blank');
-      if (opened) setTimeout(() => window.focus(), 0);
-      return Boolean(opened);
+      return abrirPestanaMenu(url);
     }
 
     function openReviewOrder(id, docId = '', keepPopupOpen = false) {
