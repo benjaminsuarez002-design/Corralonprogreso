@@ -393,6 +393,7 @@
     .cash-movement-note { text-align: left; }
     .cash-movement-positive { color: #087b49; font-weight: 900; }
     .cash-movement-negative { color: #c7193e; font-weight: 900; }
+    .receipt-client, .receipt-concept { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .subform.paste-corner .subform-head {
       padding-right: 84px;
     }
@@ -1641,6 +1642,19 @@
                 </thead>
                 <tbody id="cashMovementRows"></tbody>
               </table>
+              <table id="receiptTable" hidden>
+                <thead>
+                  <tr>
+                    <th class="row-selector-head"></th>
+                    <th data-copy-col style="width:95px">Nro. recibo</th>
+                    <th data-copy-col style="width:155px">Cliente</th>
+                    <th data-copy-col>Concepto</th>
+                    <th data-copy-col style="width:165px">Sucursal</th>
+                    <th data-copy-col style="width:120px">Importe</th>
+                  </tr>
+                </thead>
+                <tbody id="receiptRows"></tbody>
+              </table>
               <div class="movements-loading" id="movementsLoading" aria-live="polite">
                 <div class="movements-loading-box">
                   <div class="movements-loading-text">Cargando movimientos</div>
@@ -1780,7 +1794,8 @@
     const CAJA_PUBLIC_JSON_FALLBACK = {
       movements: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_tabla.json',
       system: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_transferencias.json',
-      cashMovements: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_ingresos_egresos.json'
+      cashMovements: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_ingresos_egresos.json',
+      receipts: 'https://res.cloudinary.com/do0i2da7h/raw/upload/caja_dia_recibos.json'
     };
     const FIREBASE_CAJA_CONFIG_COLLECTION = 'config';
     const FIREBASE_CAJA_CONFIG_DOC = 'cajaActual';
@@ -1789,7 +1804,8 @@
     const DEFAULT_SUMMARY_MANUAL = { mercadoPago: 0, lapos: 0, getnet: 0, providerTransfers: 0 };
     const MOVEMENT_VIEW_OPTIONS = [
       { id: 'movements', label: 'Movimientos del día' },
-      { id: 'cashMovements', label: 'Ingresos y egresos' }
+      { id: 'cashMovements', label: 'Ingresos y egresos' },
+      { id: 'receipts', label: 'Recibos' }
     ];
     const UI_NOISE = new Set([
       'saltar al contenido', 'comentar sobre accesibilidad', 'mercado pago logo',
@@ -1810,7 +1826,8 @@
       summaryManual: { ...DEFAULT_SUMMARY_MANUAL },
       movements: MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 })),
       movementsByBranch: {},
-      cashMovements: []
+      cashMovements: [],
+      receipts: []
     };
 
     const el = {
@@ -1821,6 +1838,8 @@
       movementTable: document.getElementById('movementTable'),
       cashMovementRows: document.getElementById('cashMovementRows'),
       cashMovementTable: document.getElementById('cashMovementTable'),
+      receiptRows: document.getElementById('receiptRows'),
+      receiptTable: document.getElementById('receiptTable'),
       movementCount: document.getElementById('movementCount'),
       movementViewCombo: document.getElementById('movementViewCombo'),
       movementViewButton: document.getElementById('movementViewButton'),
@@ -1888,6 +1907,7 @@
     let movementBranchExclusions = loadMovementBranchExclusions();
     let movementViewId = 'movements';
     let movementViewActiveOption = -1;
+    let receiptMovementAllocations = { branches: {}, global: {} };
 
     function storageKeyForDate(dateKey = selectedDateKey) {
       return `${STORAGE_KEY_BASE}_${dateKey}`;
@@ -2085,6 +2105,104 @@
       return (Array.isArray(rows) ? rows : []).map(normalizeCashMovement).filter((row) => row.id && row.branchId);
     }
 
+    function normalizeReceipt(item = {}, index = 0) {
+      const id = String(item.id ?? item.idRecibo ?? item.IDRecibo ?? index + 1).trim();
+      const rawPayments = item.payments ?? item.pagos ?? [];
+      const paymentRows = Array.isArray(rawPayments) ? rawPayments : (rawPayments && typeof rawPayments === 'object' ? [rawPayments] : []);
+      return {
+        id,
+        number: String(item.number ?? item.numero ?? item.NroFactura ?? '').trim(),
+        date: String(item.date ?? item.fecha ?? item.Fecha ?? '').slice(0, 10),
+        hour: cashMovementHour(item.hour ?? item.hora ?? item.Hora ?? ''),
+        client: String(item.client ?? item.cliente ?? item.Cliente ?? '').trim(),
+        concept: String(item.concept ?? item.concepto ?? item.Concepto ?? item.note ?? item.Nota ?? '').trim(),
+        note: String(item.note ?? item.nota ?? item.Nota ?? '').trim(),
+        amount: Number(item.amount ?? item.importe ?? item.Total ?? 0) || 0,
+        branchId: resolveCashMovementBranchId(item),
+        branch: String(item.branch ?? item.sucursal ?? item.Sucursal ?? item.Deposito ?? '').trim(),
+        branchManual: Boolean(item.branchManual ?? item.manualBranch ?? false),
+        payments: paymentRows.map((payment) => ({
+          type: String(payment.type ?? payment.tipo ?? payment.TipoPago ?? '').trim(),
+          amount: Number(payment.amount ?? payment.importe ?? payment.Importe ?? 0) || 0
+        })).filter((payment) => payment.type && payment.amount)
+      };
+    }
+
+    function receiptKey(row = {}, index = 0) {
+      return String(row.id || index + 1);
+    }
+
+    function receiptRowsFromPayload(payload) {
+      if (!payload) return [];
+      const rows = Array.isArray(payload) ? payload : (payload.rows || payload.receipts || payload.recibos || []);
+      return (Array.isArray(rows) ? rows : []).map(normalizeReceipt).filter((row) => row.id && row.branchId);
+    }
+
+    function adjustBranchMovementDay(branchId, type, delta) {
+      if (!branchId || !type || !Number(delta)) return;
+      if (!Array.isArray(state.movementsByBranch[branchId])) state.movementsByBranch[branchId] = [];
+      const rows = state.movementsByBranch[branchId];
+      let row = rows.find((item) => movementTypeKey(item.type) === movementTypeKey(type));
+      if (!row) {
+        row = { type: MOVEMENT_TYPES.find((item) => movementTypeKey(item) === movementTypeKey(type)) || type, initial: 0, day: 0, ie: 0 };
+        rows.push(row);
+      }
+      row.day = Number((Number(row.day || 0) + Number(delta || 0)).toFixed(2));
+    }
+
+    function normalizeReceiptMovementAllocations(value = {}) {
+      const normalized = { branches: {}, global: {} };
+      Object.entries(value?.branches || {}).forEach(([branchId, totals]) => {
+        if (!totals || typeof totals !== 'object') return;
+        normalized.branches[branchId] = {};
+        Object.entries(totals).forEach(([type, amount]) => {
+          if (Number(amount)) normalized.branches[branchId][type] = Number(amount);
+        });
+        if (!Object.keys(normalized.branches[branchId]).length) delete normalized.branches[branchId];
+      });
+      Object.entries(value?.global || {}).forEach(([type, amount]) => {
+        if (Number(amount)) normalized.global[type] = Number(amount);
+      });
+      return normalized;
+    }
+
+    function hasReceiptMovementAllocations(value = receiptMovementAllocations) {
+      return Boolean(Object.keys(value?.branches || {}).length || Object.keys(value?.global || {}).length);
+    }
+
+    function clearReceiptMovementAllocations() {
+      Object.entries(receiptMovementAllocations.branches || {}).forEach(([branchId, totals]) => {
+        Object.entries(totals || {}).forEach(([type, amount]) => adjustBranchMovementDay(branchId, type, -Number(amount || 0)));
+      });
+      Object.entries(receiptMovementAllocations.global || {}).forEach(([type, amount]) => {
+        adjustBranchMovementDay(CAJA_GLOBAL_ONLY_BRANCH_ID, type, Number(amount || 0));
+      });
+      receiptMovementAllocations = { branches: {}, global: {} };
+    }
+
+    function applyReceiptTotalsToBranches() {
+      clearReceiptMovementAllocations();
+      if (!Array.isArray(state.movementsByBranch[CAJA_GLOBAL_ONLY_BRANCH_ID])) return;
+      const validBranches = new Set(cashMovementBranches().map((branch) => branch.id));
+      state.receipts.forEach((receipt) => {
+        if (!validBranches.has(receipt.branchId)) return;
+        (receipt.payments || []).forEach((payment) => {
+          const type = String(payment.type || '').trim();
+          const amount = Number(payment.amount || 0);
+          if (!type || !amount) return;
+          adjustBranchMovementDay(receipt.branchId, type, amount);
+          adjustBranchMovementDay(CAJA_GLOBAL_ONLY_BRANCH_ID, type, -amount);
+          receiptMovementAllocations.branches[receipt.branchId] ||= {};
+          receiptMovementAllocations.branches[receipt.branchId][type] = Number(((receiptMovementAllocations.branches[receipt.branchId][type] || 0) + amount).toFixed(2));
+          receiptMovementAllocations.global[type] = Number(((receiptMovementAllocations.global[type] || 0) + amount).toFixed(2));
+        });
+      });
+      const branchId = selectedCajaBranchId();
+      state.movements = branchId === CAJA_ALL_BRANCHES_ID
+        ? cloneMovements(combinedBranchMovements(state.movementsByBranch))
+        : cloneMovements(state.movementsByBranch[branchId] || []);
+    }
+
     function applyCashMovementTotalsToBranches() {
       const branches = cashMovementBranches();
       branches.forEach((branch) => {
@@ -2106,6 +2224,12 @@
       const branchId = selectedCajaBranchId();
       if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return state.cashMovements;
       return state.cashMovements.filter((row) => row.branchId === branchId);
+    }
+
+    function visibleReceipts() {
+      const branchId = selectedCajaBranchId();
+      if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return state.receipts;
+      return state.receipts.filter((row) => row.branchId === branchId);
     }
 
     function renderCashMovementRows() {
@@ -2133,11 +2257,40 @@
       el.movementCount.textContent = rowCountText(rows.length);
     }
 
+    function renderReceiptRows() {
+      const rows = visibleReceipts();
+      const branches = cashMovementBranches();
+      el.receiptRows.innerHTML = rows.map((row, index) => {
+        const branch = branches.find((item) => item.id === row.branchId);
+        const key = receiptKey(row, index);
+        const listId = `receiptBranchList_${index}`;
+        return `<tr data-receipt-id="${escapeHtml(row.id)}">
+          <td class="row-selector-cell"></td>
+          <td>${escapeHtml(row.number || row.id)}</td>
+          <td class="receipt-client" title="${escapeHtml(row.client)}">${escapeHtml(row.client)}</td>
+          <td class="receipt-concept" title="${escapeHtml(row.concept || row.note)}">${escapeHtml(row.concept || row.note)}</td>
+          <td class="cash-movement-branch-cell">
+            <div class="branch-combo cash-row-branch-combo" data-receipt-key="${escapeHtml(key)}">
+              <button class="cash-row-branch-button" type="button" aria-label="Sucursal del recibo" aria-haspopup="listbox" aria-expanded="false" aria-controls="${listId}" data-branch-id="${escapeHtml(row.branchId || '')}" data-receipt-row-branch-button>
+                <span data-receipt-row-branch-label>${escapeHtml(branch?.label || row.branch || 'Elegir sucursal')}</span><span class="cash-row-branch-arrow">&#9662;</span>
+              </button>
+              <div class="branch-combo-list" id="${listId}" role="listbox" data-receipt-row-branch-list></div>
+            </div>
+          </td>
+          <td class="money">${formatMoney(row.amount)}</td>
+        </tr>`;
+      }).join('') + blankRows(Math.max(2, 10 - rows.length), 6);
+      el.movementCount.textContent = rowCountText(rows.length);
+    }
+
     function renderMovementView() {
       const cashView = movementViewId === 'cashMovements';
-      el.movementTable.hidden = cashView;
+      const receiptView = movementViewId === 'receipts';
+      el.movementTable.hidden = cashView || receiptView;
       el.cashMovementTable.hidden = !cashView;
+      el.receiptTable.hidden = !receiptView;
       if (cashView) renderCashMovementRows();
+      else if (receiptView) renderReceiptRows();
       else el.movementCount.textContent = rowCountText(state.movements.length);
     }
 
@@ -2250,6 +2403,76 @@
       return true;
     }
 
+    function receiptForCombo(combo) {
+      const key = combo?.dataset.receiptKey || '';
+      return state.receipts.find((row, index) => receiptKey(row, index) === key) || null;
+    }
+
+    function renderReceiptRowBranchOptions(combo) {
+      const row = receiptForCombo(combo);
+      const list = combo?.querySelector('[data-receipt-row-branch-list]');
+      if (!row || !list) return;
+      const options = cashMovementBranches();
+      let activeIndex = options.findIndex((branch) => branch.id === row.branchId);
+      if (activeIndex < 0) activeIndex = options.length ? 0 : -1;
+      combo.dataset.activeOption = String(activeIndex);
+      list.innerHTML = options.length
+        ? options.map((branch, index) => `<div class="branch-combo-option${index === activeIndex ? ' active' : ''}" role="option" aria-selected="${branch.id === row.branchId ? 'true' : 'false'}" data-receipt-row-branch-id="${escapeHtml(branch.id)}">${escapeHtml(branch.label)}</div>`).join('')
+        : '<div class="branch-combo-empty">Sin sucursales</div>';
+    }
+
+    function openReceiptRowBranchList(combo) {
+      const button = combo?.querySelector('[data-receipt-row-branch-button]');
+      const list = combo?.querySelector('[data-receipt-row-branch-list]');
+      if (!button || !list) return;
+      el.receiptRows.querySelectorAll('[data-receipt-key]').forEach((other) => {
+        if (other !== combo) closeReceiptRowBranchList(other);
+      });
+      renderReceiptRowBranchOptions(combo);
+      list.classList.add('open');
+      button.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeReceiptRowBranchList(combo) {
+      const button = combo?.querySelector('[data-receipt-row-branch-button]');
+      const list = combo?.querySelector('[data-receipt-row-branch-list]');
+      list?.classList.remove('open');
+      button?.setAttribute('aria-expanded', 'false');
+      if (combo) combo.dataset.activeOption = '-1';
+    }
+
+    function moveReceiptRowBranchOption(combo, delta) {
+      const list = combo?.querySelector('[data-receipt-row-branch-list]');
+      const options = [...(list?.querySelectorAll('[data-receipt-row-branch-id]') || [])];
+      if (!options.length) return;
+      let activeIndex = Number(combo.dataset.activeOption ?? -1);
+      activeIndex = (activeIndex + delta + options.length) % options.length;
+      combo.dataset.activeOption = String(activeIndex);
+      options.forEach((option, index) => option.classList.toggle('active', index === activeIndex));
+      options[activeIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    function selectReceiptRowBranch(combo, branchId) {
+      const row = receiptForCombo(combo);
+      const button = combo?.querySelector('[data-receipt-row-branch-button]');
+      const label = combo?.querySelector('[data-receipt-row-branch-label]');
+      const branch = cashMovementBranches().find((item) => item.id === branchId);
+      if (!row || !button || !label || !branch) return false;
+      row.branchId = branch.id;
+      row.branchManual = true;
+      label.textContent = branch.label;
+      button.dataset.branchId = branch.id;
+      closeReceiptRowBranchList(combo);
+      applyReceiptTotalsToBranches();
+      saveState();
+      renderMovementRows();
+      updateTotals();
+      if (movementViewId === 'receipts' && selectedCajaBranchId() !== CAJA_ALL_BRANCHES_ID && branch.id !== selectedCajaBranchId()) {
+        renderReceiptRows();
+      }
+      return true;
+    }
+
     function initializeMovementViewSelectors() {
       selectMovementView('movements');
     }
@@ -2332,6 +2555,8 @@
       state.movements = MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 }));
       state.movementsByBranch = {};
       state.cashMovements = [];
+      state.receipts = [];
+      receiptMovementAllocations = { branches: {}, global: {} };
       selectedTransferId = '';
       selectedTransferRows.clear();
       selectedSystemRows.clear();
@@ -2369,11 +2594,33 @@
       return changed;
     }
 
+    function receiptBranchOverrides(source = state) {
+      return Object.fromEntries((source.receipts || [])
+        .map((row, index) => ({ row, key: receiptKey(row, index) }))
+        .filter(({ row, key }) => row.branchManual && key && row.branchId)
+        .map(({ row, key }) => [key, row.branchId]));
+    }
+
+    function applyReceiptBranchOverrides(overrides = {}) {
+      if (!overrides || typeof overrides !== 'object') return false;
+      const validBranches = new Set(cashMovementBranches().map((branch) => branch.id));
+      let changed = false;
+      state.receipts.forEach((row, index) => {
+        const branchId = String(overrides[receiptKey(row, index)] || '');
+        if (!validBranches.has(branchId)) return;
+        row.branchId = branchId;
+        row.branchManual = true;
+        changed = true;
+      });
+      return changed;
+    }
+
     function cajaManualPayload(source = state) {
       return {
         cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
         transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row))),
-        cashMovementBranches: cashMovementBranchOverrides(source)
+        cashMovementBranches: cashMovementBranchOverrides(source),
+        receiptBranches: receiptBranchOverrides(source)
       };
     }
 
@@ -2382,6 +2629,7 @@
         (payload?.transfers || []).length
         || (payload?.cash || []).some((row) => Number(row.bills || 0) || Number(row.packs || 0))
         || Object.keys(payload?.cashMovementBranches || {}).length
+        || Object.keys(payload?.receiptBranches || {}).length
       );
     }
 
@@ -2392,6 +2640,7 @@
       });
       if (Array.isArray(payload?.transfers)) state.transfers = payload.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
       applyCashMovementBranchOverrides(payload?.cashMovementBranches || {});
+      if (applyReceiptBranchOverrides(payload?.receiptBranches || {})) applyReceiptTotalsToBranches();
     }
 
     async function loadFirebaseCajaManual(dateKey = selectedDateKey) {
@@ -2417,6 +2666,7 @@
             cash: values.cash,
             transfers: values.transfers,
             cashMovementBranches: values.cashMovementBranches,
+            receiptBranches: values.receiptBranches,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
         } catch (error) {
@@ -2647,7 +2897,9 @@
         summaryManual: state.summaryManual,
         movements: state.movements,
         movementsByBranch: state.movementsByBranch,
-        cashMovements: state.cashMovements
+        cashMovements: state.cashMovements,
+        receipts: state.receipts,
+        receiptMovementAllocations
       };
     }
 
@@ -2659,7 +2911,9 @@
         system: state.system,
         movements: state.movements,
         movementsByBranch: state.movementsByBranch,
-        cashMovements: state.cashMovements
+        cashMovements: state.cashMovements,
+        receipts: state.receipts,
+        receiptMovementAllocations
       };
     }
 
@@ -2669,13 +2923,14 @@
       const hasTransfers = Array.isArray(payload.transfers) && payload.transfers.length > 0;
       const hasSystem = Array.isArray(payload.system) && payload.system.length > 0;
       const hasCashMovements = Array.isArray(payload.cashMovements) && payload.cashMovements.length > 0;
+      const hasReceipts = Array.isArray(payload.receipts) && payload.receipts.length > 0;
       const hasMovements = Array.isArray(payload.movements) && payload.movements.some((row) => (
         Number(row?.initial || 0) || Number(row?.day || 0) || Number(row?.ie || 0)
       ));
       const hasBranchMovements = Object.values(payload.movementsByBranch || {}).some((rows) => (
         Array.isArray(rows) && rows.some((row) => Number(row?.initial || 0) || Number(row?.day || 0) || Number(row?.ie || 0))
       ));
-      return hasCash || hasTransfers || hasSystem || hasCashMovements || hasMovements || hasBranchMovements;
+      return hasCash || hasTransfers || hasSystem || hasCashMovements || hasReceipts || hasMovements || hasBranchMovements;
     }
 
     function hasStateData() {
@@ -2709,6 +2964,7 @@
           state.system = saved.system.map(normalizeSystemRow);
         }
         if (Array.isArray(saved.cashMovements)) state.cashMovements = saved.cashMovements.map(normalizeCashMovement).filter(Boolean);
+        if (Array.isArray(saved.receipts)) state.receipts = saved.receipts.map(normalizeReceipt).filter(Boolean);
         if (saved.summaryManual && typeof saved.summaryManual === 'object' && !applyingRemoteState) {
           state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
           Object.keys(DEFAULT_SUMMARY_MANUAL).forEach((key) => {
@@ -2719,6 +2975,8 @@
         Object.entries(saved.movementsByBranch || {}).forEach(([branchId, rows]) => {
           if (Array.isArray(rows)) state.movementsByBranch[branchId] = cloneMovements(rows);
         });
+        receiptMovementAllocations = normalizeReceiptMovementAllocations(saved.receiptMovementAllocations || {});
+        if (!hasReceiptMovementAllocations()) applyReceiptTotalsToBranches();
         const branchId = selectedCajaBranchId();
         const defaultBranchId = window.CorralonSystem?.BRANCHES?.[0]?.id || 'progreso_ruta';
         const savedBranchMovements = branchId === CAJA_ALL_BRANCHES_ID
@@ -4187,6 +4445,7 @@
 
     function applyPublicCajaMovements(payload) {
       if (!cajaPublicPayloadMatchesDate(payload)) return false;
+      receiptMovementAllocations = { branches: {}, global: {} };
       rememberPublicBranchMovements(payload);
       const rows = rowsFromPublicPayload(payload, { branchAware: true });
       const hasApplicablePayload = Array.isArray(payload)
@@ -4239,6 +4498,20 @@
       return true;
     }
 
+    function applyPublicCajaReceipts(payload) {
+      if (!payload || !cajaPublicPayloadMatchesDate(payload)) return false;
+      const hasApplicablePayload = Array.isArray(payload)
+        || Array.isArray(payload?.rows)
+        || Array.isArray(payload?.receipts)
+        || Array.isArray(payload?.recibos);
+      if (!hasApplicablePayload) return false;
+      const manualBranches = receiptBranchOverrides();
+      state.receipts = receiptRowsFromPayload(payload);
+      applyReceiptBranchOverrides(manualBranches);
+      applyReceiptTotalsToBranches();
+      return true;
+    }
+
     async function fetchPublicCajaJson(url) {
       const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(await response.text());
@@ -4283,21 +4556,24 @@
       }
     }
 
-    function publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload) {
+    function publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload) {
       return [
         selectedCajaBranchId(),
         config?.updatedAt || '',
         config?.urlTabla || '',
         config?.urlTransferencias || '',
         config?.urlIngresosEgresos || '',
+        config?.urlRecibos || '',
         movementsPayload?.generatedAt || '',
         systemPayload?.generatedAt || '',
         cashMovementsPayload?.generatedAt || '',
+        receiptsPayload?.generatedAt || '',
         movementsPayload?.idRecibo || '',
         cashMovementsPayload?.idRecibo || '',
         rowsFromPublicPayload(movementsPayload, { branchAware: true }).length,
         rowsFromPublicPayload(systemPayload).length,
-        cashMovementRowsFromPayload(cashMovementsPayload).length
+        cashMovementRowsFromPayload(cashMovementsPayload).length,
+        receiptRowsFromPayload(receiptsPayload).length
       ].join('|');
     }
 
@@ -4316,18 +4592,21 @@
         const movementsUrl = config?.urlTabla || CAJA_PUBLIC_JSON_FALLBACK.movements;
         const systemUrl = config?.urlTransferencias || CAJA_PUBLIC_JSON_FALLBACK.system;
         const cashMovementsUrl = config?.urlIngresosEgresos || CAJA_PUBLIC_JSON_FALLBACK.cashMovements;
+        const receiptsUrl = config?.urlRecibos || CAJA_PUBLIC_JSON_FALLBACK.receipts;
         if (!movementsUrl || !systemUrl) return;
-        const [movementsPayload, systemPayload, cashMovementsPayload] = await Promise.all([
+        const [movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload] = await Promise.all([
           fetchPublicCajaJson(movementsUrl),
           fetchPublicCajaJson(systemUrl),
-          cashMovementsUrl ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null) : Promise.resolve(null)
+          cashMovementsUrl ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null) : Promise.resolve(null),
+          receiptsUrl ? fetchPublicCajaJson(receiptsUrl).catch(() => null) : Promise.resolve(null)
         ]);
-        const signature = publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload);
+        const signature = publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload);
         if (!force && signature && signature === lastPublicCajaSignature) return;
         const appliedMovements = applyPublicCajaMovements(movementsPayload);
         const appliedSystem = applyPublicCajaSystem(systemPayload);
         const appliedCashMovements = applyPublicCajaCashMovements(cashMovementsPayload);
-        if (!appliedMovements && !appliedSystem && !appliedCashMovements) return;
+        const appliedReceipts = applyPublicCajaReceipts(receiptsPayload);
+        if (!appliedMovements && !appliedSystem && !appliedCashMovements && !appliedReceipts) return;
         const wasAlreadyLoaded = Boolean(lastPublicCajaSignature);
         lastPublicCajaSignature = signature;
         persistLocalState();
@@ -4945,6 +5224,64 @@
       setTimeout(() => {
         if (combo.contains(document.activeElement)) return;
         closeCashRowBranchList(combo);
+      }, 0);
+    });
+    el.receiptRows.addEventListener('keydown', (event) => {
+      const button = event.target.closest('[data-receipt-row-branch-button]');
+      const combo = button?.closest('[data-receipt-key]');
+      const list = combo?.querySelector('[data-receipt-row-branch-list]');
+      if (!button || !combo || !list) return;
+      const isOpen = list.classList.contains('open');
+      if (event.key === 'F4') {
+        event.preventDefault();
+        if (isOpen) closeReceiptRowBranchList(combo);
+        else openReceiptRowBranchList(combo);
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (!isOpen) openReceiptRowBranchList(combo);
+        else moveReceiptRowBranchOption(combo, event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (isOpen) {
+          const options = [...list.querySelectorAll('[data-receipt-row-branch-id]')];
+          const option = options[Number(combo.dataset.activeOption ?? -1)];
+          if (option) selectReceiptRowBranch(combo, option.dataset.receiptRowBranchId);
+        } else openReceiptRowBranchList(combo);
+        return;
+      }
+      if (event.key === 'Escape' && isOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeReceiptRowBranchList(combo);
+      }
+    });
+    el.receiptRows.addEventListener('mousedown', (event) => {
+      const option = event.target.closest('[data-receipt-row-branch-id]');
+      if (!option) return;
+      event.preventDefault();
+      const combo = option.closest('[data-receipt-key]');
+      if (!combo) return;
+      selectReceiptRowBranch(combo, option.dataset.receiptRowBranchId);
+      combo.querySelector('[data-receipt-row-branch-button]')?.focus();
+    });
+    el.receiptRows.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-receipt-row-branch-button]');
+      const combo = button?.closest('[data-receipt-key]');
+      if (!button || !combo) return;
+      const list = combo.querySelector('[data-receipt-row-branch-list]');
+      if (list?.classList.contains('open')) closeReceiptRowBranchList(combo);
+      else openReceiptRowBranchList(combo);
+    });
+    el.receiptRows.addEventListener('focusout', (event) => {
+      const combo = event.target.closest('[data-receipt-key]');
+      if (!combo) return;
+      setTimeout(() => {
+        if (combo.contains(document.activeElement)) return;
+        closeReceiptRowBranchList(combo);
       }, 0);
     });
     document.getElementById('updateTotalsBtn').addEventListener('click', async () => {
