@@ -648,6 +648,16 @@
       color: #d80000;
       font-weight: 700;
     }
+    tr.transfer-unmatched td, tr.transfer-unmatched input { color: #d80000; font-weight: 700; }
+    tr.transfer-unmatched td { background: #fff0f2; }
+    .transfer-branch-select, .diff-branch-select {
+      width: 100%; height: 24px; border: 1px solid var(--borde); border-radius: 6px;
+      background: #fff; color: var(--violeta-oscuro); font: 700 12px Barlow,Arial,sans-serif;
+      padding: 1px 22px 1px 6px; outline: 0;
+    }
+    .transfer-branch-select:focus, .diff-branch-select:focus { border-color: var(--violeta); box-shadow: 0 0 0 2px rgba(109,93,247,.18); }
+    .diff-filter-wrap { display: flex; align-items: center; gap: 6px; color: var(--violeta-oscuro); font-size: 12px; font-weight: 900; }
+    .diff-filter-wrap .diff-branch-select { width: 190px; height: 30px; }
 
     .navigator {
       height: 22px;
@@ -937,6 +947,9 @@
       text-transform: uppercase;
     }
     .diff-table th { top: 30px; }
+    .diff-table tbody tr { height: 26px !important; }
+    .diff-table tbody td { height: 26px !important; padding-top: 0 !important; padding-bottom: 0 !important; line-height: 25px !important; }
+    .diff-table .transfer-branch-select { display: block; height: 20px; margin: 0; padding-top: 0; padding-bottom: 0; line-height: 18px; vertical-align: middle; box-sizing: border-box; }
     .diff-table .diff-row td {
       background: #fff1f1 !important;
       color: #d80000;
@@ -955,6 +968,12 @@
     .diff-table tr.group-selected-row td {
       outline: 2px solid rgba(108,79,199,.42);
       outline-offset: -2px;
+    }
+    .diff-table tr.linked-diff-row td {
+      background: #cfc3ff !important;
+      color: #2f1d75 !important;
+      font-weight: 900;
+      box-shadow: inset 0 2px 0 #7655ed, inset 0 -2px 0 #7655ed;
     }
     .diff-table .muted-cell { color: #aaa0c7; }
     .paste-textarea {
@@ -1536,6 +1555,7 @@
                     <th class="row-selector-head"></th>
                     <th class="sortable-header" data-copy-col data-transfer-sort="hour" style="width:84px">Hora</th>
                     <th class="sortable-header" data-copy-col data-transfer-sort="client">Cliente</th>
+                    <th data-copy-col style="width:165px">Sucursal</th>
                     <th class="sortable-header" data-copy-col data-transfer-sort="amount" style="width:132px">Monto</th>
                   </tr>
                 </thead>
@@ -1707,6 +1727,9 @@
       <div class="modal-head">
         <h2 class="modal-title">Buscar diferencias</h2>
         <div class="head-actions">
+          <label class="diff-filter-wrap">Sucursal
+            <select class="diff-branch-select" id="diffBranchFilter"></select>
+          </label>
           <button class="access-btn" id="filterDiffRowsBtn" type="button">Solo rojas</button>
           <button class="access-btn primary" id="mergeDiffRowsBtn" type="button">Unificar seleccionadas</button>
           <button class="access-btn" id="splitDiffRowsBtn" type="button">Separar</button>
@@ -1723,6 +1746,7 @@
                 <tr>
                   <th class="sortable-header" data-diff-sort-side="mercado" data-diff-sort="hour" style="width:82px">Hora</th>
                   <th class="sortable-header" data-diff-sort-side="mercado" data-diff-sort="client">Cliente</th>
+                  <th style="width:165px">Sucursal</th>
                   <th class="sortable-header" data-diff-sort-side="mercado" data-diff-sort="amount" style="width:132px">Total</th>
                   <th style="width:132px">Diferencia</th>
                 </tr>
@@ -1771,6 +1795,7 @@
     const STORAGE_KEY_BASE = 'corralon_control_caja_v1';
     const CAJA_BRANCH_KEY = 'corralon_control_caja_sucursal_v1';
     const CAJA_ALL_BRANCHES_ID = 'todas';
+    const DIFF_UNASSIGNED_BRANCH_ID = 'sin_asignar';
     const CAJA_GLOBAL_ONLY_BRANCH_ID = '__global__';
     const CAJA_MOVEMENT_SEPARATION_KEY = 'corralon_control_caja_separar_v1';
     const LEGACY_STORAGE_KEY = STORAGE_KEY_BASE;
@@ -1853,6 +1878,7 @@
       summaryRows: document.getElementById('summaryRows'),
       diffModal: document.getElementById('diffModal'),
       diffSummary: document.getElementById('diffSummary'),
+      diffBranchFilter: document.getElementById('diffBranchFilter'),
       filterDiffRowsBtn: document.getElementById('filterDiffRowsBtn'),
       diffMercadoBoard: document.getElementById('diffMercadoBoard'),
       diffSystemBoard: document.getElementById('diffSystemBoard'),
@@ -1888,7 +1914,8 @@
     let selectedTransferId = '';
     let selectedTransferRows = new Set();
     let selectedSystemRows = new Set();
-    let diffState = { mercado: [], system: [], selectedSide: 'mercado', selectedIndex: 0, selectedRows: { mercado: [], system: [] }, sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } }, onlyDiffs: false };
+    let systemMergeGroups = [];
+    let diffState = { mercado: [], system: [], pairs: [], branchId: 'todas', selectedSide: 'mercado', selectedIndex: 0, highlightedIndex: -1, selectedRows: { mercado: [], system: [] }, sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } }, activeSort: { key: '', side: '', field: '', direction: '' }, onlyDiffs: false };
     let copySelection = { table: null, mode: '', colIndex: -1, text: '' };
     let remoteSaveTimer = null;
     let remoteSaveBlocked = false;
@@ -2011,6 +2038,8 @@
       persistLocalState();
       renderMovementRows();
       renderMovementView();
+      renderTransferRows();
+      renderSystemRows();
       updateTotals();
       lastPublicCajaSignature = '';
       loadPublicCajaData({ force: true, showPublicLoading: true });
@@ -2551,6 +2580,7 @@
       state.cash = CASH_DENOMS.map((denom) => ({ denom, bills: 0, packs: 0 }));
       state.transfers = [];
       state.system = [];
+      systemMergeGroups = [];
       state.summaryManual = { ...DEFAULT_SUMMARY_MANUAL };
       state.movements = MOVEMENT_TYPES.map((type) => ({ type, initial: 0, day: 0, ie: 0 }));
       state.movementsByBranch = {};
@@ -2619,6 +2649,7 @@
       return {
         cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
         transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row))),
+        systemRows: manualSystemRows(source.system || []).map((row) => JSON.parse(JSON.stringify(row))),
         cashMovementBranches: cashMovementBranchOverrides(source),
         receiptBranches: receiptBranchOverrides(source)
       };
@@ -2627,6 +2658,7 @@
     function hasCajaManualData(payload) {
       return Boolean(
         (payload?.transfers || []).length
+        || (payload?.systemRows || []).length
         || (payload?.cash || []).some((row) => Number(row.bills || 0) || Number(row.packs || 0))
         || Object.keys(payload?.cashMovementBranches || {}).length
         || Object.keys(payload?.receiptBranches || {}).length
@@ -2639,6 +2671,14 @@
         return { denom, bills: Number(row.bills || 0), packs: Number(row.packs || 0) };
       });
       if (Array.isArray(payload?.transfers)) state.transfers = payload.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
+      if (Array.isArray(payload?.systemRows)) {
+        const existingIds = new Set(manualSystemRows(state.system).map((row) => row.id).filter(Boolean));
+        payload.systemRows.map(normalizeSystemRow).forEach((row) => {
+          if (row.id && existingIds.has(row.id)) return;
+          state.system.push(row);
+          if (row.id) existingIds.add(row.id);
+        });
+      }
       applyCashMovementBranchOverrides(payload?.cashMovementBranches || {});
       if (applyReceiptBranchOverrides(payload?.receiptBranches || {})) applyReceiptTotalsToBranches();
     }
@@ -2665,6 +2705,7 @@
             fecha: dateKey,
             cash: values.cash,
             transfers: values.transfers,
+            systemRows: values.systemRows,
             cashMovementBranches: values.cashMovementBranches,
             receiptBranches: values.receiptBranches,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2894,6 +2935,7 @@
         cash: state.cash,
         transfers: state.transfers,
         system: state.system,
+        systemMergeGroups,
         summaryManual: state.summaryManual,
         movements: state.movements,
         movementsByBranch: state.movementsByBranch,
@@ -2909,6 +2951,7 @@
         cash: state.cash,
         transfers: state.transfers,
         system: state.system,
+        systemMergeGroups,
         movements: state.movements,
         movementsByBranch: state.movementsByBranch,
         cashMovements: state.cashMovements,
@@ -2939,6 +2982,8 @@
 
     function normalizeSystemRow(item) {
       const row = {
+        id: String(item?.id || ''),
+        source: item?.source === 'manual' ? 'manual' : 'imported',
         typeComp: String(item?.typeComp || ''),
         invoice: String(item?.invoice || ''),
         name: String(item?.name || ''),
@@ -2949,6 +2994,19 @@
         row.children = item.children.map(normalizeSystemRow);
       }
       return row;
+    }
+
+    function manualSystemRows(rows = state.system) {
+      const result = [];
+      const seen = new Set();
+      sourceRows(rows).forEach((row) => {
+        if (row.source !== 'manual') return;
+        const key = row.id || systemDuplicateKey(row);
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(row);
+      });
+      return result;
     }
 
     function applySavedState(saved) {
@@ -2963,6 +3021,8 @@
         if (Array.isArray(saved.system)) {
           state.system = saved.system.map(normalizeSystemRow);
         }
+        systemMergeGroups = normalizeSystemMergeGroups(saved.systemMergeGroups);
+        if (!systemMergeGroups.length) systemMergeGroups = deriveSystemMergeGroups(state.system);
         if (Array.isArray(saved.cashMovements)) state.cashMovements = saved.cashMovements.map(normalizeCashMovement).filter(Boolean);
         if (Array.isArray(saved.receipts)) state.receipts = saved.receipts.map(normalizeReceipt).filter(Boolean);
         if (saved.summaryManual && typeof saved.summaryManual === 'object' && !applyingRemoteState) {
@@ -3118,6 +3178,11 @@
         amount,
         source,
         order: Number.isFinite(Number(item.order)) ? Number(item.order) : fallbackOrder,
+        branchId: String(item.branchId || ''),
+        branchSource: item.branchSource === 'manual' ? 'manual' : (item.branchSource === 'auto' ? 'auto' : ''),
+        matchedSystemKey: String(item.matchedSystemKey || ''),
+        manualMatchedSystemKey: String(item.manualMatchedSystemKey || ''),
+        matchScore: Number(item.matchScore || 0),
         children: Array.isArray(item.children) ? item.children.map((child, idx) => normalizeTransfer(child, idx)).filter(Boolean) : undefined
       };
     }
@@ -3155,8 +3220,140 @@
       return String(a?.[field] || '').localeCompare(String(b?.[field] || ''), 'es', { sensitivity: 'base' });
     }
 
+    function systemInvoiceBranchId(row = {}) {
+      const branches = cashMovementBranches();
+      const progresoId = branches[0]?.id || '';
+      const calle5Id = branches[1]?.id || '';
+      const invoices = [];
+      const collectInvoices = (item) => {
+        invoices.push(String(item?.invoice || ''));
+        if (Array.isArray(item?.children)) item.children.forEach(collectInvoices);
+      };
+      collectInvoices(row);
+      const resolved = new Set();
+      invoices.forEach((invoice) => {
+        for (const match of invoice.matchAll(/(?:^|[^0-9])(\d{1,4})\s*-/g)) {
+          const point = Number(match[1]);
+          if (point >= 0 && point <= 8 && progresoId) resolved.add(progresoId);
+          else if ((point === 9 || point === 10) && calle5Id) resolved.add(calle5Id);
+        }
+      });
+      return resolved.size === 1 ? [...resolved][0] : '';
+    }
+
+    function visibleSystemEntries() {
+      const branchId = selectedCajaBranchId();
+      return state.system
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => !branchId || branchId === CAJA_ALL_BRANCHES_ID || systemInvoiceBranchId(row) === branchId);
+    }
+
+    function visibleSystemRows() {
+      return visibleSystemEntries().map(({ row }) => row);
+    }
+
+    function transferNameTokens(value) {
+      const ignored = new Set(['del', 'los', 'las', 'con', 'por', 'para']);
+      return normalizarTexto(value).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+        .filter((token) => token.length >= 3 && !ignored.has(token));
+    }
+
+    function editDistanceOneOrLess(left, right) {
+      if (left === right) return true;
+      if (Math.abs(left.length - right.length) > 1) return false;
+      let i = 0, j = 0, differences = 0;
+      while (i < left.length && j < right.length) {
+        if (left[i] === right[j]) { i += 1; j += 1; continue; }
+        differences += 1;
+        if (differences > 1) return false;
+        if (left.length > right.length) i += 1;
+        else if (right.length > left.length) j += 1;
+        else { i += 1; j += 1; }
+      }
+      if (i < left.length || j < right.length) differences += 1;
+      return differences <= 1;
+    }
+
+    function transferNameMatchScore(mpName, systemName) {
+      const mpTokens = transferNameTokens(mpName);
+      const systemTokens = transferNameTokens(systemName);
+      let exact = 0;
+      let approximate = 0;
+      mpTokens.forEach((mpToken) => {
+        if (systemTokens.includes(mpToken)) exact += 1;
+        else if (mpToken.length >= 5 && systemTokens.some((token) => token.length >= 5 && editDistanceOneOrLess(mpToken, token))) approximate += 1;
+      });
+      if (!exact && !approximate) return 0;
+      return (exact * 120) + (approximate * 70);
+    }
+
+    function systemMatchKey(row, index) {
+      return `${systemDuplicateKey(row)}|${index}`;
+    }
+
+    function reconcileTransferBranches() {
+      const systems = state.system
+        .map((row, index) => ({ row, index, key: systemMatchKey(row, index), stableKey: systemDuplicateKey(row), branchId: systemInvoiceBranchId(row) }))
+        .filter(({ row, branchId }) => branchId && movementTypeKey(row.paymentType) !== movementTypeKey('Mercado Pago'));
+      state.transfers.forEach((row) => {
+        row.matchedSystemKey = '';
+        row.matchScore = 0;
+        if (row.branchSource !== 'manual') {
+          row.branchId = '';
+          row.branchSource = '';
+        }
+      });
+      const usedSystem = new Set();
+      state.transfers.forEach((row) => {
+        if (!row.manualMatchedSystemKey) return;
+        const manual = systems.find((system) => system.stableKey === row.manualMatchedSystemKey && !usedSystem.has(system.key));
+        if (!manual) return;
+        usedSystem.add(manual.key);
+        row.matchedSystemKey = manual.key;
+        row.matchScore = 9999;
+        row.branchId = manual.branchId;
+        row.branchSource = 'manual';
+      });
+      const jobs = state.transfers.map((row) => {
+        if (row.manualMatchedSystemKey && row.matchedSystemKey) return { row, candidates: [] };
+        const candidates = systems.map((system) => {
+          if (row.branchSource === 'manual' && row.branchId && system.branchId !== row.branchId) return null;
+          const amountDiff = Math.abs(Number(row.amount || 0) - Number(system.row.amount || 0));
+          if (amountDiff > DIFF_TOLERANCE) return null;
+          const nameScore = transferNameMatchScore(row.client, system.row.name);
+          if (!nameScore) return null;
+          return { ...system, score: nameScore + (DIFF_TOLERANCE - amountDiff), amountDiff };
+        }).filter(Boolean).sort((a, b) => b.score - a.score || a.amountDiff - b.amountDiff);
+        return { row, candidates };
+      }).sort((a, b) => a.candidates.length - b.candidates.length || (b.candidates[0]?.score || 0) - (a.candidates[0]?.score || 0));
+
+      jobs.forEach(({ row, candidates }) => {
+        const available = candidates.filter((candidate) => !usedSystem.has(candidate.key));
+        if (!available.length) return;
+        const best = available[0];
+        const second = available[1];
+        if (second && Math.abs(best.score - second.score) < 5) return;
+        usedSystem.add(best.key);
+        row.matchedSystemKey = best.key;
+        row.matchScore = best.score;
+        if (row.branchSource !== 'manual') {
+          row.branchId = best.branchId;
+          row.branchSource = 'auto';
+        }
+      });
+      return systems;
+    }
+
+    function branchOptionsHtml(selectedId = '', includeAll = false, includeUnassigned = true) {
+      const options = [];
+      if (includeAll) options.push({ id: CAJA_ALL_BRANCHES_ID, label: 'Todas las sucursales' });
+      cashMovementBranches().forEach((branch) => options.push(branch));
+      if (includeUnassigned) options.push({ id: '', label: 'Sin asignar' });
+      return options.map((branch) => `<option value="${escapeHtml(branch.id)}"${String(branch.id) === String(selectedId) ? ' selected' : ''}>${escapeHtml(branch.label)}</option>`).join('');
+    }
+
     function getSortedSystemEntries() {
-      const entries = state.system.map((row, index) => ({ row, index }));
+      const entries = visibleSystemEntries();
       if (!systemSort.field || !systemSort.direction) return entries;
       const direction = systemSort.direction === 'desc' ? -1 : 1;
       return entries.sort((a, b) => {
@@ -3202,8 +3399,14 @@
       return (Number(match[1]) || 0) * 60 + (Number(match[2]) || 0);
     }
 
+    function visibleTransfers() {
+      const branchId = selectedCajaBranchId();
+      if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return state.transfers;
+      return state.transfers.filter((row) => row.branchId === branchId);
+    }
+
     function getSortedTransfers() {
-      const rows = [...state.transfers];
+      const rows = [...visibleTransfers()];
       if (!transferSort.field || !transferSort.direction) {
         return rows.sort((a, b) => (a.order || 0) - (b.order || 0));
       }
@@ -3245,26 +3448,47 @@
     }
 
     function renderTransferRows() {
+      reconcileTransferBranches();
       const sortedRows = getSortedTransfers();
       const rows = sortedRows.map((row) => {
         const locked = row.source !== 'manual';
-        const selectedClass = row.id === selectedTransferId || selectedTransferRows.has(row.id) ? ' class="selected-row"' : '';
-        return `<tr data-transfer-id="${escapeHtml(row.id)}"${selectedClass}>
+        const rowClasses = [
+          row.id === selectedTransferId || selectedTransferRows.has(row.id) ? 'selected-row' : '',
+          !row.branchId ? 'transfer-unmatched' : ''
+        ].filter(Boolean).join(' ');
+        const branchTitle = row.branchSource === 'manual' ? 'Sucursal asignada manualmente' : (row.branchSource === 'auto' ? 'Sucursal asignada automáticamente' : 'Sin coincidencia automática');
+        return `<tr data-transfer-id="${escapeHtml(row.id)}" class="${rowClasses}">
         <td class="row-selector-cell"><button class="row-selector-btn" type="button" data-row-select="transfer" data-id="${escapeHtml(row.id)}" aria-label="Seleccionar transferencia"></button></td>
         <td class="center"><input class="cell-input" style="text-align:center" data-transfer-field="hour" data-id="${escapeHtml(row.id)}" value="${escapeHtml(row.hour || '-')}" readonly></td>
         <td class="client" title="${escapeHtml(row.client)}"><input class="cell-input" style="text-align:left" data-transfer-field="client" data-id="${escapeHtml(row.id)}" value="${escapeHtml(row.client)}" ${locked ? 'readonly' : ''}></td>
+        <td><select class="transfer-branch-select" data-transfer-branch-id="${escapeHtml(row.id)}" title="${escapeHtml(branchTitle)}">${branchOptionsHtml(row.branchId, false, true)}</select></td>
         <td class="money"><input class="cell-input" data-transfer-field="amount" data-id="${escapeHtml(row.id)}" inputmode="decimal" value="${row.amount ? formatMoney(row.amount) : ''}" placeholder="$ 0,00"></td>
       </tr>`;
       }).join('');
-      el.transferRows.innerHTML = rows || `<tr><td class="row-selector-cell"></td><td class="center">*</td><td class="client"></td><td class="money">${formatMoney(0)}</td></tr>` + blankRows(8, 4);
-      if (rows) el.transferRows.innerHTML += blankRows(Math.max(0, 9 - state.transfers.length), 4);
+      el.transferRows.innerHTML = rows || `<tr><td class="row-selector-cell"></td><td class="center">*</td><td class="client"></td><td></td><td class="money">${formatMoney(0)}</td></tr>` + blankRows(8, 5);
+      if (rows) el.transferRows.innerHTML += blankRows(Math.max(0, 9 - state.transfers.length), 5);
       el.transferCount.textContent = rowCountText(state.transfers.length);
       updateTransferSortHeaders();
       updateTransferSelection();
     }
 
+    function assignTransferBranch(transferId, branchId) {
+      const row = findTransferById(transferId);
+      if (!row) return false;
+      row.branchId = String(branchId || '');
+      row.branchSource = 'manual';
+      row.matchedSystemKey = '';
+      row.manualMatchedSystemKey = '';
+      reconcileTransferBranches();
+      saveState();
+      renderTransferRows();
+      if (el.diffModal.classList.contains('open')) rebuildDiffState(diffState.branchId);
+      return true;
+    }
+
     function renderSystemRows() {
-      const entries = state.system.length ? getSortedSystemEntries() : [{ row: { typeComp: '', invoice: '', name: '', amount: 0 }, index: 0 }];
+      const visibleEntries = getSortedSystemEntries();
+      const entries = visibleEntries.length ? visibleEntries : [{ row: { typeComp: '', invoice: '', name: '', amount: 0 }, index: 0 }];
       el.systemRows.innerHTML = entries.map(({ row, index: idx }) => `<tr class="${[
           movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago') ? 'system-warning' : '',
           selectedSystemRows.has(idx) ? 'selected-row' : ''
@@ -3275,7 +3499,7 @@
         <td class="client"><input class="cell-input" style="text-align:left" data-system-field="name" data-index="${idx}" value="${escapeHtml(row.name || '')}"></td>
         <td class="money"><input class="cell-input" data-system-field="amount" data-index="${idx}" inputmode="decimal" value="${row.amount ? formatMoney(row.amount) : ''}" placeholder="$ 0,00"></td>
       </tr>`).join('') + blankRows(8, 5);
-      el.systemCount.textContent = rowCountText(state.system.length || 1);
+      el.systemCount.textContent = rowCountText(visibleEntries.length || 1);
       updateSystemSortHeaders();
     }
 
@@ -3390,8 +3614,8 @@
 
     function calculateTotals() {
       const cash = state.cash.reduce((sum, row) => sum + cashRowTotal(row), 0);
-      const transfers = state.transfers.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-      const system = state.system.reduce((sum, row) => {
+      const transfers = visibleTransfers().reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      const system = visibleSystemRows().reduce((sum, row) => {
         if (movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago')) return sum;
         return sum + Number(row.amount || 0);
       }, 0);
@@ -3442,6 +3666,63 @@
         normalizarTexto(row?.invoice || ''),
         Math.round(Number(row?.amount || 0) * 100)
       ].join('|');
+    }
+
+    function systemMergeMemberKey(row) {
+      return [
+        normalizarTexto(row?.typeComp || ''),
+        normalizarTexto(row?.invoice || ''),
+        normalizarTexto(row?.name || ''),
+        movementTypeKey(row?.paymentType || '')
+      ].join('|');
+    }
+
+    function normalizeSystemMergeGroups(groups) {
+      if (!Array.isArray(groups)) return [];
+      return groups.map((group) => {
+        const members = Array.isArray(group) ? group : group?.members;
+        return { members: [...new Set((Array.isArray(members) ? members : []).map(String).filter(Boolean))] };
+      }).filter((group) => group.members.length >= 2);
+    }
+
+    function deriveSystemMergeGroups(rows = []) {
+      return rows.filter((row) => Array.isArray(row.children) && row.children.length >= 2)
+        .map((row) => ({ members: [...new Set(sourceRows([row]).map(systemMergeMemberKey))] }))
+        .filter((group) => group.members.length >= 2);
+    }
+
+    function rememberSystemMergeGroup(rows) {
+      const members = [...new Set(sourceRows(rows).map(systemMergeMemberKey).filter(Boolean))];
+      if (members.length < 2) return;
+      const memberSet = new Set(members);
+      systemMergeGroups = systemMergeGroups.filter((group) => !group.members.some((key) => memberSet.has(key)));
+      systemMergeGroups.push({ members });
+    }
+
+    function forgetSystemMergeGroups(rows) {
+      const members = new Set(sourceRows(rows).map(systemMergeMemberKey));
+      systemMergeGroups = systemMergeGroups.filter((group) => !group.members.some((key) => members.has(key)));
+    }
+
+    function applyPersistentSystemMerges(rows = []) {
+      let result = rows.map(normalizeSystemRow);
+      systemMergeGroups.forEach((group) => {
+        const used = new Set();
+        const found = [];
+        group.members.forEach((memberKey) => {
+          const index = result.findIndex((row, rowIndex) => !used.has(rowIndex) && systemMergeMemberKey(row) === memberKey);
+          if (index < 0) return;
+          used.add(index);
+          found.push({ index, row: result[index] });
+        });
+        if (found.length < 2) return;
+        const firstIndex = Math.min(...found.map((item) => item.index));
+        const indexes = new Set(found.map((item) => item.index));
+        const merged = mergedSystemRow(found.map((item) => item.row));
+        result = result.filter((_, index) => !indexes.has(index));
+        result.splice(Math.min(firstIndex, result.length), 0, merged);
+      });
+      return result;
     }
 
     function existingSystemKeys() {
@@ -3544,6 +3825,7 @@
         return;
       }
       const selectedRows = indexes.map((idx) => state.system[idx]);
+      rememberSystemMergeGroup(selectedRows);
       const firstIndex = indexes[0];
       const merged = mergedSystemRow(selectedRows);
       const selectedSet = new Set(indexes);
@@ -3552,6 +3834,7 @@
       selectedSystemRows = new Set([firstIndex]);
       saveState();
       renderSystemRows();
+      renderTransferRows();
       updateTotals();
       showToast(`Se unificaron ${indexes.length} boletas.`);
     }
@@ -3563,6 +3846,7 @@
         return;
       }
       const selectedSet = new Set(indexes);
+      forgetSystemMergeGroups(indexes.map((idx) => state.system[idx]));
       const nextRows = [];
       state.system.forEach((row, idx) => {
         if (selectedSet.has(idx)) nextRows.push(...row.children.map(normalizeSystemRow));
@@ -3572,6 +3856,7 @@
       selectedSystemRows.clear();
       saveState();
       renderSystemRows();
+      renderTransferRows();
       updateTotals();
       showToast('Boleta unificada separada.');
     }
@@ -3582,11 +3867,58 @@
         .sort((a, b) => a.amount - b.amount || String(a.client || '').localeCompare(String(b.client || ''), 'es', { sensitivity: 'base' }));
     }
 
-    function sortedSystemRows() {
-      return [...state.system]
+    function sortedSystemRows(rows = state.system) {
+      return [...rows]
         .filter((row) => movementTypeKey(row.paymentType) !== movementTypeKey('Mercado Pago'))
         .map((row) => ({ ...row, amount: Number(row.amount || 0) }))
         .sort((a, b) => a.amount - b.amount || String(a.invoice || '').localeCompare(String(b.invoice || ''), 'es', { sensitivity: 'base' }));
+    }
+
+    function diffBranchOptionsHtml(selectedId) {
+      const options = [{ id: CAJA_ALL_BRANCHES_ID, label: 'Todas las sucursales' }, ...cashMovementBranches(), { id: DIFF_UNASSIGNED_BRANCH_ID, label: 'Sin asignar' }];
+      return options.map((branch) => `<option value="${escapeHtml(branch.id)}"${branch.id === selectedId ? ' selected' : ''}>${escapeHtml(branch.label)}</option>`).join('');
+    }
+
+    function diffBranchMatches(branchId, filterId) {
+      if (!filterId || filterId === CAJA_ALL_BRANCHES_ID) return true;
+      if (filterId === DIFF_UNASSIGNED_BRANCH_ID) return !branchId;
+      return branchId === filterId;
+    }
+
+    function buildMatchedDiffPairs(filterId = CAJA_ALL_BRANCHES_ID) {
+      reconcileTransferBranches();
+      const systemEntries = state.system
+        .map((row, index) => ({ row: { ...row, amount: Number(row.amount || 0) }, key: systemMatchKey(row, index), branchId: systemInvoiceBranchId(row) }))
+        .filter(({ row }) => movementTypeKey(row.paymentType) !== movementTypeKey('Mercado Pago'));
+      const systemByKey = new Map(systemEntries.map((entry) => [entry.key, entry]));
+      const usedSystem = new Set();
+      const pairs = sortedMercadoPagoRows()
+        .filter((row) => diffBranchMatches(row.branchId, filterId))
+        .map((row) => {
+          const matched = row.matchedSystemKey ? systemByKey.get(row.matchedSystemKey) : null;
+          if (matched && diffBranchMatches(matched.branchId, filterId)) usedSystem.add(matched.key);
+          return { mercado: row, system: matched?.row || null };
+        });
+      systemEntries
+        .filter((entry) => diffBranchMatches(entry.branchId, filterId) && !usedSystem.has(entry.key))
+        .forEach((entry) => pairs.push({ mercado: null, system: entry.row }));
+      return pairs.sort((a, b) => Number(a.mercado?.amount ?? a.system?.amount ?? 0) - Number(b.mercado?.amount ?? b.system?.amount ?? 0));
+    }
+
+    function rebuildDiffState(branchId = CAJA_ALL_BRANCHES_ID) {
+      const pairs = buildMatchedDiffPairs(branchId);
+      diffState.branchId = branchId;
+      diffState.pairs = pairs;
+      diffState.mercado = pairs.map((pair) => pair.mercado);
+      diffState.system = pairs.map((pair) => pair.system);
+      diffState.selectedRows = { mercado: [], system: [] };
+      diffState.selectedIndex = 0;
+      diffState.highlightedIndex = -1;
+      diffState.sort = { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } };
+      diffState.activeSort = { key: '', side: '', field: '', direction: '' };
+      if (el.diffBranchFilter) el.diffBranchFilter.innerHTML = diffBranchOptionsHtml(branchId);
+      renderTransferRows();
+      renderDiffModal();
     }
 
     function cycleSortState(sort, field) {
@@ -3595,21 +3927,46 @@
       return { field: '', direction: '' };
     }
 
+    function diffSortKey(side, field) {
+      if (field === 'amount') return 'amount';
+      if ((side === 'mercado' && field === 'client') || (side === 'system' && field === 'name')) return 'client';
+      return `${side}:${field}`;
+    }
+
     function sortDiffRows(side, field) {
-      diffState.sort[side] = cycleSortState(diffState.sort[side], field);
-      const sort = diffState.sort[side];
+      const key = diffSortKey(side, field);
+      const current = diffState.activeSort || { key: '', direction: '' };
+      const direction = current.key !== key ? 'asc' : (current.direction === 'asc' ? 'desc' : (current.direction === 'desc' ? '' : 'asc'));
+      diffState.activeSort = { key: direction ? key : '', side: direction ? side : '', field: direction ? field : '', direction };
+      diffState.sort = { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } };
+      if (direction) diffState.sort[side] = { field, direction };
+      const sort = diffState.activeSort;
       if (sort.field && sort.direction) {
-        const direction = sort.direction === 'desc' ? -1 : 1;
-        diffState[side].sort((a, b) => {
-          if (a.blank && !b.blank) return 1;
-          if (!a.blank && b.blank) return -1;
-          const result = compareValues(a, b, sort.field);
-          return result * direction;
+        const multiplier = sort.direction === 'desc' ? -1 : 1;
+        diffState.pairs.sort((a, b) => {
+          if (sort.key === 'amount') {
+            const amountA = Number(a.mercado?.amount ?? a.system?.amount ?? 0);
+            const amountB = Number(b.mercado?.amount ?? b.system?.amount ?? 0);
+            return (amountA - amountB) * multiplier;
+          }
+          if (sort.key === 'client') {
+            const clientA = String(a.mercado?.client || a.system?.name || '');
+            const clientB = String(b.mercado?.client || b.system?.name || '');
+            return clientA.localeCompare(clientB, 'es', { sensitivity: 'base' }) * multiplier;
+          }
+          const left = a[side];
+          const right = b[side];
+          if (!left && right) return 1;
+          if (left && !right) return -1;
+          const result = compareValues(left, right, sort.field);
+          return result * multiplier;
         });
       } else {
-        diffState[side] = side === 'mercado' ? sortedMercadoPagoRows() : sortedSystemRows();
+        diffState.pairs = buildMatchedDiffPairs(diffState.branchId);
       }
-      diffState.selectedRows[side] = [];
+      diffState.mercado = diffState.pairs.map((pair) => pair.mercado);
+      diffState.system = diffState.pairs.map((pair) => pair.system);
+      diffState.selectedRows = { mercado: [], system: [] };
       diffState.selectedSide = side;
       diffState.selectedIndex = firstVisibleDiffIndex();
       renderDiffModal();
@@ -3618,8 +3975,9 @@
     function updateDiffSortHeaders() {
       document.querySelectorAll('[data-diff-sort]').forEach((header) => {
         const side = header.dataset.diffSortSide;
-        const sort = diffState.sort?.[side] || { field: '', direction: '' };
-        header.dataset.sortState = header.dataset.diffSort === sort.field ? sort.direction : '';
+        const field = header.dataset.diffSort;
+        const active = diffState.activeSort || { key: '', direction: '' };
+        header.dataset.sortState = active.key && diffSortKey(side, field) === active.key ? active.direction : '';
       });
     }
 
@@ -3635,10 +3993,20 @@
       return isDiffOverTolerance(diff) ? 'diff-row' : '';
     }
 
-    function diffRowClass(side, index, row, diff) {
+    function isManualDiffMatch(mp, sys) {
+      return Boolean(mp && sys && mp.manualMatchedSystemKey && mp.manualMatchedSystemKey === systemDuplicateKey(sys));
+    }
+
+    function diffPairHasDifference(mp, sys) {
+      if (isManualDiffMatch(mp, sys)) return false;
+      return isDiffOverTolerance(diffAmount(mp, sys));
+    }
+
+    function diffRowClass(side, index, row, diff, manualMatch = false) {
       return [
-        diffClass(diff),
+        manualMatch ? '' : diffClass(diff),
         row?.blank ? 'blank-diff-row' : '',
+        diffState.highlightedIndex === index ? 'linked-diff-row' : '',
         diffState.selectedRows?.[side]?.includes(index) ? 'group-selected-row' : '',
         diffState.selectedSide === side && diffState.selectedIndex === index ? 'selected-diff-row' : ''
       ].filter(Boolean).join(' ');
@@ -3657,18 +4025,20 @@
         const mp = mercado[i];
         const sys = system[i];
         const diff = diffAmount(mp, sys);
-        const hasDiff = isDiffOverTolerance(diff);
+        const manualMatch = isManualDiffMatch(mp, sys);
+        const hasDiff = diffPairHasDifference(mp, sys);
         if (hasDiff) {
           diffCount += 1;
           diffTotal += diff;
         }
         if (diffState.onlyDiffs && !hasDiff) continue;
         visibleCount += 1;
-        const mpClass = diffRowClass('mercado', i, mp, diff);
-        const sysClass = diffRowClass('system', i, sys, diff);
+        const mpClass = diffRowClass('mercado', i, mp, diff, manualMatch);
+        const sysClass = diffRowClass('system', i, sys, diff, manualMatch);
         mercadoHtml.push(`<tr class="${mpClass}" data-diff-side="mercado" data-diff-index="${i}" tabindex="0">
           <td class="center">${escapeHtml(mp?.hour || '-')}</td>
           <td class="${mp && !mp.blank ? '' : 'muted-cell'}">${escapeHtml(mp?.client || 'Espacio en blanco')}</td>
+          <td>${mp && !mp.blank ? `<select class="transfer-branch-select" data-diff-transfer-branch="${escapeHtml(mp.id || '')}" onclick="event.stopPropagation()">${branchOptionsHtml(mp.branchId, false, true)}</select>` : '-'}</td>
           <td class="money">${mp && !mp.blank ? formatMoney(mp.amount) : '-'}</td>
           <td class="money">${formatMoney(diff)}</td>
         </tr>`);
@@ -3680,10 +4050,11 @@
           <td class="money">${formatMoney(diff)}</td>
         </tr>`);
       }
-      el.diffMercadoRows.innerHTML = mercadoHtml.join('') || `<tr><td colspan="4" class="center muted-cell">Sin transferencias</td></tr>`;
+      el.diffMercadoRows.innerHTML = mercadoHtml.join('') || `<tr><td colspan="5" class="center muted-cell">Sin transferencias</td></tr>`;
       el.diffSystemRows.innerHTML = systemHtml.join('') || `<tr><td colspan="5" class="center muted-cell">Sin transferencias</td></tr>`;
-      el.diffSummary.innerHTML = `<span>Mercado Pago: ${mercado.length} filas</span>
-        <span>Sistema: ${system.length} filas</span>
+      el.diffSummary.innerHTML = `<span>Mercado Pago: ${mercado.filter(Boolean).length} filas</span>
+        <span>Sistema: ${system.filter(Boolean).length} filas</span>
+        <span>Sin asignar: ${mercado.filter((row) => row && !row.branchId).length}</span>
         <span>Tolerancia: ${formatMoney(DIFF_TOLERANCE)}</span>
         <span>Diferencias: ${diffCount}</span>
         <span>Mostradas: ${visibleCount}</span>
@@ -3691,6 +4062,25 @@
       el.filterDiffRowsBtn.classList.toggle('primary', Boolean(diffState.onlyDiffs));
       el.filterDiffRowsBtn.textContent = diffState.onlyDiffs ? 'Mostrar todas' : 'Solo rojas';
       updateDiffSortHeaders();
+      requestAnimationFrame(syncDiffRowHeights);
+    }
+
+    function syncDiffRowHeights() {
+      const mercadoRows = [...el.diffMercadoRows.querySelectorAll('tr[data-diff-index]')];
+      const systemRows = [...el.diffSystemRows.querySelectorAll('tr[data-diff-index]')];
+      const count = Math.max(mercadoRows.length, systemRows.length);
+      for (let index = 0; index < count; index += 1) {
+        const left = mercadoRows[index];
+        const right = systemRows[index];
+        if (!left || !right) continue;
+        left.style.height = '';
+        right.style.height = '';
+        [...left.cells, ...right.cells].forEach((cell) => { cell.style.height = ''; });
+        const height = Math.max(26, left.offsetHeight, right.offsetHeight);
+        left.style.height = `${height}px`;
+        right.style.height = `${height}px`;
+        [...left.cells, ...right.cells].forEach((cell) => { cell.style.height = `${height}px`; });
+      }
     }
 
     function syncDiffBoardScroll(source, target) {
@@ -3706,7 +4096,7 @@
     function firstVisibleDiffIndex() {
       const count = Math.max(diffState.mercado.length, diffState.system.length);
       for (let i = 0; i < count; i++) {
-        if (!diffState.onlyDiffs || isDiffOverTolerance(diffAmount(diffState.mercado[i], diffState.system[i]))) return i;
+        if (!diffState.onlyDiffs || diffPairHasDifference(diffState.mercado[i], diffState.system[i])) return i;
       }
       return 0;
     }
@@ -3724,15 +4114,19 @@
 
     function openDiffModal() {
       diffState = {
-        mercado: sortedMercadoPagoRows(),
-        system: sortedSystemRows(),
+        mercado: [],
+        system: [],
+        pairs: [],
+        branchId: CAJA_ALL_BRANCHES_ID,
         selectedSide: 'mercado',
         selectedIndex: 0,
+        highlightedIndex: -1,
         selectedRows: { mercado: [], system: [] },
         sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } },
+        activeSort: { key: '', side: '', field: '', direction: '' },
         onlyDiffs: false
       };
-      renderDiffModal();
+      rebuildDiffState(CAJA_ALL_BRANCHES_ID);
       el.diffModal.classList.add('open');
       requestAnimationFrame(() => {
         if (el.diffMercadoBoard) el.diffMercadoBoard.scrollTop = 0;
@@ -3744,9 +4138,30 @@
       el.diffModal.classList.remove('open');
     }
 
+    function tryCreateManualDiffMatch() {
+      const mercadoSelection = diffState.selectedRows.mercado || [];
+      const systemSelection = diffState.selectedRows.system || [];
+      if (mercadoSelection.length !== 1 || systemSelection.length !== 1) return false;
+      const mp = diffState.mercado[mercadoSelection[0]];
+      const sys = diffState.system[systemSelection[0]];
+      if (!mp || !sys || mp.blank || sys.blank) return false;
+      const original = findTransferById(mp.id || '');
+      if (!original) return false;
+      original.manualMatchedSystemKey = systemDuplicateKey(sys);
+      original.matchedSystemKey = '';
+      original.branchId = systemInvoiceBranchId(sys);
+      original.branchSource = 'manual';
+      saveState();
+      const branchId = diffState.branchId;
+      rebuildDiffState(branchId);
+      showToast('Coincidencia manual guardada.');
+      return true;
+    }
+
     function selectDiffRow(side, index, multi = false) {
       diffState.selectedSide = side;
       diffState.selectedIndex = Number(index) || 0;
+      diffState.highlightedIndex = diffState.selectedIndex;
       if (multi) {
         const selected = diffState.selectedRows[side] || [];
         if (selected.includes(diffState.selectedIndex)) {
@@ -3754,6 +4169,7 @@
         } else {
           diffState.selectedRows[side] = [...selected, diffState.selectedIndex].sort((a, b) => a - b);
         }
+        if (tryCreateManualDiffMatch()) return;
       } else {
         diffState.selectedRows = { mercado: [], system: [] };
       }
@@ -4358,6 +4774,7 @@
       state.system.push(...nextRows);
       saveState();
       renderSystemRows();
+      renderTransferRows();
       updateTotals();
       const mercadoPagoRows = nextRows.filter((row) => movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago')).length;
       showToast(`Se agregaron ${nextRows.length} filas nuevas${skipped ? `, ${skipped} repetidas ignoradas` : ''}${mercadoPagoRows ? `, ${mercadoPagoRows} Mercado Pago en rojo` : ''}.`);
@@ -4469,7 +4886,8 @@
     function applyPublicCajaSystem(payload) {
       if (!cajaPublicPayloadMatchesDate(payload)) return false;
       const rows = rowsFromPublicPayload(payload);
-      state.system = rows
+      const savedManualRows = manualSystemRows();
+      const importedRows = rows
         .map((row) => normalizeSystemRow({
           typeComp: row.typeComp || row.Abreviatura || '',
           invoice: row.invoice || row.NroFactura || '',
@@ -4478,6 +4896,7 @@
           paymentType: row.paymentType || row.TipoPago || 'Transf Bria.'
         }))
         .filter((row) => row.name || row.invoice || Number(row.amount || 0));
+      state.system = applyPersistentSystemMerges([...importedRows, ...savedManualRows]);
       selectedSystemRows.clear();
       systemSort = { field: '', direction: '' };
       return true;
@@ -4729,6 +5148,8 @@
 
     function addManualSystemRow() {
       const row = normalizeSystemRow({
+        id: `manual-system-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        source: 'manual',
         typeComp: '',
         invoice: '',
         name: '',
@@ -4798,6 +5219,7 @@
 
     function clearSystem() {
       state.system = [];
+      systemMergeGroups = [];
       saveState();
       renderSystemRows();
       updateTotals();
@@ -5319,6 +5741,7 @@
     document.addEventListener('click', handleCopySelectionClick, true);
     document.addEventListener('copy', copySelectedArea);
     el.transferRows.addEventListener('click', (event) => {
+      if (event.target.closest('[data-transfer-branch-id]')) return;
       const selector = event.target.closest('[data-row-select="transfer"]');
       const row = event.target.closest('[data-transfer-id]');
       if (selector) {
@@ -5331,6 +5754,11 @@
         return;
       }
       if (row) selectTransferRow(row.dataset.transferId || '');
+    });
+    el.transferRows.addEventListener('change', (event) => {
+      const selector = event.target.closest('[data-transfer-branch-id]');
+      if (!selector) return;
+      assignTransferBranch(selector.dataset.transferBranchId || '', selector.value);
     });
     el.transferRows.addEventListener('focusin', (event) => {
       const row = event.target.closest('[data-transfer-id]');
@@ -5398,6 +5826,19 @@
       const row = event.target.closest('[data-diff-side]');
       if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex, event.ctrlKey || event.metaKey);
     });
+    el.diffMercadoRows.addEventListener('change', (event) => {
+      const selector = event.target.closest('[data-diff-transfer-branch]');
+      if (!selector) return;
+      event.stopPropagation();
+      assignTransferBranch(selector.dataset.diffTransferBranch || '', selector.value);
+    });
+    el.diffBranchFilter.addEventListener('change', () => {
+      rebuildDiffState(el.diffBranchFilter.value || CAJA_ALL_BRANCHES_ID);
+      requestAnimationFrame(() => {
+        if (el.diffMercadoBoard) el.diffMercadoBoard.scrollTop = 0;
+        if (el.diffSystemBoard) el.diffSystemBoard.scrollTop = 0;
+      });
+    });
     el.diffSystemRows.addEventListener('click', (event) => {
       const row = event.target.closest('[data-diff-side]');
       if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex, event.ctrlKey || event.metaKey);
@@ -5430,7 +5871,17 @@
       if (selectFieldWithF2(event)) return;
       if (copySelectedArea(event)) return;
       if (event.key === 'Escape' && el.pasteModal.classList.contains('open')) closePasteModal();
-      if (event.key === 'Escape' && el.diffModal.classList.contains('open')) closeDiffModal();
+      if (event.key === 'Escape' && el.diffModal.classList.contains('open')) {
+        if (diffState.highlightedIndex >= 0) {
+          event.preventDefault();
+          diffState.highlightedIndex = -1;
+          diffState.selectedRows = { mercado: [], system: [] };
+          renderDiffModal();
+          return;
+        }
+        closeDiffModal();
+        return;
+      }
       if (event.key === 'Escape' && el.movementSeparateModal.classList.contains('open')) closeMovementSeparateModal();
       if (handleDiffModalKey(event)) return;
       if (handleSystemQuickAdd(event)) return;

@@ -11,6 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="corralon-system.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -83,6 +84,47 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .hist-search input:focus {
   border-color: var(--violeta);
   box-shadow: 0 0 0 3px rgba(108,79,199,.12);
+}
+.budget-search-toolbar { display:flex; justify-content:flex-end; padding:10px 14px; background:#fff; border-bottom:1px solid var(--borde); }
+.budget-search-open { border:1.5px solid var(--borde); border-radius:12px; background:#fff; color:var(--violeta); padding:9px 16px; font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:900; cursor:pointer; box-shadow:var(--sombra); }
+.budget-search-open:hover,.budget-search-open:focus { background:#f4f0ff; outline:none; box-shadow:0 0 0 3px rgba(108,79,199,.12); }
+
+/* ── BUSCAR EN PRESUPUESTOS ── */
+.budget-search-bg { position:fixed; inset:0; z-index:700; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(18,14,42,.45); backdrop-filter:blur(5px); }
+.budget-search-bg.open { display:flex; }
+.budget-search-modal { width:min(1180px,96vw); height:min(760px,90vh); display:grid; grid-template-rows:auto 1fr; overflow:hidden; border:1px solid #9edcff; border-radius:20px; background:#fff; box-shadow:0 28px 80px rgba(25,22,60,.3); }
+.budget-search-head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid #d7efff; background:linear-gradient(90deg,#eefaff,#fff); }
+.budget-search-head h2 { margin:0; color:var(--rojo); font-family:'Barlow Condensed',sans-serif; font-size:29px; font-weight:900; }
+.budget-search-close { margin-left:auto; border:1px solid #8bd7ff; border-radius:12px; background:#fff; color:var(--texto-dark); padding:9px 18px; font-family:'Barlow Condensed',sans-serif; font-size:18px; font-weight:900; cursor:pointer; }
+.budget-search-body { min-height:0; display:grid; grid-template-rows:auto auto minmax(130px,.8fr) minmax(220px,1.2fr); gap:10px; padding:14px; overflow:hidden; }
+.budget-search-field { overflow:hidden; border:1px solid #8bd7ff; border-radius:14px; background:#fff; box-shadow:var(--sombra); }
+.budget-search-field label { display:block; padding:7px 11px 0; color:#68708c; font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:900; cursor:pointer; }
+.budget-search-field input { width:100%; height:44px; border:0; outline:0; padding:4px 11px 9px; color:var(--texto-dark); background:#fff; font-family:'Barlow Condensed',sans-serif; font-size:23px; font-weight:700; }
+.budget-search-field:focus-within { border-color:var(--violeta); box-shadow:0 0 0 3px rgba(108,79,199,.14); }
+.budget-search-count { color:#68708c; font-family:'Barlow Condensed',sans-serif; font-size:17px; font-weight:900; }
+.budget-search-results { display:grid; gap:8px; align-content:start; overflow:auto; padding-right:4px; }
+.budget-search-card { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; min-height:60px; padding:10px 13px; border:1px solid #bce8ff; border-radius:14px; background:linear-gradient(90deg,#f1fbff,#fff); cursor:pointer; outline:none; }
+.budget-search-card:hover,.budget-search-card.active,.budget-search-card:focus { border-color:#7d6cff; background:#eeeaff; box-shadow:0 8px 22px rgba(108,79,199,.16); }
+.budget-search-card strong { display:block; color:var(--texto-dark); font-family:'Barlow Condensed',sans-serif; font-size:22px; font-weight:900; }
+.budget-search-card span { display:block; margin-top:2px; color:#68708c; font-size:13px; font-weight:800; }
+.budget-search-card b { color:var(--rojo); font-family:'Barlow Condensed',sans-serif; font-size:20px; font-weight:900; white-space:nowrap; }
+.budget-search-detail { overflow:auto; border:1px solid #bce8ff; border-radius:14px; background:#fff; }
+.budget-search-detail-title { padding:9px 12px; border-bottom:1px solid #d7efff; background:linear-gradient(90deg,#eefaff,#fff); color:var(--rojo); font-family:'Barlow Condensed',sans-serif; font-size:22px; font-weight:900; }
+.budget-search-detail-row { display:grid; grid-template-columns:130px minmax(360px,1fr) 110px 150px; min-height:36px; border-bottom:1px solid #e6f3ff; }
+.budget-search-detail-row:nth-child(even) { background:var(--fila-body); }
+.budget-search-detail-row.head { position:sticky; top:0; z-index:1; background:#e9f8ff; color:var(--violeta); font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:900; }
+.budget-search-detail-row div { overflow:hidden; padding:8px 10px; border-right:1px solid #d7efff; text-overflow:ellipsis; white-space:nowrap; }
+.budget-search-detail-row .num { text-align:right; font-variant-numeric:tabular-nums; }
+.budget-search-empty { display:flex; min-height:90px; align-items:center; justify-content:center; padding:18px; color:#888; font-weight:800; text-align:center; }
+@media(max-width:720px) {
+  .budget-search-bg { padding:8px; }
+  .budget-search-modal { width:100%; height:94vh; border-radius:14px; }
+  .budget-search-head { padding:10px 12px; }
+  .budget-search-head h2 { font-size:23px; }
+  .budget-search-body { padding:9px; grid-template-rows:auto auto minmax(120px,.75fr) minmax(210px,1.25fr); }
+  .budget-search-detail-row { min-width:700px; }
+  .budget-search-card { grid-template-columns:1fr; }
+  .budget-search-card b { white-space:normal; }
 }
 
 /* ── HISTORIAL LIST ── */
@@ -179,12 +221,21 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .detalle-panel { background: #fff; border-radius: 20px 20px 0 0; width: 100%; max-height: 90vh; display: flex; flex-direction: column; }
 .detalle-head { padding: 14px 16px; border-bottom: 1px solid var(--borde); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: var(--fila-header); border-radius: 20px 20px 0 0; }
 .detalle-nro { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 900; color: var(--violeta); }
+.detalle-nro-wrap { display: flex; align-items: center; gap: 7px; }
+.btn-copy-boleta { position: relative; width: 25px; height: 25px; border: 0; background: transparent; color: var(--violeta); cursor: pointer; }
+.btn-copy-boleta::before, .btn-copy-boleta::after { content: ''; position: absolute; width: 12px; height: 15px; border: 2px solid currentColor; border-radius: 3px; background: var(--fila-header); }
+.btn-copy-boleta::before { left: 4px; top: 7px; }
+.btn-copy-boleta::after { left: 9px; top: 2px; }
+.btn-copy-boleta:hover { color: #4f35ad; transform: scale(1.06); }
 .detalle-body { overflow-y: auto; flex: 1; padding: 16px; }
 .detalle-info { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
 .detalle-campo { display: flex; flex-direction: column; gap: 2px; }
 .detalle-lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
 .detalle-val { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; color: var(--texto-dark); }
 .detalle-val.pre-line { white-space: pre-wrap; line-height: 1.25; }
+.detalle-tipo-editable { display: flex; align-items: center; gap: 7px; }
+.detalle-pencil-btn { width: 25px; height: 25px; border: 1px solid var(--borde); border-radius: 7px; background: #f5f3ff; color: var(--violeta); cursor: pointer; font-size: 13px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.detalle-pencil-btn:hover { background: #e8e2ff; border-color: var(--violeta); }
 .detalle-tabla-head { display: grid; grid-template-columns: 45px 1fr 75px 80px; gap: 6px; background: var(--fila-header); padding: 6px 8px; border-radius: 8px 8px 0 0; }
 .detalle-th { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: var(--violeta); text-transform: uppercase; letter-spacing: .5px; }
 .detalle-fila { display: grid; grid-template-columns: 45px 1fr 75px 80px; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--borde); }
@@ -232,6 +283,20 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .edit-item-inp { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; border: none; background: transparent; outline: none; width: 100%; padding: 2px 3px; border-radius: 4px; color: var(--texto-dark); }
 .edit-item-inp:focus { background: rgba(108,79,199,.08); }
 .edit-item-inp.num { text-align: right; }
+.edit-item-inp[readonly] { color: var(--violeta); font-weight: 700; cursor: default; }
+.budget-article-wrap { position: relative; display: flex; align-items: center; min-width: 0; }
+.budget-article-wrap .edit-item-inp { padding-right: 20px; }
+.budget-article-arrow { position: absolute; right: 2px; border: 0; background: transparent; color: var(--violeta); font-size: 10px; cursor: pointer; padding: 4px; }
+.budget-article-menu { position: fixed; z-index: 280; display: none; max-height: 260px; overflow-y: auto; background: #fff; border: 1px solid var(--borde); border-radius: 9px; box-shadow: 0 10px 26px rgba(37,26,77,.24); }
+.budget-article-menu.open { display: block; }
+.budget-article-option { padding: 7px 9px; border-bottom: 1px solid #eeeaf9; cursor: pointer; font-family: 'Barlow Condensed',sans-serif; color: var(--texto-dark); }
+.budget-article-option:last-child { border-bottom: 0; }
+.budget-article-option:hover, .budget-article-option.active { background: #e8e2ff; }
+.budget-article-option-code { font-size: 11px; font-weight: 900; color: var(--violeta); }
+.budget-article-option-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.budget-article-option-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.budget-article-option-price { flex: 0 0 auto; font-weight: 900; }
+.budget-article-empty { padding: 12px; text-align: center; color: #888; font-size: 12px; }
 .edit-add-row { display: grid; grid-template-columns: 45px 1fr 75px 80px 28px; gap: 4px; padding: 4px 6px; background: rgba(108,79,199,.04); border-bottom: 1px dashed var(--borde); align-items: center; }
 .edit-footer { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--borde); flex-shrink: 0; }
 .btn-edit-cancel { flex: 1; padding: 11px; border: 1.5px solid var(--borde); border-radius: 10px; background: transparent; color: #888; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; }
@@ -286,6 +351,9 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     <div id="historialBody"></div>
   </div>
   <div class="hist-panel" id="panelPresupuestos">
+    <div class="budget-search-toolbar">
+      <button class="budget-search-open" id="openBudgetSearchBtn" type="button">Buscar en presupuestos</button>
+    </div>
     <div id="presupuestosBody"></div>
   </div>
   <div class="hist-panel" id="panelGarantias">
@@ -293,11 +361,33 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
   </div>
 </div>
 
+<!-- ── BUSCAR EN PRESUPUESTOS ── -->
+<div class="budget-search-bg" id="budgetSearchBg">
+  <div class="budget-search-modal" role="dialog" aria-modal="true" aria-labelledby="budgetSearchTitle">
+    <div class="budget-search-head">
+      <h2 id="budgetSearchTitle">Buscar en presupuestos</h2>
+      <button class="budget-search-close" id="closeBudgetSearchBtn" type="button">Cerrar</button>
+    </div>
+    <div class="budget-search-body">
+      <div class="budget-search-field">
+        <label for="budgetSearchInput">Buscar artículo presupuestado</label>
+        <input id="budgetSearchInput" type="text" autocomplete="off" placeholder="Ej: cemento, grifería, código...">
+      </div>
+      <div class="budget-search-count" id="budgetSearchCount">Escribí para buscar en presupuestos.</div>
+      <div class="budget-search-results" id="budgetSearchResults"></div>
+      <div class="budget-search-detail" id="budgetSearchDetail"><div class="budget-search-empty">Elegí un presupuesto para ver el detalle.</div></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── DETALLE ── -->
 <div class="detalle-bg" id="detalleBg" onclick="if(event.target===this)cerrarDetalle()">
   <div class="detalle-panel">
     <div class="detalle-head">
-      <span class="detalle-nro" id="detalleNro">—</span>
+      <div class="detalle-nro-wrap">
+        <span class="detalle-nro" id="detalleNro">—</span>
+        <button class="btn-copy-boleta" id="btnCopyBoleta" type="button" title="Copiar número de boleta" aria-label="Copiar número de boleta" onclick="copiarNumeroBoleta()"></button>
+      </div>
       <button onclick="cerrarDetalle()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;">✕</button>
     </div>
     <div class="detalle-body" id="detalleBody"></div>
@@ -365,7 +455,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 <div class="edit-bg" id="editBg" onclick="if(event.target===this)cerrarEditar()">
   <div class="edit-panel">
     <div class="edit-head">
-      <span style="font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;color:var(--texto-dark);text-transform:uppercase;">✏️ Editar remito</span>
+      <span id="editTitle" style="font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;color:var(--texto-dark);text-transform:uppercase;">✏️ Editar remito</span>
       <button onclick="cerrarEditar()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;">✕</button>
     </div>
     <div class="edit-body" id="editBody"></div>
@@ -375,6 +465,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
     </div>
   </div>
 </div>
+<div class="budget-article-menu" id="budgetArticleMenu" onscroll="cargarMasArticulosPresupuesto(this)"></div>
 
 <!-- ── CONFIRM ── -->
 <div class="confirm-bg" id="confirmBg">
@@ -420,6 +511,8 @@ const histDb = firebase.firestore();
 let _remitoDetalleActual = null;
 let _presupuestoDetalleActual = null;
 let _presupuestosCache = [];
+let _budgetSearchGroups = [];
+let _budgetSearchSelectedKey = '';
 let _remitosCache = [];
 let _garantiasCache = [];
 let _garantiaFotoActual = null;
@@ -434,6 +527,14 @@ let _fotoPinchStart = null;
 let _detalleTipoActual = 'remito';
 let editItems = [];
 let editFocusedField = null;
+let _budgetCatalogCache = {};
+let _budgetCatalog = [];
+let _budgetNuevoArticulo = null;
+let _budgetDropdownInput = null;
+let _budgetDropdownIndex = null;
+let _budgetDropdownResults = [];
+let _budgetDropdownRendered = 20;
+let _budgetDropdownActive = -1;
 let _confirmCallback = null;
 let logoCacheData = null;
 let _pdfDetalleActual = null;
@@ -688,6 +789,155 @@ function footerPresupuestoHistorial(p = {}) {
   return extras.length ? `${extras.join(' | ')}\n${leyenda}` : leyenda;
 }
 
+function normalizarBusquedaPresupuesto(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function fechaPresupuestoTimestamp(p = {}) {
+  const iso = Date.parse(String(p.fecha_iso || ''));
+  if (Number.isFinite(iso)) return iso;
+  const partes = String(p.fecha || '').trim().split(/[\/\-.\s]+/).map(Number);
+  if (partes.length < 3 || !partes[0] || !partes[1] || !partes[2]) return 0;
+  const formatoIso = partes[0] > 31;
+  const anioBase = formatoIso ? partes[0] : partes[2];
+  const anio = anioBase < 100 ? 2000 + anioBase : anioBase;
+  const mes = partes[1];
+  const dia = formatoIso ? partes[2] : partes[0];
+  const fecha = new Date(anio, mes - 1, dia);
+  return Number.isNaN(fecha.getTime()) ? 0 : fecha.getTime();
+}
+
+function presupuestoDentroUltimos30Dias(p = {}) {
+  const timestamp = fechaPresupuestoTimestamp(p);
+  if (!timestamp) return false;
+  const limite = new Date();
+  limite.setHours(0, 0, 0, 0);
+  limite.setDate(limite.getDate() - 30);
+  return timestamp >= limite.getTime();
+}
+
+function textoItemPresupuesto(item = {}) {
+  return normalizarBusquedaPresupuesto(`${item.codigo || item.idart || item.idArt || ''} ${item.nombre || item.descripcion || ''}`);
+}
+
+function itemPresupuestoCoincide(item, consulta) {
+  const palabras = normalizarBusquedaPresupuesto(consulta).split(' ').filter(Boolean);
+  if (!palabras.length) return false;
+  const texto = textoItemPresupuesto(item);
+  return palabras.every((palabra) => texto.includes(palabra));
+}
+
+function claveBusquedaPresupuesto(p = {}, index = 0) {
+  return String(p.id || p.numero || p.nro || index + 1);
+}
+
+function recolectarResultadosPresupuestos(consulta) {
+  return _presupuestosCache.map((presupuesto, index) => {
+    if (!presupuestoDentroUltimos30Dias(presupuesto)) return null;
+    const lineas = (Array.isArray(presupuesto.items) ? presupuesto.items : [])
+      .filter((item) => itemPresupuestoCoincide(item, consulta))
+      .map((item) => ({
+        codigo: item.codigo || item.idart || item.idArt || '',
+        descripcion: item.nombre || item.descripcion || '',
+        cantidad: item.cantidad ?? item.cant ?? '',
+        precio: Number(item.precio ?? item.price ?? 0) || 0
+      }));
+    if (!lineas.length) return null;
+    return {
+      key: claveBusquedaPresupuesto(presupuesto, index),
+      index,
+      presupuesto,
+      lineas,
+      timestamp: fechaPresupuestoTimestamp(presupuesto)
+    };
+  }).filter(Boolean).sort((a, b) => b.timestamp - a.timestamp || String(b.key).localeCompare(String(a.key), 'es', { numeric:true }));
+}
+
+function renderDetalleBusquedaPresupuesto(key) {
+  const detail = document.getElementById('budgetSearchDetail');
+  const results = document.getElementById('budgetSearchResults');
+  const group = _budgetSearchGroups.find((item) => item.key === String(key));
+  _budgetSearchSelectedKey = group?.key || '';
+  results?.querySelectorAll('[data-budget-search-key]').forEach((card) => {
+    card.classList.toggle('active', card.dataset.budgetSearchKey === _budgetSearchSelectedKey);
+  });
+  if (!detail || !group) {
+    if (detail) detail.innerHTML = '<div class="budget-search-empty">Elegí un presupuesto para ver el detalle.</div>';
+    return;
+  }
+  const p = group.presupuesto;
+  const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '');
+  const titulo = tituloPresupuestoHistorial(p);
+  const filas = group.lineas.map((item) => `
+    <div class="budget-search-detail-row">
+      <div>${esc(item.codigo)}</div>
+      <div title="${esc(item.descripcion)}">${esc(item.descripcion)}</div>
+      <div class="num">${esc(fmtCantidad(item.cantidad))}</div>
+      <div class="num">${esc(fmt(item.precio))}</div>
+    </div>`).join('');
+  detail.innerHTML = `
+    <div class="budget-search-detail-title">${fechaTxt ? `${esc(fechaTxt)} - ` : ''}${esc(titulo)} - Presupuesto ${esc(p.numero || p.id || '-')}</div>
+    <div class="budget-search-detail-row head"><div>Código</div><div>Descripción</div><div class="num">Cantidad</div><div class="num">Precio</div></div>
+    ${filas}`;
+}
+
+function renderBusquedaPresupuestos() {
+  const input = document.getElementById('budgetSearchInput');
+  const count = document.getElementById('budgetSearchCount');
+  const results = document.getElementById('budgetSearchResults');
+  const detail = document.getElementById('budgetSearchDetail');
+  if (!input || !count || !results || !detail) return;
+  const consulta = input.value.trim();
+  if (!consulta) {
+    _budgetSearchGroups = [];
+    _budgetSearchSelectedKey = '';
+    count.textContent = 'Escribí para buscar en presupuestos.';
+    results.innerHTML = '';
+    detail.innerHTML = '<div class="budget-search-empty">Elegí un presupuesto para ver el detalle.</div>';
+    return;
+  }
+  _budgetSearchGroups = recolectarResultadosPresupuestos(consulta);
+  count.textContent = `${_budgetSearchGroups.length} presupuesto${_budgetSearchGroups.length === 1 ? '' : 's'} encontrado${_budgetSearchGroups.length === 1 ? '' : 's'} en los últimos 30 días para "${consulta}"`;
+  results.innerHTML = _budgetSearchGroups.map((group) => {
+    const p = group.presupuesto;
+    const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '');
+    const titulo = tituloPresupuestoHistorial(p);
+    return `<div class="budget-search-card" tabindex="0" role="button" data-budget-search-key="${esc(group.key)}">
+      <div><strong>${fechaTxt ? `${esc(fechaTxt)} - ` : ''}${esc(titulo)}</strong><span>${group.lineas.length} línea${group.lineas.length === 1 ? '' : 's'} encontrada${group.lineas.length === 1 ? '' : 's'}</span></div>
+      <b>Presupuesto ${esc(p.numero || p.id || '-')} · ${esc(fmt(p.total || 0))}</b>
+    </div>`;
+  }).join('') || '<div class="budget-search-empty">No encontré presupuestos con ese artículo en los últimos 30 días.</div>';
+  if (_budgetSearchGroups.length) renderDetalleBusquedaPresupuesto(_budgetSearchGroups[0].key);
+  else {
+    _budgetSearchSelectedKey = '';
+    detail.innerHTML = '<div class="budget-search-empty">Sin resultados para mostrar.</div>';
+  }
+}
+
+async function abrirBusquedaPresupuestos() {
+  const bg = document.getElementById('budgetSearchBg');
+  const input = document.getElementById('budgetSearchInput');
+  if (!bg || !input) return;
+  bg.classList.add('open');
+  input.value = '';
+  renderBusquedaPresupuestos();
+  if (!_presupuestosCache.length) await cargarPresupuestos();
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
+}
+
+function cerrarBusquedaPresupuestos() {
+  document.getElementById('budgetSearchBg')?.classList.remove('open');
+  document.getElementById('openBudgetSearchBtn')?.focus();
+}
+
 async function cargarPresupuestos() {
   const body = document.getElementById('presupuestosBody');
   if (!body) return;
@@ -723,6 +973,7 @@ async function cargarPresupuestos() {
           <span style="color:#ccc;font-size:18px;">›</span>
         </div>`;
     }).join('');
+    if (document.getElementById('budgetSearchBg')?.classList.contains('open')) renderBusquedaPresupuestos();
   } catch (e) {
     _presupuestosCache = [];
     body.innerHTML = '<div class="h-empty">Error cargando presupuestos</div>';
@@ -995,10 +1246,28 @@ function setAccionesDetalleModo(modo) {
   const btnCopy = document.getElementById('btnDetalleCopy');
   const btnEdit = document.getElementById('btnDetalleEdit');
   const btnDel = document.getElementById('btnDetalleDel');
+  const btnCopyBoleta = document.getElementById('btnCopyBoleta');
   if (btnPdf) btnPdf.textContent = esRemito ? 'PDF' : 'Ver PDF';
   if (btnCopy) btnCopy.style.display = esRemito ? 'none' : '';
   if (btnEdit) btnEdit.style.display = esRemito ? '' : 'none';
   if (btnDel) btnDel.style.display = esRemito ? '' : 'none';
+  if (btnCopyBoleta) btnCopyBoleta.style.display = esRemito ? 'none' : '';
+}
+
+async function copiarNumeroBoleta() {
+  const numero = String(_presupuestoDetalleActual?.numero || document.getElementById('detalleNro')?.textContent || '').trim();
+  if(!numero || numero === '-') return;
+  try {
+    await navigator.clipboard.writeText(numero);
+  } catch (_) {
+    const campo = document.createElement('textarea');
+    campo.value = numero;
+    document.body.appendChild(campo);
+    campo.select();
+    document.execCommand('copy');
+    campo.remove();
+  }
+  toast('Número de boleta copiado');
 }
 
 async function copiarContenidoDetalle() {
@@ -1049,7 +1318,10 @@ function abrirDetallePresupuesto(index) {
     <div class="detalle-info">
       <div class="detalle-campo" style="grid-column:1/3">
         <div class="detalle-lbl">Tipo</div>
-        <div class="detalle-val">${esc(titulo)}</div>
+        <div class="detalle-val detalle-tipo-editable">
+          <span>${esc(titulo)}</span>
+          <button class="detalle-pencil-btn" type="button" title="Editar presupuesto" aria-label="Editar presupuesto" onclick="abrirEditarPresupuesto()">✏</button>
+        </div>
       </div>
       <div class="detalle-campo">
         <div class="detalle-lbl">Fecha</div>
@@ -1355,19 +1627,59 @@ function confirmarEliminar() {
 function abrirEditar() {
   const r = _remitoDetalleActual;
   if(!r) return;
+  _detalleTipoActual = 'remito';
   editItems = (r.items||[]).map(it => ({ id: it.id, cant: it.cant, desc: it.descripcion, precio: it.precio }));
   editFocusedField = null;
+  document.getElementById('editTitle').textContent = '✏ Editar remito';
   renderEditForm();
   document.getElementById('editBg').classList.add('open');
 }
 
+async function abrirEditarPresupuesto() {
+  const p = _presupuestoDetalleActual;
+  if(!p) return;
+  _detalleTipoActual = 'presupuesto';
+  editItems = (p.items || []).map(it => ({
+    codigo: String(it.codigo || it.idart || ''),
+    cant: Number(it.cantidad) || 1,
+    desc: String(it.nombre || it.descripcion || ''),
+    precio: Number(it.precio) || 0
+  }));
+  _budgetNuevoArticulo = null;
+  editFocusedField = null;
+  document.getElementById('editTitle').textContent = '✏ Editar presupuesto';
+  document.getElementById('editBg').classList.add('open');
+  document.getElementById('editBody').innerHTML = '<div style="padding:28px;text-align:center;color:#777">Cargando artículos de Index...</div>';
+  try {
+    const loader = window.CorralonSystem?.faltantes?.loadCorralonCatalog;
+    if(typeof loader !== 'function') throw new Error('No se encontró el catálogo de Index');
+    const rows = await loader(_budgetCatalogCache);
+    _budgetCatalog = (rows || []).map(row => ({
+      codigo: String(row.idart || '').trim(),
+      desc: String(row.descripcion || '').trim(),
+      precio: Number(row.precioFinal) || 0
+    })).filter(row => row.codigo || row.desc);
+    renderEditForm();
+  } catch(error) {
+    console.error(error);
+    cerrarEditar();
+    toast('No se pudo cargar la lista de artículos');
+  }
+}
+
 function cerrarEditar() {
   document.getElementById('editBg').classList.remove('open');
+  cerrarListaArticuloPresupuesto();
   editItems = [];
   editFocusedField = null;
+  _budgetNuevoArticulo = null;
 }
 
 function renderEditForm() {
+  if(_detalleTipoActual === 'presupuesto') {
+    renderEditFormPresupuesto();
+    return;
+  }
   const r = _remitoDetalleActual;
   const nroCorto = r.nro ? remitoShort(r.nro) : '';
   document.getElementById('editBody').innerHTML = `
@@ -1408,6 +1720,56 @@ function renderEditForm() {
   aplicarFuncionesTxtEdicion();
 }
 
+function etiquetaArticuloPresupuesto(item = {}) {
+  return [String(item.codigo || '').trim(), String(item.desc || '').trim()].filter(Boolean).join(' — ');
+}
+
+function renderEditFormPresupuesto() {
+  const p = _presupuestoDetalleActual;
+  if(!p) return;
+  const datos = datosExtraPresupuesto(p);
+  const fechaEditor = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '');
+  document.getElementById('editBody').innerHTML = `
+    <div class="edit-section">
+      <div class="edit-lbl">Nombre</div>
+      <input class="edit-inp" id="editCliente" value="${esc(datos.nombre)}" placeholder="Nombre del cliente" autocomplete="off">
+    </div>
+    <div class="edit-section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <div class="edit-lbl">Fecha</div>
+        <input class="edit-inp" id="editFecha" value="${esc(fechaEditor)}" placeholder="DD/MM/AAAA" autocomplete="off" onblur="normalizarEditFecha()">
+      </div>
+      <div>
+        <div class="edit-lbl">N° Presupuesto</div>
+        <input class="edit-inp" id="editNro" value="${esc(p.numero || '')}" autocomplete="off">
+      </div>
+    </div>
+    <div class="edit-section">
+      <div class="edit-lbl" style="margin-bottom:6px">Ítems</div>
+      <div class="edit-items-head">
+        <div class="edit-th" style="text-align:center">Cant.</div>
+        <div class="edit-th">Artículo de Index</div>
+        <div class="edit-th" style="text-align:right">Precio</div>
+        <div class="edit-th" style="text-align:right">Subtotal</div>
+        <div></div>
+      </div>
+      <div id="editItemsRows"></div>
+      <div class="edit-add-row">
+        <input type="text" class="edit-item-inp num" id="eNuevoCant" placeholder="1,00" inputmode="decimal" autocomplete="off" oninput="actualizarNuevoSubtotalPresupuesto()">
+        <div class="budget-article-wrap">
+          <input type="text" class="edit-item-inp" id="eNuevoDesc" placeholder="Elegir artículo..." autocomplete="off" oninput="filtrarArticuloPresupuestoNuevo(this)" onfocus="abrirListaArticuloPresupuesto(this,'nuevo')" onblur="cerrarListaArticuloPresupuestoAlSalir(this)" onkeydown="teclaListaArticuloPresupuesto(event)">
+          <button type="button" class="budget-article-arrow" tabindex="-1" onclick="abrirListaArticuloPresupuestoDesdeBoton(this,'nuevo')">▼</button>
+        </div>
+        <input type="text" class="edit-item-inp num" id="eNuevoPrecio" placeholder="0,00" readonly>
+        <input type="text" class="edit-item-inp num" id="eNuevoSubtotal" placeholder="0,00" readonly>
+        <button class="btn-add" style="width:22px;height:22px;font-size:14px" onclick="editAgregarItem()">+</button>
+      </div>
+    </div>`;
+  renderEditItems();
+  aplicarFuncionesTxtEdicion();
+  actualizarNuevoSubtotalPresupuesto();
+}
+
 function aplicarFuncionesTxtEdicion() {
   const root = document.getElementById('editBg');
   const helpers = window.CorralonFunciones;
@@ -1436,6 +1798,22 @@ function aplicarFuncionesTxtEdicion() {
 function renderEditItems() {
   const cont = document.getElementById('editItemsRows');
   if(!cont) return;
+  if(_detalleTipoActual === 'presupuesto') {
+    cont.innerHTML = editItems.map((it, i) => `
+      <div class="edit-item-row">
+        <input type="text" class="edit-item-inp num" value="${Number(it.cant||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}" inputmode="decimal" autocomplete="off"
+          oninput="editItems[${i}].cant=parseMonto(this.value);actualizarSubEdit()">
+        <div class="budget-article-wrap">
+          <input type="text" class="edit-item-inp" value="${esc(etiquetaArticuloPresupuesto(it))}" autocomplete="off"
+            oninput="filtrarArticuloPresupuestoFila(${i},this)" onfocus="abrirListaArticuloPresupuesto(this,${i})" onblur="cerrarListaArticuloPresupuestoAlSalir(this)" onkeydown="teclaListaArticuloPresupuesto(event)">
+          <button type="button" class="budget-article-arrow" tabindex="-1" onclick="abrirListaArticuloPresupuestoDesdeBoton(this,${i})">▼</button>
+        </div>
+        <input type="text" class="edit-item-inp num" value="${Number(it.precio||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}" readonly>
+        <input type="text" class="edit-item-inp num" id="editSub${i}" value="${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}" readonly>
+        <button class="btn-del-item" style="font-size:13px" onclick="editItems.splice(${i},1);renderEditItems()">✕</button>
+      </div>`).join('');
+    return;
+  }
   cont.innerHTML = editItems.map((it, i) => `
     <div class="edit-item-row">
       <input type="text" class="edit-item-inp num" value="${it.cant}" inputmode="numeric" autocomplete="off"
@@ -1450,6 +1828,166 @@ function renderEditItems() {
       <button class="btn-del-item" style="font-size:13px" onclick="editItems.splice(${i},1);renderEditItems()">✕</button>
     </div>`).join('');
 }
+
+function resultadosArticulosPresupuesto(valor, mostrarTodos = false) {
+  if(mostrarTodos) return _budgetCatalog;
+  const normalizar = window.CorralonSystem?.norm || (txt => String(txt || '').trim().toLowerCase());
+  const terminos = normalizar(valor).split(' ').filter(Boolean);
+  if(!terminos.length) return _budgetCatalog;
+  return _budgetCatalog.filter(item => {
+    const texto = normalizar(`${item.codigo} ${item.desc}`);
+    return terminos.every(termino => texto.includes(termino));
+  });
+}
+
+function posicionarListaArticuloPresupuesto() {
+  const menu = document.getElementById('budgetArticleMenu');
+  const input = _budgetDropdownInput;
+  if(!menu || !input) return;
+  const rect = input.getBoundingClientRect();
+  const width = Math.max(300, rect.width);
+  menu.style.width = `${Math.min(width, window.innerWidth - 16)}px`;
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+  const espacioAbajo = window.innerHeight - rect.bottom;
+  if(espacioAbajo >= 180) {
+    menu.style.top = `${rect.bottom + 3}px`;
+    menu.style.bottom = 'auto';
+    menu.style.maxHeight = `${Math.min(260, espacioAbajo - 8)}px`;
+  } else {
+    menu.style.top = 'auto';
+    menu.style.bottom = `${window.innerHeight - rect.top + 3}px`;
+    menu.style.maxHeight = `${Math.min(260, rect.top - 8)}px`;
+  }
+}
+
+function renderListaArticuloPresupuesto() {
+  const menu = document.getElementById('budgetArticleMenu');
+  if(!menu) return;
+  const visibles = _budgetDropdownResults.slice(0, _budgetDropdownRendered);
+  menu.innerHTML = visibles.length ? visibles.map((item, posicion) => `
+    <div class="budget-article-option ${posicion === _budgetDropdownActive ? 'active' : ''}" onmousedown="event.preventDefault();elegirArticuloPresupuesto(${posicion})">
+      <div class="budget-article-option-code">${esc(item.codigo)}</div>
+      <div class="budget-article-option-row">
+        <span class="budget-article-option-desc">${esc(item.desc)}</span>
+        <span class="budget-article-option-price">$${Number(item.precio||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+      </div>
+    </div>`).join('') : '<div class="budget-article-empty">Sin artículos encontrados</div>';
+  menu.classList.add('open');
+  posicionarListaArticuloPresupuesto();
+}
+
+function abrirListaArticuloPresupuesto(input, index, mostrarTodos = false) {
+  if(!input) return;
+  _budgetDropdownInput = input;
+  _budgetDropdownIndex = index;
+  _budgetDropdownResults = resultadosArticulosPresupuesto(input.value, mostrarTodos);
+  _budgetDropdownRendered = 20;
+  _budgetDropdownActive = -1;
+  renderListaArticuloPresupuesto();
+}
+
+function filtrarArticuloPresupuestoFila(index, input) {
+  const actual = editItems[index];
+  if(actual) {
+    actual.codigo = '';
+    actual.desc = String(input.value || '').replace(/^.*?\s—\s/, '');
+    actual.precio = 0;
+  }
+  const campos = input.closest('.edit-item-row')?.querySelectorAll('input.edit-item-inp');
+  if(campos?.[2]) campos[2].value = '0,00';
+  if(campos?.[3]) campos[3].value = '0,00';
+  abrirListaArticuloPresupuesto(input, index);
+}
+
+function filtrarArticuloPresupuestoNuevo(input) {
+  _budgetNuevoArticulo = null;
+  const precio = document.getElementById('eNuevoPrecio');
+  if(precio) precio.value = '';
+  actualizarNuevoSubtotalPresupuesto();
+  abrirListaArticuloPresupuesto(input, 'nuevo');
+}
+
+function elegirArticuloPresupuesto(posicion) {
+  const articulo = _budgetDropdownResults[posicion];
+  const input = _budgetDropdownInput;
+  if(!articulo || !input) return;
+  input.value = etiquetaArticuloPresupuesto(articulo);
+  if(_budgetDropdownIndex === 'nuevo') {
+    _budgetNuevoArticulo = articulo;
+    const precio = document.getElementById('eNuevoPrecio');
+    if(precio) precio.value = Number(articulo.precio||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    actualizarNuevoSubtotalPresupuesto();
+  } else {
+    const actual = editItems[_budgetDropdownIndex];
+    if(actual) Object.assign(actual, { codigo: articulo.codigo, desc: articulo.desc, precio: articulo.precio });
+    const campos = input.closest('.edit-item-row')?.querySelectorAll('input.edit-item-inp');
+    if(campos?.[2]) campos[2].value = Number(articulo.precio||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    if(campos?.[3]) campos[3].value = Number((actual?.cant||0)*(articulo.precio||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  cerrarListaArticuloPresupuesto();
+  input.focus();
+  input.select();
+}
+
+function cargarMasArticulosPresupuesto(menu) {
+  if(menu.scrollTop + menu.clientHeight < menu.scrollHeight - 24) return;
+  if(_budgetDropdownRendered >= _budgetDropdownResults.length) return;
+  const scrollTop = menu.scrollTop;
+  _budgetDropdownRendered += 20;
+  renderListaArticuloPresupuesto();
+  menu.scrollTop = scrollTop;
+}
+
+function teclaListaArticuloPresupuesto(event) {
+  const menu = document.getElementById('budgetArticleMenu');
+  if(!menu?.classList.contains('open')) return;
+  if(event.key === 'Escape') {
+    event.preventDefault(); event.stopPropagation(); cerrarListaArticuloPresupuesto(); return;
+  }
+  if(event.key === 'Enter' || event.key === 'Tab' || event.key.startsWith('Arrow')) {
+    cerrarListaArticuloPresupuesto();
+  }
+}
+
+function cerrarListaArticuloPresupuestoAlSalir(input) {
+  setTimeout(() => {
+    const activo = document.activeElement;
+    const menu = document.getElementById('budgetArticleMenu');
+    if(activo === input || input?.parentElement?.contains(activo) || menu?.contains(activo)) return;
+    cerrarListaArticuloPresupuesto();
+  }, 0);
+}
+
+function cerrarListaArticuloPresupuesto() {
+  document.getElementById('budgetArticleMenu')?.classList.remove('open');
+  _budgetDropdownInput = null;
+  _budgetDropdownIndex = null;
+  _budgetDropdownResults = [];
+  _budgetDropdownActive = -1;
+}
+
+function actualizarNuevoSubtotalPresupuesto() {
+  if(_detalleTipoActual !== 'presupuesto') return;
+  const cant = parseMonto(document.getElementById('eNuevoCant')?.value) || 0;
+  const subtotal = cant * Number(_budgetNuevoArticulo?.precio || 0);
+  const campo = document.getElementById('eNuevoSubtotal');
+  if(campo) campo.value = subtotal ? subtotal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
+}
+
+function abrirListaArticuloPresupuestoDesdeBoton(boton, index) {
+  const input = boton?.parentElement?.querySelector('input');
+  if(!input) return;
+  input.focus();
+  abrirListaArticuloPresupuesto(input, index, true);
+}
+
+document.addEventListener('mousedown', event => {
+  const menu = document.getElementById('budgetArticleMenu');
+  if(!menu?.classList.contains('open')) return;
+  if(menu.contains(event.target) || event.target.closest?.('.budget-article-wrap')) return;
+  cerrarListaArticuloPresupuesto();
+});
+window.addEventListener('resize', cerrarListaArticuloPresupuesto);
 
 function normalizarEditNro() {
   const input = document.getElementById('editNro');
@@ -1467,8 +2005,9 @@ function normalizarEditFecha() {
 function actualizarSubEdit() {
   editItems.forEach((it, i) => {
     const el = document.getElementById('editSub' + i);
-    if(el) el.value = Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR');
+    if(el) el.value = Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR', _detalleTipoActual === 'presupuesto' ? {minimumFractionDigits:2,maximumFractionDigits:2} : undefined);
   });
+  actualizarNuevoSubtotalPresupuesto();
 }
 
 function calcularPrecioEditDesdeSubtotal(i, input) {
@@ -1497,7 +2036,21 @@ function calcularPrecioNuevoDesdeSubtotal() {
 }
 
 function editAgregarItem() {
-  const cant  = parseFloat(document.getElementById('eNuevoCant').value) || 1;
+  const cant  = _detalleTipoActual === 'presupuesto'
+    ? (parseMonto(document.getElementById('eNuevoCant').value) || 1)
+    : (parseFloat(document.getElementById('eNuevoCant').value) || 1);
+  if(_detalleTipoActual === 'presupuesto') {
+    if(!_budgetNuevoArticulo) { toast('Elegí un artículo de la lista de Index'); return; }
+    editItems.push({ codigo: _budgetNuevoArticulo.codigo, cant, desc: _budgetNuevoArticulo.desc, precio: _budgetNuevoArticulo.precio });
+    _budgetNuevoArticulo = null;
+    document.getElementById('eNuevoCant').value = '';
+    document.getElementById('eNuevoDesc').value = '';
+    document.getElementById('eNuevoPrecio').value = '';
+    document.getElementById('eNuevoSubtotal').value = '';
+    renderEditItems();
+    setTimeout(() => document.getElementById('eNuevoCant')?.focus(), 30);
+    return;
+  }
   const desc  = document.getElementById('eNuevoDesc').value.trim();
   const precio= parseMonto(document.getElementById('eNuevoPrecio').value);
   if(!desc && !precio) return;
@@ -1511,6 +2064,10 @@ function editAgregarItem() {
 }
 
 async function guardarEdicion() {
+  if(_detalleTipoActual === 'presupuesto') {
+    await guardarEdicionPresupuesto();
+    return;
+  }
   const r = _remitoDetalleActual;
   if(!r) return;
   normalizarEditFecha();
@@ -1561,6 +2118,66 @@ async function guardarEdicionRemota(remito) {
     });
   }
   cargarHistorial();
+}
+
+async function guardarEdicionPresupuesto() {
+  const p = _presupuestoDetalleActual;
+  if(!p) return;
+  normalizarEditFecha();
+  const cliente = document.getElementById('editCliente')?.value.trim() || '';
+  const fecha = document.getElementById('editFecha')?.value.trim() || '';
+  const numero = document.getElementById('editNro')?.value.trim() || '';
+  if(!numero) { toast('Ingresá el número de presupuesto'); return; }
+  if(editItems.some(it => !it.codigo)) { toast('Todos los artículos deben elegirse de la lista de Index'); return; }
+  const nextItems = editItems.map(it => ({
+    codigo: String(it.codigo || ''),
+    nombre: String(it.desc || ''),
+    cantidad: Number(it.cant) || 0,
+    precio: Number(it.precio) || 0
+  })).filter(it => it.cantidad > 0 && it.nombre);
+  const total = nextItems.reduce((s,it) => s + it.cantidad * it.precio, 0);
+  const parsed = window.CorralonFunciones?.parseFechaFlexible?.(fecha);
+  const fechaIso = parsed ? `${parsed.year}-${String(parsed.month).padStart(2,'0')}-${String(parsed.day).padStart(2,'0')}` : p.fecha_iso;
+  const nextPresupuesto = {
+    ...p,
+    numero_original: p.numero_original || p.numero,
+    numero,
+    fecha,
+    fecha_iso: fechaIso,
+    cliente_nombre: cliente,
+    total,
+    items: nextItems
+  };
+  const cacheIndex = _presupuestosCache.findIndex(item => String(item.id) === String(p.id));
+  if(cacheIndex >= 0) _presupuestosCache[cacheIndex] = nextPresupuesto;
+  _presupuestoDetalleActual = nextPresupuesto;
+  cerrarEditar();
+  if(cacheIndex >= 0) abrirDetallePresupuesto(cacheIndex);
+  toast('Presupuesto actualizado');
+  guardarEdicionPresupuestoRemota(nextPresupuesto).catch(error => {
+    console.error(error);
+    toast('Se guardó local, falta sincronizar');
+  });
+}
+
+async function guardarEdicionPresupuestoRemota(presupuesto) {
+  const filtro = presupuesto.id != null
+    ? `id=eq.${encodeURIComponent(presupuesto.id)}`
+    : `numero=eq.${encodeURIComponent(presupuesto.numero_original || presupuesto.numero)}`;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${PRESUPUESTOS_TABLE}?${filtro}`, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    body: JSON.stringify({
+      numero: presupuesto.numero,
+      fecha: presupuesto.fecha,
+      fecha_iso: presupuesto.fecha_iso,
+      cliente_nombre: presupuesto.cliente_nombre,
+      total: presupuesto.total,
+      items: presupuesto.items
+    })
+  });
+  if(!response.ok) throw new Error(await response.text());
+  cargarPresupuestos();
 }
 
 // ── NAVEGACIÓN TECLADO EDITAR ──
@@ -1775,6 +2392,49 @@ function generarPDFPresupuestoDoc(p) {
 // Estado inicial
 inicializarHistorial();
 document.getElementById('remitosSearch')?.addEventListener('input', renderRemitosHistorial);
+document.getElementById('openBudgetSearchBtn')?.addEventListener('click', abrirBusquedaPresupuestos);
+document.getElementById('closeBudgetSearchBtn')?.addEventListener('click', cerrarBusquedaPresupuestos);
+document.getElementById('budgetSearchInput')?.addEventListener('input', renderBusquedaPresupuestos);
+document.querySelector('.budget-search-field label')?.addEventListener('click', () => {
+  requestAnimationFrame(() => document.getElementById('budgetSearchInput')?.select());
+});
+document.getElementById('budgetSearchBg')?.addEventListener('mousedown', (event) => {
+  if (event.target === event.currentTarget) cerrarBusquedaPresupuestos();
+});
+document.getElementById('budgetSearchResults')?.addEventListener('click', (event) => {
+  const card = event.target.closest('[data-budget-search-key]');
+  if (card) renderDetalleBusquedaPresupuesto(card.dataset.budgetSearchKey);
+});
+document.getElementById('budgetSearchResults')?.addEventListener('dblclick', (event) => {
+  const card = event.target.closest('[data-budget-search-key]');
+  if (!card) return;
+  const group = _budgetSearchGroups.find((item) => item.key === card.dataset.budgetSearchKey);
+  if (!group) return;
+  cerrarBusquedaPresupuestos();
+  abrirDetallePresupuesto(group.index);
+});
+document.getElementById('budgetSearchResults')?.addEventListener('keydown', (event) => {
+  const card = event.target.closest('[data-budget-search-key]');
+  if (!card) return;
+  const cards = [...event.currentTarget.querySelectorAll('[data-budget-search-key]')];
+  const index = cards.indexOf(card);
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    renderDetalleBusquedaPresupuesto(card.dataset.budgetSearchKey);
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    const next = cards[(index + delta + cards.length) % cards.length];
+    next?.focus();
+    if (next) renderDetalleBusquedaPresupuesto(next.dataset.budgetSearchKey);
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.getElementById('budgetSearchBg')?.classList.contains('open')) {
+    event.preventDefault();
+    cerrarBusquedaPresupuestos();
+  }
+});
 </script>
 </body>
 </html>
