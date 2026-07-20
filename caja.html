@@ -1471,10 +1471,16 @@
         font-size: calc(10px * var(--mobile-font-keep));
       }
     }
+    body.caja-readonly::before {
+      content: 'MODO LECTOR'; position: fixed; right: 18px; bottom: 18px; z-index: 500;
+      padding: 8px 12px; border-radius: 999px; background: #6c4fc7; color: #fff;
+      font-size: 12px; font-weight: 900; box-shadow: 0 8px 22px rgba(58,35,120,.28); pointer-events: none;
+    }
+    body.caja-readonly [data-caja-mode-locked="1"] { cursor: not-allowed !important; opacity: .68; }
   </style>
   <script src="corralon-system.js"></script>
   <script src="nav-helper.js"></script>
-  <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="caja"></script>
+  <script src="menu-auth-guard.js?v=20260720-caja-mode1" data-menu-guard="caja"></script>
 </head>
 <body>
   <div class="app">
@@ -1843,6 +1849,64 @@
       'operaciones', 'estados', 'medios de pago', 'canales', 'borrar filtros',
       'pagina', 'paginas', 'de'
     ]);
+
+    let cajaReadOnly = false;
+    const CAJA_EDIT_SELECTORS = [
+      '#prevCajaDayBtn', '#nextCajaDayBtn',
+      '#clearCashBtn', '#clearTransfersBtn', '#addTransferBtn', '#mergeTransfersBtn', '#splitTransfersBtn', '#pasteTransfersBtn',
+      '#clearSystemBtn', '#mergeSystemBtn', '#splitSystemBtn', '#pasteSystemBtn', '#pasteMovementsBtn', '#updateTotalsBtn',
+      '#clearPasteTextBtn', '#processPasteTextBtn', '#mergeDiffRowsBtn', '#splitDiffRowsBtn', '#deleteSystemRowMenuBtn',
+      '.cell-input', '.transfer-branch-select', '.row-selector-btn', '[data-cash-row-branch-button]',
+      '[data-receipt-row-branch-button]', '[data-movement-separate-index]', '[data-movement-separate-branch]'
+    ].join(',');
+
+    function cajaSessionUser() {
+      try {
+        const temporary = JSON.parse(sessionStorage.getItem('corralon_menu_active_user_session_v1') || 'null');
+        const temporaryUser = temporary?.usuario?.id ? temporary.usuario : (temporary?.id ? temporary : null);
+        if(temporaryUser?.id) return temporaryUser;
+      } catch (_) {}
+      try { return JSON.parse(localStorage.getItem('corralon_menu_active_user_snapshot_v1') || 'null'); }
+      catch (_) { return null; }
+    }
+
+    function applyCajaMode(user = cajaSessionUser()) {
+      cajaReadOnly = Boolean(user && String(user.nivel || '').toLowerCase() !== 'administrador' && user.cajaModo === 'lector');
+      if(cajaReadOnly && selectedDateKey !== TODAY_DATE_KEY) {
+        selectedDateKey = TODAY_DATE_KEY;
+        updateDateLabel();
+        loadState(selectedDateKey);
+        renderAll();
+        loadPublicCajaData({ force: true, showPublicLoading: true });
+      }
+      document.body.classList.toggle('caja-readonly', cajaReadOnly);
+      document.querySelectorAll(CAJA_EDIT_SELECTORS).forEach((control) => {
+        if(cajaReadOnly) {
+          control.dataset.cajaModeLocked = '1';
+          control.disabled = true;
+          control.title = 'Modo lector: este control no puede modificarse';
+        } else if(control.dataset.cajaModeLocked === '1') {
+          delete control.dataset.cajaModeLocked;
+          control.disabled = false;
+          if(control.title === 'Modo lector: este control no puede modificarse') control.removeAttribute('title');
+        }
+      });
+    }
+
+    window.addEventListener('menu-user-validated', (event) => applyCajaMode(event.detail?.user));
+    new MutationObserver(() => { if(cajaReadOnly) applyCajaMode(); }).observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('click', (event) => {
+      if(cajaReadOnly && (event.ctrlKey || event.metaKey) && event.target.closest?.('[data-diff-side]')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if(cajaReadOnly && ['+','-','_','Insert','Delete'].includes(event.key) && event.target.closest?.('.app, .modal-bg')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
 
     const state = {
       cash: CASH_DENOMS.map((denom) => ({ denom, bills: 0, packs: 0 })),
@@ -2697,7 +2761,7 @@
 
     function queueFirebaseCajaManualSave(dateKey = selectedDateKey, values = cajaManualPayload()) {
       const db = firebaseDatabase();
-      if (!db || applyingRemoteState) return;
+      if (!db || applyingRemoteState || cajaReadOnly) return;
       clearTimeout(firebaseManualSaveTimer);
       firebaseManualSaveTimer = setTimeout(async () => {
         try {
@@ -2756,7 +2820,7 @@
     }
 
     function queueSummaryManualSave(dateKey = selectedDateKey) {
-      if (applyingFirebaseSummary) return;
+      if (applyingFirebaseSummary || cajaReadOnly) return;
       const db = firebaseDatabase();
       if (!db) return;
       clearTimeout(firebaseSaveTimer);
@@ -3059,6 +3123,7 @@
     }
 
     function saveState() {
+      if(cajaReadOnly) return;
       persistLocalState();
       queueFirebaseCajaManualSave();
       queueRemoteSave();
@@ -3121,7 +3186,7 @@
     }
 
     async function saveRemoteState(dateKey = selectedDateKey, payloadData = remoteStatePayload()) {
-      if (remoteSaveBlocked || applyingRemoteState) return;
+      if (remoteSaveBlocked || applyingRemoteState || cajaReadOnly) return;
       const payload = {
         id: remoteRowIdForDate(dateKey),
         fecha: dateKey,
@@ -3141,7 +3206,7 @@
     }
 
     function queueRemoteSave() {
-      if (remoteSaveBlocked || applyingRemoteState) return;
+      if (remoteSaveBlocked || applyingRemoteState || cajaReadOnly) return;
       clearTimeout(remoteSaveTimer);
       const dateKey = selectedDateKey;
       const payloadData = remoteStatePayload();
@@ -5953,6 +6018,7 @@
       saveState();
     });
 
+    applyCajaMode();
     loadCajaBranches();
     initializeMovementViewSelectors();
     updateDateLabel();

@@ -67,7 +67,8 @@
       nombre: String(raw.nombre || raw.usuario || '').trim(),
       usuario: String(raw.usuario || '').trim(),
       nivel: String(raw.nivel || 'personalizado').trim().toLowerCase(),
-      permisos: Array.isArray(raw.permisos) ? raw.permisos.map(String) : []
+      permisos: Array.isArray(raw.permisos) ? raw.permisos.map(String) : [],
+      cajaModo: String(raw.nivel || '').trim().toLowerCase() === 'administrador' ? 'editor' : (raw.cajaModo === 'lector' ? 'lector' : 'editor')
     };
   }
 
@@ -169,6 +170,7 @@
         return;
       }
       saveActiveUser(user, persistent, temporary);
+      window.dispatchEvent(new CustomEvent('menu-user-validated', { detail: { user } }));
       try {
         const db = await firestoreDb();
         db.collection(USERS_COLLECTION).get().then((snap) => {

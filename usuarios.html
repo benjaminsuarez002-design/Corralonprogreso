@@ -190,6 +190,11 @@
     font-weight: 800;
   }
   .check input { width: auto; }
+  .mode-options { padding: 16px; display: grid; gap: 10px; }
+  .mode-option { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; }
+  .mode-option input { width: auto; margin-top: 2px; }
+  .mode-option strong { display: block; color: var(--purple-dark); }
+  .mode-option span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
   .modal-actions {
     padding: 14px 16px;
     border-top: 1px solid var(--line);
@@ -261,6 +266,25 @@
   </div>
 </div>
 
+<div id="cajaModeModal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head">Permiso de Control de caja</div>
+    <div class="mode-options">
+      <label class="mode-option">
+        <input type="radio" name="cajaMode" value="lector">
+        <span><strong>Lector</strong><span>Puede consultar Caja, cambiar fecha, sucursal y usar búsquedas, pero no modificar datos.</span></span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="cajaMode" value="editor">
+        <span><strong>Editor</strong><span>Puede consultar y modificar todos los datos de Caja.</span></span>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="saveCajaMode" type="button">Aceptar</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -311,15 +335,18 @@
     cancelPermissions: document.getElementById('cancelPermissions'),
     savePermissions: document.getElementById('savePermissions')
   };
+  els.cajaModeModal = document.getElementById('cajaModeModal');
+  els.saveCajaMode = document.getElementById('saveCajaMode');
 
   let users = [];
   let editingId = '';
   let permissionsEditingId = '';
   let draftPermisos = DEFAULT_SELLER_IDS.slice();
+  let draftCajaModo = 'editor';
 
   function defaultUsers() {
     return [
-      { id: 'admin', nombre: 'Administrador', usuario: 'admin', password: 'Akashiya2301', nivel: 'administrador', permisos: ALL_MENU_IDS },
+      { id: 'admin', nombre: 'Administrador', usuario: 'admin', password: 'Akashiya2301', nivel: 'administrador', permisos: ALL_MENU_IDS, cajaModo: 'editor' },
       { id: 'vendedor', nombre: 'Vendedor', usuario: 'vendedor', password: '1234', nivel: 'vendedor', permisos: DEFAULT_SELLER_IDS }
     ];
   }
@@ -332,7 +359,8 @@
         return parsed.map((user) => ({
           ...user,
           usuario: user.usuario || String(user.nombre || '').toLowerCase().replace(/\s+/g, '') || user.id,
-          password: user.password || (user.id === 'admin' ? 'Akashiya2301' : '1234')
+          password: user.password || (user.id === 'admin' ? 'Akashiya2301' : '1234'),
+          cajaModo: user.nivel === 'administrador' ? 'editor' : (user.cajaModo === 'lector' ? 'lector' : 'editor')
         }));
       }
     } catch (e) {
@@ -355,7 +383,7 @@
 
   function permissionLabels(user) {
     const permisos = new Set(userPermissions(user));
-    return MENU_ITEMS.filter((item) => permisos.has(item.id)).map((item) => item.label).join(', ') || 'Sin botones';
+    return MENU_ITEMS.filter((item) => permisos.has(item.id)).map((item) => item.id === 'caja' ? `${item.label} (${user.nivel === 'administrador' ? 'Editor' : (user.cajaModo === 'lector' ? 'Lector' : 'Editor')})` : item.label).join(', ') || 'Sin botones';
   }
 
   function escapeHtml(value) {
@@ -370,6 +398,7 @@
   function resetForm() {
     editingId = '';
     draftPermisos = DEFAULT_SELLER_IDS.slice();
+    draftCajaModo = 'editor';
     els.name.value = '';
     els.login.value = '';
     els.pass.value = '';
@@ -430,7 +459,7 @@
       let updatedUser = null;
       users = users.map((user) => {
         if (user.id !== editingId) return user;
-        updatedUser = { ...user, nombre, usuario, password, nivel, permisos: nivel === 'personalizado' ? userPermissions(user) : currentDefaultPermissions(nivel) };
+        updatedUser = { ...user, nombre, usuario, password, nivel, permisos: nivel === 'personalizado' ? userPermissions(user) : currentDefaultPermissions(nivel), cajaModo: nivel === 'administrador' ? 'editor' : (user.cajaModo === 'lector' ? 'lector' : 'editor') };
         return updatedUser;
       });
       await saveUser(updatedUser);
@@ -441,7 +470,8 @@
         usuario,
         password,
         nivel,
-        permisos: nivel === 'personalizado' ? draftPermisos.slice() : currentDefaultPermissions(nivel)
+        permisos: nivel === 'personalizado' ? draftPermisos.slice() : currentDefaultPermissions(nivel),
+        cajaModo: nivel === 'administrador' ? 'editor' : draftCajaModo
       };
       users.push(nuevo);
       await saveUser(nuevo);
@@ -473,6 +503,7 @@
     const user = users.find((item) => item.id === id);
     if (!user) return;
     permissionsEditingId = id;
+    draftCajaModo = user.nivel === 'administrador' ? 'editor' : (user.cajaModo === 'lector' ? 'lector' : 'editor');
     const permisos = new Set(userPermissions(user));
     els.checks.innerHTML = MENU_ITEMS.map((item) => `
       <label class="check">
@@ -495,6 +526,17 @@
     els.modal.classList.add('show');
   }
 
+  function openCajaMode() {
+    const user = permissionsEditingId === '__draft__' ? null : users.find((item) => item.id === permissionsEditingId);
+    if (user?.nivel === 'administrador') {
+      draftCajaModo = 'editor';
+      return;
+    }
+    const radio = els.cajaModeModal.querySelector(`input[name="cajaMode"][value="${draftCajaModo}"]`);
+    if (radio) radio.checked = true;
+    els.cajaModeModal.classList.add('show');
+  }
+
   async function savePermissions() {
     const permisos = [...els.checks.querySelectorAll('input:checked')].map((input) => input.value);
     if (permissionsEditingId === '__draft__') {
@@ -506,7 +548,8 @@
     let updatedUser = null;
     users = users.map((user) => {
       if (user.id !== permissionsEditingId) return user;
-      updatedUser = { ...user, nivel: 'personalizado', permisos };
+      const isAdmin = user.nivel === 'administrador';
+      updatedUser = { ...user, nivel: isAdmin ? 'administrador' : 'personalizado', permisos: isAdmin ? ALL_MENU_IDS : permisos, cajaModo: isAdmin ? 'editor' : draftCajaModo };
       return updatedUser;
     });
     await saveUser(updatedUser);
@@ -534,6 +577,22 @@
   });
   els.cancelPermissions.addEventListener('click', () => els.modal.classList.remove('show'));
   els.savePermissions.addEventListener('click', savePermissions);
+  els.checks.addEventListener('click', (event) => {
+    const label = event.target.closest('label.check');
+    const checkbox = label?.querySelector('input[type="checkbox"][value="caja"]');
+    if(checkbox?.checked && event.target !== checkbox) {
+      event.preventDefault();
+      openCajaMode();
+    }
+  });
+  els.checks.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('input[type="checkbox"][value="caja"]');
+    if (checkbox?.checked) openCajaMode();
+  });
+  els.saveCajaMode.addEventListener('click', () => {
+    draftCajaModo = els.cajaModeModal.querySelector('input[name="cajaMode"]:checked')?.value === 'lector' ? 'lector' : 'editor';
+    els.cajaModeModal.classList.remove('show');
+  });
   els.modal.addEventListener('click', (event) => {
     if (event.target === els.modal) els.modal.classList.remove('show');
   });
