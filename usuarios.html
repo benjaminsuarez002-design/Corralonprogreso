@@ -211,6 +211,7 @@
   }
 </style>
   <script src="nav-helper.js"></script>
+  <script src="corralon-system.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="usuarios"></script>
 </head>
 <body>
@@ -271,12 +272,15 @@
     <div class="modal-head">Permiso de Control de caja</div>
     <div class="mode-options">
       <label class="mode-option">
-        <input type="radio" name="cajaMode" value="lector">
-        <span><strong>Lector</strong><span>Puede consultar Caja, cambiar fecha, sucursal y usar búsquedas, pero no modificar datos.</span></span>
+        <input type="radio" name="cajaMode" value="restringido">
+        <span><strong>Modo restringido</strong><span>Puede ver y modificar únicamente la sucursal asignada del día de hoy.</span></span>
+      </label>
+      <label for="cajaRestrictedBranch" id="cajaRestrictedBranchWrap">Sucursal asignada
+        <select id="cajaRestrictedBranch"></select>
       </label>
       <label class="mode-option">
-        <input type="radio" name="cajaMode" value="editor">
-        <span><strong>Editor</strong><span>Puede consultar y modificar todos los datos de Caja.</span></span>
+        <input type="radio" name="cajaMode" value="completo">
+        <span><strong>Acceso completo</strong><span>Puede consultar y modificar todas las sucursales y fechas.</span></span>
       </label>
     </div>
     <div class="modal-actions">
@@ -337,16 +341,19 @@
   };
   els.cajaModeModal = document.getElementById('cajaModeModal');
   els.saveCajaMode = document.getElementById('saveCajaMode');
+  els.cajaRestrictedBranch = document.getElementById('cajaRestrictedBranch');
+  els.cajaRestrictedBranchWrap = document.getElementById('cajaRestrictedBranchWrap');
 
   let users = [];
   let editingId = '';
   let permissionsEditingId = '';
   let draftPermisos = DEFAULT_SELLER_IDS.slice();
-  let draftCajaModo = 'editor';
+  let draftCajaModo = 'completo';
+  let draftCajaSucursalId = '';
 
   function defaultUsers() {
     return [
-      { id: 'admin', nombre: 'Administrador', usuario: 'admin', password: 'Akashiya2301', nivel: 'administrador', permisos: ALL_MENU_IDS, cajaModo: 'editor' },
+      { id: 'admin', nombre: 'Administrador', usuario: 'admin', password: 'Akashiya2301', nivel: 'administrador', permisos: ALL_MENU_IDS, cajaModo: 'completo', cajaSucursalId: '' },
       { id: 'vendedor', nombre: 'Vendedor', usuario: 'vendedor', password: '1234', nivel: 'vendedor', permisos: DEFAULT_SELLER_IDS }
     ];
   }
@@ -360,7 +367,8 @@
           ...user,
           usuario: user.usuario || String(user.nombre || '').toLowerCase().replace(/\s+/g, '') || user.id,
           password: user.password || (user.id === 'admin' ? 'Akashiya2301' : '1234'),
-          cajaModo: user.nivel === 'administrador' ? 'editor' : (user.cajaModo === 'lector' ? 'lector' : 'editor')
+          cajaModo: user.nivel === 'administrador' ? 'completo' : (['lector','restringido'].includes(user.cajaModo) ? 'restringido' : 'completo'),
+          cajaSucursalId: String(user.cajaSucursalId || '')
         }));
       }
     } catch (e) {
@@ -383,7 +391,7 @@
 
   function permissionLabels(user) {
     const permisos = new Set(userPermissions(user));
-    return MENU_ITEMS.filter((item) => permisos.has(item.id)).map((item) => item.id === 'caja' ? `${item.label} (${user.nivel === 'administrador' ? 'Editor' : (user.cajaModo === 'lector' ? 'Lector' : 'Editor')})` : item.label).join(', ') || 'Sin botones';
+    return MENU_ITEMS.filter((item) => permisos.has(item.id)).map((item) => item.id === 'caja' ? `${item.label} (${user.nivel === 'administrador' ? 'Acceso completo' : (['lector','restringido'].includes(user.cajaModo) ? 'Restringido' : 'Acceso completo')})` : item.label).join(', ') || 'Sin botones';
   }
 
   function escapeHtml(value) {
@@ -398,7 +406,8 @@
   function resetForm() {
     editingId = '';
     draftPermisos = DEFAULT_SELLER_IDS.slice();
-    draftCajaModo = 'editor';
+    draftCajaModo = 'completo';
+    draftCajaSucursalId = '';
     els.name.value = '';
     els.login.value = '';
     els.pass.value = '';
@@ -459,7 +468,7 @@
       let updatedUser = null;
       users = users.map((user) => {
         if (user.id !== editingId) return user;
-        updatedUser = { ...user, nombre, usuario, password, nivel, permisos: nivel === 'personalizado' ? userPermissions(user) : currentDefaultPermissions(nivel), cajaModo: nivel === 'administrador' ? 'editor' : (user.cajaModo === 'lector' ? 'lector' : 'editor') };
+        updatedUser = { ...user, nombre, usuario, password, nivel, permisos: nivel === 'personalizado' ? userPermissions(user) : currentDefaultPermissions(nivel), cajaModo: nivel === 'administrador' ? 'completo' : (['lector','restringido'].includes(user.cajaModo) ? 'restringido' : 'completo'), cajaSucursalId: nivel === 'administrador' ? '' : String(user.cajaSucursalId || '') };
         return updatedUser;
       });
       await saveUser(updatedUser);
@@ -471,7 +480,8 @@
         password,
         nivel,
         permisos: nivel === 'personalizado' ? draftPermisos.slice() : currentDefaultPermissions(nivel),
-        cajaModo: nivel === 'administrador' ? 'editor' : draftCajaModo
+        cajaModo: nivel === 'administrador' ? 'completo' : draftCajaModo,
+        cajaSucursalId: nivel === 'administrador' ? '' : draftCajaSucursalId
       };
       users.push(nuevo);
       await saveUser(nuevo);
@@ -503,7 +513,8 @@
     const user = users.find((item) => item.id === id);
     if (!user) return;
     permissionsEditingId = id;
-    draftCajaModo = user.nivel === 'administrador' ? 'editor' : (user.cajaModo === 'lector' ? 'lector' : 'editor');
+    draftCajaModo = user.nivel === 'administrador' ? 'completo' : (['lector','restringido'].includes(user.cajaModo) ? 'restringido' : 'completo');
+    draftCajaSucursalId = String(user.cajaSucursalId || '');
     const permisos = new Set(userPermissions(user));
     els.checks.innerHTML = MENU_ITEMS.map((item) => `
       <label class="check">
@@ -529,11 +540,16 @@
   function openCajaMode() {
     const user = permissionsEditingId === '__draft__' ? null : users.find((item) => item.id === permissionsEditingId);
     if (user?.nivel === 'administrador') {
-      draftCajaModo = 'editor';
+      draftCajaModo = 'completo';
+      draftCajaSucursalId = '';
       return;
     }
+    const branches = Array.isArray(window.CorralonSystem?.BRANCHES) ? window.CorralonSystem.BRANCHES : [];
+    if(!draftCajaSucursalId) draftCajaSucursalId = String(branches[0]?.id || '');
+    els.cajaRestrictedBranch.innerHTML = branches.map((branch) => `<option value="${escapeHtml(branch.id)}"${String(branch.id) === draftCajaSucursalId ? ' selected' : ''}>${escapeHtml(branch.label || branch.id)}</option>`).join('');
     const radio = els.cajaModeModal.querySelector(`input[name="cajaMode"][value="${draftCajaModo}"]`);
     if (radio) radio.checked = true;
+    els.cajaRestrictedBranchWrap.style.display = draftCajaModo === 'restringido' ? 'block' : 'none';
     els.cajaModeModal.classList.add('show');
   }
 
@@ -549,7 +565,7 @@
     users = users.map((user) => {
       if (user.id !== permissionsEditingId) return user;
       const isAdmin = user.nivel === 'administrador';
-      updatedUser = { ...user, nivel: isAdmin ? 'administrador' : 'personalizado', permisos: isAdmin ? ALL_MENU_IDS : permisos, cajaModo: isAdmin ? 'editor' : draftCajaModo };
+      updatedUser = { ...user, nivel: isAdmin ? 'administrador' : 'personalizado', permisos: isAdmin ? ALL_MENU_IDS : permisos, cajaModo: isAdmin ? 'completo' : draftCajaModo, cajaSucursalId: isAdmin ? '' : draftCajaSucursalId };
       return updatedUser;
     });
     await saveUser(updatedUser);
@@ -590,8 +606,12 @@
     if (checkbox?.checked) openCajaMode();
   });
   els.saveCajaMode.addEventListener('click', () => {
-    draftCajaModo = els.cajaModeModal.querySelector('input[name="cajaMode"]:checked')?.value === 'lector' ? 'lector' : 'editor';
+    draftCajaModo = els.cajaModeModal.querySelector('input[name="cajaMode"]:checked')?.value === 'restringido' ? 'restringido' : 'completo';
+    draftCajaSucursalId = draftCajaModo === 'restringido' ? String(els.cajaRestrictedBranch.value || '') : '';
     els.cajaModeModal.classList.remove('show');
+  });
+  els.cajaModeModal.addEventListener('change', (event) => {
+    if(event.target.name === 'cajaMode') els.cajaRestrictedBranchWrap.style.display = event.target.value === 'restringido' ? 'block' : 'none';
   });
   els.modal.addEventListener('click', (event) => {
     if (event.target === els.modal) els.modal.classList.remove('show');

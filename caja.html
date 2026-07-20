@@ -860,6 +860,11 @@
       outline: none;
       background: #eee8ff;
     }
+    .context-menu button:disabled {
+      opacity: .45;
+      cursor: default;
+      background: transparent;
+    }
 
     .modal-bg {
       position: fixed;
@@ -1471,16 +1476,16 @@
         font-size: calc(10px * var(--mobile-font-keep));
       }
     }
-    body.caja-readonly::before {
-      content: 'MODO LECTOR'; position: fixed; right: 18px; bottom: 18px; z-index: 500;
+    body.caja-restricted::before {
+      content: 'MODO RESTRINGIDO'; position: fixed; right: 18px; bottom: 18px; z-index: 500;
       padding: 8px 12px; border-radius: 999px; background: #6c4fc7; color: #fff;
       font-size: 12px; font-weight: 900; box-shadow: 0 8px 22px rgba(58,35,120,.28); pointer-events: none;
     }
-    body.caja-readonly [data-caja-mode-locked="1"] { cursor: not-allowed !important; opacity: .68; }
+    body.caja-restricted [data-caja-mode-locked="1"] { cursor: not-allowed !important; opacity: .68; }
   </style>
   <script src="corralon-system.js"></script>
   <script src="nav-helper.js"></script>
-  <script src="menu-auth-guard.js?v=20260720-caja-mode1" data-menu-guard="caja"></script>
+  <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
 </head>
 <body>
   <div class="app">
@@ -1795,6 +1800,13 @@
   <div class="toast" id="toast"></div>
   <div class="context-menu" id="systemRowMenu">
     <button type="button" id="deleteSystemRowMenuBtn">Eliminar fila</button>
+    <button type="button" id="mergeSystemRowMenuBtn">Unificar seleccionadas</button>
+    <button type="button" id="splitSystemRowMenuBtn">Separar fila unificada</button>
+  </div>
+  <div class="context-menu" id="diffRowMenu">
+    <button type="button" id="mergeDiffRowMenuBtn">Unificar seleccionadas</button>
+    <button type="button" id="splitDiffRowMenuBtn">Separar fila unificada</button>
+    <button type="button" id="splitManualMatchMenuBtn">Separar coincidencia manual</button>
   </div>
 
   <script>
@@ -1850,15 +1862,9 @@
       'pagina', 'paginas', 'de'
     ]);
 
-    let cajaReadOnly = false;
-    const CAJA_EDIT_SELECTORS = [
-      '#prevCajaDayBtn', '#nextCajaDayBtn',
-      '#clearCashBtn', '#clearTransfersBtn', '#addTransferBtn', '#mergeTransfersBtn', '#splitTransfersBtn', '#pasteTransfersBtn',
-      '#clearSystemBtn', '#mergeSystemBtn', '#splitSystemBtn', '#pasteSystemBtn', '#pasteMovementsBtn', '#updateTotalsBtn',
-      '#clearPasteTextBtn', '#processPasteTextBtn', '#mergeDiffRowsBtn', '#splitDiffRowsBtn', '#deleteSystemRowMenuBtn',
-      '.cell-input', '.transfer-branch-select', '.row-selector-btn', '[data-cash-row-branch-button]',
-      '[data-receipt-row-branch-button]', '[data-movement-separate-index]', '[data-movement-separate-branch]'
-    ].join(',');
+    let cajaRestricted = false;
+    let cajaRestrictedBranchId = '';
+    const CAJA_RESTRICTED_SELECTORS = '#prevCajaDayBtn,#nextCajaDayBtn,#cajaBranchButton';
 
     function cajaSessionUser() {
       try {
@@ -1871,42 +1877,32 @@
     }
 
     function applyCajaMode(user = cajaSessionUser()) {
-      cajaReadOnly = Boolean(user && String(user.nivel || '').toLowerCase() !== 'administrador' && user.cajaModo === 'lector');
-      if(cajaReadOnly && selectedDateKey !== TODAY_DATE_KEY) {
+      cajaRestricted = Boolean(user && String(user.nivel || '').toLowerCase() !== 'administrador' && ['lector','restringido'].includes(user.cajaModo));
+      cajaRestrictedBranchId = cajaRestricted ? String(user.cajaSucursalId || cashMovementBranches()[0]?.id || '') : '';
+      if(cajaRestricted && selectedDateKey !== TODAY_DATE_KEY) {
         selectedDateKey = TODAY_DATE_KEY;
         updateDateLabel();
         loadState(selectedDateKey);
         renderAll();
         loadPublicCajaData({ force: true, showPublicLoading: true });
       }
-      document.body.classList.toggle('caja-readonly', cajaReadOnly);
-      document.querySelectorAll(CAJA_EDIT_SELECTORS).forEach((control) => {
-        if(cajaReadOnly) {
+      document.body.classList.toggle('caja-restricted', cajaRestricted);
+      document.querySelectorAll('[data-caja-mode-locked="1"]').forEach((control) => {
+        delete control.dataset.cajaModeLocked;
+        control.disabled = false;
+        control.removeAttribute('title');
+      });
+      if(cajaRestricted) {
+        forceRestrictedCajaBranch();
+        document.querySelectorAll(CAJA_RESTRICTED_SELECTORS).forEach((control) => {
           control.dataset.cajaModeLocked = '1';
           control.disabled = true;
-          control.title = 'Modo lector: este control no puede modificarse';
-        } else if(control.dataset.cajaModeLocked === '1') {
-          delete control.dataset.cajaModeLocked;
-          control.disabled = false;
-          if(control.title === 'Modo lector: este control no puede modificarse') control.removeAttribute('title');
-        }
-      });
+          control.title = 'Modo restringido: sucursal y fecha fijadas por el administrador';
+        });
+      }
     }
 
     window.addEventListener('menu-user-validated', (event) => applyCajaMode(event.detail?.user));
-    new MutationObserver(() => { if(cajaReadOnly) applyCajaMode(); }).observe(document.body, { childList: true, subtree: true });
-    document.addEventListener('click', (event) => {
-      if(cajaReadOnly && (event.ctrlKey || event.metaKey) && event.target.closest?.('[data-diff-side]')) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    }, true);
-    document.addEventListener('keydown', (event) => {
-      if(cajaReadOnly && ['+','-','_','Insert','Delete'].includes(event.key) && event.target.closest?.('.app, .modal-bg')) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    }, true);
 
     const state = {
       cash: CASH_DENOMS.map((denom) => ({ denom, bills: 0, packs: 0 })),
@@ -1968,6 +1964,12 @@
       pasteText: document.getElementById('pasteText'),
       systemRowMenu: document.getElementById('systemRowMenu'),
       deleteSystemRowMenuBtn: document.getElementById('deleteSystemRowMenuBtn'),
+      mergeSystemRowMenuBtn: document.getElementById('mergeSystemRowMenuBtn'),
+      splitSystemRowMenuBtn: document.getElementById('splitSystemRowMenuBtn'),
+      diffRowMenu: document.getElementById('diffRowMenu'),
+      mergeDiffRowMenuBtn: document.getElementById('mergeDiffRowMenuBtn'),
+      splitDiffRowMenuBtn: document.getElementById('splitDiffRowMenuBtn'),
+      splitManualMatchMenuBtn: document.getElementById('splitManualMatchMenuBtn'),
       systemLoading: document.getElementById('systemLoading'),
       movementsLoading: document.getElementById('movementsLoading'),
       toast: document.getElementById('toast')
@@ -1986,6 +1988,8 @@
     let applyingRemoteState = false;
     let syncingDiffScroll = false;
     let systemContextIndex = -1;
+    let diffContextIndex = -1;
+    let diffContextSide = 'mercado';
     let firebaseDb = null;
     let firebaseSaveTimer = null;
     let firebaseManualSaveTimer = null;
@@ -2047,6 +2051,27 @@
       renderCajaBranchOptions();
     }
 
+    function forceRestrictedCajaBranch() {
+      if (!cajaRestricted || !cajaRestrictedBranchId || !cajaBranches.length) return false;
+      const branch = cajaBranches.find((item) => item.id === cajaRestrictedBranchId)
+        || cajaBranches.find((item) => item.id !== CAJA_ALL_BRANCHES_ID);
+      if (!branch) return false;
+      cajaRestrictedBranchId = branch.id;
+      activeCajaBranchId = branch.id;
+      el.cajaBranchLabel.textContent = branch.label || branch.id;
+      el.cajaBranchButton.dataset.branchId = branch.id;
+      state.movements = cloneMovements(state.movementsByBranch[branch.id] || []);
+      if (state.cashMovements.length) applyCashMovementTotalsToBranches();
+      localStorage.setItem(CAJA_BRANCH_KEY, branch.id);
+      renderCajaBranchOptions();
+      renderMovementRows();
+      renderMovementView();
+      renderTransferRows();
+      renderSystemRows();
+      updateTotals();
+      return true;
+    }
+
     function selectedCajaBranchId() {
       return el.cajaBranchButton?.dataset.branchId || activeCajaBranchId || '';
     }
@@ -2087,6 +2112,7 @@
     }
 
     function selectCajaBranch(branchId) {
+      if (cajaRestricted && branchId !== cajaRestrictedBranchId) return false;
       const branch = cajaBranches.find((item) => item.id === branchId);
       if (!branch) return false;
       rememberBranchMovements(activeCajaBranchId);
@@ -2143,6 +2169,11 @@
       return branches.map((branch) => ({ id: String(branch.id || ''), label: String(branch.label || branch.id || '') })).filter((branch) => branch.id);
     }
 
+    function assignableCashMovementBranches() {
+      const branches = cashMovementBranches();
+      return cajaRestricted ? branches.filter((branch) => branch.id === cajaRestrictedBranchId) : branches;
+    }
+
     function resolveCashMovementBranchId(item = {}) {
       const branches = cashMovementBranches();
       const explicitId = String(item.branchId || item.sucursalId || item.idSucursal || item.IDSuc || item.IDDepósito || '').trim();
@@ -2171,14 +2202,15 @@
       const id = String(item.id ?? item.IDMov ?? item.idMov ?? item.IdMov ?? index + 1).trim();
       const amount = Number(item.amount ?? item.importe ?? item.Importe ?? item['Ing(+)/Egr(-)'] ?? 0) || 0;
       const note = String(item.note ?? item.nota ?? item.Nota ?? '').trim();
+      const branchManual = Boolean(item.branchManual ?? item.manualBranch ?? false);
       return {
         id,
         idRecibo: String(item.idRecibo ?? item.IDRecibo ?? '').trim(),
         amount,
         hour: cashMovementHour(item.hour ?? item.hora ?? item.Hora ?? ''),
         note,
-        branchId: resolveCashMovementBranchId({ ...item, nota: note }),
-        branchManual: Boolean(item.branchManual ?? item.manualBranch ?? false)
+        branchId: branchManual ? resolveCashMovementBranchId({ ...item, nota: note }) : '',
+        branchManual
       };
     }
 
@@ -2195,13 +2227,14 @@
           return list.map((row) => ({ ...row, branchId }));
         });
       }
-      return (Array.isArray(rows) ? rows : []).map(normalizeCashMovement).filter((row) => row.id && row.branchId);
+      return (Array.isArray(rows) ? rows : []).map(normalizeCashMovement).filter((row) => row.id);
     }
 
     function normalizeReceipt(item = {}, index = 0) {
       const id = String(item.id ?? item.idRecibo ?? item.IDRecibo ?? index + 1).trim();
       const rawPayments = item.payments ?? item.pagos ?? [];
       const paymentRows = Array.isArray(rawPayments) ? rawPayments : (rawPayments && typeof rawPayments === 'object' ? [rawPayments] : []);
+      const branchManual = Boolean(item.branchManual ?? item.manualBranch ?? false);
       return {
         id,
         number: String(item.number ?? item.numero ?? item.NroFactura ?? '').trim(),
@@ -2211,9 +2244,9 @@
         concept: String(item.concept ?? item.concepto ?? item.Concepto ?? item.note ?? item.Nota ?? '').trim(),
         note: String(item.note ?? item.nota ?? item.Nota ?? '').trim(),
         amount: Number(item.amount ?? item.importe ?? item.Total ?? 0) || 0,
-        branchId: resolveCashMovementBranchId(item),
+        branchId: branchManual ? resolveCashMovementBranchId(item) : '',
         branch: String(item.branch ?? item.sucursal ?? item.Sucursal ?? item.Deposito ?? '').trim(),
-        branchManual: Boolean(item.branchManual ?? item.manualBranch ?? false),
+        branchManual,
         payments: paymentRows.map((payment) => ({
           type: String(payment.type ?? payment.tipo ?? payment.TipoPago ?? '').trim(),
           amount: Number(payment.amount ?? payment.importe ?? payment.Importe ?? 0) || 0
@@ -2228,7 +2261,7 @@
     function receiptRowsFromPayload(payload) {
       if (!payload) return [];
       const rows = Array.isArray(payload) ? payload : (payload.rows || payload.receipts || payload.recibos || []);
-      return (Array.isArray(rows) ? rows : []).map(normalizeReceipt).filter((row) => row.id && row.branchId);
+      return (Array.isArray(rows) ? rows : []).map(normalizeReceipt).filter((row) => row.id);
     }
 
     function adjustBranchMovementDay(branchId, type, delta) {
@@ -2316,13 +2349,13 @@
     function visibleCashMovements() {
       const branchId = selectedCajaBranchId();
       if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return state.cashMovements;
-      return state.cashMovements.filter((row) => row.branchId === branchId);
+      return state.cashMovements.filter((row) => !row.branchId || row.branchId === branchId);
     }
 
     function visibleReceipts() {
       const branchId = selectedCajaBranchId();
       if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return state.receipts;
-      return state.receipts.filter((row) => row.branchId === branchId);
+      return state.receipts.filter((row) => !row.branchId || row.branchId === branchId);
     }
 
     function renderCashMovementRows() {
@@ -2339,7 +2372,7 @@
           <td class="cash-movement-branch-cell">
             <div class="branch-combo cash-row-branch-combo" data-cash-movement-key="${escapeHtml(key)}">
               <button class="cash-row-branch-button" type="button" aria-label="Sucursal del movimiento" aria-haspopup="listbox" aria-expanded="false" aria-controls="${listId}" data-branch-id="${escapeHtml(row.branchId || '')}" data-cash-row-branch-button>
-                <span data-cash-row-branch-label>${escapeHtml(branch?.label || 'Elegir sucursal')}</span><span class="cash-row-branch-arrow">&#9662;</span>
+                 <span data-cash-row-branch-label>${escapeHtml(branch?.label || 'Sin asignar')}</span><span class="cash-row-branch-arrow">&#9662;</span>
               </button>
               <div class="branch-combo-list" id="${listId}" role="listbox" data-cash-row-branch-list></div>
             </div>
@@ -2365,7 +2398,7 @@
           <td class="cash-movement-branch-cell">
             <div class="branch-combo cash-row-branch-combo" data-receipt-key="${escapeHtml(key)}">
               <button class="cash-row-branch-button" type="button" aria-label="Sucursal del recibo" aria-haspopup="listbox" aria-expanded="false" aria-controls="${listId}" data-branch-id="${escapeHtml(row.branchId || '')}" data-receipt-row-branch-button>
-                <span data-receipt-row-branch-label>${escapeHtml(branch?.label || row.branch || 'Elegir sucursal')}</span><span class="cash-row-branch-arrow">&#9662;</span>
+                 <span data-receipt-row-branch-label>${escapeHtml(branch?.label || 'Sin asignar')}</span><span class="cash-row-branch-arrow">&#9662;</span>
               </button>
               <div class="branch-combo-list" id="${listId}" role="listbox" data-receipt-row-branch-list></div>
             </div>
@@ -2435,7 +2468,7 @@
       const row = cashMovementForCombo(combo);
       const list = combo?.querySelector('[data-cash-row-branch-list]');
       if (!row || !list) return;
-      const options = cashMovementBranches();
+      const options = assignableCashMovementBranches();
       let activeIndex = options.findIndex((branch) => branch.id === row.branchId);
       if (activeIndex < 0) activeIndex = options.length ? 0 : -1;
       combo.dataset.activeOption = String(activeIndex);
@@ -2479,7 +2512,7 @@
       const row = cashMovementForCombo(combo);
       const button = combo?.querySelector('[data-cash-row-branch-button]');
       const label = combo?.querySelector('[data-cash-row-branch-label]');
-      const branch = cashMovementBranches().find((item) => item.id === branchId);
+      const branch = assignableCashMovementBranches().find((item) => item.id === branchId);
       if (!row || !button || !label || !branch) return false;
       row.branchId = branch.id;
       row.branchManual = true;
@@ -2505,7 +2538,7 @@
       const row = receiptForCombo(combo);
       const list = combo?.querySelector('[data-receipt-row-branch-list]');
       if (!row || !list) return;
-      const options = cashMovementBranches();
+      const options = assignableCashMovementBranches();
       let activeIndex = options.findIndex((branch) => branch.id === row.branchId);
       if (activeIndex < 0) activeIndex = options.length ? 0 : -1;
       combo.dataset.activeOption = String(activeIndex);
@@ -2549,7 +2582,7 @@
       const row = receiptForCombo(combo);
       const button = combo?.querySelector('[data-receipt-row-branch-button]');
       const label = combo?.querySelector('[data-receipt-row-branch-label]');
-      const branch = cashMovementBranches().find((item) => item.id === branchId);
+      const branch = assignableCashMovementBranches().find((item) => item.id === branchId);
       if (!row || !button || !label || !branch) return false;
       row.branchId = branch.id;
       row.branchManual = true;
@@ -2761,7 +2794,7 @@
 
     function queueFirebaseCajaManualSave(dateKey = selectedDateKey, values = cajaManualPayload()) {
       const db = firebaseDatabase();
-      if (!db || applyingRemoteState || cajaReadOnly) return;
+      if (!db || applyingRemoteState) return;
       clearTimeout(firebaseManualSaveTimer);
       firebaseManualSaveTimer = setTimeout(async () => {
         try {
@@ -2820,7 +2853,7 @@
     }
 
     function queueSummaryManualSave(dateKey = selectedDateKey) {
-      if (applyingFirebaseSummary || cajaReadOnly) return;
+      if (applyingFirebaseSummary) return;
       const db = firebaseDatabase();
       if (!db) return;
       clearTimeout(firebaseSaveTimer);
@@ -3123,7 +3156,6 @@
     }
 
     function saveState() {
-      if(cajaReadOnly) return;
       persistLocalState();
       queueFirebaseCajaManualSave();
       queueRemoteSave();
@@ -3186,7 +3218,7 @@
     }
 
     async function saveRemoteState(dateKey = selectedDateKey, payloadData = remoteStatePayload()) {
-      if (remoteSaveBlocked || applyingRemoteState || cajaReadOnly) return;
+      if (remoteSaveBlocked || applyingRemoteState) return;
       const payload = {
         id: remoteRowIdForDate(dateKey),
         fecha: dateKey,
@@ -3206,7 +3238,7 @@
     }
 
     function queueRemoteSave() {
-      if (remoteSaveBlocked || applyingRemoteState || cajaReadOnly) return;
+      if (remoteSaveBlocked || applyingRemoteState) return;
       clearTimeout(remoteSaveTimer);
       const dateKey = selectedDateKey;
       const payloadData = remoteStatePayload();
@@ -3411,8 +3443,8 @@
 
     function branchOptionsHtml(selectedId = '', includeAll = false, includeUnassigned = true) {
       const options = [];
-      if (includeAll) options.push({ id: CAJA_ALL_BRANCHES_ID, label: 'Todas las sucursales' });
-      cashMovementBranches().forEach((branch) => options.push(branch));
+      if (includeAll && !cajaRestricted) options.push({ id: CAJA_ALL_BRANCHES_ID, label: 'Todas las sucursales' });
+      assignableCashMovementBranches().forEach((branch) => options.push(branch));
       if (includeUnassigned) options.push({ id: '', label: 'Sin asignar' });
       return options.map((branch) => `<option value="${escapeHtml(branch.id)}"${String(branch.id) === String(selectedId) ? ' selected' : ''}>${escapeHtml(branch.label)}</option>`).join('');
     }
@@ -3467,7 +3499,7 @@
     function visibleTransfers() {
       const branchId = selectedCajaBranchId();
       if (!branchId || branchId === CAJA_ALL_BRANCHES_ID) return state.transfers;
-      return state.transfers.filter((row) => row.branchId === branchId);
+      return state.transfers.filter((row) => !row.branchId || row.branchId === branchId);
     }
 
     function getSortedTransfers() {
@@ -3940,14 +3972,16 @@
     }
 
     function diffBranchOptionsHtml(selectedId) {
-      const options = [{ id: CAJA_ALL_BRANCHES_ID, label: 'Todas las sucursales' }, ...cashMovementBranches(), { id: DIFF_UNASSIGNED_BRANCH_ID, label: 'Sin asignar' }];
+      const options = cajaRestricted
+        ? [...assignableCashMovementBranches(), { id: DIFF_UNASSIGNED_BRANCH_ID, label: 'Sin asignar' }]
+        : [{ id: CAJA_ALL_BRANCHES_ID, label: 'Todas las sucursales' }, ...cashMovementBranches(), { id: DIFF_UNASSIGNED_BRANCH_ID, label: 'Sin asignar' }];
       return options.map((branch) => `<option value="${escapeHtml(branch.id)}"${branch.id === selectedId ? ' selected' : ''}>${escapeHtml(branch.label)}</option>`).join('');
     }
 
     function diffBranchMatches(branchId, filterId) {
       if (!filterId || filterId === CAJA_ALL_BRANCHES_ID) return true;
       if (filterId === DIFF_UNASSIGNED_BRANCH_ID) return !branchId;
-      return branchId === filterId;
+      return !branchId || branchId === filterId;
     }
 
     function buildMatchedDiffPairs(filterId = CAJA_ALL_BRANCHES_ID) {
@@ -4178,11 +4212,12 @@
     }
 
     function openDiffModal() {
+      const initialBranchId = cajaRestricted ? cajaRestrictedBranchId : CAJA_ALL_BRANCHES_ID;
       diffState = {
         mercado: [],
         system: [],
         pairs: [],
-        branchId: CAJA_ALL_BRANCHES_ID,
+        branchId: initialBranchId,
         selectedSide: 'mercado',
         selectedIndex: 0,
         highlightedIndex: -1,
@@ -4191,7 +4226,7 @@
         activeSort: { key: '', side: '', field: '', direction: '' },
         onlyDiffs: false
       };
-      rebuildDiffState(CAJA_ALL_BRANCHES_ID);
+      rebuildDiffState(initialBranchId);
       el.diffModal.classList.add('open');
       requestAnimationFrame(() => {
         if (el.diffMercadoBoard) el.diffMercadoBoard.scrollTop = 0;
@@ -4200,6 +4235,7 @@
     }
 
     function closeDiffModal() {
+      hideDiffRowMenu();
       el.diffModal.classList.remove('open');
     }
 
@@ -4237,6 +4273,7 @@
         if (tryCreateManualDiffMatch()) return;
       } else {
         diffState.selectedRows = { mercado: [], system: [] };
+        diffState.selectedRows[side] = [diffState.selectedIndex];
       }
       renderDiffModal();
       const row = document.querySelector(`[data-diff-side="${side}"][data-diff-index="${diffState.selectedIndex}"]`);
@@ -4294,6 +4331,67 @@
       renderDiffModal();
       document.querySelector(`[data-diff-side="${side}"][data-diff-index="${safeIndex}"]`)?.focus();
       showToast('Fila unificada separada.');
+    }
+
+    function splitManualDiffMatch(index = diffContextIndex) {
+      if (!el.diffModal.classList.contains('open')) return false;
+      const safeIndex = Math.max(0, Math.min(Number(index) || 0, diffState.mercado.length - 1));
+      const mp = diffState.mercado[safeIndex];
+      const sys = diffState.system[safeIndex];
+      if (!isManualDiffMatch(mp, sys)) {
+        showToast('La fila no tiene una coincidencia manual.');
+        return false;
+      }
+      const original = findTransferById(mp.id || '');
+      if (!original) return false;
+      original.manualMatchedSystemKey = '';
+      original.matchedSystemKey = '';
+      original.matchScore = 0;
+      original.branchId = '';
+      original.branchSource = '';
+      const branchId = diffState.branchId;
+      hideDiffRowMenu();
+      saveState();
+      rebuildDiffState(branchId);
+      showToast('Coincidencia manual separada.');
+      return true;
+    }
+
+    function hideDiffRowMenu() {
+      el.diffRowMenu.classList.remove('open');
+      el.diffRowMenu.style.left = '';
+      el.diffRowMenu.style.top = '';
+    }
+
+    function showDiffRowMenu(event, side, index) {
+      diffContextSide = side === 'system' ? 'system' : 'mercado';
+      diffContextIndex = Number(index) || 0;
+      diffState.selectedSide = diffContextSide;
+      diffState.selectedIndex = diffContextIndex;
+      diffState.highlightedIndex = diffContextIndex;
+      const selected = diffState.selectedRows[diffContextSide] || [];
+      if (!selected.includes(diffContextIndex)) {
+        diffState.selectedRows = { mercado: [], system: [] };
+        diffState.selectedRows[diffContextSide] = [diffContextIndex];
+      }
+      renderDiffModal();
+      const mp = diffState.mercado[diffContextIndex];
+      const sys = diffState.system[diffContextIndex];
+      const row = diffState[diffContextSide][diffContextIndex];
+      el.mergeDiffRowMenuBtn.disabled = (diffState.selectedRows[diffContextSide] || []).filter((rowIndex) => diffState[diffContextSide][rowIndex] && !diffState[diffContextSide][rowIndex].blank).length < 2;
+      el.splitDiffRowMenuBtn.disabled = !Array.isArray(row?.children) || !row.children.length;
+      el.splitManualMatchMenuBtn.disabled = !isManualDiffMatch(mp, sys);
+      hideSystemRowMenu();
+      const menu = el.diffRowMenu;
+      menu.classList.add('open');
+      const scale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+      const viewportWidth = window.innerWidth / scale;
+      const viewportHeight = window.innerHeight / scale;
+      const left = Math.min(event.clientX / scale, viewportWidth - menu.offsetWidth - 8);
+      const top = Math.min(event.clientY / scale, viewportHeight - menu.offsetHeight - 8);
+      menu.style.left = `${Math.max(8, left)}px`;
+      menu.style.top = `${Math.max(8, top)}px`;
+      [...menu.querySelectorAll('button:not(:disabled)')][0]?.focus();
     }
 
     function insertDiffBlankRow() {
@@ -4361,6 +4459,10 @@
         selectedSystemRows.add(systemContextIndex);
         renderSystemRows();
       }
+      const selectedIndexes = [...selectedSystemRows].filter((rowIndex) => state.system[rowIndex]);
+      el.mergeSystemRowMenuBtn.disabled = selectedIndexes.length < 2;
+      el.splitSystemRowMenuBtn.disabled = !selectedIndexes.some((rowIndex) => Array.isArray(state.system[rowIndex]?.children) && state.system[rowIndex].children.length);
+      hideDiffRowMenu();
       const menu = el.systemRowMenu;
       menu.classList.add('open');
       const scale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
@@ -5781,6 +5883,16 @@
     document.getElementById('closeDiffModalBtn').addEventListener('click', closeDiffModal);
     document.getElementById('mergeDiffRowsBtn').addEventListener('click', mergeSelectedDiffRows);
     document.getElementById('splitDiffRowsBtn').addEventListener('click', () => splitDiffRow());
+    el.diffRowMenu.addEventListener('click', (event) => event.stopPropagation());
+    el.mergeDiffRowMenuBtn.addEventListener('click', () => {
+      hideDiffRowMenu();
+      mergeSelectedDiffRows();
+    });
+    el.splitDiffRowMenuBtn.addEventListener('click', () => {
+      hideDiffRowMenu();
+      splitDiffRow(diffContextSide, diffContextIndex);
+    });
+    el.splitManualMatchMenuBtn.addEventListener('click', () => splitManualDiffMatch(diffContextIndex));
     el.filterDiffRowsBtn.addEventListener('click', toggleDiffFilter);
     document.getElementById('clearPasteTextBtn').addEventListener('click', () => {
       el.pasteText.value = '';
@@ -5869,8 +5981,17 @@
     el.deleteSystemRowMenuBtn.addEventListener('click', () => {
       deleteSelectedSystemRows();
     });
+    el.mergeSystemRowMenuBtn.addEventListener('click', () => {
+      hideSystemRowMenu();
+      mergeSelectedSystemRows();
+    });
+    el.splitSystemRowMenuBtn.addEventListener('click', () => {
+      hideSystemRowMenu();
+      splitSelectedSystemRows();
+    });
     document.addEventListener('click', (event) => {
       if (!el.systemRowMenu.contains(event.target)) hideSystemRowMenu();
+      if (!el.diffRowMenu.contains(event.target)) hideDiffRowMenu();
     });
     el.pasteModal.addEventListener('click', (event) => {
       if (event.target === el.pasteModal) closePasteModal();
@@ -5908,6 +6029,14 @@
       const row = event.target.closest('[data-diff-side]');
       if (row) selectDiffRow(row.dataset.diffSide, row.dataset.diffIndex, event.ctrlKey || event.metaKey);
     });
+    const openDiffContextMenu = (event) => {
+      const row = event.target.closest('[data-diff-side]');
+      if (!row) return;
+      event.preventDefault();
+      showDiffRowMenu(event, row.dataset.diffSide, row.dataset.diffIndex);
+    };
+    el.diffMercadoRows.addEventListener('contextmenu', openDiffContextMenu);
+    el.diffSystemRows.addEventListener('contextmenu', openDiffContextMenu);
     el.diffMercadoRows.addEventListener('dblclick', (event) => {
       const row = event.target.closest('[data-diff-side]');
       if (row) splitDiffRow(row.dataset.diffSide, row.dataset.diffIndex);
@@ -5932,6 +6061,11 @@
     });
 
     document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && el.diffRowMenu.classList.contains('open')) {
+        event.preventDefault();
+        hideDiffRowMenu();
+        return;
+      }
       if (cancelEdit(event)) return;
       if (selectFieldWithF2(event)) return;
       if (copySelectedArea(event)) return;
@@ -6018,8 +6152,8 @@
       saveState();
     });
 
-    applyCajaMode();
     loadCajaBranches();
+    applyCajaMode();
     initializeMovementViewSelectors();
     updateDateLabel();
     loadDolarCards();

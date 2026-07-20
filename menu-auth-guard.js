@@ -68,7 +68,8 @@
       usuario: String(raw.usuario || '').trim(),
       nivel: String(raw.nivel || 'personalizado').trim().toLowerCase(),
       permisos: Array.isArray(raw.permisos) ? raw.permisos.map(String) : [],
-      cajaModo: String(raw.nivel || '').trim().toLowerCase() === 'administrador' ? 'editor' : (raw.cajaModo === 'lector' ? 'lector' : 'editor')
+      cajaModo: String(raw.nivel || '').trim().toLowerCase() === 'administrador' ? 'completo' : (['lector','restringido'].includes(raw.cajaModo) ? 'restringido' : 'completo'),
+      cajaSucursalId: String(raw.cajaSucursalId || '')
     };
   }
 
