@@ -579,6 +579,14 @@
       background: #ded6fb !important;
       box-shadow: inset 0 1px 0 rgba(108,79,199,.12), inset 0 -1px 0 rgba(108,79,199,.12);
     }
+    #systemRows .cell-input {
+      cursor: default;
+      caret-color: transparent;
+    }
+    #systemRows .cell-input.system-cell-editing {
+      cursor: text;
+      caret-color: auto;
+    }
     .copy-selected {
       background: #dcd3fb !important;
       color: var(--violeta-oscuro) !important;
@@ -1980,6 +1988,9 @@
     let selectedTransferId = '';
     let selectedTransferRows = new Set();
     let selectedSystemRows = new Set();
+    let systemSelectionAnchor = -1;
+    let systemSelectedColumns = new Set();
+    let systemColumnAnchor = -1;
     let systemMergeGroups = [];
     let diffState = { mercado: [], system: [], pairs: [], branchId: 'todas', selectedSide: 'mercado', selectedIndex: 0, highlightedIndex: -1, selectedRows: { mercado: [], system: [] }, sort: { mercado: { field: '', direction: '' }, system: { field: '', direction: '' } }, activeSort: { key: '', side: '', field: '', direction: '' }, onlyDiffs: false };
     let copySelection = { table: null, mode: '', colIndex: -1, text: '' };
@@ -2687,6 +2698,9 @@
       selectedTransferId = '';
       selectedTransferRows.clear();
       selectedSystemRows.clear();
+      systemSelectionAnchor = -1;
+      systemSelectedColumns.clear();
+      systemColumnAnchor = -1;
       transferSort = { field: '', direction: '' };
       systemSort = { field: '', direction: '' };
     }
@@ -2747,6 +2761,7 @@
         cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
         transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row))),
         systemRows: manualSystemRows(source.system || []).map((row) => JSON.parse(JSON.stringify(row))),
+        systemMergeGroups: normalizeSystemMergeGroups(systemMergeGroups),
         cashMovementBranches: cashMovementBranchOverrides(source),
         receiptBranches: receiptBranchOverrides(source)
       };
@@ -2756,6 +2771,7 @@
       return Boolean(
         (payload?.transfers || []).length
         || (payload?.systemRows || []).length
+        || (payload?.systemMergeGroups || []).length
         || (payload?.cash || []).some((row) => Number(row.bills || 0) || Number(row.packs || 0))
         || Object.keys(payload?.cashMovementBranches || {}).length
         || Object.keys(payload?.receiptBranches || {}).length
@@ -2775,6 +2791,10 @@
           state.system.push(row);
           if (row.id) existingIds.add(row.id);
         });
+      }
+      if (Array.isArray(payload?.systemMergeGroups)) {
+        systemMergeGroups = normalizeSystemMergeGroups(payload.systemMergeGroups);
+        state.system = applyPersistentSystemMerges(state.system);
       }
       applyCashMovementBranchOverrides(payload?.cashMovementBranches || {});
       if (applyReceiptBranchOverrides(payload?.receiptBranches || {})) applyReceiptTotalsToBranches();
@@ -2803,6 +2823,7 @@
             cash: values.cash,
             transfers: values.transfers,
             systemRows: values.systemRows,
+            systemMergeGroups: values.systemMergeGroups,
             cashMovementBranches: values.cashMovementBranches,
             receiptBranches: values.receiptBranches,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2811,6 +2832,19 @@
           showToast('No pude guardar los datos manuales de caja en Firebase.');
         }
       }, 150);
+    }
+
+    function saveFirebaseSystemMergeGroups(dateKey = selectedDateKey) {
+      const db = firebaseDatabase();
+      if (!db) return Promise.resolve(false);
+      return db.collection(FIREBASE_CAJA_MANUAL_COLLECTION).doc(dateKey).set({
+        fecha: dateKey,
+        systemMergeGroups: normalizeSystemMergeGroups(systemMergeGroups),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).then(() => true).catch(() => {
+        showToast('No pude guardar la unificación en Firebase.');
+        return false;
+      });
     }
 
     function summaryManualPayload() {
@@ -3031,7 +3065,7 @@
       return {
         cash: state.cash,
         transfers: state.transfers,
-        system: state.system,
+        system: state.system.filter((row) => !isBlankManualSystemRow(row)),
         systemMergeGroups,
         summaryManual: state.summaryManual,
         movements: state.movements,
@@ -3047,7 +3081,7 @@
       return {
         cash: state.cash,
         transfers: state.transfers,
-        system: state.system,
+        system: state.system.filter((row) => !isBlankManualSystemRow(row)),
         systemMergeGroups,
         movements: state.movements,
         movementsByBranch: state.movementsByBranch,
@@ -3472,6 +3506,115 @@
       renderSystemRows();
     }
 
+    function visibleSystemIndexes() {
+      return getSortedSystemEntries().map((entry) => entry.index).filter((index) => state.system[index]);
+    }
+
+    function updateSystemSelectionVisuals() {
+      el.systemRows?.querySelectorAll('[data-system-row]').forEach((row) => {
+        const index = Number(row.dataset.systemRow);
+        const selected = selectedSystemRows.has(index);
+        row.classList.toggle('selected-row', selected);
+        const button = row.querySelector('[data-system-select]');
+        button?.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      });
+    }
+
+    function selectSystemRow(index, options = {}) {
+      const safeIndex = Number(index);
+      if (!state.system[safeIndex]) return false;
+      const multi = Boolean(options.multi);
+      const range = Boolean(options.range);
+      const visible = visibleSystemIndexes();
+      if (range && state.system[systemSelectionAnchor]) {
+        const anchorPosition = visible.indexOf(systemSelectionAnchor);
+        const currentPosition = visible.indexOf(safeIndex);
+        if (anchorPosition >= 0 && currentPosition >= 0) {
+          if (!multi) selectedSystemRows.clear();
+          const start = Math.min(anchorPosition, currentPosition);
+          const end = Math.max(anchorPosition, currentPosition);
+          visible.slice(start, end + 1).forEach((rowIndex) => selectedSystemRows.add(rowIndex));
+        }
+      } else if (multi) {
+        if (selectedSystemRows.has(safeIndex)) selectedSystemRows.delete(safeIndex);
+        else selectedSystemRows.add(safeIndex);
+        systemSelectionAnchor = safeIndex;
+      } else {
+        selectedSystemRows.clear();
+        selectedSystemRows.add(safeIndex);
+        systemSelectionAnchor = safeIndex;
+      }
+      updateSystemSelectionVisuals();
+      return true;
+    }
+
+    function systemColumnIndexes() {
+      return [1, 2, 3, 4];
+    }
+
+    function updateSystemColumnSelectionVisuals() {
+      const table = el.systemRows?.closest('table');
+      if (!table) return;
+      [...table.querySelectorAll('thead th')].forEach((cell, index) => cell.classList.toggle('copy-selected', systemSelectedColumns.has(index)));
+      tableRowsForCopy(table).forEach((row) => {
+        [...row.children].forEach((cell, index) => cell.classList.toggle('copy-selected', systemSelectedColumns.has(index)));
+      });
+    }
+
+    function refreshSystemColumnCopySelection() {
+      const table = el.systemRows?.closest('table');
+      const columns = [...systemSelectedColumns].sort((a, b) => a - b);
+      if (!table || !columns.length) {
+        copySelection = { table: null, mode: '', colIndex: -1, text: '' };
+        updateSystemColumnSelectionVisuals();
+        return;
+      }
+      const headers = [...table.querySelectorAll('thead th')];
+      const matrix = [
+        columns.map((index) => cellCopyText(headers[index])),
+        ...tableRowsForCopy(table).map((row) => columns.map((index) => cellCopyText(row.children[index])))
+      ];
+      copySelection = { table, mode: 'cols', colIndex: columns.length === 1 ? columns[0] : -1, colIndexes: columns, text: matrix.map((row) => row.join('\t')).join('\n') };
+      updateSystemColumnSelectionVisuals();
+    }
+
+    function selectSystemColumns(columnIndex, options = {}) {
+      const columns = systemColumnIndexes();
+      const safeIndex = Number(columnIndex);
+      if (!columns.includes(safeIndex)) return false;
+      if (options.range && columns.includes(systemColumnAnchor)) {
+        const start = Math.min(columns.indexOf(systemColumnAnchor), columns.indexOf(safeIndex));
+        const end = Math.max(columns.indexOf(systemColumnAnchor), columns.indexOf(safeIndex));
+        if (!options.multi) systemSelectedColumns.clear();
+        columns.slice(start, end + 1).forEach((index) => systemSelectedColumns.add(index));
+      } else if (options.multi) {
+        if (systemSelectedColumns.has(safeIndex)) systemSelectedColumns.delete(safeIndex);
+        else systemSelectedColumns.add(safeIndex);
+        systemColumnAnchor = safeIndex;
+      } else {
+        systemSelectedColumns = new Set([safeIndex]);
+        systemColumnAnchor = safeIndex;
+      }
+      refreshSystemColumnCopySelection();
+      showToast(systemSelectedColumns.size === 1 ? 'Columna seleccionada.' : `${systemSelectedColumns.size} columnas seleccionadas.`);
+      return true;
+    }
+
+    function selectAllSystemColumns() {
+      systemSelectedColumns = new Set(systemColumnIndexes());
+      systemColumnAnchor = systemColumnIndexes()[0];
+      refreshSystemColumnCopySelection();
+      showToast('Tabla seleccionada.');
+    }
+
+    function clearSystemColumnSelection() {
+      if (!systemSelectedColumns.size) return;
+      systemSelectedColumns.clear();
+      systemColumnAnchor = -1;
+      if (copySelection.table === el.systemRows?.closest('table')) copySelection = { table: null, mode: '', colIndex: -1, text: '' };
+      updateSystemColumnSelectionVisuals();
+    }
+
     function renderCashRows() {
       el.cashRows.innerHTML = state.cash.map((row, idx) => {
         const total = cashRowTotal(row);
@@ -3598,6 +3741,8 @@
       </tr>`).join('') + blankRows(8, 5);
       el.systemCount.textContent = rowCountText(visibleEntries.length || 1);
       updateSystemSortHeaders();
+      updateSystemSelectionVisuals();
+      updateSystemColumnSelectionVisuals();
     }
 
     function movementBranchSelectionStats(type) {
@@ -3778,18 +3923,18 @@
       if (!Array.isArray(groups)) return [];
       return groups.map((group) => {
         const members = Array.isArray(group) ? group : group?.members;
-        return { members: [...new Set((Array.isArray(members) ? members : []).map(String).filter(Boolean))] };
+        return { members: (Array.isArray(members) ? members : []).map(String).filter(Boolean) };
       }).filter((group) => group.members.length >= 2);
     }
 
     function deriveSystemMergeGroups(rows = []) {
       return rows.filter((row) => Array.isArray(row.children) && row.children.length >= 2)
-        .map((row) => ({ members: [...new Set(sourceRows([row]).map(systemMergeMemberKey))] }))
+        .map((row) => ({ members: sourceRows([row]).map(systemMergeMemberKey).filter(Boolean) }))
         .filter((group) => group.members.length >= 2);
     }
 
     function rememberSystemMergeGroup(rows) {
-      const members = [...new Set(sourceRows(rows).map(systemMergeMemberKey).filter(Boolean))];
+      const members = sourceRows(rows).map(systemMergeMemberKey).filter(Boolean);
       if (members.length < 2) return;
       const memberSet = new Set(members);
       systemMergeGroups = systemMergeGroups.filter((group) => !group.members.some((key) => memberSet.has(key)));
@@ -3929,6 +4074,7 @@
       state.system = state.system.filter((_, idx) => !selectedSet.has(idx));
       state.system.splice(firstIndex, 0, merged);
       selectedSystemRows = new Set([firstIndex]);
+      saveFirebaseSystemMergeGroups();
       saveState();
       renderSystemRows();
       renderTransferRows();
@@ -3951,6 +4097,7 @@
       });
       state.system = nextRows;
       selectedSystemRows.clear();
+      saveFirebaseSystemMergeGroups();
       saveState();
       renderSystemRows();
       renderTransferRows();
@@ -4552,6 +4699,19 @@
       const table = header.closest('table');
       if (!table || !header.closest('.grid-box')) return false;
       if (isHeaderSortArrowClick(event, header)) return false;
+      const systemTable = el.systemRows?.closest('table');
+      if (table === systemTable) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (header.classList.contains('row-selector-head')) selectAllSystemColumns();
+        else selectSystemColumns([...header.parentElement.children].indexOf(header), {
+          multi: event.ctrlKey || event.metaKey,
+          range: event.shiftKey
+        });
+        return true;
+      }
+      systemSelectedColumns.clear();
+      systemColumnAnchor = -1;
       if (header.classList.contains('row-selector-head')) {
         event.preventDefault();
         event.stopPropagation();
@@ -4570,7 +4730,8 @@
       const isCopyKey = (event.ctrlKey || event.metaKey) && String(event.key || '').toLowerCase() === 'c';
       if (!copySelection.text || (!isCopyEvent && !isCopyKey)) return false;
       const active = document.activeElement;
-      if (isEditableField(active) && active.matches(':focus')) return false;
+      const copyingSystemColumns = systemSelectedColumns.size && copySelection.table === el.systemRows?.closest('table');
+      if (isEditableField(active) && active.matches(':focus') && !copyingSystemColumns) return false;
       event.preventDefault();
       if (event.clipboardData) {
         event.clipboardData.setData('text/plain', copySelection.text);
@@ -4578,6 +4739,42 @@
         return true;
       }
       navigator.clipboard?.writeText(copySelection.text).then(() => showToast('Seleccion copiada.'), () => showToast('No pude copiar la seleccion.'));
+      return true;
+    }
+
+    function pasteSystemSelectedColumns(event) {
+      if (!systemSelectedColumns.size || !event.clipboardData) return false;
+      const text = event.clipboardData.getData('text/plain');
+      if (!text) return false;
+      let rows = text.replace(/\r/g, '').split('\n').filter((line) => line.length).map((line) => line.split('\t'));
+      if (!rows.length) return false;
+      const headerWords = new Set(['tipo', 'n factura', 'n° factura', 'cliente', 'monto']);
+      if (rows[0].some((value) => headerWords.has(normalizarTexto(value)))) rows = rows.slice(1);
+      if (!rows.length) return false;
+      const columns = [...systemSelectedColumns].sort((a, b) => a - b);
+      const fields = { 1: 'typeComp', 2: 'invoice', 3: 'name', 4: 'amount' };
+      const visibleIndexes = visibleSystemIndexes();
+      rows.forEach((values, rowPosition) => {
+        let stateIndex = visibleIndexes[rowPosition];
+        if (!state.system[stateIndex]) {
+          state.system.push(normalizeSystemRow({
+            id: `manual-system-${Date.now()}-${rowPosition}-${Math.random().toString(36).slice(2)}`,
+            source: 'manual', typeComp: '', invoice: '', name: '', amount: 0, paymentType: 'Transf Bria.'
+          }));
+          stateIndex = state.system.length - 1;
+        }
+        columns.forEach((columnIndex, valueIndex) => {
+          const field = fields[columnIndex];
+          if (!field || values[valueIndex] === undefined) return;
+          state.system[stateIndex][field] = field === 'amount' ? parseNumber(values[valueIndex]) : cleanLine(values[valueIndex]);
+        });
+      });
+      event.preventDefault();
+      saveState();
+      renderSystemRows();
+      renderTransferRows();
+      updateTotals();
+      showToast('Datos pegados en las columnas seleccionadas.');
       return true;
     }
 
@@ -5142,10 +5339,13 @@
       }
     }
 
-    function publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload) {
+    function publicCajaSignature(config, manualPayload, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload) {
+      const manualUpdatedAt = manualPayload?.updatedAt?.toMillis?.() ?? manualPayload?.updatedAt?.seconds ?? '';
       return [
         selectedCajaBranchId(),
         config?.updatedAt || '',
+        manualUpdatedAt,
+        JSON.stringify(manualPayload?.systemMergeGroups || []),
         config?.urlTabla || '',
         config?.urlTransferencias || '',
         config?.urlIngresosEgresos || '',
@@ -5174,7 +5374,11 @@
       const showPublicLoading = !silent || Boolean(options.showSystemLoading) || Boolean(options.showPublicLoading);
       if (showPublicLoading) setCajaPublicLoading(true);
       try {
-        const config = await loadCajaPublicConfig();
+        const [config, manualPayload] = await Promise.all([
+          loadCajaPublicConfig(),
+          loadFirebaseCajaManual(selectedDateKey)
+        ]);
+        if (manualPayload) applyCajaManualPayload(manualPayload);
         const movementsUrl = config?.urlTabla || CAJA_PUBLIC_JSON_FALLBACK.movements;
         const systemUrl = config?.urlTransferencias || CAJA_PUBLIC_JSON_FALLBACK.system;
         const cashMovementsUrl = config?.urlIngresosEgresos || CAJA_PUBLIC_JSON_FALLBACK.cashMovements;
@@ -5186,7 +5390,7 @@
           cashMovementsUrl ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null) : Promise.resolve(null),
           receiptsUrl ? fetchPublicCajaJson(receiptsUrl).catch(() => null) : Promise.resolve(null)
         ]);
-        const signature = publicCajaSignature(config, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload);
+        const signature = publicCajaSignature(config, manualPayload, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload);
         if (!force && signature && signature === lastPublicCajaSignature) return;
         const appliedMovements = applyPublicCajaMovements(movementsPayload);
         const appliedSystem = applyPublicCajaSystem(systemPayload);
@@ -5313,6 +5517,14 @@
       return row;
     }
 
+    function isBlankManualSystemRow(row) {
+      return row?.source === 'manual'
+        && !String(row.typeComp || '').trim()
+        && !String(row.invoice || '').trim()
+        && !String(row.name || '').trim()
+        && !Number(row.amount || 0);
+    }
+
     function addManualSystemRow() {
       const row = normalizeSystemRow({
         id: `manual-system-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -5327,6 +5539,7 @@
       const index = state.system.length - 1;
       selectedSystemRows.clear();
       selectedSystemRows.add(index);
+      systemSelectionAnchor = index;
       systemSort = { field: '', direction: '' };
       saveState();
       renderSystemRows();
@@ -5352,6 +5565,7 @@
       const remove = new Set(valid);
       state.system = state.system.filter((_, idx) => !remove.has(idx));
       selectedSystemRows.clear();
+      systemSelectionAnchor = -1;
       systemContextIndex = -1;
       hideSystemRowMenu();
       saveState();
@@ -5387,6 +5601,9 @@
     function clearSystem() {
       state.system = [];
       systemMergeGroups = [];
+      selectedSystemRows.clear();
+      systemSelectionAnchor = -1;
+      clearSystemColumnSelection();
       saveState();
       renderSystemRows();
       updateTotals();
@@ -5486,8 +5703,10 @@
       if (hasFullSelection(target)) {
         const end = target.value.length;
         target.setSelectionRange(end, end);
+        if (target.dataset.systemField) target.classList.add('system-cell-editing');
       } else {
         target.select();
+        if (target.dataset.systemField) target.classList.remove('system-cell-editing');
       }
       return true;
     }
@@ -5624,6 +5843,93 @@
         return true;
       }
       return false;
+    }
+
+    function systemGridRows() {
+      return [...el.systemRows.querySelectorAll('tr[data-system-row]')].filter((row) => row.querySelector('[data-system-field]'));
+    }
+
+    function focusSystemGridCell(rowPosition, columnPosition) {
+      const rows = systemGridRows();
+      const row = rows[Math.max(0, Math.min(rows.length - 1, rowPosition))];
+      const cells = row ? [...row.querySelectorAll('[data-system-field]')] : [];
+      const cell = cells[Math.max(0, Math.min(cells.length - 1, columnPosition))];
+      if (!cell) return false;
+      el.systemRows.querySelectorAll('.system-cell-editing').forEach((input) => input.classList.remove('system-cell-editing'));
+      selectSystemRow(Number(row.dataset.systemRow));
+      cell.focus();
+      cell.select?.();
+      return true;
+    }
+
+    function canLeaveSystemCellHorizontally(input, direction) {
+      if (hasFullSelection(input)) return true;
+      const start = input.selectionStart ?? 0;
+      const end = input.selectionEnd ?? start;
+      if (start !== end) return false;
+      return direction < 0 ? start === 0 : end === String(input.value || '').length;
+    }
+
+    function insertSystemDecimalComma(event, input) {
+      if (input.dataset.systemField !== 'amount' || event.code !== 'NumpadDecimal') return false;
+      event.preventDefault();
+      const value = String(input.value || '');
+      const start = input.selectionStart ?? value.length;
+      const end = input.selectionEnd ?? start;
+      const before = value.slice(0, start);
+      const after = value.slice(end);
+      const next = `${before},${after}`.replace(/,(?=.*?,)/g, '');
+      input.value = next;
+      const commaPosition = next.indexOf(',') + 1;
+      input.setSelectionRange?.(commaPosition, commaPosition);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    }
+
+    function handleSystemCellNavigation(event) {
+      const target = event.target.closest?.('[data-system-field]');
+      if (!target || !el.systemRows.contains(target)) return false;
+      if (insertSystemDecimalComma(event, target)) return true;
+      const navigationKeys = ['Enter', 'Tab', 'ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'];
+      if (!navigationKeys.includes(event.key)) return false;
+      const row = target.closest('tr[data-system-row]');
+      const rows = systemGridRows();
+      const cells = [...row.querySelectorAll('[data-system-field]')];
+      const rowPosition = rows.indexOf(row);
+      const columnPosition = cells.indexOf(target);
+      if (rowPosition < 0 || columnPosition < 0) return false;
+      let nextRow = rowPosition;
+      let nextColumn = columnPosition;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        const direction = event.key === 'ArrowLeft' ? -1 : 1;
+        if (!canLeaveSystemCellHorizontally(target, direction)) return false;
+        if (event.ctrlKey || event.metaKey) nextColumn = direction < 0 ? 0 : cells.length - 1;
+        else nextColumn += direction;
+      } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        const direction = event.key === 'ArrowUp' ? -1 : 1;
+        nextRow = event.ctrlKey || event.metaKey ? (direction < 0 ? 0 : rows.length - 1) : rowPosition + direction;
+      } else {
+        const direction = event.shiftKey ? -1 : 1;
+        nextColumn += direction;
+      }
+      if (nextColumn >= cells.length) {
+        nextColumn = 0;
+        nextRow += 1;
+      } else if (nextColumn < 0) {
+        nextColumn = cells.length - 1;
+        nextRow -= 1;
+      }
+      if (target.dataset.systemField === 'amount') commitCalculatedCell(target);
+      if (nextRow >= rows.length && (event.key === 'Enter' || event.key === 'Tab')) {
+        event.preventDefault();
+        const currentStateRow = state.system[Number(row.dataset.systemRow)];
+        if (isBlankManualSystemRow(currentStateRow)) return focusSystemGridCell(rowPosition, 0);
+        addManualSystemRow();
+        return true;
+      }
+      if (nextRow < 0 || nextRow >= rows.length) return false;
+      event.preventDefault();
+      return focusSystemGridCell(nextRow, nextColumn);
     }
 
     function handleCellNavigation(event) {
@@ -5917,6 +6223,7 @@
     });
     document.addEventListener('click', handleCopySelectionClick, true);
     document.addEventListener('copy', copySelectedArea);
+    document.addEventListener('paste', pasteSystemSelectedColumns);
     el.transferRows.addEventListener('click', (event) => {
       if (event.target.closest('[data-transfer-branch-id]')) return;
       const selector = event.target.closest('[data-row-select="transfer"]');
@@ -5944,15 +6251,34 @@
     document.addEventListener('focusin', (event) => {
       rememberEditValue(event.target);
     });
+    el.systemRows.addEventListener('mousedown', (event) => {
+      const input = event.target.closest('[data-system-field]');
+      if (!input) return;
+      if (document.activeElement !== input) input.dataset.systemSelectOnClick = '1';
+      input.classList.add('system-cell-editing');
+      if (event.ctrlKey || event.metaKey || event.shiftKey) event.preventDefault();
+    });
     el.systemRows.addEventListener('click', (event) => {
       hideSystemRowMenu();
+      clearSystemColumnSelection();
+      const row = event.target.closest('[data-system-row]');
+      if (!row) return;
+      const index = Number(row.dataset.systemRow);
+      selectSystemRow(index, {
+        multi: event.ctrlKey || event.metaKey,
+        range: event.shiftKey
+      });
+      const input = event.target.closest('[data-system-field]');
+      if (input?.dataset.systemSelectOnClick === '1') {
+        delete input.dataset.systemSelectOnClick;
+        input.select?.();
+      }
       const selector = event.target.closest('[data-system-select]');
-      if (!selector) return;
-      const index = Number(selector.dataset.systemSelect);
-      if (selectedSystemRows.has(index)) selectedSystemRows.delete(index);
-      else selectedSystemRows.add(index);
-      renderSystemRows();
-      document.querySelector(`[data-system-select="${index}"]`)?.focus();
+      if (selector) selector.focus();
+    });
+    el.systemRows.addEventListener('focusout', (event) => {
+      const input = event.target.closest('[data-system-field]');
+      if (input) input.classList.remove('system-cell-editing');
     });
     el.movementRows.addEventListener('click', (event) => {
       const trigger = event.target.closest('[data-movement-separate-index]');
@@ -6084,10 +6410,16 @@
       if (event.key === 'Escape' && el.movementSeparateModal.classList.contains('open')) closeMovementSeparateModal();
       if (handleDiffModalKey(event)) return;
       if (handleSystemQuickAdd(event)) return;
+      if ((event.key === 'Delete' || event.key === 'Del' || event.key === 'Supr') && selectedSystemRows.size && el.systemRows.contains(event.target)) {
+        event.preventDefault();
+        deleteSelectedSystemRows();
+        return;
+      }
       if ((event.key === 'Delete' || event.key === 'Del' || event.key === 'Supr') && event.target.closest('[data-row-select="transfer"]')) {
         if (deleteSelectedTransferRow()) event.preventDefault();
         return;
       }
+      if (handleSystemCellNavigation(event)) return;
       if (appendOperatorToSelection(event)) return;
       handleCellNavigation(event);
     });
