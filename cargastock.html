@@ -170,8 +170,9 @@
       .head,.row{min-width:980px}
     }
   </style>
+  <link rel="stylesheet" href="theme-corralon.css?v=20260722-2">
 </head>
-<body>
+<body data-page-theme="cargastock">
 <div class="app">
   <header>
     <img src="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/c0bb8b29-8b6f-466f-8452-45fb46a1316c.png" alt="">
@@ -471,6 +472,10 @@ function codeVariants(value) {
 function moneyNumber(value) {
   return window.CorralonSystem?.parseMoney ? CorralonSystem.parseMoney(value) : Number(String(value || '').replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '')) || 0;
 }
+function quantityNumber(value) {
+  const result = FX.evaluateNumericExpression ? FX.evaluateNumericExpression(String(value ?? '')) : moneyNumber(value);
+  return Number.isFinite(result) ? result : 0;
+}
 function money(value) {
   return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -620,7 +625,7 @@ function calcPrecioFinal(row) {
   return base;
 }
 function calcPrecioFinalCantidad(row) {
-  return calcPrecioFinal(row) * (moneyNumber(row.cantidad) || 0);
+  return calcPrecioFinal(row) * (quantityNumber(row.cantidad) || 0);
 }
 function calcPrecioFinalTotal(row) {
   const precio = Number(row.precio) || 0;
@@ -1314,7 +1319,7 @@ function render() {
   const view = rowsData;
   el.rows.innerHTML = view.map(stockRowHtml).join('');
   const okCount = rowsData.filter(isGreen).length;
-  const totalUnitario = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
+  const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
   const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
   el.totalRows.textContent = `${rowsData.filter((row) => !isBlankStockRow(row)).length.toLocaleString('es-AR')} filas`;
   el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
@@ -1329,7 +1334,7 @@ function updateCalculatedCells() {
     const finalQuantityCell = editableCellAt(index, 6);
     if (finalQuantityCell && document.activeElement !== finalQuantityCell) finalQuantityCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinalCantidad(row));
   });
-  const totalUnitario = rowsData.reduce((sum, row) => sum + ((moneyNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
+  const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
   const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
   el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
   el.totalFinal.textContent = `Final: ${money(totalFinal)}`;
@@ -1349,7 +1354,7 @@ async function pasteAll() {
 }
 async function copyGreen() {
   const greenRows = rowsData.filter(isGreen);
-  const rows = greenRows.map((row) => [row.codigo, row.cantidad]);
+  const rows = greenRows.map((row) => [row.codigo, quantityNumber(row.cantidad)]);
   if (!greenRows.length) {
     show('No hay filas verdes para copiar');
     return;
@@ -2071,7 +2076,7 @@ function setEditableCellValue(cell, value) {
     row.precioDivisor = '';
     row.precioMultiplicador = '';
   }
-  else if (field === 'cantidad') row.cantidad = rawNumber(moneyNumber(value));
+  else if (field === 'cantidad') row.cantidad = rawNumber(quantityNumber(value));
   else if (field === 'descuento') row.descuentoAdicional = parsePercent(value);
   else row[field] = String(value ?? '').trim();
   if (field === 'precio') cell.textContent = money(row.precio);
@@ -2839,12 +2844,8 @@ el.recalculateContextBtn.addEventListener('click', async () => {
   closeTableContextMenu();
   el.recalculateContextBtn.disabled = true;
   try {
-    await Promise.all([
-      loadIndexCodes(),
-      provider ? loadProviderArticles(provider) : Promise.resolve()
-    ]);
-    render();
-    show('Códigos recalculados');
+    await loadIndexCodes();
+    show('JSON de index recargado');
   } finally {
     el.recalculateContextBtn.disabled = false;
   }
@@ -2910,7 +2911,7 @@ el.rows.addEventListener('input', (event) => {
     row.precioDivisor = '';
     row.precioMultiplicador = '';
   }
-  else if (field === 'cantidad') row.cantidad = rawNumber(moneyNumber(cell.textContent));
+  else if (field === 'cantidad') row.cantidad = String(cell.textContent || '').trim();
   else if (field === 'descuento') row.descuentoAdicional = parsePercent(cell.textContent);
   else row[field] = String(cell.textContent || '').trim();
   const rowIndex = Number(rowEl.dataset.row);
@@ -2932,6 +2933,22 @@ el.rows.addEventListener('input', (event) => {
   if (field === 'descuento' || field === 'precio' || field === 'cantidad') updateCalculatedCells();
   if (field === 'descripcion') openArticleProviderList(cell);
 });
+function finalizeQuantityCell(cell) {
+  if (!cell?.matches?.('[data-field="cantidad"]')) return false;
+  const row = rowFromCell(cell);
+  if (!row || !String(cell.textContent || '').trim()) return false;
+  const result = quantityNumber(cell.textContent);
+  row.cantidad = rawNumber(result);
+  cell.textContent = row.cantidad;
+  saveRows();
+  updateCalculatedCells();
+  return true;
+}
+el.rows.addEventListener('keydown', (event) => {
+  const cell = event.target.closest('[data-field="cantidad"]');
+  if (cell && ['Enter', 'Tab', 'ArrowUp', 'ArrowDown'].includes(event.key)) finalizeQuantityCell(cell);
+}, true);
+el.rows.addEventListener('focusout', (event) => finalizeQuantityCell(event.target.closest('[data-field="cantidad"]')));
 el.rows.addEventListener('keydown', (event) => {
   const cell = event.target.closest('[data-field="descripcion"]');
   if (!cell) return;
