@@ -304,14 +304,12 @@
     box-shadow: inset 0 0 0 2px var(--purple);
   }
   .menu-btn.is-drag-target {
-    border-color: var(--purple);
-    box-shadow: 0 0 0 3px rgba(108,79,199,.15);
+    border-color: #9b9b97;
+    box-shadow: inset 0 0 0 1px #9b9b97;
   }
   .menu-btn:hover {
-    border-color: var(--purple);
-    box-shadow: inset 0 0 0 1px var(--purple);
-    color: var(--purple-dark);
-    transform: translateY(-1px);
+    border-color: #9b9b97;
+    box-shadow: inset 0 0 0 1px #9b9b97;
   }
   .menu-btn strong {
     display: block;
@@ -562,9 +560,10 @@
   .menu-dollar-card{border-color:#dededb;box-shadow:0 2px 10px rgba(0,0,0,.08)}
   .menu-dollar-label{color:#ef1015}.menu-dollar-value{color:#111}
   .menu-plus,.menu-bell,.review-head button{border-color:#d5d5d2;color:#111;background:#fff}
-  .menu-plus:hover,.menu-bell:hover,.review-head button:hover{background:#f0f0ed;color:#ef1015}
+  .menu-plus:hover,.menu-bell:hover{border-color:#b8b8b5;color:#111;background:#fff}
+  .review-head button:hover{background:#f0f0ed;color:#ef1015}
   .menu-btn{border-color:#dededb;background:#fff;box-shadow:0 5px 14px rgba(0,0,0,.06)}
-  .menu-btn:hover,.menu-btn.is-drag-target{border-color:#ef1015;box-shadow:inset 0 0 0 1px #ef1015,0 7px 17px rgba(0,0,0,.09)}
+  .menu-btn:hover,.menu-btn.is-drag-target{border-color:#9b9b97;box-shadow:inset 0 0 0 1px #9b9b97,0 5px 14px rgba(0,0,0,.06)}
   .menu-btn strong{color:#111}
   .review-item{border-color:#e2e2df}.review-item:hover{background:#f3f3f1}
   .review-resolved,.review-filter{border-color:#d1d1ce;background:#f6f6f4;color:#171717}
@@ -582,7 +581,7 @@
   input[type="checkbox"]{accent-color:#ef1015}
 </style>
   <script src="nav-helper.js"></script>
-  <link rel="stylesheet" href="theme-corralon.css?v=20260722-4">
+  <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
   <div id="menuLoading">
@@ -703,6 +702,10 @@
     const MENU_USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
     const MENU_USERS_COLLECTION = 'menuUsuarios';
     const MENU_ORDER_STORAGE_KEY = 'corralon_menu_order_v1';
+    const MENU_ORDER_COLLECTION = 'menuOrdenes';
+    const MENU_ORDER_DB_NAME = 'corralon_menu_cache_v1';
+    const MENU_ORDER_DB_VERSION = 1;
+    const MENU_ORDER_STORE = 'menuOrdenes';
     const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'carga_stock', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
     const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
     const loginBg = document.getElementById('loginBg');
@@ -786,20 +789,85 @@
     let menuTouchDragging = false;
     let pendingNextPreview = null;
     let pendingUploads = 0;
+    let menuOrderLoadSequence = 0;
 
     function menuOrderKey(usuario = obtenerUsuarioActivo()) {
       const userId = String(usuario?.id || usuario?.usuario || 'default').trim() || 'default';
       return `${MENU_ORDER_STORAGE_KEY}:${userId}`;
     }
 
-    function aplicarOrdenMenu(usuario = obtenerUsuarioActivo()) {
-      if (!menuGrid) return;
-      let orden = [];
+    function menuOrderUserId(usuario = obtenerUsuarioActivo()) {
+      return String(usuario?.id || usuario?.usuario || 'default').trim() || 'default';
+    }
+
+    function menuOrderDocId(usuario = obtenerUsuarioActivo()) {
+      return encodeURIComponent(menuOrderUserId(usuario));
+    }
+
+    function normalizarOrdenMenu(orden) {
+      const validos = new Set(ALL_MENU_IDS);
+      return [...new Set((Array.isArray(orden) ? orden : []).map(String).filter((id) => validos.has(id)))];
+    }
+
+    function abrirMenuOrderDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(MENU_ORDER_DB_NAME, MENU_ORDER_DB_VERSION);
+        request.onupgradeneeded = () => {
+          const database = request.result;
+          if (!database.objectStoreNames.contains(MENU_ORDER_STORE)) {
+            database.createObjectStore(MENU_ORDER_STORE, { keyPath: 'usuarioId' });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error('IndexedDB del menú está bloqueada'));
+      });
+    }
+
+    async function leerOrdenMenuIndexedDb(usuario = obtenerUsuarioActivo()) {
+      const database = await abrirMenuOrderDb();
       try {
-        orden = JSON.parse(localStorage.getItem(menuOrderKey(usuario)) || '[]');
-      } catch (_) {}
+        return await new Promise((resolve, reject) => {
+          const request = database.transaction(MENU_ORDER_STORE, 'readonly').objectStore(MENU_ORDER_STORE).get(menuOrderUserId(usuario));
+          request.onsuccess = () => resolve(normalizarOrdenMenu(request.result?.orden));
+          request.onerror = () => reject(request.error);
+        });
+      } finally {
+        database.close();
+      }
+    }
+
+    async function guardarOrdenMenuIndexedDb(usuario, orden, origen = 'local') {
+      const database = await abrirMenuOrderDb();
+      try {
+        await new Promise((resolve, reject) => {
+          const request = database.transaction(MENU_ORDER_STORE, 'readwrite').objectStore(MENU_ORDER_STORE).put({
+            usuarioId: menuOrderUserId(usuario),
+            orden: normalizarOrdenMenu(orden),
+            origen,
+            updatedAt: Date.now()
+          });
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      } finally {
+        database.close();
+      }
+    }
+
+    function leerOrdenMenuLegacy(usuario = obtenerUsuarioActivo()) {
+      try {
+        return normalizarOrdenMenu(JSON.parse(localStorage.getItem(menuOrderKey(usuario)) || '[]'));
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function aplicarListaOrdenMenu(orden) {
+      if (!menuGrid) return;
       const botones = new Map([...menuGrid.querySelectorAll('.menu-btn[data-menu-id]')].map((item) => [item.dataset.menuId, item]));
-      orden.forEach((id) => {
+      const ordenCompleto = [...normalizarOrdenMenu(orden), ...ALL_MENU_IDS.filter((id) => !normalizarOrdenMenu(orden).includes(id))];
+      ordenCompleto.forEach((id) => {
         const item = botones.get(String(id));
         if (item) {
           menuGrid.appendChild(item);
@@ -809,10 +877,53 @@
       botones.forEach((item) => menuGrid.appendChild(item));
     }
 
-    function guardarOrdenMenu(usuario = obtenerUsuarioActivo()) {
+    async function aplicarOrdenMenu(usuario = obtenerUsuarioActivo()) {
       if (!menuGrid) return;
-      const orden = [...menuGrid.querySelectorAll('.menu-btn[data-menu-id]')].map((item) => item.dataset.menuId);
-      try { localStorage.setItem(menuOrderKey(usuario), JSON.stringify(orden)); } catch (_) {}
+      const sequence = ++menuOrderLoadSequence;
+      const legacy = leerOrdenMenuLegacy(usuario);
+      let local = [];
+      try { local = await leerOrdenMenuIndexedDb(usuario); } catch (error) { console.warn('No se pudo leer el orden local del menú', error); }
+      try {
+        const remoteSnap = await getDocFromServer(doc(db, MENU_ORDER_COLLECTION, menuOrderDocId(usuario)));
+        if (sequence !== menuOrderLoadSequence) return;
+        if (remoteSnap.exists()) {
+          const remote = normalizarOrdenMenu(remoteSnap.data()?.orden);
+          aplicarListaOrdenMenu(remote);
+          try { await guardarOrdenMenuIndexedDb(usuario, remote, 'firebase'); } catch (error) { console.warn('No se pudo actualizar la copia local del orden', error); }
+          try { localStorage.removeItem(menuOrderKey(usuario)); } catch (_) {}
+          return;
+        }
+        const inicial = local.length ? local : legacy;
+        aplicarListaOrdenMenu(inicial);
+        if (inicial.length) {
+          await setDoc(doc(db, MENU_ORDER_COLLECTION, menuOrderDocId(usuario)), {
+            usuarioId: menuOrderUserId(usuario),
+            orden: inicial,
+            updatedAt: serverTimestamp(),
+            updatedAtMs: Date.now()
+          }, { merge: true });
+          try { await guardarOrdenMenuIndexedDb(usuario, inicial, 'firebase'); } catch (_) {}
+          try { localStorage.removeItem(menuOrderKey(usuario)); } catch (_) {}
+        }
+      } catch (error) {
+        console.warn('No se pudo leer el orden desde Firebase; se usa IndexedDB', error);
+        if (sequence !== menuOrderLoadSequence) return;
+        aplicarListaOrdenMenu(local.length ? local : legacy);
+      }
+    }
+
+    async function guardarOrdenMenu(usuario = obtenerUsuarioActivo()) {
+      if (!menuGrid) return;
+      const orden = normalizarOrdenMenu([...menuGrid.querySelectorAll('.menu-btn[data-menu-id]')].map((item) => item.dataset.menuId));
+      try { await guardarOrdenMenuIndexedDb(usuario, orden, 'local'); } catch (error) { console.warn('No se pudo guardar el orden en IndexedDB', error); }
+      await setDoc(doc(db, MENU_ORDER_COLLECTION, menuOrderDocId(usuario)), {
+        usuarioId: menuOrderUserId(usuario),
+        orden,
+        updatedAt: serverTimestamp(),
+        updatedAtMs: Date.now()
+      }, { merge: true });
+      try { await guardarOrdenMenuIndexedDb(usuario, orden, 'firebase'); } catch (_) {}
+      try { localStorage.removeItem(menuOrderKey(usuario)); } catch (_) {}
     }
 
     function limpiarMarcaDestinoMenu() {
@@ -847,7 +958,7 @@
       menuTouchTimer = null;
       item?.classList.remove('is-dragging');
       limpiarMarcaDestinoMenu();
-      if (guardar && menuDragMoved) guardarOrdenMenu();
+      if (guardar && menuDragMoved) guardarOrdenMenu().catch((error) => console.warn('No se pudo sincronizar el orden del menú', error));
       if (menuDragMoved) menuSuppressClickUntil = Date.now() + 350;
       menuDragItem = null;
       menuTouchItem = null;
@@ -1131,8 +1242,8 @@
       return Array.isArray(usuario.permisos) ? usuario.permisos : [];
     }
 
-    function aplicarPermisosMenu(usuario = obtenerUsuarioActivo()) {
-      aplicarOrdenMenu(usuario);
+    async function aplicarPermisosMenu(usuario = obtenerUsuarioActivo()) {
+      await aplicarOrdenMenu(usuario);
       const permisos = new Set(permisosUsuario(usuario));
       document.querySelectorAll('[data-menu-id]').forEach((link) => {
         link.style.display = permisos.has(link.dataset.menuId) ? '' : 'none';
@@ -1141,10 +1252,10 @@
       setupReviewNotifications(usuario);
     }
 
-    function mostrarMenu(usuario = obtenerUsuarioActivo()) {
+    async function mostrarMenu(usuario = obtenerUsuarioActivo()) {
       loginBg.style.display = 'none';
+      await aplicarPermisosMenu(usuario);
       appContent.style.display = 'block';
-      aplicarPermisosMenu(usuario);
     }
 
     function mostrarLogin() {
@@ -1196,7 +1307,7 @@
           preloadAliasObjectives(),
           preloadReviewNotifications(usuario)
         ]);
-        mostrarMenu(usuario);
+        await mostrarMenu(usuario);
         ocultarCargaMenu();
       } else {
         loginError.textContent = '❌ Usuario o contraseña incorrectos';
@@ -1891,7 +2002,7 @@
         return;
       }
       if (tieneSesionMenuRecordada()) guardarUsuarioActivo(usuarioValidado);
-      mostrarMenu(usuarioValidado);
+      await mostrarMenu(usuarioValidado);
     }
 
     async function inicializarMenu() {
@@ -1911,7 +2022,7 @@
           preloadAliasObjectives(),
           preloadReviewNotifications(usuarioActivo)
         ]);
-        mostrarMenu(usuarioActivo);
+        await mostrarMenu(usuarioActivo);
         ocultarCargaMenu();
       } else {
         mostrarLogin();
