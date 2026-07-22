@@ -2006,6 +2006,8 @@
     let firebaseManualSaveTimer = null;
     let applyingFirebaseSummary = false;
     let lastPublicCajaSignature = '';
+    let lastManualCajaSignature = '';
+    let pendingCajaRefresh = false;
     let activeCajaBranchId = '';
     let cajaBranches = [];
     let activeCajaBranchOption = -1;
@@ -2372,7 +2374,7 @@
     function renderCashMovementRows() {
       const rows = visibleCashMovements();
       const branches = cashMovementBranches();
-      el.cashMovementRows.innerHTML = rows.map((row, index) => {
+      const html = rows.map((row, index) => {
         const branch = branches.find((item) => item.id === row.branchId);
         const key = cashMovementKey(row, index);
         const listId = `cashMovementBranchList_${index}`;
@@ -2391,13 +2393,14 @@
           <td class="cash-movement-note">${escapeHtml(row.note || '')}</td>
         </tr>`;
       }).join('') + blankRows(Math.max(2, 10 - rows.length), 5);
+      patchKeyedTableRows(el.cashMovementRows, html, 'data-cash-movement-id');
       el.movementCount.textContent = rowCountText(rows.length);
     }
 
     function renderReceiptRows() {
       const rows = visibleReceipts();
       const branches = cashMovementBranches();
-      el.receiptRows.innerHTML = rows.map((row, index) => {
+      const html = rows.map((row, index) => {
         const branch = branches.find((item) => item.id === row.branchId);
         const key = receiptKey(row, index);
         const listId = `receiptBranchList_${index}`;
@@ -2417,6 +2420,7 @@
           <td class="money">${formatMoney(row.amount)}</td>
         </tr>`;
       }).join('') + blankRows(Math.max(2, 10 - rows.length), 6);
+      patchKeyedTableRows(el.receiptRows, html, 'data-receipt-id');
       el.movementCount.textContent = rowCountText(rows.length);
     }
 
@@ -3615,10 +3619,64 @@
       updateSystemColumnSelectionVisuals();
     }
 
+    function patchActiveTableRow(currentRow, nextRow, activeElement) {
+      currentRow.className = nextRow.className;
+      [...nextRow.attributes].forEach((attribute) => currentRow.setAttribute(attribute.name, attribute.value));
+      const currentCells = [...currentRow.children];
+      const nextCells = [...nextRow.children];
+      nextCells.forEach((nextCell, index) => {
+        const currentCell = currentCells[index];
+        if (!currentCell) {
+          currentRow.appendChild(nextCell);
+          return;
+        }
+        if (currentCell.contains(activeElement)) {
+          currentCell.className = nextCell.className;
+          return;
+        }
+        if (currentCell.outerHTML !== nextCell.outerHTML) currentCell.replaceWith(nextCell);
+      });
+    }
+
+    function patchKeyedTableRows(container, html, keyAttribute) {
+      if (!container) return;
+      const incomingBody = document.createElement('tbody');
+      incomingBody.innerHTML = html;
+      const incomingRows = [...incomingBody.children];
+      const activeElement = document.activeElement;
+      const existingRows = [...container.children];
+      const existingByKey = new Map(existingRows.map((row) => [row.getAttribute(keyAttribute), row]).filter(([key]) => key));
+      const incomingKeys = new Set(incomingRows.map((row) => row.getAttribute(keyAttribute)).filter(Boolean));
+
+      existingRows.filter((row) => !row.getAttribute(keyAttribute)).forEach((row) => row.remove());
+      let position = 0;
+      incomingRows.filter((row) => row.getAttribute(keyAttribute)).forEach((nextRow) => {
+        const key = nextRow.getAttribute(keyAttribute);
+        let currentRow = existingByKey.get(key);
+        if (!currentRow) currentRow = nextRow;
+        else if (currentRow.outerHTML !== nextRow.outerHTML) {
+          if (activeElement && currentRow.contains(activeElement)) patchActiveTableRow(currentRow, nextRow, activeElement);
+          else {
+            currentRow.replaceWith(nextRow);
+            currentRow = nextRow;
+          }
+        }
+        const reference = container.children[position] || null;
+        if (currentRow !== reference) container.insertBefore(currentRow, reference);
+        position += 1;
+      });
+
+      existingRows.forEach((row) => {
+        const key = row.getAttribute(keyAttribute);
+        if (key && !incomingKeys.has(key) && !(activeElement && row.contains(activeElement))) row.remove();
+      });
+      incomingRows.filter((row) => !row.getAttribute(keyAttribute)).forEach((row) => container.appendChild(row));
+    }
+
     function renderCashRows() {
-      el.cashRows.innerHTML = state.cash.map((row, idx) => {
+      const html = state.cash.map((row, idx) => {
         const total = cashRowTotal(row);
-        return `<tr>
+        return `<tr data-cash-row-key="${idx}">
           <td class="row-selector-cell"></td>
           <td class="num">${formatDenom(row.denom)}</td>
           <td class="num"><input class="cell-input" data-cash-field="bills" data-index="${idx}" inputmode="numeric" value="${row.bills || ''}"></td>
@@ -3626,6 +3684,7 @@
           <td class="money" data-cash-total="${idx}">${formatMoney(total)}</td>
         </tr>`;
       }).join('') + blankRows(Math.max(0, 10 - state.cash.length), 5);
+      patchKeyedTableRows(el.cashRows, html, 'data-cash-row-key');
     }
 
     function updateCashRowDisplay(index) {
@@ -3705,8 +3764,8 @@
         <td class="money"><input class="cell-input" data-transfer-field="amount" data-id="${escapeHtml(row.id)}" inputmode="decimal" value="${row.amount ? formatMoney(row.amount) : ''}" placeholder="$ 0,00"></td>
       </tr>`;
       }).join('');
-      el.transferRows.innerHTML = rows || `<tr><td class="row-selector-cell"></td><td class="center">*</td><td class="client"></td><td></td><td class="money">${formatMoney(0)}</td></tr>` + blankRows(8, 5);
-      if (rows) el.transferRows.innerHTML += blankRows(Math.max(0, 9 - state.transfers.length), 5);
+      const html = rows || `<tr><td class="row-selector-cell"></td><td class="center">*</td><td class="client"></td><td></td><td class="money">${formatMoney(0)}</td></tr>` + blankRows(8, 5);
+      patchKeyedTableRows(el.transferRows, rows ? html + blankRows(Math.max(0, 9 - state.transfers.length), 5) : html, 'data-transfer-id');
       el.transferCount.textContent = rowCountText(state.transfers.length);
       updateTransferSortHeaders();
       updateTransferSelection();
@@ -3729,16 +3788,17 @@
     function renderSystemRows() {
       const visibleEntries = getSortedSystemEntries();
       const entries = visibleEntries.length ? visibleEntries : [{ row: { typeComp: '', invoice: '', name: '', amount: 0 }, index: 0 }];
-      el.systemRows.innerHTML = entries.map(({ row, index: idx }) => `<tr class="${[
+      const html = entries.map(({ row, index: idx }) => `<tr class="${[
           movementTypeKey(row.paymentType) === movementTypeKey('Mercado Pago') ? 'system-warning' : '',
           selectedSystemRows.has(idx) ? 'selected-row' : ''
-        ].filter(Boolean).join(' ')}" data-system-row="${idx}">
+        ].filter(Boolean).join(' ')}" data-system-row="${idx}" data-system-key="${escapeHtml(row.id || String(idx))}">
         <td class="row-selector-cell"><button class="row-selector-btn" type="button" data-system-select="${idx}" aria-label="Seleccionar transferencia sistema"></button></td>
         <td class="center"><input class="cell-input" style="text-align:center" data-system-field="typeComp" data-index="${idx}" value="${escapeHtml(row.typeComp || '')}"></td>
         <td class="center"><input class="cell-input" style="text-align:center" data-system-field="invoice" data-index="${idx}" value="${escapeHtml(row.invoice || '')}"></td>
         <td class="client"><input class="cell-input" style="text-align:left" data-system-field="name" data-index="${idx}" value="${escapeHtml(row.name || '')}"></td>
         <td class="money"><input class="cell-input" data-system-field="amount" data-index="${idx}" inputmode="decimal" value="${row.amount ? formatMoney(row.amount) : ''}" placeholder="$ 0,00"></td>
       </tr>`).join('') + blankRows(8, 5);
+      patchKeyedTableRows(el.systemRows, html, 'data-system-key');
       el.systemCount.textContent = rowCountText(visibleEntries.length || 1);
       updateSystemSortHeaders();
       updateSystemSelectionVisuals();
@@ -3793,7 +3853,7 @@
       const showSeparate = selectedCajaBranchId() === CAJA_ALL_BRANCHES_ID;
       el.movementSeparateHeader.hidden = !showSeparate;
       el.movementTable.classList.toggle('all-branches', showSeparate);
-      el.movementRows.innerHTML = state.movements.map((row, idx) => {
+      const html = state.movements.map((row, idx) => {
         const finalAmount = Number(row.initial || 0) + Number(row.day || 0) + Number(row.ie || 0);
         const stats = movementBranchSelectionStats(row.type);
         const selectionState = stats.total && stats.selected === stats.total ? 'checked' : (stats.selected ? 'mixed' : '');
@@ -3801,7 +3861,7 @@
         const separateCell = showSeparate
           ? `<td class="movement-separate-column">${row.type ? `<button class="movement-separate-trigger ${selectionState}" type="button" role="checkbox" aria-checked="${ariaChecked}" aria-label="Separar ${escapeHtml(row.type)}" data-movement-separate-index="${idx}"></button>` : ''}</td>`
           : '';
-        return `<tr>
+        return `<tr data-movement-row-key="${escapeHtml(movementTypeKey(row.type) || String(idx))}">
           <td class="row-selector-cell"></td>
           <td>${escapeHtml(row.type)}</td>
           <td class="money">${formatMoney(row.initial)}</td>
@@ -3811,6 +3871,7 @@
           <td class="money">${formatMoney(finalAmount)}</td>
         </tr>`;
       }).join('') + blankRows(2, showSeparate ? 7 : 6);
+      patchKeyedTableRows(el.movementRows, html, 'data-movement-row-key');
       if (movementViewId === 'movements') el.movementCount.textContent = rowCountText(state.movements.length);
     }
 
@@ -4627,11 +4688,15 @@
       if (!active || active === document.body) return null;
       const esc = (value) => window.CSS?.escape ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, '\\$&');
       let selector = '';
-      if (active.dataset.systemField) selector = `[data-system-field="${esc(active.dataset.systemField)}"][data-index="${esc(active.dataset.index)}"]`;
-      else if (active.dataset.summaryManual) selector = `[data-summary-manual="${esc(active.dataset.summaryManual)}"]`;
-      else if (active.dataset.cashField) selector = `[data-cash-field="${esc(active.dataset.cashField)}"][data-index="${esc(active.dataset.index)}"]`;
-      else if (active.dataset.transferField) selector = `[data-transfer-field="${esc(active.dataset.transferField)}"][data-id="${esc(active.dataset.id)}"]`;
-      else if (active.dataset.transferBranchId !== undefined) selector = `[data-transfer-branch-id="${esc(active.dataset.transferBranchId)}"]`;
+      let kind = '';
+      let field = '';
+      let index = -1;
+      let id = '';
+      if (active.dataset.systemField) { kind = 'system'; field = active.dataset.systemField; index = Number(active.dataset.index); selector = `[data-system-field="${esc(field)}"][data-index="${esc(index)}"]`; }
+      else if (active.dataset.summaryManual) { kind = 'summary'; field = active.dataset.summaryManual; selector = `[data-summary-manual="${esc(field)}"]`; }
+      else if (active.dataset.cashField) { kind = 'cash'; field = active.dataset.cashField; index = Number(active.dataset.index); selector = `[data-cash-field="${esc(field)}"][data-index="${esc(index)}"]`; }
+      else if (active.dataset.transferField) { kind = 'transfer'; field = active.dataset.transferField; id = active.dataset.id || ''; selector = `[data-transfer-field="${esc(field)}"][data-id="${esc(id)}"]`; }
+      else if (active.dataset.transferBranchId !== undefined) { kind = 'transferBranch'; id = active.dataset.transferBranchId || ''; selector = `[data-transfer-branch-id="${esc(id)}"]`; }
       else if (active.dataset.cashRowBranchButton !== undefined) {
         const key = active.closest('[data-cash-movement-key]')?.dataset.cashMovementKey;
         if (key) selector = `[data-cash-movement-key="${esc(key)}"] [data-cash-row-branch-button]`;
@@ -4642,11 +4707,32 @@
       if (!selector) return null;
       return {
         selector,
+        kind,
+        field,
+        index,
+        id,
         value: 'value' in active ? active.value : null,
         selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
         selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
         selectionDirection: active.selectionDirection || 'none'
       };
+    }
+
+    function preserveCajaFocusedValue(snapshot) {
+      if (!snapshot || snapshot.value === null) return;
+      if (snapshot.kind === 'system' && state.system[snapshot.index]) {
+        state.system[snapshot.index][snapshot.field] = snapshot.field === 'amount' ? parseNumber(snapshot.value) : snapshot.value;
+      } else if (snapshot.kind === 'summary' && snapshot.field) {
+        state.summaryManual[snapshot.field] = parseNumber(snapshot.value);
+      } else if (snapshot.kind === 'cash' && state.cash[snapshot.index]) {
+        state.cash[snapshot.index][snapshot.field] = parseNumber(snapshot.value);
+      } else if (snapshot.kind === 'transfer') {
+        const row = findTransferById(snapshot.id);
+        if (row) row[snapshot.field] = snapshot.field === 'amount' ? parseNumber(snapshot.value) : snapshot.value;
+      } else if (snapshot.kind === 'transferBranch') {
+        const row = findTransferById(snapshot.id);
+        if (row) row.branchId = snapshot.value;
+      }
     }
 
     function restoreCajaFocusState(snapshot) {
@@ -4659,7 +4745,6 @@
         const length = String(target.value || '').length;
         target.setSelectionRange(Math.min(snapshot.selectionStart, length), Math.min(snapshot.selectionEnd, length), snapshot.selectionDirection);
       }
-      if (snapshot.value !== null && target.matches('.cell-input')) target.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     function renderAll() {
@@ -5373,6 +5458,7 @@
         if (!loaded || dateKey !== selectedDateKey) return false;
         persistLocalState();
         const focusSnapshot = captureCajaFocusState();
+        preserveCajaFocusedValue(focusSnapshot);
         renderAll();
         restoreCajaFocusState(focusSnapshot);
         return true;
@@ -5381,28 +5467,31 @@
       }
     }
 
-    function publicCajaSignature(config, manualPayload, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload) {
-      const manualUpdatedAt = manualPayload?.updatedAt?.toMillis?.() ?? manualPayload?.updatedAt?.seconds ?? '';
+    function publicCajaConfigSignature(config) {
       return [
         selectedCajaBranchId(),
         config?.updatedAt || '',
-        manualUpdatedAt,
-        JSON.stringify(manualPayload?.systemMergeGroups || []),
         config?.urlTabla || '',
         config?.urlTransferencias || '',
         config?.urlIngresosEgresos || '',
-        config?.urlRecibos || '',
-        movementsPayload?.generatedAt || '',
-        systemPayload?.generatedAt || '',
-        cashMovementsPayload?.generatedAt || '',
-        receiptsPayload?.generatedAt || '',
-        movementsPayload?.idRecibo || '',
-        cashMovementsPayload?.idRecibo || '',
-        rowsFromPublicPayload(movementsPayload, { branchAware: true }).length,
-        rowsFromPublicPayload(systemPayload).length,
-        cashMovementRowsFromPayload(cashMovementsPayload).length,
-        receiptRowsFromPayload(receiptsPayload).length
+        config?.urlRecibos || ''
       ].join('|');
+    }
+
+    function manualCajaSignature(payload) {
+      if (!payload) return '';
+      const updatedAt = payload?.updatedAt?.toMillis?.() ?? payload?.updatedAt?.seconds ?? payload?.updatedAt ?? '';
+      return String(updatedAt);
+    }
+
+    function cajaHasActiveEditor() {
+      const active = document.activeElement;
+      return Boolean(active && active !== document.body && active.matches([
+        '.cell-input',
+        '.transfer-branch-select',
+        '[data-cash-row-branch-button]',
+        '[data-receipt-row-branch-button]'
+      ].join(',')));
     }
 
     async function loadPublicCajaData(options = {}) {
@@ -5420,35 +5509,49 @@
           loadCajaPublicConfig(),
           loadFirebaseCajaManual(selectedDateKey)
         ]);
-        if (manualPayload) applyCajaManualPayload(manualPayload);
+        const configSignature = publicCajaConfigSignature(config);
+        const manualSignature = manualCajaSignature(manualPayload);
+        const publicChanged = force || !lastPublicCajaSignature || configSignature !== lastPublicCajaSignature;
+        const manualChanged = Boolean(manualPayload) && (force || manualSignature !== lastManualCajaSignature);
+        if (!publicChanged && !manualChanged) return;
+        if (silent && cajaHasActiveEditor()) {
+          pendingCajaRefresh = true;
+          return;
+        }
+        pendingCajaRefresh = false;
         const movementsUrl = config?.urlTabla || CAJA_PUBLIC_JSON_FALLBACK.movements;
         const systemUrl = config?.urlTransferencias || CAJA_PUBLIC_JSON_FALLBACK.system;
         const cashMovementsUrl = config?.urlIngresosEgresos || CAJA_PUBLIC_JSON_FALLBACK.cashMovements;
         const receiptsUrl = config?.urlRecibos || CAJA_PUBLIC_JSON_FALLBACK.receipts;
-        if (!movementsUrl || !systemUrl) return;
-        const [movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload] = await Promise.all([
-          fetchPublicCajaJson(movementsUrl),
-          fetchPublicCajaJson(systemUrl),
-          cashMovementsUrl ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null) : Promise.resolve(null),
-          receiptsUrl ? fetchPublicCajaJson(receiptsUrl).catch(() => null) : Promise.resolve(null)
-        ]);
-        const signature = publicCajaSignature(config, manualPayload, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload);
-        if (!force && signature && signature === lastPublicCajaSignature) return;
+        let publicApplied = false;
+        let publicPayloads = null;
+        if (publicChanged) {
+          if (!movementsUrl || !systemUrl) return;
+          publicPayloads = await Promise.all([
+            fetchPublicCajaJson(movementsUrl),
+            fetchPublicCajaJson(systemUrl),
+            cashMovementsUrl ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null) : Promise.resolve(null),
+            receiptsUrl ? fetchPublicCajaJson(receiptsUrl).catch(() => null) : Promise.resolve(null)
+          ]);
+        }
         const focusSnapshot = captureCajaFocusState();
-        const appliedMovements = applyPublicCajaMovements(movementsPayload);
-        const appliedSystem = applyPublicCajaSystem(systemPayload);
-        const appliedCashMovements = applyPublicCajaCashMovements(cashMovementsPayload);
-        const appliedReceipts = applyPublicCajaReceipts(receiptsPayload);
-        if (!appliedMovements && !appliedSystem && !appliedCashMovements && !appliedReceipts) return;
-        const wasAlreadyLoaded = Boolean(lastPublicCajaSignature);
-        lastPublicCajaSignature = signature;
+        if (manualChanged) applyCajaManualPayload(manualPayload);
+        if (publicPayloads) {
+          const [movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload] = publicPayloads;
+          const appliedMovements = applyPublicCajaMovements(movementsPayload);
+          const appliedSystem = applyPublicCajaSystem(systemPayload);
+          const appliedCashMovements = applyPublicCajaCashMovements(cashMovementsPayload);
+          const appliedReceipts = applyPublicCajaReceipts(receiptsPayload);
+          publicApplied = appliedMovements || appliedSystem || appliedCashMovements || appliedReceipts;
+          lastPublicCajaSignature = configSignature;
+        }
+        if (manualChanged) lastManualCajaSignature = manualSignature;
+        if (!publicApplied && !manualChanged) return;
+        preserveCajaFocusedValue(focusSnapshot);
         persistLocalState();
-        renderMovementRows();
-        renderMovementView();
-        renderSystemRows();
-        updateTotals();
+        renderAll();
         restoreCajaFocusState(focusSnapshot);
-        if (wasAlreadyLoaded || !silent) showToast('Caja actualizada', 5000);
+        if (!silent) showToast('Caja actualizada', 5000);
       } catch (error) {
         if (!silent) showToast('No pude cargar la caja publicada.');
       } finally {
@@ -5462,6 +5565,14 @@
         loadPublicCajaData({ silent: true });
       }, 10000);
     }
+
+    document.addEventListener('focusout', () => {
+      if (!pendingCajaRefresh) return;
+      setTimeout(() => {
+        if (!pendingCajaRefresh || cajaHasActiveEditor()) return;
+        loadPublicCajaData({ silent: true });
+      }, 0);
+    });
 
     async function pasteMovementsFromClipboard() {
       try {
