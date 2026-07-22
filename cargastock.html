@@ -1249,19 +1249,38 @@ function normalizeRow(row = {}, index = 0) {
 function parseStockClipboardTable(text) {
   const value = String(text || '');
   if (value.includes('\t')) return value.split(/\r\n|\n|\r/).filter((line) => line.length).map((line) => line.split('\t'));
+  const lines = value.split(/\r\n|\n|\r/).filter((line) => line.trim());
+  if (lines.some((line) => /^\s*\|/.test(line) && /\|\s*$/.test(line))) {
+    return lines.map((line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()));
+  }
   return FX.parseClipboardTable ? FX.parseClipboardTable(value) : value.split(/\r\n|\n|\r/).map((line) => [line]);
 }
 function parsePasted(text) {
   const table = parseStockClipboardTable(text);
-  return table
+  const headerField = (value) => {
+    const key = norm(value).replace(/[^A-Z0-9]/g, '');
+    if (['CODIGO', 'COD', 'CODPROV', 'CODIGOPROVEEDOR'].includes(key)) return 'codigo';
+    if (['DESCRIPCION', 'DESCRIP', 'ARTICULO', 'PRODUCTO'].includes(key)) return 'descripcion';
+    if (['CANTIDAD', 'CANT', 'UNIDADES'].includes(key)) return 'cantidad';
+    if (['PRECIO', 'PRECIOUNIT', 'PRECIOUNITARIO', 'PRECIOUNI'].includes(key)) return 'precio';
+    if (['DESCUENTO', 'DESC', 'DESCPORC', 'PORCDESC', 'DESCUENTOADICIONAL'].includes(key)) return 'descuentoAdicional';
+    return '';
+  };
+  const headerIndex = table.findIndex((cols) => cols.map(headerField).filter(Boolean).length >= 2);
+  const columnMap = {};
+  if (headerIndex >= 0) table[headerIndex].forEach((value, index) => { const field = headerField(value); if (field) columnMap[field] = index; });
+  const column = (cols, field, fallback) => cols[columnMap[field] ?? fallback];
+  return (headerIndex >= 0 ? table.slice(headerIndex + 1) : table)
     .filter((cols) => cols.some((value) => String(value || '').trim()))
+    .filter((cols) => !cols.every((value) => /^:?-{3,}:?$/.test(String(value || '').trim())))
     .map((cols, index) => {
-      const codigo = String(cols[0] ?? '').trim();
-      const descripcion = String(cols[1] ?? '').trim();
-      const cantidad = String(cols[2] ?? '').trim();
-      const precio = moneyNumber(cols[3] ?? 0);
+      const codigo = String(column(cols, 'codigo', 0) ?? '').trim();
+      const descripcion = String(column(cols, 'descripcion', 1) ?? '').trim();
+      const cantidad = String(column(cols, 'cantidad', 2) ?? '').trim();
+      const precio = moneyNumber(column(cols, 'precio', 3) ?? 0);
+      const descuentoAdicional = columnMap.descuentoAdicional == null ? 0 : parsePercent(cols[columnMap.descuentoAdicional]);
       if (!codigo && !descripcion && !cantidad && !precio) return null;
-      return normalizeRow({ codigo, descripcion, cantidad, precio, descuento: providerDiscountValue() }, index);
+      return normalizeRow({ codigo, descripcion, cantidad, precio, descuento: providerDiscountValue(), descuentoAdicional }, index);
     })
     .filter(Boolean);
 }

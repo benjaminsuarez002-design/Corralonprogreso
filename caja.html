@@ -4622,6 +4622,46 @@
       el.deleteSystemRowMenuBtn.focus();
     }
 
+    function captureCajaFocusState() {
+      const active = document.activeElement;
+      if (!active || active === document.body) return null;
+      const esc = (value) => window.CSS?.escape ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, '\\$&');
+      let selector = '';
+      if (active.dataset.systemField) selector = `[data-system-field="${esc(active.dataset.systemField)}"][data-index="${esc(active.dataset.index)}"]`;
+      else if (active.dataset.summaryManual) selector = `[data-summary-manual="${esc(active.dataset.summaryManual)}"]`;
+      else if (active.dataset.cashField) selector = `[data-cash-field="${esc(active.dataset.cashField)}"][data-index="${esc(active.dataset.index)}"]`;
+      else if (active.dataset.transferField) selector = `[data-transfer-field="${esc(active.dataset.transferField)}"][data-id="${esc(active.dataset.id)}"]`;
+      else if (active.dataset.transferBranchId !== undefined) selector = `[data-transfer-branch-id="${esc(active.dataset.transferBranchId)}"]`;
+      else if (active.dataset.cashRowBranchButton !== undefined) {
+        const key = active.closest('[data-cash-movement-key]')?.dataset.cashMovementKey;
+        if (key) selector = `[data-cash-movement-key="${esc(key)}"] [data-cash-row-branch-button]`;
+      } else if (active.dataset.receiptRowBranchButton !== undefined) {
+        const key = active.closest('[data-receipt-key]')?.dataset.receiptKey;
+        if (key) selector = `[data-receipt-key="${esc(key)}"] [data-receipt-row-branch-button]`;
+      } else if (active.id) selector = `#${esc(active.id)}`;
+      if (!selector) return null;
+      return {
+        selector,
+        value: 'value' in active ? active.value : null,
+        selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+        selectionDirection: active.selectionDirection || 'none'
+      };
+    }
+
+    function restoreCajaFocusState(snapshot) {
+      if (!snapshot?.selector) return;
+      const target = document.querySelector(snapshot.selector);
+      if (!target) return;
+      if (snapshot.value !== null && 'value' in target) target.value = snapshot.value;
+      target.focus({ preventScroll: true });
+      if (snapshot.selectionStart !== null && target.setSelectionRange) {
+        const length = String(target.value || '').length;
+        target.setSelectionRange(Math.min(snapshot.selectionStart, length), Math.min(snapshot.selectionEnd, length), snapshot.selectionDirection);
+      }
+      if (snapshot.value !== null && target.matches('.cell-input')) target.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
     function renderAll() {
       renderCashRows();
       renderTransferRows();
@@ -5332,7 +5372,9 @@
         }
         if (!loaded || dateKey !== selectedDateKey) return false;
         persistLocalState();
+        const focusSnapshot = captureCajaFocusState();
         renderAll();
+        restoreCajaFocusState(focusSnapshot);
         return true;
       } catch (error) {
         return false;
@@ -5392,6 +5434,7 @@
         ]);
         const signature = publicCajaSignature(config, manualPayload, movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload);
         if (!force && signature && signature === lastPublicCajaSignature) return;
+        const focusSnapshot = captureCajaFocusState();
         const appliedMovements = applyPublicCajaMovements(movementsPayload);
         const appliedSystem = applyPublicCajaSystem(systemPayload);
         const appliedCashMovements = applyPublicCajaCashMovements(cashMovementsPayload);
@@ -5404,6 +5447,7 @@
         renderMovementView();
         renderSystemRows();
         updateTotals();
+        restoreCajaFocusState(focusSnapshot);
         if (wasAlreadyLoaded || !silent) showToast('Caja actualizada', 5000);
       } catch (error) {
         if (!silent) showToast('No pude cargar la caja publicada.');

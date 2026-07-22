@@ -168,6 +168,7 @@
   .review-head button { border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; background: #fff; color: var(--purple-dark); font-weight: 900; cursor: pointer; }
   .review-history-btn { width: 38px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
   .review-history-btn svg { width: 19px; height: 19px; stroke: currentColor; }
+  .review-add-btn { width: 38px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 22px; line-height: 1; }
   .review-list { max-height: 560px; overflow: auto; padding: 10px; }
   .review-item { display: grid; grid-template-columns: 160px minmax(360px,1fr) 172px 112px; gap: 12px; align-items: center; min-height: 46px; padding: 8px 10px; border: 1px solid #e4dcfb; border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: pointer; font-weight: 800; }
   .review-item:hover { background: #f4f0ff; }
@@ -630,7 +631,7 @@
   <div class="review-toast" id="reviewToast"></div>
   <div class="review-modal" id="reviewModal">
     <div class="review-box">
-      <div class="review-head"><h2>Notificaciones</h2><button class="review-history-btn" id="openResolvedNotifications" type="button" title="Ver resueltas" aria-label="Ver resueltas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></button><button id="closeReviewModal" type="button">Cerrar</button></div>
+      <div class="review-head"><h2>Notificaciones</h2><button class="review-history-btn" id="openResolvedNotifications" type="button" title="Ver resueltas" aria-label="Ver resueltas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></button><button class="review-add-btn" id="reviewPendingBtn" type="button" title="Agregar pendiente" aria-label="Agregar pendiente">+</button><button id="closeReviewModal" type="button">Cerrar</button></div>
       <div class="review-list" id="reviewList"></div>
     </div>
   </div>
@@ -690,6 +691,7 @@
     const reviewBell = document.getElementById('reviewBell');
     const reviewBellCount = document.getElementById('reviewBellCount');
     const pendingBtn = document.getElementById('pendingBtn');
+    const reviewPendingBtn = document.getElementById('reviewPendingBtn');
     const pendingModal = document.getElementById('pendingModal');
     const closePendingModal = document.getElementById('closePendingModal');
     const pendingTextInput = document.getElementById('pendingTextInput');
@@ -1780,9 +1782,21 @@
       else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
     });
     pendingBtn.addEventListener('click', abrirPendientesModal);
+    reviewPendingBtn.addEventListener('click', abrirPendientesModal);
     closePendingModal.addEventListener('click', cerrarPendientesModal);
     pendingModal.addEventListener('mousedown', (event) => {
       if (event.target === pendingModal) cerrarPendientesModal();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && pendingModal.classList.contains('visible')) {
+        event.preventDefault();
+        cerrarPendientesModal();
+      } else if (event.key === 'Escape' && reviewModal.classList.contains('visible')) {
+        event.preventDefault();
+        reviewModalSnapshot = null;
+        reviewModal.classList.remove('visible');
+        renderReviewNotifications();
+      }
     });
     pendingTextInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {

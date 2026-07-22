@@ -1708,11 +1708,11 @@ function renderEditForm() {
       </div>
       <div id="editItemsRows"></div>
       <div class="edit-add-row">
-        <input type="text" class="edit-item-inp num" id="eNuevoCant" placeholder="1" inputmode="numeric" autocomplete="off" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+        <input type="text" class="edit-item-inp num" id="eNuevoCant" placeholder="1" inputmode="numeric" autocomplete="off" oninput="this.value=this.value.replace(/[^0-9]/g,'');reiniciarCalculoNuevoSubtotal();actualizarSubtotalFilaNueva()">
         <input type="text" class="edit-item-inp" id="eNuevoDesc" placeholder="Descripción..." autocomplete="off">
-        <input type="text" class="edit-item-inp num" id="eNuevoPrecio" placeholder="0" inputmode="numeric" autocomplete="off">
+        <input type="text" class="edit-item-inp num" id="eNuevoPrecio" placeholder="0" inputmode="numeric" autocomplete="off" oninput="formatearMonedaEdicion(this);reiniciarCalculoNuevoSubtotal();actualizarSubtotalFilaNueva()">
         <input type="text" class="edit-item-inp num" id="eNuevoSubtotal" placeholder="0" inputmode="numeric" autocomplete="off"
-          onchange="calcularPrecioNuevoDesdeSubtotal()">
+          oninput="formatearMonedaEdicion(this)" onchange="calcularPrecioNuevoDesdeSubtotal()">
         <button class="btn-add" style="width:22px;height:22px;font-size:14px" onclick="editAgregarItem()">+</button>
       </div>
     </div>`;
@@ -1775,7 +1775,6 @@ function aplicarFuncionesTxtEdicion() {
   const helpers = window.CorralonFunciones;
   if (!root || !helpers || root.dataset.funcionesTxtEdicion) return;
   root.dataset.funcionesTxtEdicion = '1';
-  helpers.bindLiveLocaleNumber?.({ root, selector: '.edit-item-inp.num', decimals: 2 });
   helpers.bindLabelSelect?.({ root });
   root.addEventListener('focusin', (event) => {
     const field = event.target?.closest?.('input,textarea');
@@ -1821,10 +1820,10 @@ function renderEditItems() {
         onchange="editItems[${i}].cant=parseFloat(this.value)||1;actualizarSubEdit()">
       <input type="text" class="edit-item-inp" value="${it.desc||''}" autocomplete="off"
         onchange="editItems[${i}].desc=this.value">
-      <input type="text" class="edit-item-inp num" value="${it.precio||0}" inputmode="numeric" autocomplete="off"
-        onchange="editItems[${i}].precio=parseMonto(this.value);this.value=editItems[${i}].precio;actualizarSubEdit()">
-      <input type="text" class="edit-item-inp num" id="editSub${i}" value="${Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR')}" inputmode="numeric" autocomplete="off"
-        onchange="calcularPrecioEditDesdeSubtotal(${i}, this)">
+      <input type="text" class="edit-item-inp num" value="${fmt(it.precio||0)}" inputmode="numeric" autocomplete="off"
+        oninput="formatearMonedaEdicion(this)" onchange="editItems[${i}].precio=parseMonto(this.value);this.value=fmt(editItems[${i}].precio);actualizarSubEdit()">
+      <input type="text" class="edit-item-inp num" id="editSub${i}" value="${fmt((it.cant||0)*(it.precio||0))}" inputmode="numeric" autocomplete="off"
+        oninput="formatearMonedaEdicion(this)" onchange="calcularPrecioEditDesdeSubtotal(${i}, this)">
       <button class="btn-del-item" style="font-size:13px" onclick="editItems.splice(${i},1);renderEditItems()">✕</button>
     </div>`).join('');
 }
@@ -2005,7 +2004,9 @@ function normalizarEditFecha() {
 function actualizarSubEdit() {
   editItems.forEach((it, i) => {
     const el = document.getElementById('editSub' + i);
-    if(el) el.value = Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR', _detalleTipoActual === 'presupuesto' ? {minimumFractionDigits:2,maximumFractionDigits:2} : undefined);
+    if(el) el.value = _detalleTipoActual === 'presupuesto'
+      ? Number((it.cant||0)*(it.precio||0)).toLocaleString('es-AR', {minimumFractionDigits:2,maximumFractionDigits:2})
+      : fmt((it.cant||0)*(it.precio||0));
   });
   actualizarNuevoSubtotalPresupuesto();
 }
@@ -2018,8 +2019,8 @@ function calcularPrecioEditDesdeSubtotal(i, input) {
   it.precio = cant ? subtotal / cant : subtotal;
   const row = input.closest('.edit-item-row');
   const priceInput = row?.querySelectorAll('input.edit-item-inp')[2];
-  if(priceInput) priceInput.value = Number(it.precio || 0).toLocaleString('es-AR');
-  input.value = Number(subtotal || 0).toLocaleString('es-AR');
+  if(priceInput) priceInput.value = fmt(it.precio || 0);
+  input.value = fmt(subtotal || 0);
 }
 
 function calcularPrecioNuevoDesdeSubtotal() {
@@ -2027,12 +2028,52 @@ function calcularPrecioNuevoDesdeSubtotal() {
   const precioEl = document.getElementById('eNuevoPrecio');
   const subtotalEl = document.getElementById('eNuevoSubtotal');
   if(!precioEl || !subtotalEl) return;
-  const cant = parseFloat(cantEl?.value) || 1;
+  let cant = parseMonto(cantEl?.value);
+  let precio = parseMonto(precioEl.value);
   const subtotal = parseMonto(subtotalEl.value);
   if(!subtotal) return;
-  const precio = cant ? subtotal / cant : subtotal;
-  precioEl.value = Number(precio || 0).toLocaleString('es-AR');
-  subtotalEl.value = Number(subtotal || 0).toLocaleString('es-AR');
+  if(!subtotalEl.dataset.calcularCampo) {
+    subtotalEl.dataset.calcularCampo = !precio ? 'precio' : (!cant ? 'cantidad' : 'precio');
+  }
+  if(subtotalEl.dataset.calcularCampo === 'cantidad' && precio) {
+    cant = subtotal / precio;
+    if(cantEl) cantEl.value = fmtCantidad(cant);
+  } else {
+    cant = cant || 1;
+    precio = subtotal / cant;
+    precioEl.value = fmt(precio || 0);
+  }
+  subtotalEl.value = fmt(subtotal || 0);
+}
+
+function reiniciarCalculoNuevoSubtotal() {
+  const subtotalEl = document.getElementById('eNuevoSubtotal');
+  if(subtotalEl) delete subtotalEl.dataset.calcularCampo;
+}
+
+function actualizarSubtotalFilaNueva() {
+  if(_detalleTipoActual !== 'remito') return;
+  const cant = parseMonto(document.getElementById('eNuevoCant')?.value);
+  const precio = parseMonto(document.getElementById('eNuevoPrecio')?.value);
+  const subtotalEl = document.getElementById('eNuevoSubtotal');
+  if(!subtotalEl) return;
+  subtotalEl.value = cant && precio ? fmt(cant * precio) : '';
+}
+
+function formatearMonedaEdicion(input) {
+  const texto = String(input?.value || '').replace(/\$/g, '').replace(/\s+/g, '').replace(/\./g, '');
+  const tieneComa = texto.includes(',');
+  const partes = texto.split(',');
+  const enteros = (partes.shift() || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  const decimales = partes.join('').replace(/\D/g, '').slice(0, 2);
+  if(!enteros && !tieneComa) {
+    input.value = '';
+    return;
+  }
+  const enteroFormateado = Number(enteros || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+  input.value = `$${enteroFormateado}${tieneComa ? `,${decimales}` : ''}`;
+  const final = input.value.length;
+  input.setSelectionRange?.(final, final);
 }
 
 function editAgregarItem() {
@@ -2059,6 +2100,7 @@ function editAgregarItem() {
   document.getElementById('eNuevoDesc').value = '';
   document.getElementById('eNuevoPrecio').value = '';
   document.getElementById('eNuevoSubtotal').value = '';
+  reiniciarCalculoNuevoSubtotal();
   renderEditItems();
   setTimeout(() => document.getElementById('eNuevoCant').focus(), 30);
 }
@@ -2235,7 +2277,10 @@ document.addEventListener('keydown', function(e) {
     if(e.key === 'Enter') {
       e.preventDefault();
       if(agIdx < COL-1) agInputs[agIdx+1]?.focus();
-      else document.querySelector('.edit-add-row .btn-add')?.click();
+      else {
+        if(_detalleTipoActual === 'remito') calcularPrecioNuevoDesdeSubtotal();
+        document.querySelector('.edit-add-row .btn-add')?.click();
+      }
       return;
     }
     if(e.key === 'ArrowUp' && rows.length>0) { e.preventDefault(); focusEditCell(rows.length-1, agIdx); }

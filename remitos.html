@@ -186,7 +186,7 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 <div class="items-list" id="itemsList">
   <div class="fila-agregar" id="filaAgregar">
     <input type="text" class="inp num" id="nCant" placeholder="1" inputmode="decimal" enterkeyhint="next" autocomplete="off"
-      oninput="updatePreview('cant')">
+      oninput="updatePreview('cant')" onchange="finalizarCantidad(this);updatePreview('cant')">
     <input type="text" class="inp" id="nDesc" placeholder="Descripción..." enterkeyhint="next" autocomplete="off">
     <input type="text" class="inp num money-live" id="nPrecio" placeholder="0" inputmode="decimal" enterkeyhint="next" autocomplete="off"
       oninput="updatePreview('precio')">
@@ -306,6 +306,26 @@ function parseMonto(valor) {
     if(partes.length > 2 || partes[partes.length - 1].length === 3) texto = texto.replace(/\./g, '');
   }
   return Number.parseFloat(texto.replace(/[^0-9.-]/g, '')) || 0;
+}
+function evaluarCantidad(valor) {
+  const original = String(valor ?? '').trim();
+  if(!original) return 0;
+  const tieneOperacion = /[+*/]/.test(original) || /-/.test(original.slice(1));
+  if(!tieneOperacion) return parseMonto(original);
+  const expresion = original.replace(/,/g, '.').replace(/\s+/g, '');
+  if(!/^[0-9.+\-*/()]+$/.test(expresion)) return NaN;
+  try {
+    const resultado = Function(`"use strict";return (${expresion})`)();
+    return Number.isFinite(resultado) ? resultado : NaN;
+  } catch(_) {
+    return NaN;
+  }
+}
+function finalizarCantidad(input) {
+  const resultado = evaluarCantidad(input?.value);
+  if(!input || !Number.isFinite(resultado)) return false;
+  input.value = String(resultado).replace('.', ',');
+  return true;
 }
 function rawMoneyTextFromValue(value) {
   const n = parseMonto(value);
@@ -564,7 +584,7 @@ function moverDesdePrecioRemito(precioInput) {
   const rowIndex = rowsAntes.indexOf(row);
   const rowInputs = [...row.querySelectorAll('.item-input')];
   const cantidadInput = rowInputs[0];
-  const cantidad = parseMonto(cantidadInput?.value);
+  const cantidad = evaluarCantidad(cantidadInput?.value);
   const precio = parseMonto(precioInput.value);
   actualizarItemDesdeCampo(rowIndex, 'precio', precioInput);
   const rowsActuales = [...document.querySelectorAll('.item-row')];
@@ -602,11 +622,11 @@ function manejarEnterRemito(event, target) {
     parseFecha(target.value);
     return seleccionarCampo(document.getElementById('nCant'));
   }
-  if(target.id === 'nCant') return seleccionarCampo(document.getElementById('nDesc'));
+  if(target.id === 'nCant') { finalizarCantidad(target); updatePreview('cant'); return seleccionarCampo(document.getElementById('nDesc')); }
   if(target.id === 'nDesc') return seleccionarCampo(document.getElementById('nPrecio'));
   if(target.id === 'nPrecio' && !event.shiftKey) {
     updatePreview('precio');
-    const cantidad = parseMonto(document.getElementById('nCant')?.value);
+    const cantidad = evaluarCantidad(document.getElementById('nCant')?.value);
     const precio = parseMonto(target.value);
     if(cantidad && precio) {
       agregarItem();
@@ -751,7 +771,7 @@ function actualizarItemDesdeCampo(i, campo, input) {
   if(!it) return;
   const row = input.closest('.item-row');
   const inputs = row ? [...row.querySelectorAll('.item-input')] : [];
-  if(campo === 'cant') it.cant = parseMonto(input.value) || 0;
+  if(campo === 'cant') it.cant = evaluarCantidad(input.value) || 0;
   if(campo === 'precio') it.precio = parseMonto(input.value);
   if(campo === 'subtotal') {
     const subtotal = parseMonto(input.value);
@@ -770,7 +790,7 @@ function updatePreview(campo = 'precio') {
   const cantEl = document.getElementById('nCant');
   const precioEl = document.getElementById('nPrecio');
   const subEl = document.getElementById('nSub');
-  let c = parseMonto(cantEl.value);
+  let c = evaluarCantidad(cantEl.value);
   let p = parseMonto(precioEl.value);
   let s = parseMonto(subEl.value);
   if(campo === 'subtotal') {
@@ -825,7 +845,7 @@ function limpiarFilaAgregar() {
 function agregarItem() {
   const subEl = document.getElementById('nSub');
   if(subEl.value.trim() && !subEl.readOnly) updatePreview('subtotal');
-  const cant  = parseMonto(document.getElementById('nCant').value)  || 1;
+  const cant  = evaluarCantidad(document.getElementById('nCant').value)  || 1;
   const desc  = document.getElementById('nDesc').value.trim();
   let precio= parseMonto(document.getElementById('nPrecio').value);
   const subtotal = parseMonto(document.getElementById('nSub').value);
@@ -1276,4 +1296,3 @@ document.addEventListener('pointerdown', e => {
 <a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:9999;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>
 </body>
 </html>
-
