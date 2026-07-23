@@ -192,12 +192,6 @@
     let y = drawTableHeader(doc, 61, columns);
 
     items.forEach((rawItem) => {
-      if (y > rowLimitY) {
-        doc.addPage();
-        drawPageHeader(doc, data);
-        y = drawTableHeader(doc, 61, columns);
-      }
-
       const item = {
         cantidad: Number(rawItem.cantidad) || 0,
         nombre: String(rawItem.nombre || rawItem.descripcion || rawItem.desc || ''),
@@ -205,15 +199,30 @@
         precio: Number(rawItem.precio) || 0
       };
       const subtotal = item.cantidad * item.precio;
+      const rowPitch = 4.8;
+      const lineHeightFactor = 1.36;
 
       doc.setFont(undefined, 'normal');
       doc.setFontSize(10);
+      const lines = doc.splitTextToSize(item.nombre || '-', columns.codigo - columns.descripcion - 5);
+      const rowH = Math.max(1, lines.length) * rowPitch + 0.8;
+
+      if (y + rowH > rowLimitY) {
+        doc.addPage();
+        drawPageHeader(doc, data);
+        y = drawTableHeader(doc, 61, columns);
+      }
+
       doc.text(item.cantidad.toFixed(2), columns.cantidad, y);
-      doc.text(item.nombre.substring(0, 34), columns.descripcion, y);
+      doc.text(lines, columns.descripcion, y, { lineHeightFactor });
       doc.text(item.codigo.substring(0, 10), columns.codigo, y);
       doc.text(fmtMoneda(item.precio), columns.precio, y, { align: 'right' });
       doc.text(fmtMoneda(subtotal), columns.importe, y, { align: 'right' });
-      y += 8;
+      doc.setDrawColor(175, 175, 175);
+      doc.setLineWidth(0.18);
+      const dividerY = y + (Math.max(1, lines.length) * rowPitch) - (rowPitch * 0.7);
+      doc.line(15, dividerY, 195, dividerY);
+      y += rowH;
     });
 
     doc.line(15, footerY - 6, 195, footerY - 6);
@@ -325,6 +334,9 @@
       doc.setFontSize(10);
       doc.text(lines, 48, y, { lineHeightFactor });
       doc.text(cantidad, 193, y, { align: 'right' });
+      doc.setDrawColor(175, 175, 175);
+      doc.setLineWidth(0.18);
+      doc.line(15, y + rowH - (rowPitch * 0.7), 195, y + rowH - (rowPitch * 0.7));
       y += rowH;
     });
 
