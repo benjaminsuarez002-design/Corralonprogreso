@@ -9,6 +9,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="corralon-system.js"></script>
+  <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -189,7 +191,7 @@
 
     .alias-form {
       display: grid;
-      grid-template-columns: 1.2fr 1fr .9fr auto;
+      grid-template-columns: 1.15fr 1fr .8fr 1.25fr auto;
       gap: 9px;
       padding: 12px;
       border-bottom: 1px solid var(--line);
@@ -205,35 +207,186 @@
       display: grid;
     }
 
+    .alias-debt {
+      margin-top: 4px;
+      color: #202020;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .alias-debt-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px 22px;
+      margin-top: 6px;
+      width: 100%;
+    }
+
+    .alias-debt-item {
+      display: grid;
+      gap: 1px;
+    }
+
+    .alias-debt-label {
+      color: #666;
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .alias-debt-value {
+      color: #202020;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .alias-debt-value.overdue {
+      color: var(--red);
+    }
+
+    .alias-unlinked {
+      color: var(--red);
+    }
+
+    .provider-combo {
+      position: relative;
+    }
+
+    .provider-combo .input {
+      padding-right: 36px;
+    }
+
+    .provider-combo-toggle {
+      position: absolute;
+      top: 50%;
+      right: 5px;
+      z-index: 2;
+      width: 27px;
+      height: 27px;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      background: #ececec;
+      color: #222;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-50%);
+    }
+
+    .provider-combo:hover .provider-combo-toggle,
+    .provider-combo:focus-within .provider-combo-toggle {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .provider-combo-list {
+      position: fixed;
+      z-index: 4000;
+      display: none;
+      max-height: 230px;
+      overflow: auto;
+      padding: 5px;
+      border: 1px solid #bbb;
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 14px 34px rgba(0, 0, 0, .20);
+    }
+
+    .provider-combo-list.open {
+      display: grid;
+      gap: 2px;
+    }
+
+    .provider-combo-option {
+      width: 100%;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: #222;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 800;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .provider-combo-option:hover,
+    .provider-combo-option.active {
+      background: #dedede;
+    }
+
+    .provider-combo-empty {
+      padding: 10px;
+      color: #777;
+      font-size: 12px;
+      text-align: center;
+    }
+
     .alias-row {
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto minmax(0, 1fr);
       gap: 9px;
       align-items: center;
       padding: 10px 12px;
       border-top: 1px solid var(--line);
     }
 
+    .alias-content {
+      min-width: 0;
+    }
+
+    .alias-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
     .alias-priority-btn {
-      width: 26px;
-      min-width: 26px;
-      height: 26px;
-      border: 1px solid #f1c5c5;
+      position: relative;
+      width: 28px;
+      min-width: 28px;
+      height: 28px;
+      padding: 0;
+      border: 2px solid #b8b8b8;
       border-radius: 50%;
-      background: var(--red);
+      background: #fff;
       cursor: pointer;
-      box-shadow: inset 0 0 0 5px #fff;
-      transition: .16s ease;
+      box-shadow: none;
+      transition: background-color .14s ease, border-color .14s ease, transform .14s ease;
     }
 
     .alias-priority-btn.active {
-      border-color: #8fdbac;
-      background: var(--ok);
+      border-color: #078b3f;
+      background: #12a84f;
+    }
+
+    .alias-priority-btn.active::after {
+      content: "✓";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-size: 17px;
+      line-height: 1;
+      font-weight: 900;
+    }
+
+    .alias-priority-btn:hover {
+      transform: scale(1.06);
+      border-color: #777;
+    }
+
+    .alias-priority-btn.active:hover {
+      border-color: #057334;
     }
 
     .alias-priority-btn:focus {
       outline: none;
-      box-shadow: inset 0 0 0 5px #fff, 0 0 0 3px rgba(108,79,199,.14);
+      box-shadow: 0 0 0 3px rgba(80, 80, 80, .16);
     }
 
     .alias-row:nth-child(even),
@@ -1323,8 +1476,11 @@
       }
 
       .alias-actions {
-        grid-column: 1 / -1;
         justify-content: flex-end;
+      }
+
+      .alias-heading {
+        align-items: flex-start;
       }
 
       .summary-row {
@@ -1357,6 +1513,10 @@
     }
 
     @media (max-width: 640px) {
+      .alias-debt-grid {
+        grid-template-columns: 1fr;
+      }
+
       .topbar-inner,
       .content,
       .footer-inner {
@@ -1629,6 +1789,14 @@
               <span class="field-label">CUIT</span>
               <input class="input" id="alias-cuit" autocomplete="off">
             </label>
+            <label class="field">
+              <span class="field-label">ID proveedor</span>
+              <div class="provider-combo" data-provider-combo>
+                <input class="input" id="alias-provider-id" type="text" autocomplete="off" placeholder="Sin vincular">
+                <button class="provider-combo-toggle" type="button" tabindex="-1" aria-label="Desplegar proveedores">▼</button>
+                <div class="provider-combo-list" role="listbox"></div>
+              </div>
+            </label>
             <button class="action-btn" id="alias-add" type="button">+ Agregar</button>
           </div>
           <div class="alias-search">
@@ -1698,7 +1866,35 @@
           <span class="field-label">CUIT</span>
           <input class="input" id="alias-edit-cuit" autocomplete="off">
         </label>
+        <label class="field">
+          <span class="field-label">ID proveedor</span>
+          <div class="provider-combo" data-provider-combo>
+            <input class="input" id="alias-edit-provider-id" type="text" autocomplete="off" placeholder="Sin vincular">
+            <button class="provider-combo-toggle" type="button" tabindex="-1" aria-label="Desplegar proveedores">▼</button>
+            <div class="provider-combo-list" role="listbox"></div>
+          </div>
+        </label>
         <button class="action-btn" id="alias-edit-save" type="button">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="provider-create-modal-bg">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 class="modal-title">Cargar proveedor</h3>
+        <button class="danger-btn" id="provider-create-close" type="button">X</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span class="field-label">ID proveedor (obligatorio)</span>
+          <input class="input" id="provider-create-id" type="text" autocomplete="off">
+        </label>
+        <label class="field">
+          <span class="field-label">Proveedor</span>
+          <input class="input" id="provider-create-name" type="text" autocomplete="off">
+        </label>
+        <button class="action-btn" id="provider-create-save" type="button">Cargar proveedor</button>
       </div>
     </div>
   </div>
@@ -1809,6 +2005,9 @@
       const ALIASES_COLLECTION = "aliases";
       const COMPROBANTES_COLLECTION = "comprobantes";
       const ALIAS_OBJECTIVES_SUMMARY_COLLECTION = "aliasObjetivosResumen";
+      const SUPPLIER_BALANCES_CONFIG_DOC = "saldosProveedores";
+      const SUPPLIER_BALANCES_CACHE_DB = "comprobantes_saldos_proveedores_v1";
+      const SUPPLIER_BALANCES_CACHE_STORE = "data";
       const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1";
       const ALIASES_CACHE_KEY = "corralon_comprobantes_aliases_cache_v1";
       const RECORDS_CACHE_KEY = "corralon_comprobantes_records_cache_v1";
@@ -1873,9 +2072,51 @@
           nombre: String(item.nombre || ""),
           alias: String(item.alias || ""),
           cuit: String(item.cuit || ""),
+          idProveedor: String(item.idProveedor || ""),
           prioritario: item.prioritario === true,
           objetivoDiario: Number(item.objetivoDiario || 0)
         };
+      }
+
+      function supplierBalancesCacheOpen() {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open(SUPPLIER_BALANCES_CACHE_DB, 1);
+          request.onupgradeneeded = () => {
+            if (!request.result.objectStoreNames.contains(SUPPLIER_BALANCES_CACHE_STORE)) {
+              request.result.createObjectStore(SUPPLIER_BALANCES_CACHE_STORE, { keyPath: "id" });
+            }
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      }
+
+      async function readSupplierBalancesCache() {
+        const db = await supplierBalancesCacheOpen();
+        try {
+          return await new Promise((resolve, reject) => {
+            const tx = db.transaction(SUPPLIER_BALANCES_CACHE_STORE, "readonly");
+            const request = tx.objectStore(SUPPLIER_BALANCES_CACHE_STORE).get("latest");
+            request.onsuccess = () => resolve(request.result?.payload || null);
+            request.onerror = () => reject(request.error);
+          });
+        } finally {
+          db.close();
+        }
+      }
+
+      async function writeSupplierBalancesCache(payload) {
+        const db = await supplierBalancesCacheOpen();
+        try {
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction(SUPPLIER_BALANCES_CACHE_STORE, "readwrite");
+            tx.objectStore(SUPPLIER_BALANCES_CACHE_STORE).put({ id: "latest", payload });
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+          });
+        } finally {
+          db.close();
+        }
       }
 
       function normalizeCachedRecord(item = {}) {
@@ -1938,6 +2179,7 @@
         aliasName: $("#alias-name"),
         aliasAlias: $("#alias-alias"),
         aliasCuit: $("#alias-cuit"),
+        aliasProviderId: $("#alias-provider-id"),
         aliasAdd: $("#alias-add"),
         aliasSearch: $("#alias-search"),
         aliasList: $("#alias-list"),
@@ -1960,8 +2202,14 @@
         aliasEditName: $("#alias-edit-name"),
         aliasEditAlias: $("#alias-edit-alias"),
         aliasEditCuit: $("#alias-edit-cuit"),
+        aliasEditProviderId: $("#alias-edit-provider-id"),
         aliasEditSave: $("#alias-edit-save"),
         aliasEditClose: $("#alias-edit-close"),
+        providerCreateModalBg: $("#provider-create-modal-bg"),
+        providerCreateId: $("#provider-create-id"),
+        providerCreateName: $("#provider-create-name"),
+        providerCreateSave: $("#provider-create-save"),
+        providerCreateClose: $("#provider-create-close"),
         aliasObjectiveModalBg: $("#alias-objective-modal-bg"),
         aliasObjectiveLabel: $("#alias-objective-label"),
         aliasObjectiveAmount: $("#alias-objective-amount"),
@@ -2003,6 +2251,10 @@
       const state = {
         db: null,
         aliases: [],
+        providers: [],
+        providerCombo: { input: null, options: [], active: 0 },
+        providerCreateInputId: "",
+        supplierBalances: { version: 0, generatedAt: "", rows: [] },
         todayRecords: [],
         summaryRecords: [],
         summaryDates: [],
@@ -2020,6 +2272,7 @@
         isSavingDraft: false,
         isUploadingDraftAttachment: false,
         unsubAliases: null,
+        unsubSupplierBalances: null,
         unsubRecords: null,
         allRecords: [],
         attachmentPreviewCache: new Map(),
@@ -2339,6 +2592,337 @@
         return String(value || "").trim().toLowerCase();
       }
 
+      function normalizeMatch(value) {
+        return normalize(value)
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim();
+      }
+
+      function providerId(value) {
+        return String(value ?? "").trim();
+      }
+
+      function providerForAlias(item) {
+        const savedId = providerId(item?.idProveedor);
+        if (savedId) {
+          return state.providers.find((provider) => providerId(provider.id_proveedor) === savedId) || null;
+        }
+        const candidates = [item?.alias, item?.nombre].map(normalizeMatch).filter(Boolean);
+        if (!candidates.length) return null;
+        const exact = state.providers.filter((provider) => candidates.includes(normalizeMatch(provider.proveedor)));
+        if (exact.length === 1) return exact[0];
+        const contains = state.providers.filter((provider) => {
+          const name = normalizeMatch(provider.proveedor);
+          return name && candidates.some((candidate) => candidate.includes(name) || name.includes(candidate));
+        });
+        return contains.length === 1 ? contains[0] : null;
+      }
+
+      function resolvedAliasProviderId(item) {
+        return providerId(item?.idProveedor) || providerId(providerForAlias(item)?.id_proveedor);
+      }
+
+      function supplierDebtForAlias(item) {
+        const id = resolvedAliasProviderId(item);
+        if (!id) return { id: "", total: 0, overdueTotal: 0, oldestDue: "", count: 0 };
+        let total = 0;
+        let overdueTotal = 0;
+        let oldestDue = "";
+        let count = 0;
+        const today = todayIso();
+        for (const row of state.supplierBalances.rows || []) {
+          if (providerId(row.idProveedor) !== id) continue;
+          const saldo = Number(row.saldo || 0);
+          total += Number.isFinite(saldo) ? saldo : 0;
+          count += 1;
+          const due = String(row.fechaVto || "");
+          if (due && due <= today) overdueTotal += Number.isFinite(saldo) ? saldo : 0;
+          if (due && (!oldestDue || due < oldestDue)) oldestDue = due;
+        }
+        return { id, total, overdueTotal, oldestDue, count };
+      }
+
+      function providerLabel(provider) {
+        if (!provider) return "";
+        return `${providerId(provider.id_proveedor)} - ${String(provider.proveedor || "").trim()}`;
+      }
+
+      function providerById(id) {
+        const wanted = providerId(id);
+        return state.providers.find((provider) => providerId(provider.id_proveedor) === wanted) || null;
+      }
+
+      function setProviderComboValue(input, id) {
+        if (!input) return;
+        const cleanId = providerId(id);
+        const provider = providerById(cleanId);
+        input.dataset.providerId = cleanId;
+        input.value = provider ? providerLabel(provider) : cleanId;
+      }
+
+      function providerComboIdFromInput(input) {
+        if (!input) return "";
+        const selectedId = providerId(input.dataset.providerId);
+        if (selectedId) return selectedId;
+        const raw = String(input.value || "").trim();
+        if (!raw) return "";
+        const possibleId = providerId(raw.split(/\s+-\s+/)[0]);
+        const exact = providerById(possibleId) || state.providers.find((provider) => normalizeMatch(providerLabel(provider)) === normalizeMatch(raw));
+        return providerId(exact?.id_proveedor || "");
+      }
+
+      function providerComboList(input) {
+        if (!input) return null;
+        return Array.from(document.querySelectorAll(".provider-combo-list"))
+          .find((list) => list.dataset.providerOwner === input.id)
+          || input.closest("[data-provider-combo]")?.querySelector(".provider-combo-list")
+          || null;
+      }
+
+      function providerComboInput(list) {
+        return list?.dataset.providerOwner
+          ? document.getElementById(list.dataset.providerOwner)
+          : null;
+      }
+
+      function positionProviderCombo(input, list) {
+        if (!input || !list) return;
+        const rect = input.getBoundingClientRect();
+        const gap = 4;
+        const roomBelow = window.innerHeight - rect.bottom - gap - 6;
+        const roomAbove = rect.top - gap - 6;
+        const openAbove = roomBelow < 120 && roomAbove > roomBelow;
+        const available = Math.max(70, openAbove ? roomAbove : roomBelow);
+        const height = Math.min(230, available);
+
+        list.style.left = `${Math.round(rect.left)}px`;
+        list.style.width = `${Math.round(rect.width)}px`;
+        list.style.right = "auto";
+        list.style.maxHeight = `${Math.round(height)}px`;
+        list.style.top = openAbove
+          ? `${Math.max(6, Math.round(rect.top - height - gap))}px`
+          : `${Math.round(rect.bottom + gap)}px`;
+      }
+
+      function hideProviderCombo() {
+        document.querySelectorAll(".provider-combo-list.open").forEach((list) => {
+          list.classList.remove("open");
+          const input = providerComboInput(list);
+          const combo = input?.closest("[data-provider-combo]");
+          if (combo && list.parentElement !== combo) combo.appendChild(list);
+          list.removeAttribute("style");
+        });
+        state.providerCombo.input = null;
+        state.providerCombo.options = [];
+        state.providerCombo.active = 0;
+      }
+
+      function showProviderCombo(input, showAll = false) {
+        const list = providerComboList(input);
+        if (!input || !list) return;
+        document.querySelectorAll(".provider-combo-list.open").forEach((other) => {
+          if (other !== list) other.classList.remove("open");
+        });
+        const query = showAll || input.dataset.providerId ? "" : normalizeMatch(input.value);
+        state.providerCombo.input = input;
+        state.providerCombo.options = state.providers
+          .filter((provider) => !query || normalizeMatch(`${provider.id_proveedor} ${provider.proveedor}`).includes(query))
+          .slice(0, 40);
+        state.providerCombo.active = Math.max(0, Math.min(state.providerCombo.active, state.providerCombo.options.length - 1));
+        list.innerHTML = state.providerCombo.options.length
+          ? state.providerCombo.options.map((provider, index) => `
+              <button class="provider-combo-option ${index === state.providerCombo.active ? "active" : ""}" type="button" role="option" data-provider-id="${esc(provider.id_proveedor)}" data-provider-index="${index}">
+                ${esc(providerLabel(provider))}
+              </button>
+            `).join("")
+          : String(input.value || "").trim()
+            ? `<button class="provider-combo-option provider-combo-create" type="button" data-provider-create="true">+ Cargar proveedor “${esc(String(input.value || "").trim())}”</button>`
+            : '<div class="provider-combo-empty">Sin proveedores encontrados</div>';
+        if (list.parentElement !== document.body) document.body.appendChild(list);
+        positionProviderCombo(input, list);
+        list.classList.add("open");
+        list.querySelector(".provider-combo-option.active")?.scrollIntoView({ block: "nearest" });
+      }
+
+      function pickProviderCombo(input, index = state.providerCombo.active) {
+        if (!String(input?.value || "").trim()) {
+          hideProviderCombo();
+          return true;
+        }
+        const provider = state.providerCombo.options[index];
+        if (!provider) {
+          if (String(input?.value || "").trim()) {
+            openProviderCreateModal(input);
+            return true;
+          }
+          return false;
+        }
+        setProviderComboValue(input, provider.id_proveedor);
+        hideProviderCombo();
+        input.focus();
+        input.select();
+        return true;
+      }
+
+      function openProviderCreateModal(input) {
+        const name = String(input?.value || "").trim();
+        if (!name) return;
+        hideProviderCombo();
+        state.providerCreateInputId = input.id;
+        el.providerCreateId.value = "";
+        el.providerCreateName.value = name;
+        el.providerCreateModalBg.classList.add("open");
+        setTimeout(() => {
+          el.providerCreateId.focus();
+          el.providerCreateId.select();
+        }, 0);
+      }
+
+      function closeProviderCreateModal() {
+        state.providerCreateInputId = "";
+        el.providerCreateModalBg.classList.remove("open");
+        el.providerCreateId.value = "";
+        el.providerCreateName.value = "";
+        el.providerCreateSave.disabled = false;
+        el.providerCreateSave.textContent = "Cargar proveedor";
+      }
+
+      async function saveNewProvider() {
+        if (el.providerCreateSave.disabled) return;
+        const id = providerId(el.providerCreateId.value);
+        const name = String(el.providerCreateName.value || "").trim();
+        if (!id) {
+          el.providerCreateId.focus();
+          showToast("La ID del proveedor es obligatoria");
+          return;
+        }
+        if (!name) {
+          el.providerCreateName.focus();
+          return;
+        }
+        if (providerById(id)) {
+          el.providerCreateId.focus();
+          el.providerCreateId.select();
+          showToast("Esa ID de proveedor ya existe");
+          return;
+        }
+
+        const provider = window.CorralonSystem.normalizeProviderPageLink({
+          id_proveedor: id,
+          proveedor: name,
+          proveedor_norm: normalizeMatch(name),
+          descuento_factura: 0,
+          descuento_lista: 0,
+          descuento_total_fc: 0,
+          porc_flete: 0,
+          porc_iva: 0,
+          iva_incluido: false
+        });
+        el.providerCreateSave.disabled = true;
+        el.providerCreateSave.textContent = "Guardando...";
+        const response = await fetch(
+          `${window.CorralonSystem.SUPABASE_URL || "https://tizyjenayrcdkcodsjnc.supabase.co"}/rest/v1/${window.CorralonSystem.TABLES.providers}?on_conflict=id_proveedor`,
+          {
+            method: "POST",
+            headers: window.CorralonSystem.headers({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+            body: JSON.stringify(window.CorralonSystem.providerRemotePayload(provider))
+          }
+        );
+        if (!response.ok) throw new Error(await response.text());
+
+        state.providers.push(provider);
+        state.providers.sort((a, b) => String(a.proveedor || "").localeCompare(String(b.proveedor || ""), "es", { sensitivity: "base" }));
+        const target = document.getElementById(state.providerCreateInputId);
+        setProviderComboValue(target, id);
+        closeProviderCreateModal();
+        window.CorralonSystem.putProviderCacheItem(provider).catch((error) => console.warn("No se pudo actualizar la copia local del proveedor", error));
+        showToast("Proveedor cargado");
+      }
+
+      function renderProviderOptions(selected = "") {
+        setProviderComboValue(el.aliasProviderId, "");
+        setProviderComboValue(el.aliasEditProviderId, selected);
+      }
+
+      function bindProviderCombos() {
+        const selector = "#alias-provider-id, #alias-edit-provider-id";
+        [el.aliasProviderId, el.aliasEditProviderId].forEach((input) => {
+          const list = input.closest("[data-provider-combo]")?.querySelector(".provider-combo-list");
+          if (list) list.dataset.providerOwner = input.id;
+          input.addEventListener("input", () => {
+            input.dataset.providerId = "";
+          });
+          input.addEventListener("keydown", (event) => {
+            if (event.key !== "F2") return;
+            event.preventDefault();
+            const all = input.selectionStart === 0 && input.selectionEnd === input.value.length;
+            if (all) input.setSelectionRange(input.value.length, input.value.length);
+            else input.select();
+          });
+          input.addEventListener("focusout", () => {
+            setTimeout(() => {
+              if (!input.closest("[data-provider-combo]")?.contains(document.activeElement)) hideProviderCombo();
+            }, 0);
+          });
+        });
+
+        window.CorralonFunciones?.bindDropdownOnlyWhenTyping?.({
+          root: document,
+          inputSelector: selector,
+          buttonSelector: ".provider-combo-toggle",
+          inputFromButton: (button) => button.closest("[data-provider-combo]")?.querySelector(selector),
+          containerFromInput: (input) => input.closest("[data-provider-combo]"),
+          show: (input, reason) => showProviderCombo(input, reason !== "typing" && reason !== "typing-key"),
+          hide: hideProviderCombo,
+          isOpen: (input) => providerComboList(input)?.classList.contains("open"),
+          pickActive: (input) => pickProviderCombo(input),
+          moveActive: (input, delta) => {
+            state.providerCombo.active = Math.max(0, Math.min(state.providerCombo.options.length - 1, state.providerCombo.active + delta));
+            showProviderCombo(input, !String(input.value || "").trim());
+          },
+          selectOnFocus: true,
+          buttonOnlyWhenFocused: false,
+          enterPicksFirst: false
+        });
+
+        document.addEventListener("mousedown", (event) => {
+          const option = event.target.closest(".provider-combo-option");
+          if (option) {
+            event.preventDefault();
+            const input = providerComboInput(option.closest(".provider-combo-list"));
+            pickProviderCombo(input, Number(option.dataset.providerIndex));
+            return;
+          }
+          if (!event.target.closest("[data-provider-combo]") && !event.target.closest(".provider-combo-list")) {
+            hideProviderCombo();
+          }
+        });
+
+        const repositionOpenProviderCombo = () => {
+          const input = state.providerCombo.input;
+          const list = providerComboList(input);
+          if (input && list?.classList.contains("open")) positionProviderCombo(input, list);
+        };
+        window.addEventListener("resize", repositionOpenProviderCombo);
+        window.addEventListener("scroll", repositionOpenProviderCombo, true);
+      }
+
+      async function loadProviders() {
+        if (!window.CorralonSystem) return;
+        let providers = [];
+        try {
+          providers = await window.CorralonSystem.importProvidersCloud();
+        } catch (error) {
+          providers = await window.CorralonSystem.getProvidersCache();
+        }
+        state.providers = (Array.isArray(providers) ? providers : [])
+          .filter((provider) => providerId(provider?.id_proveedor) && String(provider?.proveedor || "").trim());
+        renderProviderOptions();
+        renderAliases();
+      }
+
       function isPriorityAlias(item) {
         return item?.prioritario === true;
       }
@@ -2346,6 +2930,17 @@
       function aliasSort(a, b) {
         const priorityDiff = Number(isPriorityAlias(b)) - Number(isPriorityAlias(a));
         if (priorityDiff) return priorityDiff;
+        const debtA = supplierDebtForAlias(a);
+        const debtB = supplierDebtForAlias(b);
+        const hasDebtDiff = Number(debtB.total > 0.004) - Number(debtA.total > 0.004);
+        if (hasDebtDiff) return hasDebtDiff;
+        if (debtA.oldestDue !== debtB.oldestDue) {
+          if (!debtA.oldestDue) return 1;
+          if (!debtB.oldestDue) return -1;
+          return debtA.oldestDue.localeCompare(debtB.oldestDue);
+        }
+        const totalDiff = debtB.total - debtA.total;
+        if (Math.abs(totalDiff) > 0.004) return totalDiff;
         return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es", { sensitivity: "base" });
       }
 
@@ -2552,6 +3147,7 @@
           nombre: String(data.nombre || ""),
           alias: String(data.alias || ""),
           cuit: String(data.cuit || ""),
+          idProveedor: String(data.idProveedor || ""),
           prioritario: data.prioritario === true,
           objetivoDiario: Number(data.objetivoDiario || 0)
         };
@@ -2585,6 +3181,33 @@
         }, 250);
       }
 
+      function aliasDebtHtml(item) {
+        const debt = supplierDebtForAlias(item);
+        if (!debt.id) {
+          return '<div class="alias-debt alias-unlinked">Proveedor sin vincular</div>';
+        }
+        const provider = providerForAlias({ ...item, idProveedor: debt.id });
+        const providerText = provider ? `${debt.id} - ${provider.proveedor}` : debt.id;
+        const dueText = debt.oldestDue ? formatDate(debt.oldestDue) : "Sin vencimientos";
+        return `
+          <div class="alias-meta">ID proveedor: ${esc(providerText)}</div>
+          <div class="alias-debt-grid">
+            <div class="alias-debt-item">
+              <span class="alias-debt-label">Saldo adeudado</span>
+              <span class="alias-debt-value">${formatAmount(debt.total, true)}</span>
+            </div>
+            <div class="alias-debt-item">
+              <span class="alias-debt-label">Vencimiento más antiguo</span>
+              <span class="alias-debt-value">${esc(dueText)}</span>
+            </div>
+            <div class="alias-debt-item">
+              <span class="alias-debt-label">Saldo vencido</span>
+              <span class="alias-debt-value overdue">${formatAmount(debt.overdueTotal, true)}</span>
+            </div>
+          </div>
+        `;
+      }
+
       function renderAliases() {
         if (!state.aliases.length) {
           el.aliasList.innerHTML = '<div class="empty">Todavía no hay alias cargados.</div>';
@@ -2610,16 +3233,19 @@
               aria-pressed="${isPriorityAlias(item) ? "true" : "false"}"
               aria-label="${isPriorityAlias(item) ? "Desmarcar prioridad" : "Marcar prioridad"} de ${esc(item.nombre)}"
             ></button>
-            <div>
-              <div class="alias-name">${esc(item.nombre)}</div>
+            <div class="alias-content">
+              <div class="alias-heading">
+                <div class="alias-name">${esc(item.nombre)}</div>
+                <div class="alias-actions">
+                  <button class="ghost-btn alias-edit-btn" type="button" data-action="edit-alias" data-id="${esc(item.id)}" title="Editar alias" aria-label="Editar ${esc(item.nombre)}">✎</button>
+                  <button class="ghost-btn alias-print-btn" type="button" data-action="print-alias" data-id="${esc(item.id)}" title="Imprimir alias" aria-label="Imprimir ${esc(item.nombre)}">⎙</button>
+                  <button class="ghost-btn alias-summary-btn" type="button" data-action="view-alias-summary" data-id="${esc(item.id)}" title="Ver resumen" aria-label="Ver resumen de ${esc(item.nombre)}">Ver</button>
+                  <button class="danger-btn" type="button" data-action="delete-alias" data-id="${esc(item.id)}">Eliminar</button>
+                </div>
+              </div>
               <div class="alias-meta">Alias: ${esc(item.alias || "-")} | CUIT: ${esc(item.cuit || "-")}</div>
+              ${aliasDebtHtml(item)}
               ${isPriorityAlias(item) ? `<div class="alias-objective">${Number(item.objetivoDiario || 0) > 0 ? `Objetivo diario: ${formatAmount(item.objetivoDiario, false)}` : "Sin objetivo"}</div>` : ""}
-            </div>
-            <div class="alias-actions">
-              <button class="ghost-btn alias-edit-btn" type="button" data-action="edit-alias" data-id="${esc(item.id)}" title="Editar alias" aria-label="Editar ${esc(item.nombre)}">✎</button>
-              <button class="ghost-btn alias-print-btn" type="button" data-action="print-alias" data-id="${esc(item.id)}" title="Imprimir alias" aria-label="Imprimir ${esc(item.nombre)}">⎙</button>
-              <button class="ghost-btn alias-summary-btn" type="button" data-action="view-alias-summary" data-id="${esc(item.id)}" title="Ver resumen" aria-label="Ver resumen de ${esc(item.nombre)}">Ver</button>
-              <button class="danger-btn" type="button" data-action="delete-alias" data-id="${esc(item.id)}">Eliminar</button>
             </div>
           </div>
         `).join("");
@@ -3366,6 +3992,7 @@
         const nombre = String(el.aliasName.value || "").trim();
         const alias = String(el.aliasAlias.value || "").trim();
         const cuit = String(el.aliasCuit.value || "").trim();
+        const idProveedor = providerComboIdFromInput(el.aliasProviderId);
         if (!nombre) {
           el.aliasName.focus();
           return;
@@ -3374,6 +4001,7 @@
           nombre,
           alias,
           cuit,
+          idProveedor,
           prioritario: false,
           objetivoDiario: 0,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -3382,6 +4010,7 @@
         el.aliasName.value = "";
         el.aliasAlias.value = "";
         el.aliasCuit.value = "";
+        setProviderComboValue(el.aliasProviderId, "");
         el.aliasName.focus();
       }
 
@@ -3394,12 +4023,21 @@
         const item = findRecord(id, state.aliases);
         if (!item) return;
         const nextPriority = !isPriorityAlias(item);
-        await aliasRef(id).update({
-          prioritario: nextPriority,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await syncAliasObjectivesSummaryFromServer();
+        item.prioritario = nextPriority;
+        renderAliases();
         if (nextPriority) openAliasObjectiveModal(id);
+        try {
+          await aliasRef(id).update({
+            prioritario: nextPriority,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        } catch (error) {
+          item.prioritario = !nextPriority;
+          if (state.objectiveAliasId === String(id)) closeAliasObjectiveModal();
+          renderAliases();
+          throw error;
+        }
+        await syncAliasObjectivesSummaryFromServer();
       }
 
       function openAliasObjectiveModal(id) {
@@ -3440,6 +4078,7 @@
         el.aliasEditName.value = item.nombre || "";
         el.aliasEditAlias.value = item.alias || "";
         el.aliasEditCuit.value = item.cuit || "";
+        renderProviderOptions(item.idProveedor || resolvedAliasProviderId(item));
         el.aliasEditModalBg.classList.add("open");
         setTimeout(() => el.aliasEditName.focus(), 0);
       }
@@ -3450,6 +4089,8 @@
         el.aliasEditName.value = "";
         el.aliasEditAlias.value = "";
         el.aliasEditCuit.value = "";
+        setProviderComboValue(el.aliasEditProviderId, "");
+        renderProviderOptions();
       }
 
       async function updateAlias() {
@@ -3458,18 +4099,28 @@
         const nombre = String(el.aliasEditName.value || "").trim();
         const alias = String(el.aliasEditAlias.value || "").trim();
         const cuit = String(el.aliasEditCuit.value || "").trim();
+        const idProveedor = providerComboIdFromInput(el.aliasEditProviderId);
         if (!nombre) {
           el.aliasEditName.focus();
           return;
         }
-        await aliasRef(id).update({
+        const changes = {
           nombre,
           alias,
           cuit,
+          idProveedor,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        const localItem = findRecord(id, state.aliases);
+        if (localItem) {
+          Object.assign(localItem, { nombre, alias, cuit, idProveedor });
+          renderAliases();
+        }
+        closeEditAliasModal();
+        await aliasRef(id).update({
+          ...changes
         });
         await syncAliasObjectivesSummaryFromServer();
-        closeEditAliasModal();
       }
 
       function fitPdfFontSize(doc, text, maxWidth, startSize, minSize) {
@@ -3888,6 +4539,7 @@
             nombre: String(doc.data().nombre || ""),
             alias: String(doc.data().alias || ""),
             cuit: String(doc.data().cuit || ""),
+            idProveedor: String(doc.data().idProveedor || ""),
             prioritario: doc.data().prioritario === true,
             objetivoDiario: Number(doc.data().objetivoDiario || 0)
           }));
@@ -3899,6 +4551,55 @@
           if (state.aliasSummaryId) renderAliasSummary(state.aliasSummaryId);
           queueAliasObjectivesSummarySync();
         }, (error) => throttleError("No se pudieron leer alias", error));
+      }
+
+      function normalizeSupplierBalancesPayload(payload = {}) {
+        return {
+          version: Number(payload.version || 0),
+          generatedAt: String(payload.generatedAt || ""),
+          desde: String(payload.desde || ""),
+          hasta: String(payload.hasta || ""),
+          rows: (Array.isArray(payload.rows) ? payload.rows : []).map((row) => ({
+            id: String(row.id || ""),
+            idProveedor: providerId(row.idProveedor),
+            fechaVto: String(row.fechaVto || ""),
+            nroFactura: String(row.nroFactura || ""),
+            saldo: Number(row.saldo || 0)
+          })).filter((row) => row.idProveedor)
+        };
+      }
+
+      async function restoreSupplierBalancesCache() {
+        try {
+          const cached = await readSupplierBalancesCache();
+          if (!cached) return;
+          state.supplierBalances = normalizeSupplierBalancesPayload(cached);
+          renderAliases();
+        } catch (error) {
+          console.warn("No se pudo restaurar cache de saldos", error);
+        }
+      }
+
+      async function downloadSupplierBalances(config = {}) {
+        const version = Number(config.version || 0);
+        if (version && version === Number(state.supplierBalances.version || 0)) return;
+        const url = String(config.url || "").trim();
+        if (!url) return;
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`No se pudieron descargar saldos (${response.status})`);
+        const payload = normalizeSupplierBalancesPayload(await response.json());
+        if (!payload.version) payload.version = version;
+        state.supplierBalances = payload;
+        await writeSupplierBalancesCache(payload);
+        renderAliases();
+      }
+
+      function subscribeSupplierBalances() {
+        if (state.unsubSupplierBalances) state.unsubSupplierBalances();
+        state.unsubSupplierBalances = state.db.collection("config").doc(SUPPLIER_BALANCES_CONFIG_DOC).onSnapshot((snapshot) => {
+          if (!snapshot.exists) return;
+          downloadSupplierBalances(snapshot.data()).catch((error) => throttleError("No se pudieron actualizar saldos de proveedores", error));
+        }, (error) => throttleError("No se pudo leer la versión de saldos", error));
       }
 
       function subscribeTodayRecords() {
@@ -3942,6 +4643,15 @@
             }
           });
         });
+        el.aliasProviderId.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || providerComboList(el.aliasProviderId)?.classList.contains("open")) return;
+          event.preventDefault();
+          if (String(el.aliasProviderId.value || "").trim() && !providerComboIdFromInput(el.aliasProviderId)) {
+            openProviderCreateModal(el.aliasProviderId);
+            return;
+          }
+          saveAlias().catch((error) => throttleError("No se pudo guardar alias", error));
+        });
         el.aliasList.addEventListener("click", (event) => {
           const priorityButton = event.target.closest("[data-action='toggle-alias-priority']");
           if (priorityButton) {
@@ -3973,6 +4683,27 @@
         el.aliasEditClose.addEventListener("click", closeEditAliasModal);
         el.aliasEditModalBg.addEventListener("click", (event) => {
           if (event.target === el.aliasEditModalBg) closeEditAliasModal();
+        });
+        const submitNewProvider = () => {
+          saveNewProvider()
+            .catch((error) => throttleError("No se pudo cargar el proveedor", error))
+            .finally(() => {
+              if (!el.providerCreateModalBg.classList.contains("open")) return;
+              el.providerCreateSave.disabled = false;
+              el.providerCreateSave.textContent = "Cargar proveedor";
+            });
+        };
+        el.providerCreateSave.addEventListener("click", submitNewProvider);
+        el.providerCreateClose.addEventListener("click", closeProviderCreateModal);
+        el.providerCreateModalBg.addEventListener("click", (event) => {
+          if (event.target === el.providerCreateModalBg) closeProviderCreateModal();
+        });
+        [el.providerCreateId, el.providerCreateName].forEach((input) => {
+          input.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            submitNewProvider();
+          });
         });
         el.aliasObjectiveClose.addEventListener("click", closeAliasObjectiveModal);
         el.aliasObjectiveModalBg.addEventListener("click", (event) => {
@@ -4052,6 +4783,15 @@
               updateAlias().catch((error) => throttleError("No se pudo actualizar alias", error));
             }
           });
+        });
+        el.aliasEditProviderId.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || providerComboList(el.aliasEditProviderId)?.classList.contains("open")) return;
+          event.preventDefault();
+          if (String(el.aliasEditProviderId.value || "").trim() && !providerComboIdFromInput(el.aliasEditProviderId)) {
+            openProviderCreateModal(el.aliasEditProviderId);
+            return;
+          }
+          updateAlias().catch((error) => throttleError("No se pudo actualizar alias", error));
         });
       }
 
@@ -4359,7 +5099,10 @@
         renderTodayRecords();
         renderSummaryDate();
         renderSummary();
+        restoreSupplierBalancesCache();
+        loadProviders().catch((error) => console.warn("No se pudieron cargar proveedores", error));
         bindTabs();
+        bindProviderCombos();
         bindAliasSection();
         bindDraftSection();
         bindRecords();
@@ -4403,14 +5146,8 @@
           window.firebase.initializeApp(firebaseConfig);
         }
         state.db = window.firebase.firestore();
-        if (typeof state.db.enablePersistence === "function") {
-          try {
-            await state.db.enablePersistence({ synchronizeTabs: true });
-          } catch (error) {
-            console.warn("Firestore persistence no disponible en esta carga", error);
-          }
-        }
         subscribeAliases();
+        subscribeSupplierBalances();
         subscribeTodayRecords();
         subscribeSummaryDates();
       }
