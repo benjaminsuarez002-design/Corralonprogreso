@@ -427,6 +427,9 @@
     const selector = options.selector || 'input, textarea, select, button, [tabindex]';
     const selectOnFocus = options.selectOnFocus !== false;
     const navigateLeftRight = options.navigateLeftRight === true;
+    const smartCaret = options.smartCaret === true;
+    const selectOnAnyFocus = options.selectOnAnyFocus === true;
+    const selectOnFirstPointerFocus = options.selectOnFirstPointerFocus === true;
     const wrap = options.wrap === true;
 
     function visible(el) {
@@ -453,6 +456,25 @@
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return false;
       const tag = event.target?.tagName;
       return tag === 'INPUT' || tag === 'TEXTAREA';
+    }
+
+    function isTextControl(el) {
+      return !!el?.matches?.('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea');
+    }
+
+    function selectionIsComplete(el) {
+      if (!isTextControl(el)) return false;
+      const length = String(el.value || '').length;
+      return el.selectionStart === 0 && el.selectionEnd === length;
+    }
+
+    function caretAllowsHorizontalMove(el, direction) {
+      if (!smartCaret || !isTextControl(el)) return true;
+      if (selectionIsComplete(el)) return true;
+      const start = Number(el.selectionStart ?? 0);
+      const end = Number(el.selectionEnd ?? start);
+      if (start !== end) return false;
+      return direction > 0 ? end >= String(el.value || '').length : start <= 0;
     }
 
     function moveFrom(el, step, event) {
@@ -486,7 +508,10 @@
         }
         return;
       }
+      if (event.key === 'Enter' && event.shiftKey && el.matches?.('textarea, [data-shift-enter-newline]')) return;
       if (isTextCaretKey(event)) return;
+      if (event.key === 'ArrowRight' && !caretAllowsHorizontalMove(el, 1)) return;
+      if (event.key === 'ArrowLeft' && !caretAllowsHorizontalMove(el, -1)) return;
       if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowRight') {
         moveFrom(el, event.shiftKey ? -1 : 1, event);
         return;
@@ -496,11 +521,32 @@
       }
     }
 
+    function handlePointerDown(event) {
+      if (!selectOnFirstPointerFocus) return;
+      const el = event.target?.closest?.(selector);
+      if (!el || !root.contains(el) || !isTextControl(el) || el.disabled || el.readOnly) return;
+      if (document.activeElement === el) return;
+      event.preventDefault();
+      el.focus?.();
+      el.select?.();
+    }
+
+    function handleFocusIn(event) {
+      if (!selectOnAnyFocus) return;
+      const el = event.target?.closest?.(selector);
+      if (!el || !root.contains(el) || !isTextControl(el)) return;
+      el.select?.();
+    }
+
     root.addEventListener('keydown', handleKeyDown);
+    if (selectOnFirstPointerFocus) root.addEventListener('pointerdown', handlePointerDown);
+    if (selectOnAnyFocus) root.addEventListener('focusin', handleFocusIn);
 
     return {
       destroy() {
         root.removeEventListener('keydown', handleKeyDown);
+        if (selectOnFirstPointerFocus) root.removeEventListener('pointerdown', handlePointerDown);
+        if (selectOnAnyFocus) root.removeEventListener('focusin', handleFocusIn);
       },
       focusFirst() {
         return focusControl(controls()[0]);

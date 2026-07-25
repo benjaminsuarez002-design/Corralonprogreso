@@ -694,6 +694,9 @@
   .product-detail-discount-btn { min-height:34px; border:0; border-radius:999px; background:linear-gradient(135deg,#7d58df,#6540c5); color:#fff; font-family:'Barlow Condensed',sans-serif; font-size:14px; font-weight:800; padding:0 14px; cursor:pointer; box-shadow:0 8px 18px rgba(108,79,199,.22); }
   .product-detail-discount-btn.hidden { display:none; }
   .product-detail-discount-btn:disabled { opacity:.48; cursor:not-allowed; box-shadow:none; }
+  .product-detail-edit { width:34px; height:34px; border:1.4px solid #aaa; border-radius:50%; background:#fff; color:#222; font:900 22px/1 Arial,sans-serif; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,.10); }
+  .product-detail-edit:hover { background:#eee; border-color:#777; }
+  .product-detail-edit.hidden { display:none; }
   .product-detail-budget-btn {
     min-height: 34px;
     border: 1.4px solid rgba(108,79,199,.18);
@@ -3653,6 +3656,7 @@
     <div class="product-detail-top-actions">
       <button class="product-detail-budget-btn hidden" id="productDetailBudget" type="button">Presupuestar</button>
       <button class="product-detail-discount-btn hidden" id="productDetailDiscount" type="button">Descuentos</button>
+      <button class="product-detail-edit hidden" id="productDetailEdit" type="button" aria-label="Editar artículo" title="Editar artículo">✎</button>
       <button class="product-detail-share" id="productDetailShare" type="button" aria-label="Compartir"><span class="prode-share-mark" aria-hidden="true"></span></button>
       <button class="product-detail-close" id="productDetailClose" type="button" aria-label="Cerrar">×</button>
     </div>
@@ -3845,6 +3849,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="presupuesto-shared.js"></script>
+<script src="corralon-system.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -5953,6 +5958,12 @@ function mostrarPopupDescuentoArticulo(articulo, returnFocus = null) {
 function abrirDescuentoDetalleProducto() {
   mostrarPopupDescuentoArticulo(buscarArticuloPorCodigoFlexible(productDetailAdminCode) || buscarArticuloPorCodigo(productDetailAdminCode), document.getElementById('productDetailDiscount'));
 }
+function abrirEdicionAdminDetalleProducto() {
+  if (!window.CorralonFunciones?.isMenuSessionActive?.() || !productDetailAdminCode) return;
+  window.CorralonSystem?.articleEditor?.open(productDetailAdminCode, {
+    returnFocus: document.getElementById('productDetailEdit')
+  });
+}
 function abrirDescuentoPresupuestoCeramico() {
   if (ceramicoBudgetModo !== 'ceramico') return;
   mostrarPopupDescuentoArticulo(ceramicoBudgetArticulo, document.getElementById('ceramicoBudgetDiscount'));
@@ -6455,6 +6466,7 @@ function abrirDetalleProducto(codigo) {
   const qtyInput = document.getElementById('productDetailQty');
   const budgetBtn = document.getElementById('productDetailBudget');
   const discountBtn = document.getElementById('productDetailDiscount');
+  const editBtn = document.getElementById('productDetailEdit');
   qtyInput.value = '';
   qtyInput.placeholder = MODO_A_DESCONTAR ? 'Ej: 4p' : '';
   productDetailAdminCode = obtenerIdArticulo(articulo);
@@ -6462,6 +6474,7 @@ function abrirDetalleProducto(codigo) {
   budgetBtn.classList.toggle('hidden', !((articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0) || esArticuloPegamento(articulo)));
   const sesionMenuActiva = !!window.CorralonFunciones?.isMenuSessionActive?.(), datosDescuento = datosDescuentoArticulo(articulo);
   discountBtn.classList.toggle('hidden', !sesionMenuActiva);
+  editBtn.classList.toggle('hidden', !sesionMenuActiva);
   discountBtn.disabled = !!articulo.ofertaVigente || !(datosDescuento.maximo > 0);
   discountBtn.title = articulo.ofertaVigente ? 'Las ofertas no admiten descuentos' : (!(datosDescuento.maximo > 0) ? 'Sin margen disponible para descuento' : 'Aplicar descuento');
   addBtn.dataset.codigo = obtenerIdArticulo(articulo);
@@ -8823,6 +8836,39 @@ function iniciarEscuchaListaArticulos() {
   });
 }
 
+let articleEditorSyncQueue = Promise.resolve();
+window.CorralonSystem?.articleEditor?.configure({
+  getArticles: () => todosArticulos,
+  save: (nextList, updated) => {
+    todosArticulos = prepararArticulosParaVista(nextList);
+    actualizarVistaEtiqueta();
+    aplicarBusquedaActual();
+    if (document.getElementById('productDetailModal')?.classList.contains('visible')) {
+      abrirDetalleProducto(obtenerIdArticulo(updated));
+    }
+    const syncSnapshot = nextList.map((article) => ({
+      ...article,
+      imagenes: Array.isArray(article.imagenes) ? [...article.imagenes] : article.imagenes,
+      tagsOcultos: Array.isArray(article.tagsOcultos) ? [...article.tagsOcultos] : article.tagsOcultos
+    }));
+    articleEditorSyncQueue = articleEditorSyncQueue
+      .catch(() => {})
+      .then(async () => {
+        window.dispatchEvent(new CustomEvent('corralon:article-sync-start'));
+        const { baseUrl, metaUrl } = await window.CorralonSystem.articleEditor.publishCatalog(syncSnapshot);
+        await Promise.all([
+          setDoc(doc(db, 'config', ARTICULOS_META_DOC_ID), { url: metaUrl, updatedAt: Date.now() }),
+          setDoc(doc(db, 'config', 'listaActual'), { url: baseUrl, updatedAt: Date.now() })
+        ]);
+        window.dispatchEvent(new CustomEvent('corralon:article-sync-success'));
+      })
+      .catch((error) => {
+        console.error('No se pudo sincronizar el artículo en segundo plano', error);
+        window.dispatchEvent(new CustomEvent('corralon:article-sync-error', { detail: { error } }));
+      });
+  }
+});
+
 setTimeout(iniciarCargaListaArticulos, 0);
 
 let carrito = {};
@@ -8939,6 +8985,7 @@ document.getElementById('popupImg')?.addEventListener('click', (event) => {
 document.getElementById('productDetailClose').addEventListener('click', cerrarDetalleProducto);
 document.getElementById('productDetailShare')?.addEventListener('click', compartirDetalleProducto);
 document.getElementById('productDetailDiscount')?.addEventListener('click', abrirDescuentoDetalleProducto);
+document.getElementById('productDetailEdit')?.addEventListener('click', abrirEdicionAdminDetalleProducto);
 document.getElementById('productDiscountClose')?.addEventListener('click', cerrarDescuentoDetalleProducto);
 document.getElementById('productDiscountCancel')?.addEventListener('click', cerrarDescuentoDetalleProducto);
 document.getElementById('productDiscountApply')?.addEventListener('click', aplicarDescuentoDetalleProducto);
@@ -9113,7 +9160,7 @@ document.addEventListener('keydown', (e) => {
       secretAltSequence += e.code.replace('Numpad', '');
       if (secretAltSequence.length > 4) secretAltSequence = secretAltSequence.slice(-4);
       if (secretAltSequence === '0160' && productDetailAdminCode) {
-        window.open(`soloadmin.html?edit=${encodeURIComponent(productDetailAdminCode)}`, '_blank', 'noopener');
+        abrirEdicionAdminDetalleProducto();
         return;
       }
     } else if (e.key === 'Alt') {

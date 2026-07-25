@@ -24,6 +24,750 @@
     progreso_ruta: ['stockSucursalProgresoRuta', 'stock_sucursal_progreso_ruta', 'stock_progreso_ruta', 'stockSucProgresoRuta', 'stockSuc1'],
     calle5_espana: ['stockSucursalCalle5Espana', 'stock_sucursal_calle5_espana', 'stock_calle5_espana', 'stockSucCalle5Espana', 'stockSuc2']
   };
+  let articleEditorHost = null;
+  let articleEditorReturnFocus = null;
+  let articleEditorAdapter = {};
+  let articleEditorOriginalCode = '';
+  let articleEditorImages = [];
+  let articleEditorImageIndex = 0;
+  let articleEditorImageFiles = new Map();
+  let articleEditorApplyTargets = new Set();
+  let articleEditorApplyFields = new Set(['etiquetas']);
+  let articleEditorFunctionsBound = false;
+  let articleEditorBasePrice = 0;
+
+  function articleCode(article = {}) {
+    return String(article.codigo ?? article.idart ?? article.idArt ?? '').trim();
+  }
+
+  function articleImages(article = {}) {
+    const values = [];
+    const add = (value) => {
+      if (Array.isArray(value)) return value.forEach(add);
+      const text = String(value || '').trim();
+      if (text) values.push(text);
+    };
+    add(article.imagenes);
+    add(article.fotos);
+    add(article.fotoUrl);
+    add(article.imagen);
+    return [...new Set(values)];
+  }
+
+  function articleTags(value) {
+    const source = Array.isArray(value) ? value : String(value || '').split(/[\n,;|]+/);
+    return [...new Set(source.map((item) => String(item || '').trim()).filter(Boolean))];
+  }
+
+  function articleBool(value) {
+    if (typeof value === 'boolean') return value;
+    return ['1', 'true', 'si', 'sí', 'on'].includes(String(value ?? '').trim().toLowerCase());
+  }
+
+  function editorField(id) {
+    return articleEditorHost?.querySelector(`[data-editor-field="${id}"]`);
+  }
+
+  function editorInfo(id) {
+    return articleEditorHost?.querySelector(`[data-editor-info="${id}"]`);
+  }
+
+  function syncArticleEditorSections() {
+    const offer = articleEditorHost?.querySelector('[data-editor-extra="oferta"]');
+    const ceramic = articleEditorHost?.querySelector('[data-editor-extra="ceramico"]');
+    if (offer) offer.hidden = !articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active');
+    if (ceramic) ceramic.hidden = !articleEditorHost.querySelector('[data-editor-chip="ceramico"]')?.classList.contains('is-active');
+    renderArticleEditorPrice();
+  }
+
+  function renderArticleEditorPrice() {
+    if (!articleEditorHost) return;
+    const value = editorInfo('precio');
+    const state = editorInfo('precioEstado');
+    const previous = editorInfo('precioAnterior');
+    if (!value || !state || !previous) return;
+    const offerActive = articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active');
+    const percentage = Math.max(0, Math.min(100, Number(parseFlexibleNumber(editorField('ofertaPct')?.value) || 0)));
+    const offerPrice = offerActive
+      ? Math.round(articleEditorBasePrice * (1 - percentage / 100) * 100) / 100
+      : articleEditorBasePrice;
+    const money = (number) => `$ ${Number(number || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    value.textContent = money(offerPrice);
+    value.classList.toggle('is-offer', offerActive);
+    state.textContent = offerActive ? `OFERTA ${percentage.toLocaleString('es-AR', { maximumFractionDigits: 2 })} %` : 'PRECIO DE LISTA';
+    state.classList.toggle('is-offer', offerActive);
+    previous.textContent = offerActive ? `Antes ${money(articleEditorBasePrice)}` : '';
+    previous.hidden = !offerActive;
+  }
+
+  function editorImageUrl() {
+    if (!articleEditorImages.length) return '';
+    articleEditorImageIndex = Math.max(0, Math.min(articleEditorImageIndex, articleEditorImages.length - 1));
+    return articleEditorImages[articleEditorImageIndex] || '';
+  }
+
+  function renderArticleEditorGallery() {
+    if (!articleEditorHost) return;
+    const image = articleEditorHost.querySelector('[data-editor-photo]');
+    const count = articleEditorHost.querySelector('[data-editor-photo-count]');
+    const url = editorImageUrl();
+    if (image) {
+      image.src = url;
+      image.style.visibility = url ? 'visible' : 'hidden';
+    }
+    if (count) count.textContent = articleEditorImages.length ? `${articleEditorImageIndex + 1}/${articleEditorImages.length}` : '0/0';
+    articleEditorHost.querySelectorAll('[data-editor-photo-prev],[data-editor-photo-next]').forEach((button) => {
+      button.disabled = articleEditorImages.length <= 1;
+    });
+    const manager = articleEditorHost.querySelector('[data-editor-images-list]');
+    if (manager) {
+      manager.innerHTML = articleEditorImages.length
+        ? articleEditorImages.map((item, index) => `
+          <div class="corralon-editor-image-item${index === articleEditorImageIndex ? ' is-current' : ''}" data-editor-image-index="${index}" draggable="true">
+            <img src="${String(item).replace(/"/g, '&quot;')}" alt="Imagen ${index + 1}">
+            <div><b>${index === 0 ? 'Principal' : `Imagen ${index + 1}`}</b><small>${String(item).startsWith('blob:') ? 'Pendiente de guardar' : `${index + 1} de ${articleEditorImages.length}`}</small></div>
+            <button type="button" data-editor-image-remove="${index}" aria-label="Eliminar imagen">×</button>
+          </div>`).join('')
+        : '<div class="corralon-editor-empty">Todavía no hay imágenes para este artículo.</div>';
+    }
+  }
+
+  function addArticleEditorFiles(files) {
+    Array.from(files || []).filter((file) => file?.type?.startsWith('image/')).forEach((file) => {
+      const url = URL.createObjectURL(file);
+      articleEditorImageFiles.set(url, file);
+      articleEditorImages.push(url);
+      articleEditorImageIndex = articleEditorImages.length - 1;
+    });
+    renderArticleEditorGallery();
+  }
+
+  function removeArticleEditorImage(index = articleEditorImageIndex) {
+    const url = articleEditorImages[index];
+    if (!url) return;
+    if (String(url).startsWith('blob:')) URL.revokeObjectURL(url);
+    articleEditorImageFiles.delete(url);
+    articleEditorImages.splice(index, 1);
+    articleEditorImageIndex = Math.max(0, Math.min(index, articleEditorImages.length - 1));
+    renderArticleEditorGallery();
+  }
+
+  function moveArticleEditorImage(from, to) {
+    if (from === to || from < 0 || to < 0 || from >= articleEditorImages.length || to >= articleEditorImages.length) return;
+    const [item] = articleEditorImages.splice(from, 1);
+    articleEditorImages.splice(to, 0, item);
+    articleEditorImageIndex = to;
+    renderArticleEditorGallery();
+  }
+
+  function articleEditorDateToDisplay(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || '');
+  }
+
+  function articleEditorDateToIso(value) {
+    const parsed = window.CorralonFunciones?.parseFechaFlexible?.(value);
+    if (!parsed) return String(value || '').trim();
+    return `${parsed.year}-${String(parsed.month).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`;
+  }
+
+  function formatArticleEditorNumber(input, decimals = 2, editing = false) {
+    if (!input) return;
+    const fn = window.CorralonFunciones;
+    const kind = input.dataset.editorKind || 'number';
+    const prefix = kind === 'money' ? '$ ' : '';
+    const suffix = kind === 'percent' ? ' %' : '';
+    const source = String(input.value || '').replace(/\$/g, '').replace(/%/g, '').trim();
+    const expressionSource = source.replace(/\s+/g, '');
+    if (editing && /[+\-*/()%]/.test(expressionSource.replace(/^-/, ''))) return;
+
+    if (editing) {
+      const negative = expressionSource.startsWith('-');
+      const unsigned = expressionSource.replace(/-/g, '');
+      const commaAt = unsigned.indexOf(',');
+      const integerSource = commaAt >= 0 ? unsigned.slice(0, commaAt) : unsigned;
+      const decimalSource = commaAt >= 0 ? unsigned.slice(commaAt + 1) : '';
+      const integerDigits = (integerSource.replace(/\D/g, '') || '0').replace(/^0+(?=\d)/, '');
+      const decimalDigits = decimalSource.replace(/\D/g, '').slice(0, decimals);
+      const integerFormatted = integerDigits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      input.value = `${prefix}${negative ? '-' : ''}${integerFormatted}${commaAt >= 0 && decimals ? `,${decimalDigits}` : ''}${suffix}`;
+      const caret = input.value.length - suffix.length;
+      input.setSelectionRange?.(caret, caret);
+      return;
+    }
+
+    const number = fn?.evaluateNumericExpression ? fn.evaluateNumericExpression(source) : parseFlexibleNumber(source);
+    if (!Number.isFinite(number)) return;
+    input.value = `${prefix}${Number(number).toLocaleString('es-AR', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    })}${suffix}`;
+  }
+
+  function insertArticleEditorDecimal(input) {
+    if (!input || input.readOnly || input.disabled) return;
+    const suffix = input.dataset.editorKind === 'percent' ? ' %' : '';
+    const value = String(input.value || '');
+    const editableEnd = Math.max(0, value.length - suffix.length);
+    const start = Math.min(Number(input.selectionStart ?? editableEnd), editableEnd);
+    const end = Math.min(Number(input.selectionEnd ?? start), editableEnd);
+    const before = value.slice(0, start);
+    const after = value.slice(end, editableEnd);
+    const cleanBefore = before.replace(/,/g, '');
+    input.value = `${cleanBefore},${after}${suffix}`;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function bindArticleEditorFunctions() {
+    if (articleEditorFunctionsBound || !articleEditorHost) return;
+    articleEditorFunctionsBound = true;
+    const fn = window.CorralonFunciones;
+    fn?.bindLinearNavigation?.({
+      root: articleEditorHost,
+      selector: '.corralon-article-editor-card [data-editor-field],.corralon-article-editor-card [data-editor-chip],.corralon-article-editor-card [data-editor-images-open],.corralon-article-editor-card [data-editor-apply-open],.corralon-article-editor-card [data-editor-save],[data-editor-target-search],[data-editor-target-code],[data-editor-apply-field],[data-editor-apply-confirm]',
+      selectOnFocus: true,
+      navigateLeftRight: true,
+      smartCaret: true,
+      selectOnAnyFocus: true,
+      selectOnFirstPointerFocus: true
+    });
+    fn?.bindShiftEnterNewLine?.({ root: articleEditorHost });
+    fn?.bindLabelSelect?.({ root: articleEditorHost });
+
+    articleEditorHost.addEventListener('input', (event) => {
+      const field = event.target?.closest?.('[data-editor-number]');
+      if (!field) return;
+      formatArticleEditorNumber(field, Number(field.dataset.editorNumber || 2), true);
+      if (field.dataset.editorField === 'ofertaPct') renderArticleEditorPrice();
+    });
+    articleEditorHost.addEventListener('focusout', (event) => {
+      const number = event.target?.closest?.('[data-editor-number]');
+      if (number) formatArticleEditorNumber(number, Number(number.dataset.editorNumber || 2), false);
+      const date = event.target?.closest?.('[data-editor-date]');
+      if (date && date.value.trim()) {
+        const parsed = fn?.parseFechaFlexible?.(date.value);
+        if (parsed) date.value = parsed.text;
+      }
+    });
+    articleEditorHost.addEventListener('keydown', (event) => {
+      const number = event.target?.closest?.('[data-editor-number]');
+      if (number && event.code === 'NumpadDecimal') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        insertArticleEditorDecimal(number);
+        return;
+      }
+      if (number && event.key === 'Enter') formatArticleEditorNumber(number, Number(number.dataset.editorNumber || 2), false);
+      const date = event.target?.closest?.('[data-editor-date]');
+      if (date && event.key === 'Enter' && date.value.trim()) {
+        const parsed = fn?.parseFechaFlexible?.(date.value);
+        if (parsed) date.value = parsed.text;
+      }
+    }, true);
+  }
+
+  function renderArticleEditorTargets() {
+    if (!articleEditorHost) return;
+    const query = String(articleEditorHost.querySelector('[data-editor-target-search]')?.value || '').trim().toLowerCase();
+    const list = articleEditorAdapter.getArticles?.() || [];
+    const targetList = articleEditorHost.querySelector('[data-editor-target-list]');
+    const filtered = list.filter((item) => {
+      const code = articleCode(item);
+      if (!code || code === articleEditorOriginalCode) return false;
+      const name = String(item.nombre ?? item.descripcion ?? '');
+      return !query || `${code} ${name}`.toLowerCase().includes(query);
+    }).slice(0, 250);
+    targetList.innerHTML = filtered.length
+      ? filtered.map((item) => {
+        const code = articleCode(item);
+        const name = String(item.nombre ?? item.descripcion ?? '');
+        return `<label><input type="checkbox" data-editor-target-code="${code.replace(/"/g, '&quot;')}" ${articleEditorApplyTargets.has(code) ? 'checked' : ''}><b>${code}</b><span>${name}</span></label>`;
+      }).join('')
+      : '<div class="corralon-editor-empty">No hay artículos encontrados.</div>';
+    articleEditorHost.querySelectorAll('[data-editor-apply-field]').forEach((button) => {
+      button.classList.toggle('is-active', articleEditorApplyFields.has(button.dataset.editorApplyField));
+    });
+    updateArticleEditorTargetCount();
+  }
+
+  function updateArticleEditorTargetCount() {
+    const mainButton = articleEditorHost?.querySelector('[data-editor-apply-open]');
+    if (mainButton) mainButton.textContent = articleEditorApplyTargets.size
+      ? `Aplicar también a (${articleEditorApplyTargets.size})`
+      : 'Aplicar cambios también a';
+  }
+
+  function openArticleEditorTargets() {
+    if (!articleEditorHost) return;
+    articleEditorHost.querySelector('[data-editor-target-search]').value = '';
+    renderArticleEditorTargets();
+    articleEditorHost.querySelector('[data-editor-apply-dialog]').classList.add('is-open');
+    setTimeout(() => articleEditorHost.querySelector('[data-editor-target-search]')?.focus(), 0);
+  }
+
+  function applyArticleEditorFields(target, source, fields) {
+    const updated = { ...target };
+    if (fields.has('etiquetas')) {
+      ['oferta', 'ofertaPct', 'ofertaHasta', 'destacado', 'masVendido', 'accesoRapido', 'ceramico', 'ceramicoM2', 'ceramicoPlacas'].forEach((key) => {
+        updated[key] = source[key];
+      });
+    }
+    if (fields.has('detalle')) updated.detalle = source.detalle;
+    if (fields.has('tags')) updated.tagsOcultos = [...articleTags(source.tagsOcultos)];
+    if (fields.has('foto')) {
+      updated.fotoUrl = source.fotoUrl || '';
+      updated.imagenes = [...articleImages(source)];
+    }
+    updated.timestamp = Date.now();
+    return updated;
+  }
+
+  function ensureArticleEditorHost() {
+    if (articleEditorHost?.isConnected) return articleEditorHost;
+    const style = document.createElement('style');
+    style.textContent = `
+      .corralon-article-editor-host{position:fixed;inset:0;z-index:2147483000;display:none;align-items:center;justify-content:center;padding:12px;background:rgba(0,0,0,.72)}
+      .corralon-article-editor-host.is-open{display:flex}
+      .corralon-article-editor-card{width:min(680px,100%);max-height:94dvh;overflow:auto;border:1px solid #ccc;border-radius:18px;background:#fff;padding:22px;box-shadow:0 22px 60px rgba(0,0,0,.34);font-family:Arial,sans-serif;color:#171717}
+      .corralon-article-editor-head{display:flex;align-items:center;justify-content:space-between;margin:-22px -22px 16px;padding:18px 22px 14px;position:sticky;top:-22px;z-index:5;background:#fff;border-bottom:1px solid #ddd}
+      .corralon-article-editor-title{font:900 22px/1 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase}
+      .corralon-article-editor-close{width:36px;height:36px;border:0;border-radius:50%;background:#eee;color:#222;font-size:23px;cursor:pointer}
+      .corralon-article-editor-info{display:grid;grid-template-columns:minmax(90px,.65fr) minmax(0,2fr) minmax(140px,.8fr);gap:6px 18px;margin:0 0 18px;padding:14px;border:1px solid #ddd;border-radius:14px;background:#f5f5f3}
+      .corralon-article-editor-info-label{font:800 11px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase;color:#666}
+      .corralon-article-editor-info-value{min-width:0;font:800 14px/1.3 Arial,sans-serif;color:#171717;overflow-wrap:anywhere}
+      .corralon-article-editor-info-price{grid-row:1/3;grid-column:3;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:5px;text-align:right}
+      .corralon-article-editor-price-state{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;border-radius:999px;background:#e5e5e2;color:#555;font:900 10px/1 Arial,sans-serif;letter-spacing:.45px}
+      .corralon-article-editor-price-state.is-offer{background:#ef111b;color:#fff}
+      .corralon-article-editor-price{font:900 22px/1 'Barlow Condensed',Arial,sans-serif}
+      .corralon-article-editor-price.is-offer{color:#d90009}
+      .corralon-article-editor-price-before{font:700 11px/1 Arial,sans-serif;color:#777;text-decoration:line-through}
+      .corralon-article-editor-info-rubro{grid-column:1/-1;display:flex;gap:7px;align-items:baseline;margin-top:6px;padding-top:10px;border-top:1px solid #ddd}
+      .corralon-article-editor-info-rubro .corralon-article-editor-info-value{font-weight:700}
+      .corralon-article-editor-main-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+      .corralon-article-editor-field{display:grid;gap:5px;margin-bottom:12px}
+      .corralon-article-editor-field label{font:800 11px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase;color:#666}
+      .corralon-article-editor-field input,.corralon-article-editor-field textarea{width:100%;box-sizing:border-box;border:1px solid #bbb;border-radius:11px;background:#fff;color:#171717;padding:11px 13px;font:14px/1.25 Arial,sans-serif;outline:none}
+      .corralon-article-editor-field textarea{min-height:76px;resize:vertical}
+      .corralon-article-editor-field input:focus,.corralon-article-editor-field textarea:focus{border-color:#777;box-shadow:0 0 0 2px rgba(0,0,0,.08)}
+      .corralon-article-editor-chips{display:flex;flex-wrap:wrap;gap:8px;margin:5px 0 16px}
+      .corralon-article-editor-chip{border:1px solid #ccc;border-radius:999px;background:#f6f6f4;color:#333;padding:8px 12px;font-weight:800;cursor:pointer}
+      .corralon-article-editor-chip.is-active{border-color:#d90009;background:#ef111b;color:#fff}
+      .corralon-article-editor-extras{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 14px;padding:14px 14px 2px;border:1px solid #ddd;border-radius:14px;background:#f7f7f5}
+      .corralon-article-editor-section-title{grid-column:1/-1;font:900 13px/1 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase;color:#333}
+      .corralon-article-editor-extras[hidden]{display:none!important}
+      .corralon-article-editor-photo-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+      .corralon-article-editor-photo-head label{font:800 11px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase;color:#666}
+      .corralon-article-editor-photo-head button{border:0;border-radius:999px;background:#ef111b;color:#fff;padding:9px 14px;font-weight:900;cursor:pointer}
+      .corralon-article-editor-photo{position:relative;display:grid;place-items:center;min-height:180px;margin:5px 0 14px;border:2px dashed #ddd;border-radius:14px;background:#fafafa;overflow:hidden;cursor:pointer}
+      .corralon-article-editor-photo img{width:100%;height:180px;object-fit:contain;background:#f6f6f6}
+      .corralon-article-editor-photo input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+      .corralon-editor-photo-tools{position:absolute;right:10px;top:10px;display:flex;align-items:center;gap:6px;z-index:2}
+      .corralon-editor-photo-tools button,.corralon-editor-photo-tools span{display:grid;place-items:center;min-width:28px;height:28px;border:0;border-radius:50%;background:#777;color:#fff;font-weight:900}
+      .corralon-editor-photo-tools button{cursor:pointer}.corralon-editor-photo-tools button:disabled{opacity:.45}
+      .corralon-article-editor-actions{display:grid;grid-template-columns:.8fr 1.2fr 1.2fr;gap:10px;position:sticky;bottom:-22px;z-index:5;background:#fff;margin:0 -22px -22px;padding:14px 22px 18px;border-top:1px solid #ddd}
+      .corralon-article-editor-actions button{min-height:46px;border:1px solid #bbb;border-radius:12px;background:#fff;font-weight:900;cursor:pointer}
+      .corralon-article-editor-actions button[data-editor-apply-open]{border-color:#aaa;background:#f3f3f1;color:#222}
+      .corralon-article-editor-actions button[data-editor-save]{border-color:#ef111b;background:#ef111b;color:#fff}
+      .corralon-article-editor-actions button:disabled{opacity:.55;cursor:wait}
+      .corralon-editor-subdialog{position:fixed;inset:0;z-index:2147483010;display:none;align-items:center;justify-content:center;padding:14px;background:rgba(0,0,0,.65)}
+      .corralon-editor-subdialog.is-open{display:flex}
+      .corralon-editor-subcard{width:min(680px,100%);max-height:88dvh;overflow:auto;border-radius:16px;background:#fff;padding:18px;box-shadow:0 18px 55px rgba(0,0,0,.38)}
+      .corralon-editor-subhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.corralon-editor-subhead b{font-size:19px;text-transform:uppercase}
+      .corralon-editor-subhead button{width:34px;height:34px;border:0;border-radius:50%;font-size:20px;cursor:pointer}
+      .corralon-editor-image-list,.corralon-editor-target-list{display:grid;gap:7px;max-height:55dvh;overflow:auto}
+      .corralon-editor-image-item{display:grid;grid-template-columns:64px 1fr 36px;align-items:center;gap:10px;border:1px solid #ddd;border-radius:11px;padding:7px;background:#fff}
+      .corralon-editor-image-item.is-current{border-color:#777;background:#eee}.corralon-editor-image-item img{width:64px;height:54px;object-fit:contain}.corralon-editor-image-item small{display:block;color:#777;margin-top:3px}.corralon-editor-image-item button{border:0;background:#ef111b;color:#fff;border-radius:8px;height:34px;font-weight:900;cursor:pointer}
+      .corralon-editor-upload{display:block;margin-top:10px;border:2px dashed #ccc;border-radius:12px;padding:16px;text-align:center;cursor:pointer}.corralon-editor-upload input{display:none}
+      .corralon-editor-target-search{width:100%;box-sizing:border-box;border:1px solid #bbb;border-radius:11px;padding:11px 13px;margin-bottom:10px}
+      .corralon-editor-target-list label{display:grid;grid-template-columns:24px 110px 1fr;align-items:center;gap:8px;border:1px solid #ddd;border-radius:9px;padding:8px;cursor:pointer}
+      .corralon-editor-target-list label:hover{background:#eee}.corralon-editor-target-fields{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.corralon-editor-target-fields button{border:1px solid #bbb;border-radius:999px;background:#fff;padding:8px 12px;font-weight:800;cursor:pointer}.corralon-editor-target-fields button.is-active{background:#ef111b;border-color:#ef111b;color:#fff}
+      .corralon-editor-subactions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.corralon-editor-subactions button{min-height:42px;border:1px solid #bbb;border-radius:10px;background:#fff;padding:0 18px;font-weight:900;cursor:pointer}.corralon-editor-subactions button:last-child{background:#ef111b;border-color:#ef111b;color:#fff}
+      .corralon-editor-empty{padding:22px;text-align:center;color:#777}
+      @media(max-width:560px){.corralon-article-editor-host{padding:0}.corralon-article-editor-card{width:100%;max-height:100dvh;border-radius:0;padding:18px}.corralon-article-editor-head{margin:-18px -18px 14px;top:-18px;padding:16px 18px 13px}.corralon-article-editor-info{grid-template-columns:90px 1fr}.corralon-article-editor-info-price{grid-row:auto;grid-column:1/-1;align-items:flex-start;text-align:left;padding-top:10px;border-top:1px solid #ddd}.corralon-article-editor-main-grid,.corralon-article-editor-extras{grid-template-columns:1fr}.corralon-article-editor-actions{margin:0 -18px -18px;padding:12px 18px 16px;grid-template-columns:1fr}.corralon-article-editor-actions button{min-height:42px}}
+    `;
+    document.head.appendChild(style);
+    articleEditorHost = document.createElement('div');
+    articleEditorHost.className = 'corralon-article-editor-host';
+    articleEditorHost.setAttribute('aria-hidden', 'true');
+    articleEditorHost.innerHTML = `
+      <div class="corralon-article-editor-card" role="dialog" aria-modal="true" aria-label="Editar artículo">
+        <div class="corralon-article-editor-head"><div class="corralon-article-editor-title">Editar artículo</div><button class="corralon-article-editor-close" type="button" data-editor-close>×</button></div>
+        <div class="corralon-article-editor-info">
+          <div class="corralon-article-editor-info-label">Código</div><div class="corralon-article-editor-info-label">Descripción</div>
+          <div class="corralon-article-editor-info-value" data-editor-info="codigo"></div><div class="corralon-article-editor-info-value" data-editor-info="nombre"></div>
+          <div class="corralon-article-editor-info-price">
+            <span class="corralon-article-editor-price-state" data-editor-info="precioEstado">Precio de lista</span>
+            <strong class="corralon-article-editor-price" data-editor-info="precio"></strong>
+            <small class="corralon-article-editor-price-before" data-editor-info="precioAnterior" hidden></small>
+          </div>
+          <div class="corralon-article-editor-info-rubro"><span class="corralon-article-editor-info-label">Rubro:</span><span class="corralon-article-editor-info-value" data-editor-info="rubro"></span></div>
+        </div>
+        <div class="corralon-article-editor-main-grid">
+          <div class="corralon-article-editor-field"><label for="corralonEditDetalle">Detalle</label><textarea id="corralonEditDetalle" data-editor-field="detalle"></textarea></div>
+          <div class="corralon-article-editor-field"><label for="corralonEditTags">Tags invisibles</label><textarea id="corralonEditTags" data-editor-field="tags" placeholder="Ej: portland, obra gruesa, pegamento"></textarea></div>
+        </div>
+        <div class="corralon-article-editor-field"><label>Etiquetas</label></div>
+        <div class="corralon-article-editor-chips">
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="oferta">En oferta</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="destacado">Destacado</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="masVendido">Más vendido</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="accesoRapido">Acceso rápido</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="ceramico">Cerámico</button>
+        </div>
+        <div class="corralon-article-editor-extras" data-editor-extra="oferta" hidden>
+          <div class="corralon-article-editor-section-title">Configuración de oferta</div>
+          <div class="corralon-article-editor-field"><label for="corralonEditOfertaPct">Descuento oferta %</label><input id="corralonEditOfertaPct" data-editor-field="ofertaPct" data-editor-number="2" data-editor-kind="percent" inputmode="decimal"></div>
+          <div class="corralon-article-editor-field"><label for="corralonEditOfertaHasta">Oferta hasta</label><input id="corralonEditOfertaHasta" type="text" data-editor-field="ofertaHasta" data-editor-date placeholder="dd/mm/aaaa"></div>
+        </div>
+        <div class="corralon-article-editor-extras" data-editor-extra="ceramico" hidden>
+          <div class="corralon-article-editor-section-title">Configuración de cerámico</div>
+          <div class="corralon-article-editor-field"><label for="corralonEditCeramicoM2">M² por caja</label><input id="corralonEditCeramicoM2" data-editor-field="ceramicoM2" data-editor-number="2" inputmode="decimal"></div>
+          <div class="corralon-article-editor-field"><label for="corralonEditCeramicoPlacas">Placas por caja</label><input id="corralonEditCeramicoPlacas" data-editor-field="ceramicoPlacas" data-editor-number="0" inputmode="numeric"></div>
+        </div>
+        <div class="corralon-article-editor-photo-head"><label>Foto (arrastrá o hacé clic para cambiar)</label><button type="button" data-editor-images-open>Ver imágenes</button></div>
+        <div class="corralon-article-editor-photo" data-editor-photo-zone><img data-editor-photo alt="Foto del artículo"><input type="file" accept="image/*" multiple data-editor-photo-input>
+          <div class="corralon-editor-photo-tools"><button type="button" data-editor-photo-prev>‹</button><span data-editor-photo-count>0/0</span><button type="button" data-editor-photo-next>›</button><button type="button" data-editor-photo-remove>×</button></div>
+        </div>
+        <div class="corralon-article-editor-actions"><button type="button" data-editor-close>Cancelar</button><button type="button" data-editor-apply-open>Aplicar cambios también a</button><button type="button" data-editor-save>Guardar cambios</button></div>
+      </div>
+      <div class="corralon-editor-subdialog" data-editor-images-dialog><div class="corralon-editor-subcard">
+        <div class="corralon-editor-subhead"><b>Imágenes</b><button type="button" data-editor-images-close>×</button></div>
+        <div class="corralon-editor-image-list" data-editor-images-list></div>
+        <label class="corralon-editor-upload">Arrastrá, pegá o seleccioná imágenes<input type="file" accept="image/*" multiple data-editor-images-input></label>
+      </div></div>
+      <div class="corralon-editor-subdialog" data-editor-apply-dialog><div class="corralon-editor-subcard">
+        <div class="corralon-editor-subhead"><b>Aplicar cambios también a</b><button type="button" data-editor-apply-close>×</button></div>
+        <input class="corralon-editor-target-search" type="text" data-editor-target-search placeholder="Buscar artículo por código o nombre">
+        <div class="corralon-editor-target-fields"><button type="button" data-editor-apply-field="etiquetas">Etiquetas</button><button type="button" data-editor-apply-field="detalle">Detalle</button><button type="button" data-editor-apply-field="tags">Tags</button><button type="button" data-editor-apply-field="foto">Fotos</button></div>
+        <div class="corralon-editor-target-list" data-editor-target-list></div>
+        <div class="corralon-editor-subactions"><button type="button" data-editor-apply-close>Cancelar</button><button type="button" data-editor-apply-confirm>Confirmar selección</button></div>
+      </div></div>`;
+    document.body.appendChild(articleEditorHost);
+    articleEditorHost.addEventListener('click', (event) => {
+      if (event.target === articleEditorHost) closeArticleEditor();
+      if (event.target.matches?.('[data-editor-images-dialog]')) {
+        event.target.classList.remove('is-open');
+        articleEditorHost.querySelector('[data-editor-images-open]')?.focus();
+      }
+      if (event.target.matches?.('[data-editor-apply-dialog]')) {
+        event.target.classList.remove('is-open');
+        articleEditorHost.querySelector('[data-editor-apply-open]')?.focus();
+      }
+      if (event.target.closest('[data-editor-close]')) closeArticleEditor();
+      const chip = event.target.closest('[data-editor-chip]');
+      if (chip) {
+        chip.classList.toggle('is-active');
+        syncArticleEditorSections();
+      }
+      if (event.target.closest('[data-editor-save]')) saveArticleEditor();
+      if (event.target.closest('[data-editor-images-open]')) {
+        renderArticleEditorGallery();
+        articleEditorHost.querySelector('[data-editor-images-dialog]').classList.add('is-open');
+      }
+      if (event.target.closest('[data-editor-images-close]')) {
+        articleEditorHost.querySelector('[data-editor-images-dialog]').classList.remove('is-open');
+        articleEditorHost.querySelector('[data-editor-images-open]')?.focus();
+      }
+      if (event.target.closest('[data-editor-photo-prev]')) {
+        articleEditorImageIndex = (articleEditorImageIndex - 1 + articleEditorImages.length) % Math.max(1, articleEditorImages.length);
+        renderArticleEditorGallery();
+      }
+      if (event.target.closest('[data-editor-photo-next]')) {
+        articleEditorImageIndex = (articleEditorImageIndex + 1) % Math.max(1, articleEditorImages.length);
+        renderArticleEditorGallery();
+      }
+      if (event.target.closest('[data-editor-photo-remove]')) removeArticleEditorImage();
+      const removeImage = event.target.closest('[data-editor-image-remove]');
+      if (removeImage) removeArticleEditorImage(Number(removeImage.dataset.editorImageRemove));
+      const imageItem = event.target.closest('[data-editor-image-index]');
+      if (imageItem && !removeImage) {
+        articleEditorImageIndex = Number(imageItem.dataset.editorImageIndex);
+        renderArticleEditorGallery();
+      }
+      if (event.target.closest('[data-editor-apply-open]')) openArticleEditorTargets();
+      if (event.target.closest('[data-editor-apply-close]')) {
+        articleEditorHost.querySelector('[data-editor-apply-dialog]').classList.remove('is-open');
+        articleEditorHost.querySelector('[data-editor-apply-open]')?.focus();
+      }
+      const applyField = event.target.closest('[data-editor-apply-field]');
+      if (applyField) {
+        const key = applyField.dataset.editorApplyField;
+        if (articleEditorApplyFields.has(key)) articleEditorApplyFields.delete(key);
+        else articleEditorApplyFields.add(key);
+        renderArticleEditorTargets();
+      }
+      if (event.target.closest('[data-editor-apply-confirm]')) {
+        articleEditorHost.querySelector('[data-editor-apply-dialog]').classList.remove('is-open');
+        articleEditorHost.querySelector('[data-editor-apply-open]')?.focus();
+      }
+    });
+    articleEditorHost.querySelector('[data-editor-photo-input]').addEventListener('change', (event) => {
+      addArticleEditorFiles(event.target.files);
+      event.target.value = '';
+    });
+    articleEditorHost.querySelector('[data-editor-images-input]').addEventListener('change', (event) => {
+      addArticleEditorFiles(event.target.files);
+      event.target.value = '';
+    });
+    const photoZone = articleEditorHost.querySelector('[data-editor-photo-zone]');
+    photoZone.addEventListener('dragover', (event) => event.preventDefault());
+    photoZone.addEventListener('drop', (event) => { event.preventDefault(); addArticleEditorFiles(event.dataTransfer.files); });
+    const uploadZone = articleEditorHost.querySelector('.corralon-editor-upload');
+    uploadZone.addEventListener('dragover', (event) => event.preventDefault());
+    uploadZone.addEventListener('drop', (event) => { event.preventDefault(); addArticleEditorFiles(event.dataTransfer.files); });
+    articleEditorHost.querySelector('[data-editor-images-list]').addEventListener('dragstart', (event) => {
+      const item = event.target.closest('[data-editor-image-index]');
+      if (item) event.dataTransfer.setData('text/plain', item.dataset.editorImageIndex);
+    });
+    articleEditorHost.querySelector('[data-editor-images-list]').addEventListener('dragover', (event) => event.preventDefault());
+    articleEditorHost.querySelector('[data-editor-images-list]').addEventListener('drop', (event) => {
+      event.preventDefault();
+      const item = event.target.closest('[data-editor-image-index]');
+      if (item) moveArticleEditorImage(Number(event.dataTransfer.getData('text/plain')), Number(item.dataset.editorImageIndex));
+    });
+    articleEditorHost.querySelector('[data-editor-target-search]').addEventListener('input', renderArticleEditorTargets);
+    articleEditorHost.querySelector('[data-editor-target-list]').addEventListener('change', (event) => {
+      const input = event.target.closest('[data-editor-target-code]');
+      if (!input) return;
+      if (input.checked) articleEditorApplyTargets.add(input.dataset.editorTargetCode);
+      else articleEditorApplyTargets.delete(input.dataset.editorTargetCode);
+      updateArticleEditorTargetCount();
+    });
+    bindArticleEditorFunctions();
+    return articleEditorHost;
+  }
+
+  function configureArticleEditor(options = {}) {
+    articleEditorAdapter = { ...articleEditorAdapter, ...options };
+  }
+
+  function openArticleEditor(code, options = {}) {
+    const articleCodeValue = String(code || '').trim();
+    const list = options.articles || articleEditorAdapter.getArticles?.() || [];
+    const article = list.find((item) => articleCode(item) === articleCodeValue);
+    if (!article) return false;
+    const host = ensureArticleEditorHost();
+    articleEditorOriginalCode = articleCodeValue;
+    articleEditorImages.forEach((url) => { if (String(url).startsWith('blob:')) URL.revokeObjectURL(url); });
+    articleEditorImages = articleImages(article);
+    articleEditorImageIndex = 0;
+    articleEditorImageFiles = new Map();
+    articleEditorApplyTargets = new Set();
+    articleEditorApplyFields = new Set(['etiquetas']);
+    articleEditorReturnFocus = options.returnFocus || document.activeElement;
+    editorInfo('codigo').textContent = articleCodeValue;
+    editorInfo('nombre').textContent = String(article.nombre ?? article.descripcion ?? '');
+    editorInfo('rubro').textContent = String(article.rubro ?? '') || 'Sin rubro';
+    articleEditorBasePrice = Number(article.precio || 0);
+    editorField('detalle').value = String(article.detalle ?? '');
+    editorField('tags').value = articleTags(article.tagsOcultos ?? article.tagsBusqueda ?? article.tags ?? '').join(', ');
+    editorField('ofertaPct').value = Number(article.ofertaPct ?? article.oferta_pct ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    editorField('ofertaHasta').value = articleEditorDateToDisplay(article.ofertaHasta ?? article.oferta_hasta ?? '');
+    editorField('ceramicoM2').value = Number(article.ceramicoM2 ?? article.m2 ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    editorField('ceramicoPlacas').value = Number(article.ceramicoPlacas ?? article.placas ?? 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+    host.querySelectorAll('[data-editor-number]').forEach((field) => {
+      formatArticleEditorNumber(field, Number(field.dataset.editorNumber || 2), false);
+    });
+    renderArticleEditorPrice();
+    host.querySelectorAll('[data-editor-chip]').forEach((chip) => {
+      const key = chip.dataset.editorChip;
+      const aliases = {
+        oferta: article.oferta ?? article.enOferta,
+        destacado: article.destacado,
+        masVendido: article.masVendido ?? article.mas_vendido,
+        accesoRapido: article.accesoRapido ?? article.rapido,
+        ceramico: article.ceramico
+      };
+      chip.classList.toggle('is-active', articleBool(aliases[key]));
+    });
+    host.querySelector('[data-editor-photo-input]').value = '';
+    host.querySelector('[data-editor-images-input]').value = '';
+    host.querySelectorAll('.corralon-editor-subdialog').forEach((dialog) => dialog.classList.remove('is-open'));
+    syncArticleEditorSections();
+    renderArticleEditorGallery();
+    host.classList.add('is-open');
+    host.setAttribute('aria-hidden', 'false');
+    setTimeout(() => editorField('detalle')?.focus(), 0);
+    return true;
+  }
+
+  function closeArticleEditor() {
+    if (!articleEditorHost) return;
+    articleEditorHost.classList.remove('is-open');
+    articleEditorHost.setAttribute('aria-hidden', 'true');
+    articleEditorImages.forEach((url) => { if (String(url).startsWith('blob:')) URL.revokeObjectURL(url); });
+    articleEditorImages = [];
+    articleEditorImageFiles = new Map();
+    articleEditorApplyTargets = new Set();
+    articleEditorHost.querySelectorAll('.corralon-editor-subdialog').forEach((dialog) => dialog.classList.remove('is-open'));
+    articleEditorReturnFocus?.focus?.();
+    articleEditorReturnFocus = null;
+  }
+
+  async function uploadArticleImage(file, code) {
+    const data = new FormData();
+    data.append('file', file);
+    data.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    data.append('public_id', `articulos/${code}_${Date.now()}`);
+    const response = await fetch('https://api.cloudinary.com/v1_1/do0i2da7h/image/upload', { method: 'POST', body: data });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error?.message || 'No se pudo subir la imagen');
+    return payload.secure_url;
+  }
+
+  async function saveArticleEditor() {
+    const list = articleEditorAdapter.getArticles?.() || [];
+    const original = list.find((item) => articleCode(item) === articleEditorOriginalCode);
+    if (!original) return;
+    const code = articleEditorOriginalCode;
+    const name = String(original.nombre ?? original.descripcion ?? '').trim();
+    const price = articleEditorBasePrice;
+    if (!code || !name || price === null) {
+      alert('Completá código, nombre y precio');
+      return;
+    }
+    if (list.some((item) => articleCode(item) === code && articleCode(item) !== articleEditorOriginalCode)) {
+      alert('Ya existe otro artículo con ese código');
+      return;
+    }
+    const saveButton = articleEditorHost.querySelector('[data-editor-save]');
+    saveButton.disabled = true;
+    saveButton.textContent = 'Guardando...';
+    try {
+      const images = [...articleEditorImages];
+      for (let index = 0; index < images.length; index += 1) {
+        const file = articleEditorImageFiles.get(images[index]);
+        if (!file) continue;
+        const blobUrl = images[index];
+        images[index] = await uploadArticleImage(file, code);
+        URL.revokeObjectURL(blobUrl);
+        articleEditorImageFiles.delete(blobUrl);
+      }
+      const savedImages = [...new Set(images.filter((item) => item && !String(item).startsWith('blob:')))];
+      const active = (key) => articleEditorHost.querySelector(`[data-editor-chip="${key}"]`)?.classList.contains('is-active');
+      const updated = {
+        ...original,
+        codigo: code,
+        idart: code,
+        nombre: name,
+        descripcion: name,
+        detalle: String(editorField('detalle').value || '').trim(),
+        rubro: String(original.rubro || '').trim(),
+        tagsOcultos: articleTags(editorField('tags').value),
+        precio: price,
+        fotoUrl: savedImages[0] || '',
+        imagenes: savedImages,
+        oferta: active('oferta'),
+        ofertaPct: active('oferta') ? Number(parseFlexibleNumber(editorField('ofertaPct').value) || 0) : 0,
+        ofertaHasta: active('oferta') ? articleEditorDateToIso(editorField('ofertaHasta').value) : '',
+        destacado: active('destacado'),
+        masVendido: active('masVendido'),
+        accesoRapido: active('accesoRapido'),
+        ceramico: active('ceramico'),
+        ceramicoM2: active('ceramico') ? Number(parseFlexibleNumber(editorField('ceramicoM2').value) || 0) : 0,
+        ceramicoPlacas: active('ceramico') ? Math.max(0, Math.round(Number(parseFlexibleNumber(editorField('ceramicoPlacas').value) || 0))) : 0,
+        timestamp: Date.now()
+      };
+      const nextList = list.map((item) => {
+        const itemCode = articleCode(item);
+        if (itemCode === articleEditorOriginalCode) return updated;
+        if (!articleEditorApplyTargets.has(itemCode)) return item;
+        return applyArticleEditorFields(item, updated, articleEditorApplyFields);
+      });
+      if (!articleEditorAdapter.save) throw new Error('El editor no está conectado a esta página');
+      await articleEditorAdapter.save(nextList, updated, articleEditorOriginalCode);
+      window.dispatchEvent(new CustomEvent('corralon:article-updated', { detail: { article: updated, previousCode: articleEditorOriginalCode } }));
+      closeArticleEditor();
+    } catch (error) {
+      console.error(error);
+      alert(error.message || 'No se pudo guardar el artículo');
+    } finally {
+      saveButton.disabled = false;
+      saveButton.textContent = 'Guardar cambios';
+    }
+  }
+
+  function serializeArticleBase(article = {}) {
+    const code = articleCode(article);
+    const stocks = resolveBranchStocks(article);
+    const providerCode = String(article.idartprov ?? article.codprov ?? '').trim();
+    const providerId = String(article.idProveedor ?? article.id_proveedor ?? '').trim();
+    const name = String(article.nombre ?? article.descripcion ?? '').trim();
+    return {
+      codigo: code, idart: code, idartprov: providerCode, codprov: providerCode,
+      idProveedor: providerId, id_proveedor: providerId, nombre: name, descripcion: name,
+      rubro: String(article.rubro || ''), precio: Number(article.precio || 0),
+      stock: stocks.stock ?? article.stock ?? '',
+      stockSucursalProgresoRuta: stocks.stockSucursalProgresoRuta ?? '',
+      stockSucursalCalle5Espana: stocks.stockSucursalCalle5Espana ?? ''
+    };
+  }
+
+  function serializeArticleMeta(article = {}) {
+    const images = articleImages(article);
+    return {
+      codigo: articleCode(article),
+      detalle: String(article.detalle || ''),
+      tagsOcultos: articleTags(article.tagsOcultos ?? article.tagsBusqueda ?? ''),
+      fotoUrl: images[0] || '',
+      imagenes: images,
+      oferta: articleBool(article.oferta),
+      ofertaPct: Number(article.ofertaPct || 0),
+      ofertaHasta: String(article.ofertaHasta || ''),
+      destacado: articleBool(article.destacado),
+      masVendido: articleBool(article.masVendido ?? article.mas_vendido),
+      accesoRapido: articleBool(article.accesoRapido ?? article.rapido),
+      ceramico: articleBool(article.ceramico),
+      ceramicoM2: Number(article.ceramicoM2 || 0),
+      ceramicoPlacas: Number(article.ceramicoPlacas || 0)
+    };
+  }
+
+  async function uploadArticleJson(rows, prefix) {
+    const form = new FormData();
+    form.append('file', new Blob([JSON.stringify(rows)], { type: 'application/json' }));
+    form.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    form.append('public_id', `${prefix}_${Date.now()}`);
+    form.append('resource_type', 'raw');
+    const response = await fetch(CLOUDINARY_RAW_UPLOAD_URL, { method: 'POST', body: form });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error?.message || 'No se pudo publicar el catálogo');
+    return payload.secure_url;
+  }
+
+  async function publishArticleCatalog(list = []) {
+    const merged = mergeArticleBranchStocks(list || []);
+    const [baseUrl, metaUrl] = await Promise.all([
+      uploadArticleJson(merged.map(serializeArticleBase), 'articulos'),
+      uploadArticleJson(merged.map(serializeArticleMeta), 'articulos_meta')
+    ]);
+    return { baseUrl, metaUrl };
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && articleEditorHost?.classList.contains('is-open')) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const subdialog = articleEditorHost.querySelector('.corralon-editor-subdialog.is-open');
+      if (subdialog) {
+        subdialog.classList.remove('is-open');
+        articleEditorHost.querySelector(subdialog.matches('[data-editor-images-dialog]') ? '[data-editor-images-open]' : '[data-editor-apply-open]')?.focus();
+        return;
+      }
+      closeArticleEditor();
+    }
+  }, true);
+
+  document.addEventListener('paste', (event) => {
+    if (!articleEditorHost?.classList.contains('is-open')) return;
+    const files = Array.from(event.clipboardData?.items || [])
+      .filter((item) => item.type?.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (!files.length) return;
+    event.preventDefault();
+    addArticleEditorFiles(files);
+  });
 
   function headers(extra = {}) {
     return {
@@ -1958,6 +2702,12 @@
     setImageGeneratorPayload,
     readImageGeneratorPayload,
     openImageGenerator,
+    articleEditor: {
+      configure: configureArticleEditor,
+      open: openArticleEditor,
+      close: closeArticleEditor,
+      publishCatalog: publishArticleCatalog
+    },
     faltantes: FALTANTES
   };
 })();
