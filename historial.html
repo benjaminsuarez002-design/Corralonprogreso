@@ -519,6 +519,7 @@ const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const SUPABASE_BUCKET = 'Archivos';
 const PRESUPUESTOS_TABLE = 'presupuestos_web';
+const PRESUPUESTOS_OCULTOS_KEY = 'corralon_presupuestos_web_ocultos_v1';
 const HISTORIAL_LOGIN_STORAGE_KEY = 'historial_keep_logged_v1';
 const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
 const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
@@ -565,6 +566,25 @@ let _budgetDropdownActive = -1;
 let _confirmCallback = null;
 let logoCacheData = null;
 let _pdfDetalleActual = null;
+
+function presupuestosOcultos() {
+  try {
+    const values = JSON.parse(localStorage.getItem(PRESUPUESTOS_OCULTOS_KEY) || '[]');
+    return new Set(Array.isArray(values) ? values.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function ocultarPresupuestoLocal(presupuesto) {
+  const id = String(presupuesto?.id || '').trim();
+  if(!id) return false;
+  const ocultos = presupuestosOcultos();
+  ocultos.add(id);
+  localStorage.setItem(PRESUPUESTOS_OCULTOS_KEY, JSON.stringify([...ocultos]));
+  _presupuestosCache = _presupuestosCache.filter((item) => String(item?.id || '') !== id);
+  return true;
+}
 
 function historialNotifId(tipo, id) {
   return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
@@ -978,7 +998,9 @@ async function cargarPresupuestos() {
       throw new Error(errText || 'No se pudieron cargar los presupuestos');
     }
     const presupuestos = await res.json();
-    _presupuestosCache = Array.isArray(presupuestos) ? presupuestos : [];
+    const ocultos = presupuestosOcultos();
+    _presupuestosCache = (Array.isArray(presupuestos) ? presupuestos : [])
+      .filter((item) => !ocultos.has(String(item?.id || '')));
     if (!_presupuestosCache.length) {
       body.innerHTML = '<div class="h-empty">Sin presupuestos todavia</div>';
       return;
@@ -997,6 +1019,9 @@ async function cargarPresupuestos() {
             ${metaExtraPresupuestoHtml(p)}
           </div>
           <div class="h-total">${fmt(p.total || 0)}</div>
+          <div class="h-actions">
+            <button class="h-mini-btn danger" type="button" onclick="event.stopPropagation();confirmarEliminarPresupuesto(${idx})">Eliminar</button>
+          </div>
           <span style="color:#ccc;font-size:18px;">›</span>
         </div>`;
     }).join('');
@@ -1277,7 +1302,10 @@ function setAccionesDetalleModo(modo) {
   if (btnPdf) btnPdf.textContent = esRemito ? 'PDF' : 'Ver PDF';
   if (btnCopy) btnCopy.style.display = esRemito ? 'none' : '';
   if (btnEdit) btnEdit.style.display = esRemito ? '' : 'none';
-  if (btnDel) btnDel.style.display = esRemito ? '' : 'none';
+  if (btnDel) {
+    btnDel.style.display = '';
+    btnDel.textContent = esRemito ? '🗑 Eliminar remito' : '🗑 Eliminar presupuesto';
+  }
   if (btnCopyBoleta) btnCopyBoleta.style.display = esRemito ? 'none' : '';
 }
 
@@ -1623,7 +1651,36 @@ function imprimirPdfDetalle() {
 }
 
 // ── ELIMINAR ──
+function confirmarEliminarPresupuesto(indexOrBudget = _presupuestoDetalleActual) {
+  const p = typeof indexOrBudget === 'number'
+    ? _presupuestosCache[indexOrBudget]
+    : indexOrBudget;
+  if(!p?.id) {
+    toast('No se encontró la ID del presupuesto');
+    return;
+  }
+  pedirConfirm({
+    icon: '🗑',
+    titulo: 'Ocultar presupuesto web',
+    sub: `¿Ocultar el presupuesto ${p.numero || p.id || '-'} del historial de esta PC?`,
+    color: 'var(--rojo)',
+    btnTxt: 'Ocultar',
+    callback: () => {
+      if(!ocultarPresupuestoLocal(p)) return;
+      resolverHistorialNotificacion('presupuesto', p.id).catch(() => {});
+      _presupuestoDetalleActual = null;
+      cerrarDetalle();
+      toast('Presupuesto ocultado');
+      cargarPresupuestos();
+    }
+  });
+}
+
 function confirmarEliminar() {
+  if(_detalleTipoActual === 'presupuesto') {
+    confirmarEliminarPresupuesto(_presupuestoDetalleActual);
+    return;
+  }
   const r = _remitoDetalleActual;
   if(!r) return;
   pedirConfirm({

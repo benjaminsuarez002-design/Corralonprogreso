@@ -388,6 +388,7 @@ const compareSortState = { left: { col: -1, dir: 1 }, right: { col: -1, dir: 1 }
 let compareReturnFocus = null;
 let compareContextSide = '';
 let compareContextIndex = -1;
+let compareScrollSyncing = false;
 let undoStack = null;
 let editSnapshot = null;
 let editHadChanges = false;
@@ -2579,6 +2580,16 @@ document.getElementById('pasteCompareStockBtn').addEventListener('click', async 
 });
 document.getElementById('compareStockBackdrop').addEventListener('mousedown', (event) => {
   if (event.target === event.currentTarget) closeStockComparison();
+});
+document.querySelectorAll('.compare-side-scroll[data-compare-table-side]').forEach((source) => {
+  source.addEventListener('scroll', () => {
+    if (compareScrollSyncing) return;
+    const target = document.querySelector(`.compare-side-scroll[data-compare-table-side="${source.dataset.compareTableSide === 'left' ? 'right' : 'left'}"]`);
+    if (!target) return;
+    compareScrollSyncing = true;
+    target.scrollTop = source.scrollTop;
+    requestAnimationFrame(() => { compareScrollSyncing = false; });
+  }, { passive: true });
 });
 document.getElementById('compareStockTables').addEventListener('mousedown', (event) => {
   const previous = document.querySelector('[data-compare-editing="1"]');
