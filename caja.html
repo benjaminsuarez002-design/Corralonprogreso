@@ -2211,6 +2211,19 @@
       return '';
     }
 
+    function resolveCashMovementBranchIdFromNote(note = '') {
+      const source = normalizarTexto(note);
+      if (!source) return '';
+      const branches = cashMovementBranches();
+      if (source.includes('calle 5')) {
+        return branches.find((branch) => normalizarTexto(branch.label).includes('calle 5'))?.id || '';
+      }
+      if (source.includes('progreso')) {
+        return branches.find((branch) => normalizarTexto(branch.label).includes('progreso'))?.id || '';
+      }
+      return '';
+    }
+
     function cashMovementHour(value) {
       const text = String(value ?? '').trim();
       const match = text.match(/(?:T|\s|^)(\d{1,2}):(\d{2})/);
@@ -2222,13 +2235,14 @@
       const amount = Number(item.amount ?? item.importe ?? item.Importe ?? item['Ing(+)/Egr(-)'] ?? 0) || 0;
       const note = String(item.note ?? item.nota ?? item.Nota ?? '').trim();
       const branchManual = Boolean(item.branchManual ?? item.manualBranch ?? false);
+      const automaticBranchId = resolveCashMovementBranchIdFromNote(note);
       return {
         id,
         idRecibo: String(item.idRecibo ?? item.IDRecibo ?? '').trim(),
         amount,
         hour: cashMovementHour(item.hour ?? item.hora ?? item.Hora ?? ''),
         note,
-        branchId: branchManual ? resolveCashMovementBranchId({ ...item, nota: note }) : '',
+        branchId: branchManual ? resolveCashMovementBranchId({ ...item, nota: note }) : automaticBranchId,
         branchManual
       };
     }
