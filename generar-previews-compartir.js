@@ -68,7 +68,7 @@ async function readSupabaseCatalog() {
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/catalogo_articulos?select=*&activo=eq.true&order=codigo.asc`,
+      `${SUPABASE_URL}/rest/v1/catalogo_articulos_publico?select=*&activo=eq.true&order=codigo.asc`,
       {
         headers: {
           apikey: SUPABASE_ANON_KEY,
@@ -99,7 +99,20 @@ async function readSupabaseCatalog() {
     PrecioVta3: Number(row.precio_venta || 0),
     PorcGanMin: Number(row.porcentaje_ganancia_min || 0),
     stockSucursalProgresoRuta: row.stock_progreso,
-    stockSucursalCalle5Espana: row.stock_calle5
+    stockSucursalCalle5Espana: row.stock_calle5,
+    detalle: String(row.detalle || ''),
+    tagsOcultos: Array.isArray(row.tags_ocultos) ? row.tags_ocultos : [],
+    fotoUrl: String(row.foto_url || ''),
+    imagenes: Array.isArray(row.imagenes) ? row.imagenes : [],
+    oferta: Boolean(row.oferta),
+    ofertaPct: Number(row.oferta_pct || 0),
+    ofertaHasta: String(row.oferta_hasta || ''),
+    destacado: Boolean(row.destacado),
+    masVendido: Boolean(row.mas_vendido),
+    accesoRapido: Boolean(row.acceso_rapido),
+    ceramico: Boolean(row.ceramico),
+    ceramicoM2: Number(row.ceramico_m2 || 0),
+    ceramicoPlacas: Number(row.ceramico_placas || 0)
   }));
 }
 
@@ -172,14 +185,18 @@ function buildShareHtml(article) {
 }
 
 async function main() {
-  const [baseUrl, metaUrl] = await Promise.all([
-    getConfigUrl('listaActual'),
-    getConfigUrl('listaMetaArticulos')
-  ]);
-  const [baseRows, metaRows] = await Promise.all([
-    readSupabaseCatalog().then((rows) => rows.length ? rows : readJson(baseUrl)).catch(() => readJson(baseUrl)),
-    readJson(metaUrl)
-  ]);
+  let baseRows = [];
+  let metaRows = [];
+  try {
+    baseRows = await readSupabaseCatalog();
+  } catch (error) {
+    console.warn('Supabase no disponible; se usan los JSON historicos', error.message || error);
+    const [baseUrl, metaUrl] = await Promise.all([
+      getConfigUrl('listaActual'),
+      getConfigUrl('listaMetaArticulos')
+    ]);
+    [baseRows, metaRows] = await Promise.all([readJson(baseUrl), readJson(metaUrl)]);
+  }
   const metas = metaMap(metaRows);
   const articles = baseRows
     .map((row) => {

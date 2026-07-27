@@ -3854,7 +3854,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=20260727-catalogo-progressivo"></script>
+<script src="corralon-system.js?v=20260727-catalogo-directo5"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4024,6 +4024,8 @@ const CARRITO_STORAGE_KEY = MODO_A_DESCONTAR ? 'carrito_a_descontar' : 'carrito'
 let homeLandingConfig = { mode: 'auto', sections: { destacado: [], masVendido: [], oferta: [] } };
 let rankingVentasCargado = false;
 let rankingVentasPorCodigo = new Map();
+let rankingVentasInicializada = false;
+let rankingVentasFirma = '';
 let codigosMasVendidos = new Set();
 let homeLandingFingerprintActiva = '';
 const homeCarouselInstances = new Map();
@@ -4035,6 +4037,7 @@ let listaCacheFingerprintActiva = '';
 let listaCacheUrlActiva = '';
 let listaCacheServerSignatureActiva = '';
 let unsubscribeListaActual = null;
+let catalogoCambioVersionEscuchada = null;
 try {
   vistaActiva = localStorage.getItem('vistaArticulos') === 'lista' ? 'lista' : 'cards';
 } catch (e) {}
@@ -5807,7 +5810,19 @@ async function obtenerInfoListaDesdeSnapshot(listaSnap) {
   return infoListaDesdeSnapshots(listaSnap, metaSnap);
 }
 
-function aplicarDatosCatalogoServidor(data, serverInfo, { guardarCache = true } = {}) {
+function actualizarResumenCatalogoSinRender() {
+  const body = document.getElementById('scrollBody');
+  const estado = document.getElementById('estado');
+  if (!body?.classList.contains('home-mode') || !estado) return;
+  const total = estado.querySelector('.estado-home-copy b');
+  if (total) total.textContent = String(todosArticulos.length);
+  const indicadores = estado.querySelectorAll('.estado-home-meta span');
+  if (indicadores[0]) indicadores[0].textContent = `${todosArticulos.filter((articulo) => !!articulo.destacado).length} destacados`;
+  if (indicadores[1]) indicadores[1].textContent = `${todosArticulos.filter((articulo) => !!articulo.masVendido).length} más vendidos`;
+  if (indicadores[2]) indicadores[2].textContent = `${todosArticulos.filter((articulo) => articulo.ofertaVigente).length} en oferta`;
+}
+
+function aplicarDatosCatalogoServidor(data, serverInfo, { guardarCache = true, actualizarDom = true } = {}) {
   const loader = document.getElementById('loadingOverlay');
   if (!Array.isArray(data) || !data.length) return false;
   const serverSignature = firmaServidorLista(serverInfo);
@@ -5825,6 +5840,11 @@ function aplicarDatosCatalogoServidor(data, serverInfo, { guardarCache = true } 
   listaCacheServerSignatureActiva = serverSignature;
   const teniaListaRenderizada = todosArticulos.length > 0;
   todosArticulos = prepararArticulosParaVista(data);
+  if (!actualizarDom && teniaListaRenderizada) {
+    actualizarResumenCatalogoSinRender();
+    if (loader) loader.style.display = 'none';
+    return true;
+  }
   if (teniaListaRenderizada) {
     ejecutarSinAnimacionesSync(() => {
       actualizarVistaEtiqueta();
@@ -5882,7 +5902,7 @@ async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false, c
 
   complete
     .then((completeRows) => {
-      aplicarDatosCatalogoServidor(completeRows, serverInfo, { guardarCache: true });
+      aplicarDatosCatalogoServidor(completeRows, serverInfo, { guardarCache: true, actualizarDom: false });
     })
     .catch((error) => {
       console.warn('No se pudo completar el catalogo en segundo plano', error);
@@ -5892,24 +5912,33 @@ async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false, c
 async function iniciarCargaListaArticulos() {
   const loader = document.getElementById('loadingOverlay');
   if (loader) loader.style.display = 'flex';
-  const cargaPreparadaPromise = cargarListaConMetadatos('', null, { progressive: true });
-  const serverInfoPromise = obtenerInfoListaServidor();
   try {
-    const cargaPreparada = await cargaPreparadaPromise;
+    const cargaPreparada = await cargarListaConMetadatos('', null, { progressive: true });
     const initialRows = Array.isArray(cargaPreparada?.initialRows) ? cargaPreparada.initialRows : [];
+    const serverInfo = {
+      exists: true,
+      url: 'supabase://catalogo_articulos_publico',
+      listaSignature: `supabase-directo-v1|${Number(cargaPreparada?.version || 0)}`,
+      metaSignature: ''
+    };
     if (initialRows.length) {
-      aplicarDatosCatalogoServidor(initialRows, {
-        exists: true,
-        url: 'supabase://catalogo_articulos',
-        listaSignature: '',
-        metaSignature: ''
-      }, { guardarCache: false });
+      aplicarDatosCatalogoServidor(initialRows, serverInfo, { guardarCache: false });
     }
-    const serverInfo = await serverInfoPromise;
-    await aplicarListaServidor(serverInfo, {
-      desdeCachePermitida: !initialRows.length,
-      cargaPreparada
-    });
+    const complete = cargaPreparada?.complete;
+    if (!complete || typeof complete.then !== 'function') {
+      if (Array.isArray(cargaPreparada)) aplicarDatosCatalogoServidor(cargaPreparada, serverInfo, { guardarCache: true });
+      return;
+    }
+    if (!initialRows.length) {
+      const completeRows = await complete;
+      aplicarDatosCatalogoServidor(completeRows, serverInfo, { guardarCache: true });
+      return;
+    }
+    complete
+      .then((completeRows) => {
+        aplicarDatosCatalogoServidor(completeRows, serverInfo, { guardarCache: true, actualizarDom: false });
+      })
+      .catch((error) => console.warn('No se pudo completar el catalogo en segundo plano', error));
   } catch (error) {
     console.error(error);
     disconnectPublicListObserver();
@@ -8881,11 +8910,17 @@ onSnapshot(
       const codigo = String(data.codigo || '').trim();
       if (codigo) siguienteRanking.set(codigo, Number(data.agregados || 0));
     });
+    const siguienteFirma = JSON.stringify([...siguienteRanking.entries()]);
+    if (rankingVentasInicializada && siguienteFirma === rankingVentasFirma) return;
+    const esPrimeraCargaRanking = !rankingVentasInicializada;
+    rankingVentasInicializada = true;
+    rankingVentasFirma = siguienteFirma;
     rankingVentasPorCodigo = siguienteRanking;
     codigosMasVendidos = new Set(siguienteRanking.keys());
     rankingVentasCargado = true;
     if (!todosArticulos.length) return;
     todosArticulos = aplicarRankingVentasArticulos(todosArticulos);
+    if (esPrimeraCargaRanking) return;
     actualizarVistaEtiqueta();
     aplicarBusquedaActual();
   },
@@ -8894,19 +8929,30 @@ onSnapshot(
 
 function iniciarEscuchaListaArticulos() {
   if (unsubscribeListaActual) return;
-  unsubscribeListaActual = onSnapshot(doc(db, "config", "listaActual"), async snap => {
+  unsubscribeListaActual = onSnapshot(doc(db, 'config', 'catalogoArticulosCambios'), async snap => {
     if (snap.metadata?.fromCache) return;
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    const version = Number(data.version || 0);
+    const codigo = String(data.codigo || '').trim();
+    if (catalogoCambioVersionEscuchada === null) {
+      catalogoCambioVersionEscuchada = version;
+      return;
+    }
+    if (!codigo || !version || version === catalogoCambioVersionEscuchada) return;
+    catalogoCambioVersionEscuchada = version;
     try {
-      const serverInfo = await obtenerInfoListaDesdeSnapshot(snap);
-      await aplicarListaServidor(serverInfo, { desdeCachePermitida: false });
+      const updated = await window.CorralonSystem?.catalog?.fetchArticle?.(codigo);
+      if (!updated) return;
+      todosArticulos = todosArticulos.map((article) =>
+        obtenerIdArticulo(article) === codigo ? prepararArticulosParaVista([{ ...article, ...updated }])[0] : article
+      );
+      actualizarVistaEtiqueta();
+      aplicarBusquedaActual();
+      if (document.getElementById('productDetailModal')?.classList.contains('visible') && productDetailAdminCode === codigo) {
+        abrirDetalleProducto(codigo);
+      }
     } catch (e) {
       console.error(e);
-      disconnectPublicListObserver();
-      if (!todosArticulos.length) {
-        document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">Error cargando lista</p></div>`;
-      }
-      const loader = document.getElementById('loadingOverlay');
-      if (loader) loader.style.display = 'none';
     }
   });
 }
@@ -8914,6 +8960,15 @@ function iniciarEscuchaListaArticulos() {
 let articleEditorSyncQueue = Promise.resolve();
 window.CorralonSystem?.articleEditor?.configure({
   getArticles: () => todosArticulos,
+  getRubros: () => todosArticulos.map((article) => String(article.rubro || '').trim()).filter(Boolean),
+  searchArticles: ({ query, rubro }) => {
+    let results = procesarBusquedaArticulos(query).resultados;
+    const rubroNormalizado = normalizarTexto(rubro);
+    if (rubroNormalizado) {
+      results = results.filter((article) => normalizarTexto(article.rubro || '').includes(rubroNormalizado));
+    }
+    return results;
+  },
   save: (nextList, updated) => {
     todosArticulos = prepararArticulosParaVista(nextList);
     actualizarVistaEtiqueta();
@@ -8921,24 +8976,30 @@ window.CorralonSystem?.articleEditor?.configure({
     if (document.getElementById('productDetailModal')?.classList.contains('visible')) {
       abrirDetalleProducto(obtenerIdArticulo(updated));
     }
-    const syncSnapshot = nextList.map((article) => ({
-      ...article,
-      imagenes: Array.isArray(article.imagenes) ? [...article.imagenes] : article.imagenes,
-      tagsOcultos: Array.isArray(article.tagsOcultos) ? [...article.tagsOcultos] : article.tagsOcultos
-    }));
+    const syncSnapshot = {
+      ...updated,
+      imagenes: Array.isArray(updated?.imagenes) ? [...updated.imagenes] : updated?.imagenes,
+      tagsOcultos: Array.isArray(updated?.tagsOcultos) ? [...updated.tagsOcultos] : updated?.tagsOcultos
+    };
     articleEditorSyncQueue = articleEditorSyncQueue
       .catch(() => {})
       .then(async () => {
         window.dispatchEvent(new CustomEvent('corralon:article-sync-start'));
-        const { baseUrl, metaUrl } = await window.CorralonSystem.articleEditor.publishCatalog(syncSnapshot);
-        await Promise.all([
-          setDoc(doc(db, 'config', ARTICULOS_META_DOC_ID), { url: metaUrl, updatedAt: Date.now() }),
-          setDoc(doc(db, 'config', 'listaActual'), { url: baseUrl, updatedAt: Date.now() })
-        ]);
+        const result = await window.CorralonSystem.catalog.saveArticleEdit(syncSnapshot);
+        if (result?.article) {
+          const code = obtenerIdArticulo(result.article);
+          todosArticulos = todosArticulos.map((article) => obtenerIdArticulo(article) === code ? { ...article, ...result.article } : article);
+        }
+        await setDoc(doc(db, 'config', 'catalogoArticulosCambios'), {
+          codigo: obtenerIdArticulo(updated),
+          version: Number(result?.version || Date.now()),
+          updatedAt: serverTimestamp()
+        }, { merge: true }).catch(() => {});
         window.dispatchEvent(new CustomEvent('corralon:article-sync-success'));
       })
       .catch((error) => {
         console.error('No se pudo sincronizar el artículo en segundo plano', error);
+        if (error?.code === 'editor_session_required') alert(error.message);
         window.dispatchEvent(new CustomEvent('corralon:article-sync-error', { detail: { error } }));
       });
   }

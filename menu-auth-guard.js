@@ -5,6 +5,8 @@
   const ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
   const USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
   const USERS_COLLECTION = 'menuUsuarios';
+  const CATALOG_EDITOR_LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
+  const CATALOG_EDITOR_SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
   const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'carga_stock', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const firebaseConfig = {
@@ -58,7 +60,9 @@
     localStorage.removeItem(KEEP_LOGIN_KEY);
     localStorage.removeItem(ACTIVE_USER_KEY);
     localStorage.removeItem(ACTIVE_USER_SNAPSHOT_KEY);
+    localStorage.removeItem(CATALOG_EDITOR_LOCAL_KEY);
     try { sessionStorage.removeItem(ACTIVE_USER_SESSION_KEY); } catch (_) {}
+    try { sessionStorage.removeItem(CATALOG_EDITOR_SESSION_KEY); } catch (_) {}
   }
 
   function normalizeUser(raw = {}) {

@@ -1094,21 +1094,15 @@ document.addEventListener('keydown', (event) => {
 window.addEventListener('focus', intentarPegarAutomatico, { once: true });
 window.addEventListener('DOMContentLoaded', intentarPegarAutomatico);
 
-onSnapshot(doc(db, 'config', 'listaActual'), async (snap) => {
+async function cargarCatalogoGarantias() {
   listaCargada = false;
   articuloSeleccionado = null;
   actualizarBoton();
-  if (!snap.exists()) {
-    todosArticulos = [];
-    els.estado.className = 'status error';
-    els.estado.textContent = 'No hay lista publicada.';
-    renderVacio('No hay lista publicada para buscar articulos.');
-    return;
-  }
   try {
     els.estado.className = 'status';
     els.estado.textContent = 'Cargando lista de precios...';
-    const data = await cargarListaConMetadatos(snap.data().url);
+    const data = await cargarListaConMetadatos('');
+    if (!Array.isArray(data) || !data.length) throw new Error('El catalogo esta vacio');
     todosArticulos = data.map(normalizarArticulo);
     listaCargada = true;
     aplicarBusqueda();
@@ -1120,11 +1114,9 @@ onSnapshot(doc(db, 'config', 'listaActual'), async (snap) => {
     els.estado.textContent = 'Error cargando la lista de precios.';
     renderVacio('No se pudo cargar la lista.');
   }
-}, (error) => {
-  console.error(error);
-  els.estado.className = 'status error';
-  els.estado.textContent = 'Error conectando con Firebase.';
-});
+}
+
+cargarCatalogoGarantias();
 </script>
 </body>
 </html>

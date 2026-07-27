@@ -1,4 +1,5 @@
 (function () {
+  try {
   const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
   const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
   const TABLES = {
@@ -8,7 +9,9 @@
     priceListMeta: 'lista_precios_meta',
     priceListJsonProviders: 'listas_json_proveedores',
     catalog: 'catalogo_articulos',
-    catalogMeta: 'catalogo_articulos_meta'
+    catalogMeta: 'catalogo_articulos_meta',
+    catalogPublic: 'catalogo_articulos_publico',
+    catalogEdits: 'catalogo_articulos_edicion'
   };
   const PROVIDERS_DB = 'proveedores_cache_v1';
   const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
@@ -37,6 +40,130 @@
   let articleEditorApplyFields = new Set(['etiquetas']);
   let articleEditorFunctionsBound = false;
   let articleEditorBasePrice = 0;
+  let articleEditorTargetRubroOpen = false;
+  let articleEditorTargetRubroIndex = -1;
+  let articleSyncIndicatorHideTimer = null;
+
+  function ensureArticleSyncIndicator() {
+    let indicator = document.getElementById('corralonArticleSyncIndicator');
+    if (indicator) return indicator;
+    const style = document.createElement('style');
+    style.id = 'corralonArticleSyncIndicatorStyle';
+    style.textContent = `
+      #corralonArticleSyncIndicator {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 2147483646;
+        width: min(330px, calc(100vw - 40px));
+        padding: 12px 14px 13px;
+        border: 1px solid #c9c9c9;
+        border-radius: 13px;
+        background: rgba(255,255,255,.98);
+        color: #171717;
+        box-shadow: 0 12px 32px rgba(0,0,0,.22);
+        font: 700 13px/1.25 Arial, sans-serif;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(12px);
+        transition: opacity .18s ease, transform .18s ease, visibility .18s ease;
+        pointer-events: none;
+      }
+      #corralonArticleSyncIndicator.is-visible {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+      #corralonArticleSyncIndicator .corralon-sync-copy {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 9px;
+      }
+      #corralonArticleSyncIndicator .corralon-sync-dot {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 9px;
+        border-radius: 50%;
+        background: #f20d18;
+        box-shadow: 0 0 0 4px rgba(242,13,24,.12);
+      }
+      #corralonArticleSyncIndicator .corralon-sync-track {
+        height: 5px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e4e4e4;
+      }
+      #corralonArticleSyncIndicator .corralon-sync-fill {
+        width: 42%;
+        height: 100%;
+        border-radius: inherit;
+        background: #f20d18;
+        transform: translateX(-120%);
+      }
+      #corralonArticleSyncIndicator.is-syncing .corralon-sync-fill {
+        animation: corralonArticleSyncProgress 1.05s ease-in-out infinite;
+      }
+      #corralonArticleSyncIndicator.is-success .corralon-sync-dot,
+      #corralonArticleSyncIndicator.is-success .corralon-sync-fill {
+        background: #159447;
+      }
+      #corralonArticleSyncIndicator.is-success .corralon-sync-dot {
+        box-shadow: 0 0 0 4px rgba(21,148,71,.12);
+      }
+      #corralonArticleSyncIndicator.is-success .corralon-sync-fill {
+        width: 100%;
+        transform: translateX(0);
+      }
+      #corralonArticleSyncIndicator.is-error .corralon-sync-fill {
+        width: 100%;
+        transform: translateX(0);
+      }
+      @keyframes corralonArticleSyncProgress {
+        0% { transform: translateX(-120%); }
+        55% { transform: translateX(105%); }
+        100% { transform: translateX(245%); }
+      }
+    `;
+    document.head.appendChild(style);
+    indicator = document.createElement('div');
+    indicator.id = 'corralonArticleSyncIndicator';
+    indicator.setAttribute('role', 'status');
+    indicator.setAttribute('aria-live', 'polite');
+    indicator.innerHTML = `
+      <div class="corralon-sync-copy">
+        <span class="corralon-sync-dot"></span>
+        <span data-corralon-sync-text>Sincronizando en segundo plano…</span>
+      </div>
+      <div class="corralon-sync-track"><div class="corralon-sync-fill"></div></div>
+    `;
+    document.body.appendChild(indicator);
+    return indicator;
+  }
+
+  function setArticleSyncIndicator(state, message) {
+    const indicator = ensureArticleSyncIndicator();
+    const text = indicator.querySelector('[data-corralon-sync-text]');
+    clearTimeout(articleSyncIndicatorHideTimer);
+    indicator.classList.remove('is-syncing', 'is-success', 'is-error');
+    indicator.classList.add('is-visible', `is-${state}`);
+    if (text) text.textContent = message;
+    if (state === 'success' || state === 'error') {
+      articleSyncIndicatorHideTimer = setTimeout(() => {
+        indicator.classList.remove('is-visible');
+      }, state === 'success' ? 1700 : 5000);
+    }
+  }
+
+  window.addEventListener('corralon:article-sync-start', () => {
+    setArticleSyncIndicator('syncing', 'Sincronizando en segundo plano…');
+  });
+  window.addEventListener('corralon:article-sync-success', () => {
+    setArticleSyncIndicator('success', 'Cambios sincronizados');
+  });
+  window.addEventListener('corralon:article-sync-error', () => {
+    setArticleSyncIndicator('error', 'No se pudo sincronizar. Los cambios siguen visibles localmente.');
+  });
 
   function articleCode(article = {}) {
     return String(article.codigo ?? article.idart ?? article.idArt ?? '').trim();
@@ -226,7 +353,7 @@
     const fn = window.CorralonFunciones;
     fn?.bindLinearNavigation?.({
       root: articleEditorHost,
-      selector: '.corralon-article-editor-card [data-editor-field],.corralon-article-editor-card [data-editor-chip],.corralon-article-editor-card [data-editor-images-open],.corralon-article-editor-card [data-editor-apply-open],.corralon-article-editor-card [data-editor-save],[data-editor-target-search],[data-editor-target-code],[data-editor-apply-field],[data-editor-apply-confirm]',
+      selector: '.corralon-article-editor-card [data-editor-field],.corralon-article-editor-card [data-editor-chip],.corralon-article-editor-card [data-editor-images-open],.corralon-article-editor-card [data-editor-apply-open],.corralon-article-editor-card [data-editor-save],[data-editor-target-search],[data-editor-target-rubro],[data-editor-target-code],[data-editor-apply-field],[data-editor-apply-confirm]',
       selectOnFocus: true,
       navigateLeftRight: true,
       smartCaret: true,
@@ -270,14 +397,26 @@
 
   function renderArticleEditorTargets() {
     if (!articleEditorHost) return;
-    const query = String(articleEditorHost.querySelector('[data-editor-target-search]')?.value || '').trim().toLowerCase();
+    const query = String(articleEditorHost.querySelector('[data-editor-target-search]')?.value || '').trim();
+    const rubro = String(articleEditorHost.querySelector('[data-editor-target-rubro]')?.value || '').trim();
     const list = articleEditorAdapter.getArticles?.() || [];
     const targetList = articleEditorHost.querySelector('[data-editor-target-list]');
-    const filtered = list.filter((item) => {
+    const searched = typeof articleEditorAdapter.searchArticles === 'function'
+      ? articleEditorAdapter.searchArticles({ query, rubro, articles: list })
+      : list.filter((item) => {
+        const searchable = norm([
+          articleCode(item),
+          item.nombre,
+          item.descripcion,
+          item.detalle,
+          item.rubro,
+          articleTags(item.tagsOcultos ?? item.tagsBusqueda ?? item.tags).join(' ')
+        ].join(' '));
+        return (!query || searchable.includes(norm(query))) && (!rubro || norm(item.rubro).includes(norm(rubro)));
+      });
+    const filtered = (Array.isArray(searched) ? searched : []).filter((item) => {
       const code = articleCode(item);
-      if (!code || code === articleEditorOriginalCode) return false;
-      const name = String(item.nombre ?? item.descripcion ?? '');
-      return !query || `${code} ${name}`.toLowerCase().includes(query);
+      return code && code !== articleEditorOriginalCode;
     }).slice(0, 250);
     targetList.innerHTML = filtered.length
       ? filtered.map((item) => {
@@ -292,6 +431,48 @@
     updateArticleEditorTargetCount();
   }
 
+  function articleEditorTargetRubros() {
+    const values = typeof articleEditorAdapter.getRubros === 'function'
+      ? articleEditorAdapter.getRubros()
+      : (articleEditorAdapter.getArticles?.() || []).map((item) => String(item.rubro || '').trim());
+    return [...new Set((Array.isArray(values) ? values : []).map((item) => String(item || '').trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  }
+
+  function closeArticleEditorRubroOptions() {
+    articleEditorTargetRubroOpen = false;
+    articleEditorTargetRubroIndex = -1;
+    articleEditorHost?.querySelector('[data-editor-rubro-options]')?.classList.remove('is-open');
+    articleEditorHost?.querySelector('[data-editor-target-rubro-toggle]')?.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderArticleEditorRubroOptions(open = articleEditorTargetRubroOpen) {
+    if (!articleEditorHost) return;
+    const input = articleEditorHost.querySelector('[data-editor-target-rubro]');
+    const options = articleEditorHost.querySelector('[data-editor-rubro-options]');
+    if (!input || !options) return;
+    const query = norm(input.value);
+    const rubros = articleEditorTargetRubros().filter((item) => !query || norm(item).includes(query));
+    const visible = [{ value: '', label: 'Todos los rubros' }, ...rubros.map((item) => ({ value: item, label: item }))];
+    articleEditorTargetRubroIndex = Math.min(articleEditorTargetRubroIndex, visible.length - 1);
+    options.innerHTML = visible.map((item, index) => `
+      <button type="button" class="${index === articleEditorTargetRubroIndex ? 'is-active' : ''}" data-editor-rubro-option="${String(item.value).replace(/"/g, '&quot;')}">${item.label}</button>
+    `).join('');
+    articleEditorTargetRubroOpen = !!open;
+    options.classList.toggle('is-open', articleEditorTargetRubroOpen);
+    articleEditorHost.querySelector('[data-editor-target-rubro-toggle]')?.setAttribute('aria-expanded', String(articleEditorTargetRubroOpen));
+  }
+
+  function selectArticleEditorRubro(value) {
+    const input = articleEditorHost?.querySelector('[data-editor-target-rubro]');
+    if (!input) return;
+    input.value = String(value || '');
+    closeArticleEditorRubroOptions();
+    renderArticleEditorTargets();
+    input.focus();
+    input.select();
+  }
+
   function updateArticleEditorTargetCount() {
     const mainButton = articleEditorHost?.querySelector('[data-editor-apply-open]');
     if (mainButton) mainButton.textContent = articleEditorApplyTargets.size
@@ -302,6 +483,8 @@
   function openArticleEditorTargets() {
     if (!articleEditorHost) return;
     articleEditorHost.querySelector('[data-editor-target-search]').value = '';
+    articleEditorHost.querySelector('[data-editor-target-rubro]').value = '';
+    closeArticleEditorRubroOptions();
     renderArticleEditorTargets();
     articleEditorHost.querySelector('[data-editor-apply-dialog]').classList.add('is-open');
     setTimeout(() => articleEditorHost.querySelector('[data-editor-target-search]')?.focus(), 0);
@@ -380,12 +563,24 @@
       .corralon-editor-image-item{display:grid;grid-template-columns:64px 1fr 36px;align-items:center;gap:10px;border:1px solid #ddd;border-radius:11px;padding:7px;background:#fff}
       .corralon-editor-image-item.is-current{border-color:#777;background:#eee}.corralon-editor-image-item img{width:64px;height:54px;object-fit:contain}.corralon-editor-image-item small{display:block;color:#777;margin-top:3px}.corralon-editor-image-item button{border:0;background:#ef111b;color:#fff;border-radius:8px;height:34px;font-weight:900;cursor:pointer}
       .corralon-editor-upload{display:block;margin-top:10px;border:2px dashed #ccc;border-radius:12px;padding:16px;text-align:center;cursor:pointer}.corralon-editor-upload input{display:none}
-      .corralon-editor-target-search{width:100%;box-sizing:border-box;border:1px solid #bbb;border-radius:11px;padding:11px 13px;margin-bottom:10px}
+      .corralon-editor-target-filters{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(210px,.8fr);gap:9px;margin-bottom:10px}
+      .corralon-editor-target-filter{display:grid;gap:5px;min-width:0;position:relative}
+      .corralon-editor-target-filter>label{font:800 10px/1 Arial,sans-serif;letter-spacing:.65px;text-transform:uppercase;color:#666}
+      .corralon-editor-target-search,.corralon-editor-target-rubro{width:100%;height:42px;box-sizing:border-box;border:1px solid #aaa;border-radius:11px;background:#fff;color:#171717;padding:10px 13px;font:14px/1 Arial,sans-serif;outline:none}
+      .corralon-editor-target-search:focus,.corralon-editor-target-rubro:focus{border-color:#666;box-shadow:0 0 0 2px rgba(0,0,0,.08)}
+      .corralon-editor-rubro-combo{position:relative}
+      .corralon-editor-target-rubro{padding-right:42px}
+      .corralon-editor-rubro-toggle{position:absolute;right:5px;top:5px;width:32px;height:32px;border:0;border-radius:8px;background:#eee;color:#222;font-size:15px;cursor:pointer;opacity:0;transition:opacity .12s}
+      .corralon-editor-rubro-combo:hover .corralon-editor-rubro-toggle,.corralon-editor-rubro-combo:focus-within .corralon-editor-rubro-toggle{opacity:1}
+      .corralon-editor-rubro-options{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);display:none;max-height:230px;overflow:auto;border:1px solid #aaa;border-radius:11px;background:#fff;padding:5px;box-shadow:0 12px 28px rgba(0,0,0,.22)}
+      .corralon-editor-rubro-options.is-open{display:grid}
+      .corralon-editor-rubro-options button{border:0;border-radius:8px;background:#fff;color:#222;padding:9px 10px;text-align:left;font-weight:700;cursor:pointer}
+      .corralon-editor-rubro-options button:hover,.corralon-editor-rubro-options button.is-active{background:#dededb}
       .corralon-editor-target-list label{display:grid;grid-template-columns:24px 110px 1fr;align-items:center;gap:8px;border:1px solid #ddd;border-radius:9px;padding:8px;cursor:pointer}
       .corralon-editor-target-list label:hover{background:#eee}.corralon-editor-target-fields{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.corralon-editor-target-fields button{border:1px solid #bbb;border-radius:999px;background:#fff;padding:8px 12px;font-weight:800;cursor:pointer}.corralon-editor-target-fields button.is-active{background:#ef111b;border-color:#ef111b;color:#fff}
       .corralon-editor-subactions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.corralon-editor-subactions button{min-height:42px;border:1px solid #bbb;border-radius:10px;background:#fff;padding:0 18px;font-weight:900;cursor:pointer}.corralon-editor-subactions button:last-child{background:#ef111b;border-color:#ef111b;color:#fff}
       .corralon-editor-empty{padding:22px;text-align:center;color:#777}
-      @media(max-width:560px){.corralon-article-editor-host{padding:0}.corralon-article-editor-card{width:100%;max-height:100dvh;border-radius:0;padding:18px}.corralon-article-editor-head{margin:-18px -18px 14px;top:-18px;padding:16px 18px 13px}.corralon-article-editor-info{grid-template-columns:90px 1fr}.corralon-article-editor-info-price{grid-row:auto;grid-column:1/-1;align-items:flex-start;text-align:left;padding-top:10px;border-top:1px solid #ddd}.corralon-article-editor-main-grid,.corralon-article-editor-extras{grid-template-columns:1fr}.corralon-article-editor-actions{margin:0 -18px -18px;padding:12px 18px 16px;grid-template-columns:1fr}.corralon-article-editor-actions button{min-height:42px}}
+      @media(max-width:560px){.corralon-article-editor-host{padding:0}.corralon-article-editor-card{width:100%;max-height:100dvh;border-radius:0;padding:18px}.corralon-article-editor-head{margin:-18px -18px 14px;top:-18px;padding:16px 18px 13px}.corralon-article-editor-info{grid-template-columns:90px 1fr}.corralon-article-editor-info-price{grid-row:auto;grid-column:1/-1;align-items:flex-start;text-align:left;padding-top:10px;border-top:1px solid #ddd}.corralon-article-editor-main-grid,.corralon-article-editor-extras,.corralon-editor-target-filters{grid-template-columns:1fr}.corralon-article-editor-actions{margin:0 -18px -18px;padding:12px 18px 16px;grid-template-columns:1fr}.corralon-article-editor-actions button{min-height:42px}}
     `;
     document.head.appendChild(style);
     articleEditorHost = document.createElement('div');
@@ -439,7 +634,20 @@
       </div></div>
       <div class="corralon-editor-subdialog" data-editor-apply-dialog><div class="corralon-editor-subcard">
         <div class="corralon-editor-subhead"><b>Aplicar cambios también a</b><button type="button" data-editor-apply-close>×</button></div>
-        <input class="corralon-editor-target-search" type="text" data-editor-target-search placeholder="Buscar artículo por código o nombre">
+        <div class="corralon-editor-target-filters">
+          <div class="corralon-editor-target-filter">
+            <label for="corralonEditorTargetSearch">Buscar artículo</label>
+            <input id="corralonEditorTargetSearch" class="corralon-editor-target-search" type="text" data-editor-target-search placeholder="Nombre, código, detalle, tags o filtros">
+          </div>
+          <div class="corralon-editor-target-filter">
+            <label for="corralonEditorTargetRubro">Rubro</label>
+            <div class="corralon-editor-rubro-combo">
+              <input id="corralonEditorTargetRubro" class="corralon-editor-target-rubro" type="text" data-editor-target-rubro autocomplete="off" placeholder="Todos los rubros">
+              <button class="corralon-editor-rubro-toggle" type="button" data-editor-target-rubro-toggle aria-label="Mostrar rubros" aria-expanded="false">▼</button>
+              <div class="corralon-editor-rubro-options" data-editor-rubro-options></div>
+            </div>
+          </div>
+        </div>
         <div class="corralon-editor-target-fields"><button type="button" data-editor-apply-field="etiquetas">Etiquetas</button><button type="button" data-editor-apply-field="detalle">Detalle</button><button type="button" data-editor-apply-field="tags">Tags</button><button type="button" data-editor-apply-field="foto">Fotos</button></div>
         <div class="corralon-editor-target-list" data-editor-target-list></div>
         <div class="corralon-editor-subactions"><button type="button" data-editor-apply-close>Cancelar</button><button type="button" data-editor-apply-confirm>Confirmar selección</button></div>
@@ -452,6 +660,7 @@
         articleEditorHost.querySelector('[data-editor-images-open]')?.focus();
       }
       if (event.target.matches?.('[data-editor-apply-dialog]')) {
+        closeArticleEditorRubroOptions();
         event.target.classList.remove('is-open');
         articleEditorHost.querySelector('[data-editor-apply-open]')?.focus();
       }
@@ -488,9 +697,17 @@
       }
       if (event.target.closest('[data-editor-apply-open]')) openArticleEditorTargets();
       if (event.target.closest('[data-editor-apply-close]')) {
+        closeArticleEditorRubroOptions();
         articleEditorHost.querySelector('[data-editor-apply-dialog]').classList.remove('is-open');
         articleEditorHost.querySelector('[data-editor-apply-open]')?.focus();
       }
+      if (event.target.closest('[data-editor-target-rubro-toggle]')) {
+        renderArticleEditorRubroOptions(!articleEditorTargetRubroOpen);
+        articleEditorHost.querySelector('[data-editor-target-rubro]')?.focus();
+      }
+      const rubroOption = event.target.closest('[data-editor-rubro-option]');
+      if (rubroOption) selectArticleEditorRubro(rubroOption.dataset.editorRubroOption);
+      if (!event.target.closest('.corralon-editor-rubro-combo')) closeArticleEditorRubroOptions();
       const applyField = event.target.closest('[data-editor-apply-field]');
       if (applyField) {
         const key = applyField.dataset.editorApplyField;
@@ -528,6 +745,49 @@
       if (item) moveArticleEditorImage(Number(event.dataTransfer.getData('text/plain')), Number(item.dataset.editorImageIndex));
     });
     articleEditorHost.querySelector('[data-editor-target-search]').addEventListener('input', renderArticleEditorTargets);
+    const targetRubro = articleEditorHost.querySelector('[data-editor-target-rubro]');
+    targetRubro.addEventListener('input', () => {
+      articleEditorTargetRubroIndex = -1;
+      renderArticleEditorRubroOptions(true);
+      renderArticleEditorTargets();
+    });
+    targetRubro.addEventListener('keydown', (event) => {
+      if (event.key === 'F4') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        renderArticleEditorRubroOptions(!articleEditorTargetRubroOpen);
+        return;
+      }
+      if (event.key === 'Escape' && articleEditorTargetRubroOpen) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeArticleEditorRubroOptions();
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!articleEditorTargetRubroOpen) renderArticleEditorRubroOptions(true);
+        const options = [...articleEditorHost.querySelectorAll('[data-editor-rubro-option]')];
+        if (!options.length) return;
+        articleEditorTargetRubroIndex = event.key === 'ArrowDown'
+          ? Math.min(options.length - 1, articleEditorTargetRubroIndex + 1)
+          : Math.max(0, articleEditorTargetRubroIndex < 0 ? options.length - 1 : articleEditorTargetRubroIndex - 1);
+        renderArticleEditorRubroOptions(true);
+        articleEditorHost.querySelector('[data-editor-rubro-option].is-active')?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (event.key === 'Enter' && articleEditorTargetRubroOpen) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const option = articleEditorHost.querySelectorAll('[data-editor-rubro-option]')[articleEditorTargetRubroIndex];
+        if (option) selectArticleEditorRubro(option.dataset.editorRubroOption);
+        else closeArticleEditorRubroOptions();
+      }
+    });
+    targetRubro.addEventListener('blur', () => setTimeout(() => {
+      if (!articleEditorHost?.querySelector('.corralon-editor-rubro-combo')?.contains(document.activeElement)) closeArticleEditorRubroOptions();
+    }, 0));
     articleEditorHost.querySelector('[data-editor-target-list]').addEventListener('change', (event) => {
       const input = event.target.closest('[data-editor-target-code]');
       if (!input) return;
@@ -759,6 +1019,7 @@
       event.stopImmediatePropagation();
       const subdialog = articleEditorHost.querySelector('.corralon-editor-subdialog.is-open');
       if (subdialog) {
+        closeArticleEditorRubroOptions();
         subdialog.classList.remove('is-open');
         articleEditorHost.querySelector(subdialog.matches('[data-editor-images-dialog]') ? '[data-editor-images-open]' : '[data-editor-apply-open]')?.focus();
         return;
@@ -1669,6 +1930,104 @@
     setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
   }
 
+  const CATALOG_EDITOR_SESSION = (() => {
+    const LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
+    const SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
+    const SESSION_URL = `${SUPABASE_URL}/functions/v1/catalogo-editor-sesion`;
+    const EDIT_URL = `${SUPABASE_URL}/functions/v1/editar-catalogo-articulo`;
+
+    function readStorage(storage, key) {
+      try {
+        const value = JSON.parse(storage.getItem(key) || 'null');
+        if (!value?.token || Number(value.expiresAt || 0) <= Date.now()) {
+          storage.removeItem(key);
+          return null;
+        }
+        return value;
+      } catch (_) {
+        try { storage.removeItem(key); } catch (_) {}
+        return null;
+      }
+    }
+
+    function current() {
+      return readStorage(sessionStorage, SESSION_KEY) || readStorage(localStorage, LOCAL_KEY);
+    }
+
+    function store(payload, persistent) {
+      clear();
+      /*
+       * El menú y las páginas de trabajo viven en pestañas distintas.
+       * sessionStorage no se comparte con pestañas que ya estaban abiertas.
+       * La duración real sigue limitada por expiresAt en el servidor.
+       */
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(payload));
+      return payload;
+    }
+
+    function clear() {
+      try { localStorage.removeItem(LOCAL_KEY); } catch (_) {}
+      try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+    }
+
+    async function login(userId, password, persistent = false) {
+      const response = await fetch(SESSION_URL, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'login', userId, password, persistent: Boolean(persistent) })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.token) throw new Error(payload?.error || `No se pudo habilitar la edición (${response.status})`);
+      return store(payload, Boolean(persistent));
+    }
+
+    async function logout() {
+      const active = current();
+      clear();
+      if (!active?.token) return;
+      fetch(SESSION_URL, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${active.token}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'logout' })
+      }).catch(() => {});
+    }
+
+    async function saveArticle(article) {
+      const active = current();
+      if (!active?.token) {
+        const error = new Error('No hay una sesión de edición activa. Volvé al Menú principal, actualizalo e iniciá sesión.');
+        error.code = 'editor_session_required';
+        throw error;
+      }
+      const response = await fetch(EDIT_URL, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${active.token}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ article })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) clear();
+      if (!response.ok) {
+        const error = new Error(payload?.error || `No se pudo guardar el artículo (${response.status})`);
+        error.code = payload?.code || (response.status === 401 ? 'editor_session_required' : 'editor_save_failed');
+        throw error;
+      }
+      return payload;
+    }
+
+    return { current, login, logout, clear, saveArticle };
+  })();
+
   const CATALOG = (() => {
     const DB_NAME = 'corralon_catalogo_articulos_v1';
     const DB_VERSION = 1;
@@ -1681,8 +2040,12 @@
       'codigo', 'codigo_proveedor', 'id_proveedor', 'nombre', 'rubro',
       'precio_compra_sin_descuento', 'precio_compra_con_impuestos',
       'porcentaje_ganancia_min', 'precio_venta', 'stock',
-      'stock_progreso', 'stock_calle5',
-      'sync_version', 'source_file', 'updated_at'
+      'stock_progreso', 'stock_calle5', 'source_rows',
+      'sync_version', 'source_file', 'activo', 'updated_at',
+      'detalle', 'tags_ocultos', 'foto_url', 'imagenes',
+      'oferta', 'oferta_pct', 'oferta_hasta', 'destacado',
+      'mas_vendido', 'acceso_rapido', 'ceramico',
+      'ceramico_m2', 'ceramico_placas', 'editado_por', 'edicion_updated_at'
     ].join(',');
     let activeFullLoad = null;
     let memoryCache = null;
@@ -1784,6 +2147,30 @@
         stock: row.stock === null || row.stock === undefined ? '' : Number(row.stock),
         stockSucursalProgresoRuta: progreso,
         stockSucursalCalle5Espana: calle5,
+        detalle: String(row.detalle || ''),
+        tagsOcultos: Array.isArray(row.tags_ocultos) ? row.tags_ocultos : [],
+        tags_ocultos: Array.isArray(row.tags_ocultos) ? row.tags_ocultos : [],
+        fotoUrl: String(row.foto_url || ''),
+        foto_url: String(row.foto_url || ''),
+        imagen: String(row.foto_url || ''),
+        imagenes: Array.isArray(row.imagenes) ? row.imagenes : [],
+        oferta: Boolean(row.oferta),
+        ofertaPct: Number(row.oferta_pct || 0),
+        oferta_pct: Number(row.oferta_pct || 0),
+        ofertaHasta: String(row.oferta_hasta || ''),
+        oferta_hasta: String(row.oferta_hasta || ''),
+        destacado: Boolean(row.destacado),
+        masVendido: Boolean(row.mas_vendido),
+        mas_vendido: Boolean(row.mas_vendido),
+        accesoRapido: Boolean(row.acceso_rapido),
+        acceso_rapido: Boolean(row.acceso_rapido),
+        ceramico: Boolean(row.ceramico),
+        ceramicoM2: Number(row.ceramico_m2 || 0),
+        ceramico_m2: Number(row.ceramico_m2 || 0),
+        ceramicoPlacas: Number(row.ceramico_placas || 0),
+        ceramico_placas: Number(row.ceramico_placas || 0),
+        editadoPor: String(row.editado_por || ''),
+        edicionUpdatedAt: row.edicion_updated_at || '',
         sourceRows: Array.isArray(row.source_rows) ? row.source_rows : [],
         source_rows: Array.isArray(row.source_rows) ? row.source_rows : [],
         syncVersion: Number(row.sync_version || 0),
@@ -1811,7 +2198,7 @@
     }
 
     function supabaseCatalogQuery(extra = '') {
-      return `${SUPABASE_URL}/rest/v1/${TABLES.catalog}?select=${encodeURIComponent(SELECT_COLUMNS)}&activo=eq.true${extra}&order=codigo.asc`;
+      return `${SUPABASE_URL}/rest/v1/${TABLES.catalogPublic}?select=${encodeURIComponent(SELECT_COLUMNS)}&activo=eq.true${extra}&order=codigo.asc`;
     }
 
     async function fetchSupabaseRange(from = 0, to = from + PAGE_SIZE - 1) {
@@ -1854,6 +2241,18 @@
       priorityRows.forEach((row) => merged.set(String(row?.codigo || '').trim(), row));
       firstRows.forEach((row) => merged.set(String(row?.codigo || '').trim(), row));
       return [...merged.values()].slice(0, safeLimit);
+    }
+
+    async function fetchSupabasePriorityCodes() {
+      const select = encodeURIComponent('codigo');
+      const filter = encodeURIComponent('(oferta.eq.true,destacado.eq.true,mas_vendido.eq.true,acceso_rapido.eq.true)');
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.catalogEdits}?select=${select}&or=${filter}&limit=240`, {
+        headers: headers(),
+        cache: 'no-store'
+      });
+      if (!response.ok) return [];
+      const rows = await response.json();
+      return Array.isArray(rows) ? rows.map((row) => String(row?.codigo || '').trim()).filter(Boolean) : [];
     }
 
     async function fetchSupabaseRows() {
@@ -1909,22 +2308,18 @@
       let metaRow = null;
       let metadataUrl = '';
       try {
-        [metaRow, metadataUrl] = await Promise.all([
-          fetchMetaRow(),
-          getConfigUrl('listaMetaArticulos').catch(() => '')
-        ]);
+        metaRow = await fetchMetaRow();
       } catch (error) {
         console.warn('No se pudo consultar la version del catalogo', error);
       }
       const version = Number(metaRow?.version || 0);
-      if (!metadataUrl) metadataUrl = String(cached?.metadataUrl || '');
       return {
         cached,
         metaRow,
         metadataUrl,
         version,
         versionKnown: Boolean(metaRow),
-        signature: `${version}|${metadataUrl}`
+        signature: `supabase-directo-v1|${version}`
       };
     }
 
@@ -1932,17 +2327,11 @@
       const allowFallback = options.fallback !== false;
       const loadKey = `${context.signature}|${allowFallback ? 'fallback' : 'direct'}`;
       if (activeFullLoad?.key === loadKey) return activeFullLoad.promise;
-      const metadataPromise = options.metadataPromise || (
-        context.metadataUrl ? fetchJson(context.metadataUrl).catch(() => []) : Promise.resolve([])
-      );
       const promise = (async () => {
         try {
-          const [baseRows, metadataRows] = await Promise.all([
-            fetchSupabaseRows(),
-            metadataPromise
-          ]);
+          const baseRows = await fetchSupabaseRows();
           if (!baseRows.length) throw new Error('El catalogo de Supabase todavia esta vacio');
-          const rows = mergeMetadata(baseRows, metadataRows);
+          const rows = baseRows.map(fromSupabase);
           await writeCache({
             signature: context.signature,
             version: context.version,
@@ -1991,10 +2380,7 @@
         const complete = (async () => {
           const context = await catalogContext(cached);
           if (!context.versionKnown || cached.signature === context.signature) return cached.rows;
-          const metadataPromise = context.metadataUrl
-            ? fetchJson(context.metadataUrl).catch(() => [])
-            : Promise.resolve([]);
-          return startFullLoad(context, { ...options, metadataPromise });
+          return startFullLoad(context, options);
         })();
         return {
           initialRows: cached.rows,
@@ -2005,22 +2391,18 @@
       }
 
       const context = await catalogContext(cached);
-      const metadataPromise = context.metadataUrl
-        ? fetchJson(context.metadataUrl).catch(() => [])
-        : Promise.resolve([]);
-
       let initialRows = [];
       try {
-        const metadataRows = await metadataPromise;
-        const priorityCodes = priorityCodesFromMetadata(metadataRows, options.priorityCodes);
+        const directPriorityCodes = await fetchSupabasePriorityCodes();
+        const priorityCodes = priorityCodesFromMetadata([], [...(options.priorityCodes || []), ...directPriorityCodes]);
         const baseRows = await fetchSupabaseInitialRows(priorityCodes, options.initialLimit);
-        initialRows = mergeMetadata(baseRows, metadataRows);
+        initialRows = baseRows.map(fromSupabase);
       } catch (error) {
         console.warn('No se pudo preparar la portada del catalogo', error);
       }
       return {
         initialRows,
-        complete: startFullLoad(context, { ...options, metadataPromise }),
+        complete: startFullLoad(context, options),
         fromCache: false,
         version: context.version
       };
@@ -2045,6 +2427,35 @@
       }
     }
 
+    async function fetchArticle(code) {
+      const safeCode = String(code || '').trim();
+      if (!safeCode) return null;
+      const response = await fetch(supabaseCatalogQuery(`&codigo=eq.${encodeURIComponent(safeCode)}&limit=1`), {
+        headers: headers(),
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      return Array.isArray(rows) && rows[0] ? fromSupabase(rows[0]) : null;
+    }
+
+    async function saveArticleEdit(article) {
+      const payload = await CATALOG_EDITOR_SESSION.saveArticle(article);
+      const updated = payload?.article ? fromSupabase(payload.article) : await fetchArticle(codeOf(article));
+      if (updated && Array.isArray(memoryCache?.rows)) {
+        const code = codeOf(updated);
+        const rows = memoryCache.rows.map((row) => codeOf(row) === code ? { ...row, ...updated } : row);
+        await writeCache({
+          ...memoryCache,
+          signature: `supabase-directo-v1|${Number(payload?.version || memoryCache.version || 0)}`,
+          version: Number(payload?.version || memoryCache.version || 0),
+          rows,
+          source: 'supabase'
+        });
+      }
+      return { ...payload, article: updated };
+    }
+
     return {
       load,
       loadProgressive,
@@ -2052,6 +2463,8 @@
       getConfigUrl,
       fetchSupabaseInitialRows,
       fetchSupabaseRows,
+      fetchArticle,
+      saveArticleEdit,
       mergeMetadata,
       fromSupabase
     };
@@ -3115,7 +3528,16 @@
       close: closeArticleEditor,
       publishCatalog: publishArticleCatalog
     },
+    catalogEditorSession: CATALOG_EDITOR_SESSION,
     catalog: CATALOG,
     faltantes: FALTANTES
   };
+  } catch (error) {
+    window.__corralonSystemError = {
+      name: String(error?.name || 'Error'),
+      message: String(error?.message || error || 'Error desconocido'),
+      stack: String(error?.stack || '')
+    };
+    console.error('No se pudo iniciar CorralonSystem', error);
+  }
 })();

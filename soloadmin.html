@@ -1248,7 +1248,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="corralon-system.js?v=20260727-catalogo-progressivo"></script>
+<script src="corralon-system.js?v=20260727-catalogo-directo5"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot, orderBy, query, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4933,10 +4933,22 @@ document.getElementById('listaArticulos').addEventListener('scroll', maybeAdvanc
 
 window.CorralonSystem?.articleEditor?.configure({
   getArticles: () => todosArticulos,
-  save: (nextList) => {
+  save: (nextList, updated) => {
     setTodosArticulos(nextList);
-    programarSincronizacion('edición de artículo');
     toast('✅ Artículo actualizado. Sincronizando en segundo plano', 'ok');
+    Promise.resolve()
+      .then(() => window.CorralonSystem.catalog.saveArticleEdit(updated))
+      .then((result) => {
+        if (result?.article) {
+          const code = String(result.article.codigo || '').trim();
+          setTodosArticulos(todosArticulos.map((article) => String(article.codigo || '').trim() === code ? { ...article, ...result.article } : article));
+        }
+        toast('✅ Artículo sincronizado', 'ok');
+      })
+      .catch((error) => {
+        console.error('No se pudo sincronizar el artículo', error);
+        toast(`❌ ${error.message || 'No se pudo sincronizar el artículo'}`, 'error');
+      });
   }
 });
 
@@ -4944,19 +4956,21 @@ window.abrirEditar = (codigo) => {
   window.CorralonSystem?.articleEditor?.open(codigo);
 };
 
-// -- LISTENER FIRESTORE --
-onSnapshot(doc(db, "config", "listaActual"), async snap => {
+async function cargarCatalogoAdminDirecto() {
   const loader = document.getElementById('loadingOverlay');
   try {
-    if (!snap.exists()) { disconnectAdminListObserver(); document.getElementById('listaArticulos').innerHTML = '<div class="empty-lista">No hay lista publicada</div>'; if (loader) loader.style.display='none'; return; }
-    const url = snap.data().url;
-    if (!url) throw new Error('URL no definida');
-    jsonListaUrl = url;
     if (syncLoadedOnce && localStateDirty) {
       if (loader) loader.style.display = 'none';
       return;
     }
-    const data = await cargarListaPublicada(url);
+    let data = await cargarListaPublicada('');
+    if (!Array.isArray(data) || !data.length) {
+      const fallbackSnap = await getDoc(doc(db, 'config', 'listaActual'));
+      const fallbackUrl = fallbackSnap.exists() ? String(fallbackSnap.data()?.url || '').trim() : '';
+      if (!fallbackUrl) throw new Error('El catalogo de Supabase esta vacio y no hay respaldo publicado');
+      jsonListaUrl = fallbackUrl;
+      data = await cargarListaPublicada(fallbackUrl);
+    }
     setTodosArticulos(data);
     if (articuloPendienteAbrir) {
       const existe = (todosArticulos || []).some((articulo) => String(articulo.codigo || '').trim() === articuloPendienteAbrir);
@@ -4980,7 +4994,9 @@ onSnapshot(doc(db, "config", "listaActual"), async snap => {
   } finally {
     if (loader) loader.style.display = 'none';
   }
-});
+}
+
+cargarCatalogoAdminDirecto();
 
 document.getElementById('modalOverlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('modalOverlay')) e.stopPropagation();
