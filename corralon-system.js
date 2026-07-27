@@ -2034,6 +2034,7 @@
     const CACHE_ID = 'principal';
     const PAGE_SIZE = 1000;
     const INITIAL_PAGE_SIZE = 120;
+    const CODE_INDEX_PAGE_CONCURRENCY = 6;
     const FIRESTORE_PROJECT = 'corralon-progreso';
     const FIRESTORE_API_KEY = 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0';
     const SELECT_COLUMNS = [
@@ -2266,6 +2267,36 @@
       return result;
     }
 
+    async function fetchSupabaseCodeIndexRange(from = 0, to = from + PAGE_SIZE - 1) {
+      const select = encodeURIComponent('codigo,codigo_proveedor,id_proveedor,nombre');
+      const query = `${SUPABASE_URL}/rest/v1/${TABLES.catalogPublic}?select=${select}&activo=eq.true&order=codigo.asc`;
+      const response = await fetch(query, {
+        headers: headers({ Range: `${from}-${to}` }),
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      if (!Array.isArray(rows)) throw new Error('Respuesta de codigos de catalogo invalida');
+      return rows;
+    }
+
+    async function fetchSupabaseCodeIndexRows() {
+      const result = [];
+      const waveSize = PAGE_SIZE * CODE_INDEX_PAGE_CONCURRENCY;
+      for (let waveStart = 0; ; waveStart += waveSize) {
+        const pages = await Promise.all(Array.from(
+          { length: CODE_INDEX_PAGE_CONCURRENCY },
+          (_, page) => {
+            const from = waveStart + (page * PAGE_SIZE);
+            return fetchSupabaseCodeIndexRange(from, from + PAGE_SIZE - 1);
+          }
+        ));
+        pages.forEach((rows) => result.push(...rows));
+        if (pages.some((rows) => rows.length < PAGE_SIZE)) break;
+      }
+      return result;
+    }
+
     function enabledMetadataFlag(value) {
       if (value === true || value === 1) return true;
       return ['1', 'true', 'si', 'sí', 'x'].includes(String(value ?? '').trim().toLowerCase());
@@ -2321,6 +2352,75 @@
         versionKnown: Boolean(metaRow),
         signature: `supabase-directo-v1|${version}`
       };
+    }
+
+    function metaCodeList(metaRow, field) {
+      const value = metaRow?.[field];
+      if (!Array.isArray(value)) return [];
+      return [...new Set(value.map((code) => String(code || '').trim()).filter(Boolean))];
+    }
+
+    function canApplyDelta(context) {
+      if (!Array.isArray(context?.cached?.rows) || !context.cached.rows.length) return false;
+      if (String(context?.metaRow?.change_mode || '') !== 'delta') return false;
+      const previousVersion = Number(context?.metaRow?.previous_version || 0);
+      const cachedVersion = Number(context?.cached?.version || 0);
+      const changedCodes = metaCodeList(context.metaRow, 'changed_codes');
+      const removedCodes = metaCodeList(context.metaRow, 'removed_codes');
+      return previousVersion > 0
+        && previousVersion === cachedVersion
+        && changedCodes.length + removedCodes.length <= 2500;
+    }
+
+    function startDeltaLoad(context, options = {}) {
+      const loadKey = `${context.signature}|delta`;
+      if (activeFullLoad?.key === loadKey) return activeFullLoad.promise;
+      const promise = (async () => {
+        try {
+          const changedCodes = metaCodeList(context.metaRow, 'changed_codes');
+          const removedCodes = metaCodeList(context.metaRow, 'removed_codes');
+          const changedRows = (await fetchSupabaseCodes(changedCodes)).map(fromSupabase);
+          const removedSet = new Set(removedCodes);
+          const changedSet = new Set(changedCodes);
+          const merged = new Map();
+          context.cached.rows.forEach((row) => {
+            const code = codeOf(row);
+            if (!code || removedSet.has(code) || changedSet.has(code)) return;
+            merged.set(code, row);
+          });
+          changedRows.forEach((row) => merged.set(codeOf(row), row));
+          const rows = [...merged.values()].sort((left, right) =>
+            codeOf(left).localeCompare(codeOf(right), 'es', { numeric: true, sensitivity: 'base' })
+          );
+          await writeCache({
+            ...context.cached,
+            signature: context.signature,
+            version: context.version,
+            metadataUrl: context.metadataUrl,
+            rows,
+            source: 'supabase'
+          });
+          window.dispatchEvent(new CustomEvent('corralon:catalog-delta', {
+            detail: { changedRows, removedCodes, rows, version: context.version, source: 'supabase' }
+          }));
+          return rows;
+        } catch (error) {
+          console.warn('No se pudo aplicar el delta del catalogo; se recarga el catalogo completo', error);
+          return startFullLoad(context, options);
+        }
+      })();
+      activeFullLoad = { key: loadKey, promise };
+      const clearActiveLoad = () => {
+        if (activeFullLoad?.promise === promise) activeFullLoad = null;
+      };
+      promise.then(clearActiveLoad, clearActiveLoad);
+      return promise;
+    }
+
+    function startCatalogLoad(context, options = {}) {
+      return canApplyDelta(context)
+        ? startDeltaLoad(context, options)
+        : startFullLoad(context, options);
     }
 
     function startFullLoad(context, options = {}) {
@@ -2380,7 +2480,7 @@
         const complete = (async () => {
           const context = await catalogContext(cached);
           if (!context.versionKnown || cached.signature === context.signature) return cached.rows;
-          return startFullLoad(context, options);
+          return startCatalogLoad(context, options);
         })();
         return {
           initialRows: cached.rows,
@@ -2402,7 +2502,7 @@
       }
       return {
         initialRows,
-        complete: startFullLoad(context, options),
+        complete: startCatalogLoad(context, options),
         fromCache: false,
         version: context.version
       };
@@ -2411,6 +2511,21 @@
     async function load(options = {}) {
       const progressive = await loadProgressive(options);
       return progressive.complete;
+    }
+
+    async function refresh(options = {}) {
+      const cached = await readCache();
+      if (!Array.isArray(cached?.rows) || !cached.rows.length) {
+        const rows = await load(options);
+        return { changed: true, mode: 'full', rows };
+      }
+      const context = await catalogContext(cached);
+      if (!context.versionKnown || cached.signature === context.signature) {
+        return { changed: false, mode: 'none', rows: cached.rows };
+      }
+      const mode = canApplyDelta(context) ? 'delta' : 'full';
+      const rows = await startCatalogLoad(context, options);
+      return { changed: true, mode, rows, version: context.version };
     }
 
     async function clearCache() {
@@ -2459,10 +2574,12 @@
     return {
       load,
       loadProgressive,
+      refresh,
       clearCache,
       getConfigUrl,
       fetchSupabaseInitialRows,
       fetchSupabaseRows,
+      fetchCodeIndexRows: fetchSupabaseCodeIndexRows,
       fetchArticle,
       saveArticleEdit,
       mergeMetadata,

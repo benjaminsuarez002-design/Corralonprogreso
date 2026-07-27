@@ -8957,6 +8957,63 @@ function iniciarEscuchaListaArticulos() {
   });
 }
 
+function aplicarDeltaCatalogoEnPantalla(event) {
+  const detail = event?.detail || {};
+  const changedRows = prepararArticulosParaVista(Array.isArray(detail.changedRows) ? detail.changedRows : []);
+  const removedCodes = new Set(
+    (Array.isArray(detail.removedCodes) ? detail.removedCodes : [])
+      .map((code) => String(code || '').trim())
+      .filter(Boolean)
+  );
+  if (!changedRows.length && !removedCodes.size) return;
+
+  const changedByCode = new Map(changedRows.map((article) => [obtenerIdArticulo(article), article]));
+  const nextArticles = [];
+  todosArticulos.forEach((article) => {
+    const code = obtenerIdArticulo(article);
+    if (removedCodes.has(code)) return;
+    if (changedByCode.has(code)) {
+      nextArticles.push({ ...article, ...changedByCode.get(code) });
+      changedByCode.delete(code);
+      return;
+    }
+    nextArticles.push(article);
+  });
+  changedByCode.forEach((article) => nextArticles.push(article));
+  todosArticulos = prepararArticulosParaVista(nextArticles);
+  actualizarVistaEtiqueta();
+  aplicarBusquedaActual();
+
+  if (document.getElementById('productDetailModal')?.classList.contains('visible')) {
+    if (removedCodes.has(productDetailAdminCode)) {
+      cerrarDetalleProducto();
+    } else if (changedRows.some((article) => obtenerIdArticulo(article) === productDetailAdminCode)) {
+      abrirDetalleProducto(productDetailAdminCode);
+    }
+  }
+}
+
+function aplicarCatalogoCompletoEnPantalla(event) {
+  const rows = Array.isArray(event?.detail?.rows) ? event.detail.rows : [];
+  if (!rows.length || !todosArticulos.length) return;
+  todosArticulos = prepararArticulosParaVista(rows);
+  actualizarVistaEtiqueta();
+  aplicarBusquedaActual();
+}
+
+window.addEventListener('corralon:catalog-delta', aplicarDeltaCatalogoEnPantalla);
+window.addEventListener('corralon:catalog-ready', aplicarCatalogoCompletoEnPantalla);
+
+let catalogoRefreshInterval = null;
+function iniciarActualizacionIncrementalCatalogo() {
+  if (catalogoRefreshInterval) return;
+  catalogoRefreshInterval = setInterval(() => {
+    window.CorralonSystem?.catalog?.refresh?.({ fallback: false }).catch((error) => {
+      console.warn('No se pudo revisar el delta del catalogo', error);
+    });
+  }, 10000);
+}
+
 let articleEditorSyncQueue = Promise.resolve();
 window.CorralonSystem?.articleEditor?.configure({
   getArticles: () => todosArticulos,
@@ -9005,7 +9062,10 @@ window.CorralonSystem?.articleEditor?.configure({
   }
 });
 
-setTimeout(iniciarCargaListaArticulos, 0);
+setTimeout(() => {
+  iniciarCargaListaArticulos();
+  iniciarActualizacionIncrementalCatalogo();
+}, 0);
 
 let carrito = {};
 function guardarCarrito() { localStorage.setItem(CARRITO_STORAGE_KEY, JSON.stringify(carrito)); }
