@@ -1205,7 +1205,10 @@
     gap: 8px;
   }
   .sort-chip-caret {
-    font-size: 10px;
+    display: inline-block;
+    color: currentColor;
+    font-size: 9px;
+    font-weight: 900;
     line-height: 1;
     transition: transform .18s ease;
   }
@@ -3498,11 +3501,13 @@
       <div class="sort-wrap" id="sortWrap">
         <button class="vista-chip sort-chip" id="sortButton" type="button" aria-expanded="false" aria-haspopup="true">
           <span>Ordenar</span>
-          <span class="sort-chip-caret" aria-hidden="true">?</span>
+          <span class="sort-chip-caret" aria-hidden="true">&#9660;</span>
         </button>
         <div class="sort-menu" id="sortMenu">
-          <button class="sort-option" type="button" data-sort="price-asc">De menor a mayor</button>
-          <button class="sort-option" type="button" data-sort="price-desc">De mayor a menor</button>
+          <button class="sort-option" type="button" data-sort="price-asc">Precio: menor a mayor</button>
+          <button class="sort-option" type="button" data-sort="price-desc">Precio: mayor a menor</button>
+          <button class="sort-option" type="button" data-sort="stock-desc">Stock: mayor a menor</button>
+          <button class="sort-option" type="button" data-sort="stock-asc">Stock: menor a mayor</button>
           <button class="sort-option" type="button" data-sort="name-asc">De A a Z</button>
           <button class="sort-option" type="button" data-sort="name-desc">De Z a A</button>
         </div>
@@ -3849,7 +3854,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js"></script>
+<script src="corralon-system.js?v=20260727-catalogo-progressivo"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4294,7 +4299,31 @@ function aplicarMetadatosArticulo(raw = {}, meta = null) {
   };
 }
 
-async function cargarListaConMetadatos(baseUrl, metaSnapPreparado = null) {
+function codigosPrioritariosCatalogoInicio() {
+  const sections = homeLandingConfig?.sections || {};
+  const requestedCode = String(new URLSearchParams(location.search).get('articulo') || '').trim();
+  return [...new Set([
+    requestedCode,
+    ...(sections.destacado || []),
+    ...(sections.masVendido || []),
+    ...(sections.oferta || [])
+  ].map((codigo) => String(codigo || '').trim()).filter(Boolean))];
+}
+
+async function cargarListaConMetadatos(baseUrl, metaSnapPreparado = null, options = {}) {
+  const progressiveLoader = window.CorralonSystem?.catalog?.loadProgressive;
+  if (options.progressive && typeof progressiveLoader === 'function') {
+    return progressiveLoader({
+      fallback: true,
+      initialLimit: 120,
+      priorityCodes: codigosPrioritariosCatalogoInicio()
+    });
+  }
+  const sharedLoader = window.CorralonSystem?.catalog?.load;
+  if (typeof sharedLoader === 'function') {
+    const sharedRows = await sharedLoader({ fallback: true });
+    if (Array.isArray(sharedRows) && sharedRows.length) return sharedRows;
+  }
   const [baseData, metaSnap] = await Promise.all([
     cargarJsonRemoto(baseUrl),
     metaSnapPreparado ? Promise.resolve(metaSnapPreparado) : getDoc(doc(db, 'config', ARTICULOS_META_DOC_ID))
@@ -5778,41 +5807,20 @@ async function obtenerInfoListaDesdeSnapshot(listaSnap) {
   return infoListaDesdeSnapshots(listaSnap, metaSnap);
 }
 
-async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false } = {}) {
+function aplicarDatosCatalogoServidor(data, serverInfo, { guardarCache = true } = {}) {
   const loader = document.getElementById('loadingOverlay');
-  if (!serverInfo?.exists || !serverInfo.url) {
-    disconnectPublicListObserver();
-    if (!todosArticulos.length) {
-      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
-    }
-    if (loader) loader.style.display = 'none';
-    return;
-  }
-
-  if (desdeCachePermitida && restaurarListaArticulosCache({ serverInfo })) {
-    return;
-  }
-
+  if (!Array.isArray(data) || !data.length) return false;
   const serverSignature = firmaServidorLista(serverInfo);
-  if (todosArticulos.length && listaCacheServerSignatureActiva && listaCacheServerSignatureActiva === serverSignature) {
-    if (loader) loader.style.display = 'none';
-    return;
-  }
-
-  const data = await cargarListaConMetadatos(serverInfo.url, serverInfo.metaSnap);
   const fingerprint = fingerprintListaArticulos(data);
-  guardarListaArticulosCache(serverInfo.url, data, serverInfo);
-  if (
-    todosArticulos.length &&
-    listaCacheUrlActiva === String(serverInfo.url || '') &&
-    listaCacheFingerprintActiva === fingerprint &&
-    listaCacheServerSignatureActiva === serverSignature
-  ) {
+  if (guardarCache) guardarListaArticulosCache(serverInfo?.url || '', data, serverInfo);
+  if (todosArticulos.length && listaCacheFingerprintActiva === fingerprint) {
+    listaCacheUrlActiva = String(serverInfo?.url || listaCacheUrlActiva || '');
+    listaCacheServerSignatureActiva = serverSignature || listaCacheServerSignatureActiva || '';
     if (loader) loader.style.display = 'none';
-    return;
+    return false;
   }
 
-  listaCacheUrlActiva = String(serverInfo.url || '');
+  listaCacheUrlActiva = String(serverInfo?.url || '');
   listaCacheFingerprintActiva = fingerprint;
   listaCacheServerSignatureActiva = serverSignature;
   const teniaListaRenderizada = todosArticulos.length > 0;
@@ -5829,14 +5837,79 @@ async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false } 
     abrirArticuloCompartidoSiCorresponde();
   }
   if (loader) loader.style.display = 'none';
+  return true;
+}
+
+async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false, cargaPreparada = null } = {}) {
+  const loader = document.getElementById('loadingOverlay');
+  if (!serverInfo?.exists || !serverInfo.url) {
+    disconnectPublicListObserver();
+    if (!todosArticulos.length) {
+      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No hay lista publicada</p></div>`;
+    }
+    if (loader) loader.style.display = 'none';
+    return;
+  }
+
+  const cacheRestaurada = desdeCachePermitida && restaurarListaArticulosCache({ serverInfo });
+
+  const serverSignature = firmaServidorLista(serverInfo);
+  if (!cacheRestaurada && todosArticulos.length && listaCacheServerSignatureActiva && listaCacheServerSignatureActiva === serverSignature) {
+    if (loader) loader.style.display = 'none';
+    return;
+  }
+
+  const loaded = cargaPreparada || await cargarListaConMetadatos(serverInfo.url, serverInfo.metaSnap, { progressive: true });
+  if (Array.isArray(loaded)) {
+    aplicarDatosCatalogoServidor(loaded, serverInfo, { guardarCache: true });
+    return;
+  }
+
+  const initialRows = Array.isArray(loaded?.initialRows) ? loaded.initialRows : [];
+  if (initialRows.length) {
+    aplicarDatosCatalogoServidor(initialRows, serverInfo, { guardarCache: false });
+  } else if (cacheRestaurada && loader) {
+    loader.style.display = 'none';
+  }
+
+  const complete = loaded?.complete;
+  if (!complete || typeof complete.then !== 'function') return;
+  if (!initialRows.length && !cacheRestaurada) {
+    const completeRows = await complete;
+    aplicarDatosCatalogoServidor(completeRows, serverInfo, { guardarCache: true });
+    return;
+  }
+
+  complete
+    .then((completeRows) => {
+      aplicarDatosCatalogoServidor(completeRows, serverInfo, { guardarCache: true });
+    })
+    .catch((error) => {
+      console.warn('No se pudo completar el catalogo en segundo plano', error);
+    });
 }
 
 async function iniciarCargaListaArticulos() {
   const loader = document.getElementById('loadingOverlay');
   if (loader) loader.style.display = 'flex';
+  const cargaPreparadaPromise = cargarListaConMetadatos('', null, { progressive: true });
+  const serverInfoPromise = obtenerInfoListaServidor();
   try {
-    const serverInfo = await obtenerInfoListaServidor();
-    await aplicarListaServidor(serverInfo, { desdeCachePermitida: true });
+    const cargaPreparada = await cargaPreparadaPromise;
+    const initialRows = Array.isArray(cargaPreparada?.initialRows) ? cargaPreparada.initialRows : [];
+    if (initialRows.length) {
+      aplicarDatosCatalogoServidor(initialRows, {
+        exists: true,
+        url: 'supabase://catalogo_articulos',
+        listaSignature: '',
+        metaSignature: ''
+      }, { guardarCache: false });
+    }
+    const serverInfo = await serverInfoPromise;
+    await aplicarListaServidor(serverInfo, {
+      desdeCachePermitida: !initialRows.length,
+      cargaPreparada
+    });
   } catch (error) {
     console.error(error);
     disconnectPublicListObserver();
@@ -6789,6 +6862,8 @@ function aplicarBusquedaActual() {
   if (chipActivo === 'ceramico') resultado = resultado.filter(a => !!a.ceramico);
   if (sortActivo === 'price-asc') resultado.sort((a,b) => (a.precioVigente||0)-(b.precioVigente||0));
   else if (sortActivo === 'price-desc') resultado.sort((a,b) => (b.precioVigente||0)-(a.precioVigente||0));
+  else if (sortActivo === 'stock-desc') resultado.sort((a,b) => (obtenerStockInfo(b).stockNum ?? -Infinity)-(obtenerStockInfo(a).stockNum ?? -Infinity));
+  else if (sortActivo === 'stock-asc') resultado.sort((a,b) => (obtenerStockInfo(a).stockNum ?? Infinity)-(obtenerStockInfo(b).stockNum ?? Infinity));
   else if (sortActivo === 'name-asc') resultado.sort((a,b) => obtenerDescripcionArticulo(a).principal.localeCompare(obtenerDescripcionArticulo(b).principal, 'es', { sensitivity: 'base' }));
   else if (sortActivo === 'name-desc') resultado.sort((a,b) => obtenerDescripcionArticulo(b).principal.localeCompare(obtenerDescripcionArticulo(a).principal, 'es', { sensitivity: 'base' }));
 

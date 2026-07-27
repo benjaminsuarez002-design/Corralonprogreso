@@ -6,7 +6,7 @@
   <title>Carga Stock</title>
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
-  <script src="corralon-system.js"></script>
+  <script src="corralon-system.js?v=20260727-catalogo-progressivo"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="carga_stock"></script>
@@ -1964,10 +1964,15 @@ async function fetchJson(url) {
 async function loadIndexCodes() {
   el.status.textContent = 'Cargando lista de index...';
   try {
-    const snap = await getDocFromServer(doc(db, 'config', 'listaActual')).catch(() => getDoc(doc(db, 'config', 'listaActual')));
-    const url = snap.exists() ? String(snap.data()?.url || '').trim() : '';
-    if (!url) throw new Error('No hay lista publicada');
-    const list = await fetchJson(url);
+    let list = [];
+    const sharedLoader = window.CorralonSystem?.catalog?.load;
+    if (typeof sharedLoader === 'function') list = await sharedLoader({ fallback: true });
+    if (!Array.isArray(list) || !list.length) {
+      const snap = await getDocFromServer(doc(db, 'config', 'listaActual')).catch(() => getDoc(doc(db, 'config', 'listaActual')));
+      const url = snap.exists() ? String(snap.data()?.url || '').trim() : '';
+      if (!url) throw new Error('No hay lista publicada');
+      list = await fetchJson(url);
+    }
     const codeProviders = new Map();
     const codeMatchCounts = new Map();
     const codeDescriptions = new Map();

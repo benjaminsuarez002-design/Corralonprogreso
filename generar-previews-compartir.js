@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 const FIRESTORE_PROJECT = 'corralon-progreso';
+const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const SITE_URL = 'https://corralonprogreso.com';
 const OUT_DIR = path.join(__dirname, 'compartir');
 
@@ -59,6 +61,46 @@ async function readJson(url) {
   const json = await response.json();
   if (!Array.isArray(json)) throw new Error('El JSON publicado no es una lista');
   return json;
+}
+
+async function readSupabaseCatalog() {
+  const rows = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/catalogo_articulos?select=*&activo=eq.true&order=codigo.asc`,
+      {
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          Range: `${from}-${from + pageSize - 1}`
+        }
+      }
+    );
+    if (!response.ok) throw new Error(`No pude leer Supabase: HTTP ${response.status} ${await response.text()}`);
+    const page = await response.json();
+    if (!Array.isArray(page)) throw new Error('El catalogo de Supabase no es una lista');
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows.map((row) => ({
+    ...row,
+    codigo: cleanCode(row.codigo),
+    idart: cleanCode(row.codigo),
+    idartprov: String(row.codigo_proveedor || '').trim(),
+    codprov: String(row.codigo_proveedor || '').trim(),
+    id_proveedor: String(row.id_proveedor || '').trim(),
+    idProveedor: String(row.id_proveedor || '').trim(),
+    nombre: String(row.nombre || '').trim(),
+    descripcion: String(row.nombre || '').trim(),
+    precio: Number(row.precio_venta || 0),
+    precioCosto: Number(row.precio_compra_sin_descuento || 0),
+    PrecioCpraCI: Number(row.precio_compra_con_impuestos || 0),
+    PrecioVta3: Number(row.precio_venta || 0),
+    PorcGanMin: Number(row.porcentaje_ganancia_min || 0),
+    stockSucursalProgresoRuta: row.stock_progreso,
+    stockSucursalCalle5Espana: row.stock_calle5
+  }));
 }
 
 function metaMap(rows = []) {
@@ -135,7 +177,7 @@ async function main() {
     getConfigUrl('listaMetaArticulos')
   ]);
   const [baseRows, metaRows] = await Promise.all([
-    readJson(baseUrl),
+    readSupabaseCatalog().then((rows) => rows.length ? rows : readJson(baseUrl)).catch(() => readJson(baseUrl)),
     readJson(metaUrl)
   ]);
   const metas = metaMap(metaRows);

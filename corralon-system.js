@@ -6,7 +6,9 @@
     providersMeta: 'proveedores_meta',
     priceList: 'lista_precios',
     priceListMeta: 'lista_precios_meta',
-    priceListJsonProviders: 'listas_json_proveedores'
+    priceListJsonProviders: 'listas_json_proveedores',
+    catalog: 'catalogo_articulos',
+    catalogMeta: 'catalogo_articulos_meta'
   };
   const PROVIDERS_DB = 'proveedores_cache_v1';
   const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
@@ -696,10 +698,18 @@
     return {
       codigo: code, idart: code, idartprov: providerCode, codprov: providerCode,
       idProveedor: providerId, id_proveedor: providerId, nombre: name, descripcion: name,
-      rubro: String(article.rubro || ''), precio: Number(article.precio || 0),
+      rubro: String(article.rubro || ''),
+      precio: Number(article.precio ?? article.PrecioVta3 ?? 0),
+      precioCosto: Number(article.precioCosto ?? article.precio_costo ?? article.PrecioCpraSISDto ?? 0),
+      precio_costo: Number(article.precioCosto ?? article.precio_costo ?? article.PrecioCpraSISDto ?? 0),
+      PrecioCpraSISDto: Number(article.PrecioCpraSISDto ?? article.precioCosto ?? article.precio_costo ?? 0),
+      PrecioCpraCI: Number(article.PrecioCpraCI ?? article.precioCpraCI ?? 0),
+      PrecioVta3: Number(article.PrecioVta3 ?? article.precio ?? 0),
+      PorcGanMin: Number(article.PorcGanMin ?? article.porcGanMin ?? 0),
       stock: stocks.stock ?? article.stock ?? '',
       stockSucursalProgresoRuta: stocks.stockSucursalProgresoRuta ?? '',
-      stockSucursalCalle5Espana: stocks.stockSucursalCalle5Espana ?? ''
+      stockSucursalCalle5Espana: stocks.stockSucursalCalle5Espana ?? '',
+      sourceRows: Array.isArray(article.sourceRows ?? article.source_rows) ? (article.sourceRows ?? article.source_rows) : []
     };
   }
 
@@ -737,10 +747,9 @@
 
   async function publishArticleCatalog(list = []) {
     const merged = mergeArticleBranchStocks(list || []);
-    const [baseUrl, metaUrl] = await Promise.all([
-      uploadArticleJson(merged.map(serializeArticleBase), 'articulos'),
-      uploadArticleJson(merged.map(serializeArticleMeta), 'articulos_meta')
-    ]);
+    const metaUrl = await uploadArticleJson(merged.map(serializeArticleMeta), 'articulos_meta');
+    let baseUrl = await CATALOG.getConfigUrl('listaActual').catch(() => '');
+    if (!baseUrl) baseUrl = await uploadArticleJson(merged.map(serializeArticleBase), 'articulos_respaldo');
     return { baseUrl, metaUrl };
   }
 
@@ -1660,6 +1669,394 @@
     setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
   }
 
+  const CATALOG = (() => {
+    const DB_NAME = 'corralon_catalogo_articulos_v1';
+    const DB_VERSION = 1;
+    const CACHE_ID = 'principal';
+    const PAGE_SIZE = 1000;
+    const INITIAL_PAGE_SIZE = 120;
+    const FIRESTORE_PROJECT = 'corralon-progreso';
+    const FIRESTORE_API_KEY = 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0';
+    const SELECT_COLUMNS = [
+      'codigo', 'codigo_proveedor', 'id_proveedor', 'nombre', 'rubro',
+      'precio_compra_sin_descuento', 'precio_compra_con_impuestos',
+      'porcentaje_ganancia_min', 'precio_venta', 'stock',
+      'stock_progreso', 'stock_calle5',
+      'sync_version', 'source_file', 'updated_at'
+    ].join(',');
+    let activeFullLoad = null;
+    let memoryCache = null;
+
+    function openCatalogDb() {
+      return openDb(DB_NAME, (database) => {
+        if (!database.objectStoreNames.contains('cache')) database.createObjectStore('cache', { keyPath: 'id' });
+      }, DB_VERSION);
+    }
+
+    async function readCache() {
+      if (memoryCache) return memoryCache;
+      try {
+        const database = await openCatalogDb();
+        memoryCache = await new Promise((resolve, reject) => {
+          const request = database.transaction('cache').objectStore('cache').get(CACHE_ID);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error);
+        });
+        return memoryCache;
+      } catch (error) {
+        console.warn('No se pudo leer la cache del catalogo', error);
+        return null;
+      }
+    }
+
+    async function writeCache(payload) {
+      memoryCache = { id: CACHE_ID, ...payload, savedAt: Date.now() };
+      try {
+        const database = await openCatalogDb();
+        await new Promise((resolve, reject) => {
+          const transaction = database.transaction('cache', 'readwrite');
+          transaction.objectStore('cache').put(memoryCache);
+          transaction.oncomplete = resolve;
+          transaction.onerror = () => reject(transaction.error);
+        });
+      } catch (error) {
+        console.warn('No se pudo guardar la cache del catalogo', error);
+      }
+    }
+
+    async function getConfigUrl(docId) {
+      const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/config/${encodeURIComponent(docId)}?key=${FIRESTORE_API_KEY}`;
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) return '';
+      const payload = await response.json();
+      return String(payload?.fields?.url?.stringValue || '').trim();
+    }
+
+    async function fetchJson(url) {
+      if (!url) return [];
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      return Array.isArray(payload) ? payload : [];
+    }
+
+    function codeOf(article = {}) {
+      return String(article.codigo ?? article.idart ?? article.idArt ?? article.id ?? '').trim();
+    }
+
+    function metaMap(rows = []) {
+      const map = new Map();
+      for (const row of rows || []) {
+        const code = codeOf(row);
+        if (code) map.set(code, row);
+      }
+      return map;
+    }
+
+    function fromSupabase(row = {}) {
+      const codigo = String(row.codigo || '').trim();
+      const codigoProveedor = String(row.codigo_proveedor || '').trim();
+      const idProveedor = String(row.id_proveedor || '').trim();
+      const nombre = String(row.nombre || '').trim();
+      const precioCosto = Number(row.precio_compra_sin_descuento || 0);
+      const precioCpraCI = Number(row.precio_compra_con_impuestos || 0);
+      const precioVenta = Number(row.precio_venta || 0);
+      const progreso = row.stock_progreso === null || row.stock_progreso === undefined ? '' : Number(row.stock_progreso);
+      const calle5 = row.stock_calle5 === null || row.stock_calle5 === undefined ? '' : Number(row.stock_calle5);
+      return {
+        codigo,
+        idart: codigo,
+        idArt: codigo,
+        idartprov: codigoProveedor,
+        codprov: codigoProveedor,
+        id_proveedor: idProveedor,
+        idProveedor,
+        nombre,
+        descripcion: nombre,
+        rubro: String(row.rubro || ''),
+        precio: precioVenta,
+        precioCosto,
+        precio_costo: precioCosto,
+        PrecioCpraSISDto: precioCosto,
+        PrecioCpraCI: precioCpraCI,
+        PrecioVta3: precioVenta,
+        PorcGanMin: Number(row.porcentaje_ganancia_min || 0),
+        stock: row.stock === null || row.stock === undefined ? '' : Number(row.stock),
+        stockSucursalProgresoRuta: progreso,
+        stockSucursalCalle5Espana: calle5,
+        sourceRows: Array.isArray(row.source_rows) ? row.source_rows : [],
+        source_rows: Array.isArray(row.source_rows) ? row.source_rows : [],
+        syncVersion: Number(row.sync_version || 0),
+        sourceFile: String(row.source_file || ''),
+        updatedAt: row.updated_at || ''
+      };
+    }
+
+    function mergeMetadata(baseRows = [], metadataRows = []) {
+      const byCode = metaMap(metadataRows);
+      return (baseRows || []).map((raw) => {
+        const base = raw?.codigo_proveedor !== undefined || raw?.precio_venta !== undefined ? fromSupabase(raw) : { ...raw };
+        const code = codeOf(base);
+        const meta = byCode.get(code);
+        return meta ? { ...base, ...meta, codigo: code, idart: code, idArt: code } : base;
+      });
+    }
+
+    async function fetchMetaRow() {
+      const query = `${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?id=eq.principal&select=*`;
+      const response = await fetch(query, { headers: headers(), cache: 'no-store' });
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      return Array.isArray(rows) && rows[0] ? rows[0] : null;
+    }
+
+    function supabaseCatalogQuery(extra = '') {
+      return `${SUPABASE_URL}/rest/v1/${TABLES.catalog}?select=${encodeURIComponent(SELECT_COLUMNS)}&activo=eq.true${extra}&order=codigo.asc`;
+    }
+
+    async function fetchSupabaseRange(from = 0, to = from + PAGE_SIZE - 1) {
+      const response = await fetch(supabaseCatalogQuery(), {
+        headers: headers({ Range: `${from}-${to}` }),
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      if (!Array.isArray(rows)) throw new Error('Respuesta de catalogo invalida');
+      return rows;
+    }
+
+    async function fetchSupabaseCodes(codes = []) {
+      const uniqueCodes = [...new Set((codes || []).map((code) => String(code || '').trim()).filter(Boolean))];
+      if (!uniqueCodes.length) return [];
+      const chunks = [];
+      for (let index = 0; index < uniqueCodes.length; index += 60) chunks.push(uniqueCodes.slice(index, index + 60));
+      const pages = await Promise.all(chunks.map(async (chunk) => {
+        const filter = `&codigo=${encodeURIComponent(`in.(${chunk.map((code) => JSON.stringify(code)).join(',')})`)}`;
+        const response = await fetch(supabaseCatalogQuery(filter), {
+          headers: headers(),
+          cache: 'no-store'
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const rows = await response.json();
+        if (!Array.isArray(rows)) throw new Error('Respuesta inicial de catalogo invalida');
+        return rows;
+      }));
+      return pages.flat();
+    }
+
+    async function fetchSupabaseInitialRows(priorityCodes = [], limit = INITIAL_PAGE_SIZE) {
+      const safeLimit = Math.max(24, Math.min(300, Number(limit || INITIAL_PAGE_SIZE)));
+      const [priorityRows, firstRows] = await Promise.all([
+        fetchSupabaseCodes(priorityCodes),
+        fetchSupabaseRange(0, safeLimit - 1)
+      ]);
+      const merged = new Map();
+      priorityRows.forEach((row) => merged.set(String(row?.codigo || '').trim(), row));
+      firstRows.forEach((row) => merged.set(String(row?.codigo || '').trim(), row));
+      return [...merged.values()].slice(0, safeLimit);
+    }
+
+    async function fetchSupabaseRows() {
+      const result = [];
+      for (let from = 0; ; from += PAGE_SIZE) {
+        const to = from + PAGE_SIZE - 1;
+        const rows = await fetchSupabaseRange(from, to);
+        result.push(...rows);
+        if (rows.length < PAGE_SIZE) break;
+      }
+      return result;
+    }
+
+    function enabledMetadataFlag(value) {
+      if (value === true || value === 1) return true;
+      return ['1', 'true', 'si', 'sí', 'x'].includes(String(value ?? '').trim().toLowerCase());
+    }
+
+    function priorityCodesFromMetadata(metadataRows = [], suppliedCodes = []) {
+      const result = [];
+      const seen = new Set();
+      const add = (value) => {
+        const code = String(value || '').trim();
+        if (!code || seen.has(code)) return;
+        seen.add(code);
+        result.push(code);
+      };
+      (suppliedCodes || []).forEach(add);
+      (metadataRows || []).forEach((row) => {
+        const isHomeArticle = enabledMetadataFlag(row?.oferta ?? row?.enOferta ?? row?.tagOferta)
+          || enabledMetadataFlag(row?.destacado ?? row?.tagDestacado)
+          || enabledMetadataFlag(row?.masVendido ?? row?.mas_vendido ?? row?.tagMasVendido)
+          || enabledMetadataFlag(row?.accesoRapido ?? row?.rapido ?? row?.tagRapido ?? row?.quickAccess);
+        if (isHomeArticle) add(codeOf(row));
+      });
+      return result;
+    }
+
+    async function loadFallback() {
+      const [baseUrl, metaUrl] = await Promise.all([
+        getConfigUrl('listaActual'),
+        getConfigUrl('listaMetaArticulos').catch(() => '')
+      ]);
+      const [baseRows, metadataRows] = await Promise.all([
+        fetchJson(baseUrl),
+        metaUrl ? fetchJson(metaUrl).catch(() => []) : Promise.resolve([])
+      ]);
+      return { rows: mergeMetadata(baseRows, metadataRows), baseUrl, metaUrl };
+    }
+
+    async function catalogContext(cachedValue) {
+      const cached = cachedValue === undefined ? await readCache() : cachedValue;
+      let metaRow = null;
+      let metadataUrl = '';
+      try {
+        [metaRow, metadataUrl] = await Promise.all([
+          fetchMetaRow(),
+          getConfigUrl('listaMetaArticulos').catch(() => '')
+        ]);
+      } catch (error) {
+        console.warn('No se pudo consultar la version del catalogo', error);
+      }
+      const version = Number(metaRow?.version || 0);
+      if (!metadataUrl) metadataUrl = String(cached?.metadataUrl || '');
+      return {
+        cached,
+        metaRow,
+        metadataUrl,
+        version,
+        versionKnown: Boolean(metaRow),
+        signature: `${version}|${metadataUrl}`
+      };
+    }
+
+    function startFullLoad(context, options = {}) {
+      const allowFallback = options.fallback !== false;
+      const loadKey = `${context.signature}|${allowFallback ? 'fallback' : 'direct'}`;
+      if (activeFullLoad?.key === loadKey) return activeFullLoad.promise;
+      const metadataPromise = options.metadataPromise || (
+        context.metadataUrl ? fetchJson(context.metadataUrl).catch(() => []) : Promise.resolve([])
+      );
+      const promise = (async () => {
+        try {
+          const [baseRows, metadataRows] = await Promise.all([
+            fetchSupabaseRows(),
+            metadataPromise
+          ]);
+          if (!baseRows.length) throw new Error('El catalogo de Supabase todavia esta vacio');
+          const rows = mergeMetadata(baseRows, metadataRows);
+          await writeCache({
+            signature: context.signature,
+            version: context.version,
+            metadataUrl: context.metadataUrl,
+            rows,
+            source: 'supabase'
+          });
+          window.dispatchEvent(new CustomEvent('corralon:catalog-ready', {
+            detail: { rows, version: context.version, source: 'supabase' }
+          }));
+          return rows;
+        } catch (error) {
+          console.warn('Catalogo Supabase no disponible; se usa el respaldo JSON', error);
+          if (allowFallback) {
+            try {
+              const fallback = await loadFallback();
+              if (fallback.rows.length) {
+                await writeCache({
+                  signature: `fallback|${fallback.baseUrl}|${fallback.metaUrl}`,
+                  version: context.version,
+                  metadataUrl: fallback.metaUrl,
+                  rows: fallback.rows,
+                  source: 'cloudinary'
+                });
+                return fallback.rows;
+              }
+            } catch (fallbackError) {
+              console.warn('Respaldo JSON no disponible', fallbackError);
+            }
+          }
+          return Array.isArray(context.cached?.rows) ? context.cached.rows : [];
+        }
+      })();
+      activeFullLoad = { key: loadKey, promise };
+      const clearActiveLoad = () => {
+        if (activeFullLoad?.promise === promise) activeFullLoad = null;
+      };
+      promise.then(clearActiveLoad, clearActiveLoad);
+      return promise;
+    }
+
+    async function loadProgressive(options = {}) {
+      const force = Boolean(options.force);
+      const cached = await readCache();
+      if (!force && Array.isArray(cached?.rows) && cached.rows.length) {
+        const complete = (async () => {
+          const context = await catalogContext(cached);
+          if (!context.versionKnown || cached.signature === context.signature) return cached.rows;
+          const metadataPromise = context.metadataUrl
+            ? fetchJson(context.metadataUrl).catch(() => [])
+            : Promise.resolve([]);
+          return startFullLoad(context, { ...options, metadataPromise });
+        })();
+        return {
+          initialRows: cached.rows,
+          complete,
+          fromCache: true,
+          version: Number(cached.version || 0)
+        };
+      }
+
+      const context = await catalogContext(cached);
+      const metadataPromise = context.metadataUrl
+        ? fetchJson(context.metadataUrl).catch(() => [])
+        : Promise.resolve([]);
+
+      let initialRows = [];
+      try {
+        const metadataRows = await metadataPromise;
+        const priorityCodes = priorityCodesFromMetadata(metadataRows, options.priorityCodes);
+        const baseRows = await fetchSupabaseInitialRows(priorityCodes, options.initialLimit);
+        initialRows = mergeMetadata(baseRows, metadataRows);
+      } catch (error) {
+        console.warn('No se pudo preparar la portada del catalogo', error);
+      }
+      return {
+        initialRows,
+        complete: startFullLoad(context, { ...options, metadataPromise }),
+        fromCache: false,
+        version: context.version
+      };
+    }
+
+    async function load(options = {}) {
+      const progressive = await loadProgressive(options);
+      return progressive.complete;
+    }
+
+    async function clearCache() {
+      memoryCache = null;
+      try {
+        const database = await openCatalogDb();
+        await new Promise((resolve, reject) => {
+          const request = database.transaction('cache', 'readwrite').objectStore('cache').delete(CACHE_ID);
+          request.onsuccess = resolve;
+          request.onerror = () => reject(request.error);
+        });
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+
+    return {
+      load,
+      loadProgressive,
+      clearCache,
+      getConfigUrl,
+      fetchSupabaseInitialRows,
+      fetchSupabaseRows,
+      mergeMetadata,
+      fromSupabase
+    };
+  })();
+
   const FALTANTES = (() => {
     const INDEX_CACHE_KEY = 'corralon_index_lista_articulos_cache_v1';
     const LIST_DB = 'corralon_lista_proveedores_v1';
@@ -2456,6 +2853,12 @@
 
     async function loadCorralonCatalog(cache = {}, force = false) {
       if (!cache.index || force) {
+        const sharedRows = await CATALOG.load({ force, fallback: true });
+        if (sharedRows.length) {
+          cache.index = await enrichIndexProviders(sharedRows.map(normalizeIndexItem).filter((item) => item.descripcion || item.idart));
+          sortCatalogByDescription(cache.index);
+          return cache.index;
+        }
         const localRows = await readIndexCache();
         const needsRemote = force || !localRows.length || localRows.some((row) => row.idProveedor && !row.proveedor);
         const remoteRows = needsRemote ? await readIndexRemote() : [];
@@ -2532,10 +2935,14 @@
 
     async function syncCatalogInBackground(useProviderList = false, cache = {}, onUpdated = null) {
       try {
-        const updated = useProviderList ? await readProviderArticlesRemoteIfChanged() : await readIndexRemoteIfChanged();
+        const updated = useProviderList
+          ? await readProviderArticlesRemoteIfChanged()
+          : await CATALOG.load({ force: true, fallback: true });
         if (!updated?.length) return false;
         if (useProviderList) cache.proveedores = sortCatalogByDescription(updated);
-        else cache.index = sortCatalogByDescription(updated);
+        else cache.index = sortCatalogByDescription(
+          await enrichIndexProviders(updated.map(normalizeIndexItem).filter((item) => item.descripcion || item.idart))
+        );
         if (typeof onUpdated === 'function') onUpdated(useProviderList ? cache.proveedores : cache.index, cache);
         return true;
       } catch (error) {
@@ -2708,6 +3115,7 @@
       close: closeArticleEditor,
       publishCatalog: publishArticleCatalog
     },
+    catalog: CATALOG,
     faltantes: FALTANTES
   };
 })();

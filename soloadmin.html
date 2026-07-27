@@ -1248,7 +1248,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="corralon-system.js"></script>
+<script src="corralon-system.js?v=20260727-catalogo-progressivo"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot, orderBy, query, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -2372,6 +2372,15 @@ async function subirMetadatosArticulos(lista) {
 }
 
 async function publicarListaArticulos(lista) {
+  const sharedPublisher = window.CorralonSystem?.articleEditor?.publishCatalog;
+  if (typeof sharedPublisher === 'function') {
+    const { baseUrl, metaUrl } = await sharedPublisher(lista);
+    await setDoc(doc(db, 'config', ARTICULOS_META_DOC_ID), { url: metaUrl, updatedAt: Date.now() });
+    if (baseUrl) await setDoc(doc(db, 'config', 'listaActual'), { url: baseUrl, updatedAt: Date.now() });
+    jsonListaMetaUrl = metaUrl;
+    if (baseUrl) jsonListaUrl = baseUrl;
+    return { baseUrl, metaUrl };
+  }
   const [baseUrl, metaUrl] = await Promise.all([
     subirListaBaseArticulos(lista),
     subirMetadatosArticulos(lista)
@@ -2393,6 +2402,11 @@ async function cargarJsonRemoto(url) {
 }
 
 async function cargarListaPublicada(baseUrl) {
+  const sharedLoader = window.CorralonSystem?.catalog?.load;
+  if (typeof sharedLoader === 'function') {
+    const sharedRows = await sharedLoader({ fallback: true });
+    if (Array.isArray(sharedRows) && sharedRows.length) return sharedRows;
+  }
   const metaAnterior = articulosMetaMap;
   const [baseData, metaSnap] = await Promise.all([
     cargarJsonRemoto(baseUrl),
