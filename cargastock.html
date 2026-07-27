@@ -6,6 +6,7 @@
   <title>Carga Stock</title>
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="corralon-system.js?v=20260727-catalogo-directo3"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -181,6 +182,7 @@
     <div class="header-actions">
       <div class="status" id="status">Inicializando...</div>
       <button id="viewProviderBtn" type="button">Proveedor</button>
+      <button id="applyPricesBtn" type="button" disabled>Aplicar precios</button>
       <button data-nav-url="menu.html" type="button">Menu</button>
     </div>
   </header>
@@ -422,6 +424,7 @@ const FX = window.CorralonFunciones || {};
 
 const el = {
   status: document.getElementById('status'),
+  applyPricesBtn: document.getElementById('applyPricesBtn'),
   providerInput: document.getElementById('providerInput'),
   providerList: document.getElementById('providerList'),
   providerInvoiceDiscount: document.getElementById('providerInvoiceDiscount'),
@@ -763,6 +766,7 @@ function setProvider(nextProvider, options = {}) {
   if (provider && !options.keepText) el.providerInput.value = providerLabel(provider);
   if (provider) localStorage.setItem(PROVIDER_KEY, String(provider.id_proveedor));
   else localStorage.removeItem(PROVIDER_KEY);
+  el.applyPricesBtn.disabled = !String(provider?.id_proveedor || '').trim();
   renderProviderInfo();
   const desc = providerDiscountValue();
   rowsData.forEach((row) => row.descuento = desc);
@@ -794,6 +798,68 @@ function pickProviderById(id) {
 }
 function selectedProvider() {
   return provider || providers.find((item) => norm(providerLabel(item)) === norm(el.providerInput.value) || String(item.id_proveedor || '') === String(el.providerInput.value).trim()) || null;
+}
+function isLocalAccessMode() {
+  return location.protocol === 'file:'
+    || location.hostname === 'localhost'
+    || location.hostname === '127.0.0.1'
+    || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(location.hostname);
+}
+async function saveAccessArticlesXls(blob) {
+  const response = await fetch('/save-articulos-xls', { method: 'POST', body: blob });
+  if (!response.ok) throw new Error(await response.text() || 'No pude guardar C:\\Update\\Articulos.xls');
+}
+function runAccessPriceUpdate() {
+  const link = document.createElement('a');
+  link.href = 'corralon-access-update://actualizar-precios';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => link.remove(), 1000);
+}
+function accessPriceArticles(currentProvider) {
+  const providerId = String(currentProvider?.id_proveedor || '').trim();
+  if (!providerId) return [];
+  return rowsData
+    .filter((row) => !isBlankStockRow(row) && String(row.codigo || '').trim())
+    .map((row, index) => ({
+      cod_proveedor: String(row.codigo || '').trim(),
+      articulo: String(row.descripcion || '').trim(),
+      precio_costo: Number(calcPrecioFinal(row).toFixed(2)),
+      id_proveedor: providerId,
+      proveedor: providerLabel(currentProvider),
+      idorden: Date.now() * 1000 + index
+    }));
+}
+async function applyPricesToAccess() {
+  const currentProvider = selectedProvider();
+  if (!String(currentProvider?.id_proveedor || '').trim()) return;
+  const articles = accessPriceArticles(currentProvider);
+  if (!articles.length) {
+    show('No hay filas con código para aplicar');
+    return;
+  }
+  const originalText = el.applyPricesBtn.textContent;
+  el.applyPricesBtn.disabled = true;
+  el.applyPricesBtn.textContent = 'Aplicando...';
+  el.status.textContent = 'Generando Articulos.xls...';
+  try {
+    if (!window.XLSX) throw new Error('No se pudo cargar el módulo XLSX');
+    const blob = CorralonSystem.buildArticlesXlsBlob(articles);
+    if (isLocalAccessMode()) {
+      await saveAccessArticlesXls(blob);
+      runAccessPriceUpdate();
+      el.status.textContent = `${articles.length.toLocaleString('es-AR')} precios enviados a Access`;
+      show('Precios enviados a Access');
+    } else {
+      await CorralonSystem.saveBlobAs(blob, 'Articulos.xls');
+      el.status.textContent = `${articles.length.toLocaleString('es-AR')} precios exportados`;
+      show('Articulos.xls generado');
+    }
+  } finally {
+    el.applyPricesBtn.textContent = originalText;
+    el.applyPricesBtn.disabled = !String(selectedProvider()?.id_proveedor || '').trim();
+  }
 }
 function providerModalRows() {
   const ids = [
@@ -2459,6 +2525,7 @@ el.providerInput.addEventListener('input', () => {
   el.providerInput.dataset.fullSelected = '0';
   providerMouseEdit = true;
   provider = null;
+  el.applyPricesBtn.disabled = true;
   providerArticles = [];
   closeArticleProviderList();
   openProviderList();
@@ -2574,6 +2641,13 @@ document.getElementById('providerModal').addEventListener('mousedown', (event) =
   if (event.target === document.getElementById('providerModal')) closeProviderModal();
 });
 document.getElementById('compareStockBtn').addEventListener('click', openStockComparison);
+el.applyPricesBtn.addEventListener('click', () => {
+  applyPricesToAccess().catch((error) => {
+    console.error(error);
+    el.status.textContent = 'No se pudieron aplicar los precios';
+    show(error.message || 'No se pudieron aplicar los precios');
+  });
+});
 document.getElementById('closeCompareStockBtn').addEventListener('click', closeStockComparison);
 document.getElementById('pasteCompareStockBtn').addEventListener('click', async () => {
   try {
