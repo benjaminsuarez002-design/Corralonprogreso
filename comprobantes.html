@@ -658,6 +658,89 @@
       margin-bottom: 10px;
     }
 
+    .summary-date-actions {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .summary-share-btn {
+      width: 36px;
+      min-width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: #1598e8;
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 5px 14px rgba(21, 152, 232, .28);
+    }
+
+    .summary-share-btn:hover {
+      background: #087fc9;
+    }
+
+    .summary-share-btn:disabled {
+      opacity: .55;
+      cursor: wait;
+    }
+
+    .summary-share-btn svg {
+      width: 19px;
+      height: 19px;
+      fill: currentColor;
+    }
+
+    .shared-summary-mode .tabs,
+    .shared-summary-mode .footer-bar,
+    .shared-summary-mode #summary-prev,
+    .shared-summary-mode #summary-next,
+    .shared-summary-mode .summary-share-btn,
+    .shared-summary-mode > a[href="menu.html"] {
+      display: none !important;
+    }
+
+    .shared-summary-mode .summary-nav {
+      grid-template-columns: 1fr;
+    }
+
+    .shared-summary-mode .content {
+      padding-bottom: 24px;
+    }
+
+    .shared-summary-mode .summary-row {
+      grid-template-columns: 72px minmax(0, 1fr) auto;
+    }
+
+    .summary-head-total {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 9px;
+    }
+
+    .shared-summary-mode .topbar {
+      position: static;
+    }
+
+    .shared-summary-note {
+      margin-bottom: 10px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #f5f5f5;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+    }
+
     .summary-view-tabs {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -1812,9 +1895,12 @@
       <section class="panel" id="panel-resumen">
         <div class="summary-nav">
           <button class="nav-btn" id="summary-prev" type="button">← Día anterior</button>
-          <div class="summary-date" id="summary-date">Sin datos</div>
+          <div class="summary-date-actions">
+            <div class="summary-date" id="summary-date">Sin datos</div>
+          </div>
           <button class="nav-btn" id="summary-next" type="button">Día siguiente →</button>
         </div>
+        <div class="shared-summary-note" id="shared-summary-note" hidden>Resumen compartido · Solo lectura</div>
         <div class="summary-view-tabs">
           <button class="summary-view-chip active" id="summary-view-alias" data-summary-view="alias" type="button">Vista por alias</button>
           <button class="summary-view-chip" id="summary-view-time" data-summary-view="time" type="button">Vista por hora</button>
@@ -2004,6 +2090,7 @@
       const SUPABASE_BUCKET = "Archivos";
       const ALIASES_COLLECTION = "aliases";
       const COMPROBANTES_COLLECTION = "comprobantes";
+      const SHARED_SUMMARIES_COLLECTION = "comprobantesResumenesCompartidos";
       const ALIAS_OBJECTIVES_SUMMARY_COLLECTION = "aliasObjetivosResumen";
       const SUPPLIER_BALANCES_CONFIG_DOC = "saldosProveedores";
       const SUPPLIER_BALANCES_CACHE_DB = "comprobantes_saldos_proveedores_v1";
@@ -2186,6 +2273,7 @@
         summaryPrev: $("#summary-prev"),
         summaryNext: $("#summary-next"),
         summaryDate: $("#summary-date"),
+        sharedSummaryNote: $("#shared-summary-note"),
         summaryViewTabs: $$("[data-summary-view]"),
         summaryViewAlias: $("#summary-view-alias"),
         summaryViewTime: $("#summary-view-time"),
@@ -2260,6 +2348,9 @@
         summaryDates: [],
         summaryDateIso: todayIso(),
         summaryView: "alias",
+        sharedMode: Boolean(new URLSearchParams(location.search).get("resumenCompartido")),
+        sharedToken: String(new URLSearchParams(location.search).get("resumenCompartido") || "").trim(),
+        isSharing: false,
         aliasPickerTarget: null,
         aliasSearchText: "",
         editingAliasId: "",
@@ -3462,7 +3553,14 @@
                   <div class="summary-alias">${esc(name)}</div>
                   <span class="summary-toggle-icon">▼</span>
                 </div>
-                <div class="summary-total">${formatAmount(total, false)}</div>
+                <div class="summary-head-total">
+                  <div class="summary-total">${formatAmount(total, false)}</div>
+                  <button class="summary-share-btn" type="button" data-action="share-summary-alias" data-alias-key="${esc(aliasKey)}" data-alias-name="${esc(name)}" title="Compartir solamente ${esc(name)}" aria-label="Compartir movimientos de ${esc(name)}">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7a3.2 3.2 0 0 0 0-1.39l7.05-4.11A3 3 0 1 0 15 5c0 .23.03.46.08.67L8.04 9.78A3 3 0 1 0 8 14.22l7.12 4.15A3 3 0 1 0 18 16.08Z"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
               ${group.map((item) => `
                 <div class="summary-row">
@@ -3472,10 +3570,10 @@
                     <button class="summary-machine" type="button" data-action="open-summary-file" data-id="${esc(item.id)}" ${item.attachmentUrl ? "" : "disabled"}>${esc(item.machine || item.attachmentName || (item.attachmentUrl ? "Ver comprobante" : "Sin comprobante"))}</button>
                   </div>
                   <div class="summary-amount">${formatAmount(item.amountNumber || 0, false)}</div>
-                  <div class="summary-actions">
+                  ${state.sharedMode ? "" : `<div class="summary-actions">
                     <button class="ghost-btn summary-icon-btn" type="button" title="Editar" aria-label="Editar" data-action="edit-summary" data-id="${esc(item.id)}">✎</button>
                     <button class="danger-btn summary-icon-btn" type="button" title="Eliminar" aria-label="Eliminar" data-action="delete-summary" data-id="${esc(item.id)}">✕</button>
-                  </div>
+                  </div>`}
                 </div>
               `).join("")}
             </section>
@@ -3496,10 +3594,10 @@
                   <button class="summary-machine" type="button" data-action="open-summary-file" data-id="${esc(item.id)}" ${item.attachmentUrl ? "" : "disabled"}>${esc(item.machine || item.attachmentName || (item.attachmentUrl ? "Ver comprobante" : "Sin comprobante"))}</button>
                 </div>
                 <div class="summary-amount">${formatAmount(item.amountNumber || 0, false)}</div>
-                <div class="summary-actions">
+                ${state.sharedMode ? "" : `<div class="summary-actions">
                   <button class="ghost-btn summary-icon-btn" type="button" title="Editar" aria-label="Editar" data-action="edit-summary" data-id="${esc(item.id)}">✎</button>
                   <button class="danger-btn summary-icon-btn" type="button" title="Eliminar" aria-label="Eliminar" data-action="delete-summary" data-id="${esc(item.id)}">✕</button>
-                </div>
+                </div>`}
               </div>
             `).join("")}
           </section>
@@ -3528,6 +3626,137 @@
         el.summaryDate.textContent = formatDate(state.summaryDateIso);
         el.summaryPrev.disabled = safeIndex <= 0;
         el.summaryNext.disabled = safeIndex >= state.summaryDates.length - 1;
+      }
+
+      function sharedRecordPayload(item) {
+        return {
+          id: String(item.id || ""),
+          client: String(item.client || ""),
+          machine: String(item.machine || ""),
+          amountNumber: Number(item.amountNumber || 0),
+          transferName: String(item.transferName || ""),
+          transferId: String(item.transferId || ""),
+          transferAlias: String(item.transferAlias || ""),
+          transferCuit: String(item.transferCuit || ""),
+          dateIso: String(item.dateIso || state.summaryDateIso || ""),
+          dateText: String(item.dateText || formatDate(item.dateIso || state.summaryDateIso)),
+          timeText: String(item.timeText || ""),
+          attachmentUrl: String(item.attachmentUrl || ""),
+          attachmentName: String(item.attachmentName || ""),
+          attachmentType: String(item.attachmentType || ""),
+          createdClientMs: Number(item.createdClientMs || 0)
+        };
+      }
+
+      function makeShareToken() {
+        if (window.crypto && typeof window.crypto.randomUUID === "function") {
+          return window.crypto.randomUUID().replace(/-/g, "");
+        }
+        const bytes = new Uint8Array(24);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+      }
+
+      async function copyShareLink(url) {
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(url);
+            return true;
+          }
+        } catch (error) {
+          // Continúa con el método compatible con navegadores antiguos o bloqueados.
+        }
+        const input = document.createElement("textarea");
+        input.value = url;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.left = "-9999px";
+        input.style.top = "0";
+        document.body.appendChild(input);
+        input.select();
+        input.setSelectionRange(0, input.value.length);
+        let copied = false;
+        try {
+          copied = document.execCommand("copy");
+        } catch (error) {
+          copied = false;
+        }
+        input.remove();
+        return copied;
+      }
+
+      async function shareAliasSummary(aliasKey, aliasName) {
+        if (state.isSharing) return;
+        const decodedKey = decodeURIComponent(String(aliasKey || ""));
+        const records = state.summaryRecords
+          .filter((item) => String(aliasGroupKey(item)) === decodedKey)
+          .filter(hasVisibleRecordData)
+          .map(sharedRecordPayload);
+        if (!records.length) {
+          alert("No hay movimientos de este proveedor para compartir.");
+          return;
+        }
+        if (!state.db) {
+          alert("Todavía se está conectando. Probá de nuevo en un instante.");
+          return;
+        }
+        state.isSharing = true;
+        document.querySelectorAll(".summary-share-btn").forEach((button) => { button.disabled = true; });
+        try {
+          const token = makeShareToken();
+          await state.db.collection(SHARED_SUMMARIES_COLLECTION).doc(token).set({
+            version: 1,
+            dateIso: state.summaryDateIso,
+            aliasName: String(aliasName || records[0]?.transferName || "Proveedor"),
+            summaryView: "alias",
+            records,
+            createdClientMs: Date.now(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          const url = new URL(location.href);
+          url.search = "";
+          url.hash = "";
+          url.searchParams.set("resumenCompartido", token);
+          const shareData = {
+            title: `${aliasName || "Comprobantes"} · ${formatDate(state.summaryDateIso)}`,
+            text: `Movimientos de ${aliasName || "proveedor"} del ${formatDate(state.summaryDateIso)}`,
+            url: url.toString()
+          };
+          const copied = await copyShareLink(shareData.url);
+          if (copied) {
+            showToast("Enlace copiado");
+          } else {
+            window.prompt("Copiá este enlace para compartir el resumen:", shareData.url);
+          }
+        } finally {
+          state.isSharing = false;
+          document.querySelectorAll(".summary-share-btn").forEach((button) => { button.disabled = false; });
+        }
+      }
+
+      async function loadSharedSummary() {
+        document.body.classList.add("shared-summary-mode");
+        el.sharedSummaryNote.hidden = false;
+        activateTab("resumen");
+        const snapshot = await state.db.collection(SHARED_SUMMARIES_COLLECTION).doc(state.sharedToken).get();
+        if (!snapshot.exists) {
+          state.summaryDates = [];
+          state.summaryRecords = [];
+          renderSummaryDate();
+          el.summaryList.innerHTML = '<div class="section-card"><div class="empty">Este enlace compartido no existe o ya no está disponible.</div></div>';
+          return;
+        }
+        const data = snapshot.data() || {};
+        const records = (Array.isArray(data.records) ? data.records : [])
+          .map(normalizeCachedRecord)
+          .filter(hasVisibleRecordData)
+          .sort(recordSort);
+        state.summaryDateIso = String(data.dateIso || records[0]?.dateIso || todayIso());
+        state.summaryDates = [state.summaryDateIso];
+        state.summaryRecords = records;
+        state.summaryView = data.summaryView === "time" ? "time" : "alias";
+        renderSummaryDate();
+        renderSummary();
       }
 
       function buildPdfRowsByAlias(items) {
@@ -4922,6 +5151,14 @@
           });
         });
         el.summaryList.addEventListener("click", (event) => {
+          const actionButton = event.target.closest("[data-action]");
+          if (actionButton?.dataset.action === "share-summary-alias") {
+            event.preventDefault();
+            event.stopPropagation();
+            shareAliasSummary(actionButton.dataset.aliasKey, actionButton.dataset.aliasName)
+              .catch((error) => throttleError("No se pudo compartir el resumen", error));
+            return;
+          }
           // First handle clicks on summary headers to toggle collapse/expand in alias view
           const head = event.target.closest(".summary-head");
           if (head && state.summaryView !== "time") {
@@ -4938,7 +5175,7 @@
             }
             return;
           }
-          const button = event.target.closest("[data-action]");
+          const button = actionButton;
           if (!button) return;
           const action = button.dataset.action;
           const item = findRecord(button.dataset.id, state.summaryRecords);
@@ -5091,6 +5328,15 @@
       }
 
       function initStaticUi() {
+        if (state.sharedMode) {
+          document.body.classList.add("shared-summary-mode");
+          el.sharedSummaryNote.hidden = false;
+          activateTab("resumen");
+          bindSummary();
+          bindModals();
+          loadDolarCards();
+          return;
+        }
         restoreDraftFromStorage();
         restoreCachedData();
         activateTab("comp");
@@ -5146,6 +5392,10 @@
           window.firebase.initializeApp(firebaseConfig);
         }
         state.db = window.firebase.firestore();
+        if (state.sharedMode) {
+          await loadSharedSummary();
+          return;
+        }
         subscribeAliases();
         subscribeSupplierBalances();
         subscribeTodayRecords();

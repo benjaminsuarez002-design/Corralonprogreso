@@ -42,6 +42,13 @@
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const pageId = document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile];
+  const sharedComprobantesView = pageId === 'comprobantes'
+    && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));
+
+  if (sharedComprobantesView) {
+    document.documentElement.style.visibility = '';
+    return;
+  }
 
   function targetUrl(file) {
     return file;
