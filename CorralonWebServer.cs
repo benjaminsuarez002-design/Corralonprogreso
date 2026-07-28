@@ -106,8 +106,7 @@ internal sealed class ServerForm : Form
         trayIcon.Visible = true;
         var menu = new ContextMenuStrip();
         menu.Items.Add("Abrir", null, (s, e) => ShowFromTray());
-        menu.Items.Add("Abrir HTML", null, (s, e) => Process.Start(urlBox.Text));
-        menu.Items.Add("Abrir Facturas Web", null, (s, e) => Process.Start("http://localhost:8080/facturas"));
+        menu.Items.Add("Abrir menú", null, (s, e) => Process.Start("http://localhost:8080/menu.html"));
         menu.Items.Add("Subir a GitHub", null, (s, e) => OpenGitUploader());
         menu.Items.Add("Salir", null, (s, e) => { exiting = true; Close(); });
         trayIcon.ContextMenuStrip = menu;
