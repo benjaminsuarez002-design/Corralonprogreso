@@ -3875,10 +3875,16 @@
         document.querySelectorAll(".summary-share-btn").forEach((button) => { button.disabled = true; });
         try {
           const token = makeShareToken();
+          const representative = records[0] || {};
+          const aliasDoc = findAliasForRecord(representative);
           await state.db.collection(SHARED_SUMMARIES_COLLECTION).doc(token).set({
-            version: 1,
+            version: 2,
             dateIso: state.summaryDateIso,
             aliasName: String(aliasName || records[0]?.transferName || "Proveedor"),
+            aliasKey: decodedKey,
+            aliasId: String(aliasDoc?.id || representative.transferId || ""),
+            aliasText: String(aliasDoc?.alias || representative.transferAlias || ""),
+            aliasCuit: String(aliasDoc?.cuit || representative.transferCuit || ""),
             summaryView: "alias",
             records,
             createdClientMs: Date.now(),
@@ -3918,16 +3924,46 @@
           return;
         }
         const data = snapshot.data() || {};
-        const records = (Array.isArray(data.records) ? data.records : [])
+        const storedRecords = (Array.isArray(data.records) ? data.records : [])
           .map(normalizeCachedRecord)
           .filter(hasVisibleRecordData)
           .sort(recordSort);
-        state.summaryDateIso = String(data.dateIso || records[0]?.dateIso || todayIso());
+        const representative = storedRecords[0] || {};
+        const sharedAliasId = String(data.aliasId || representative.transferId || "").trim();
+        const sharedAliasName = normalize(data.aliasName || representative.transferName || "");
+        const sharedAliasText = normalize(data.aliasText || representative.transferAlias || "");
+        const sharedAliasCuit = normalize(data.aliasCuit || representative.transferCuit || "");
+        state.summaryDateIso = String(data.dateIso || representative.dateIso || todayIso());
         state.summaryDates = [state.summaryDateIso];
-        state.summaryRecords = records;
+        state.summaryRecords = storedRecords;
         state.summaryView = data.summaryView === "time" ? "time" : "alias";
         renderSummaryDate();
         renderSummary();
+        if (state.unsubRecords) state.unsubRecords();
+        state.unsubRecords = state.db.collection(COMPROBANTES_COLLECTION)
+          .where("dateIso", "==", state.summaryDateIso)
+          .onSnapshot((recordsSnapshot) => {
+            state.summaryRecords = recordsSnapshot.docs
+              .map(mapDoc)
+              .filter(hasVisibleRecordData)
+              .filter((item) => {
+                const transferId = String(item.transferId || "").trim();
+                if (sharedAliasId && transferId === sharedAliasId) return true;
+                const name = normalize(item.transferName);
+                const alias = normalize(item.transferAlias);
+                const cuit = normalize(item.transferCuit);
+                return Boolean(
+                  (sharedAliasName && name === sharedAliasName) ||
+                  (sharedAliasText && alias === sharedAliasText) ||
+                  (sharedAliasCuit && cuit === sharedAliasCuit)
+                );
+              })
+              .sort(recordSort);
+            renderSummaryDate();
+            renderSummary();
+          }, (error) => {
+            console.warn("No se pudo actualizar el resumen compartido", error);
+          });
       }
 
       function buildPdfRowsByAlias(items) {
