@@ -594,7 +594,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=20260727-catalogo-directo5"></script>
+<script src="corralon-system.js?v=20260728-menu-auth-local1"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -1258,7 +1258,6 @@
     }
 
     async function aplicarPermisosMenu(usuario = obtenerUsuarioActivo()) {
-      await aplicarOrdenMenu(usuario);
       const permisos = new Set(permisosUsuario(usuario));
       document.querySelectorAll('[data-menu-id]').forEach((link) => {
         const soloAdmin = link.dataset.menuId === 'configuracion';
@@ -1266,12 +1265,13 @@
       });
       activeUserLabel.textContent = `${usuario?.nombre || '-'} (${usuario?.nivel || '-'})`;
       setupReviewNotifications(usuario);
+      await aplicarOrdenMenu(usuario);
     }
 
-    async function mostrarMenu(usuario = obtenerUsuarioActivo()) {
+    function mostrarMenu(usuario = obtenerUsuarioActivo()) {
       loginBg.style.display = 'none';
-      await aplicarPermisosMenu(usuario);
       appContent.style.display = 'block';
+      aplicarPermisosMenu(usuario).catch((error) => console.warn('No se pudo completar la preparación del menú', error));
     }
 
     function mostrarLogin() {
@@ -1319,7 +1319,7 @@
           if (!editorSession?.login) {
             throw new Error('El módulo de edición no terminó de cargar. Actualizá esta página e intentá nuevamente.');
           }
-          await editorSession.login(usuario.id, passIngresada, rememberLogin.checked);
+          await editorSession.login(usuario.id, passIngresada, rememberLogin.checked, usuario);
         } catch (error) {
           console.error('No se pudo habilitar el editor de artículos', error);
           loginError.textContent = `❌ ${error?.message || 'No se pudo habilitar el editor de artículos'}`;
@@ -1331,13 +1331,12 @@
         recordarSesion(usuario, rememberLogin.checked);
         accesoManualEnPagina = true;
         loginError.textContent = '';
-        mostrarCargaMenu('Cargando comprobantes y notificaciones...');
-        await Promise.all([
-          preloadAliasObjectives(),
-          preloadReviewNotifications(usuario)
-        ]);
         await mostrarMenu(usuario);
         ocultarCargaMenu();
+        Promise.all([
+          preloadAliasObjectives(),
+          preloadReviewNotifications(usuario)
+        ]).catch((error) => console.warn('No se pudo completar la precarga del menú', error));
       } else {
         loginError.textContent = '❌ Usuario o contraseña incorrectos';
         loginInput.value = '';

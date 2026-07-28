@@ -3854,7 +3854,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=20260727-catalogo-directo5"></script>
+<script src="corralon-system.js?v=20260728-menu-auth-local1"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -9017,6 +9017,7 @@ function iniciarActualizacionIncrementalCatalogo() {
 let articleEditorSyncQueue = Promise.resolve();
 window.CorralonSystem?.articleEditor?.configure({
   getArticles: () => todosArticulos,
+  getSearchQuery: () => document.getElementById('searchInput')?.value || '',
   getRubros: () => todosArticulos.map((article) => String(article.rubro || '').trim()).filter(Boolean),
   searchArticles: ({ query, rubro }) => {
     let results = procesarBusquedaArticulos(query).resultados;
@@ -9026,29 +9027,37 @@ window.CorralonSystem?.articleEditor?.configure({
     }
     return results;
   },
-  save: (nextList, updated) => {
+  save: (nextList, updated, previousCode, appliedTargets = []) => {
     todosArticulos = prepararArticulosParaVista(nextList);
     actualizarVistaEtiqueta();
     aplicarBusquedaActual();
     if (document.getElementById('productDetailModal')?.classList.contains('visible')) {
       abrirDetalleProducto(obtenerIdArticulo(updated));
     }
-    const syncSnapshot = {
-      ...updated,
-      imagenes: Array.isArray(updated?.imagenes) ? [...updated.imagenes] : updated?.imagenes,
-      tagsOcultos: Array.isArray(updated?.tagsOcultos) ? [...updated.tagsOcultos] : updated?.tagsOcultos
-    };
+    const syncSnapshots = [...new Map([updated, ...appliedTargets].map((article) => {
+      const snapshot = {
+        ...article,
+        imagenes: Array.isArray(article?.imagenes) ? [...article.imagenes] : article?.imagenes,
+        tagsOcultos: Array.isArray(article?.tagsOcultos) ? [...article.tagsOcultos] : article?.tagsOcultos
+      };
+      return [obtenerIdArticulo(snapshot), snapshot];
+    }).filter(([code]) => code)).values()];
     articleEditorSyncQueue = articleEditorSyncQueue
       .catch(() => {})
       .then(async () => {
         window.dispatchEvent(new CustomEvent('corralon:article-sync-start'));
-        const result = await window.CorralonSystem.catalog.saveArticleEdit(syncSnapshot);
-        if (result?.article) {
-          const code = obtenerIdArticulo(result.article);
-          todosArticulos = todosArticulos.map((article) => obtenerIdArticulo(article) === code ? { ...article, ...result.article } : article);
+        const result = await window.CorralonSystem.catalog.saveArticleEdits(syncSnapshots);
+        if (Array.isArray(result?.articles) && result.articles.length) {
+          const syncedByCode = new Map(result.articles.map((article) => [obtenerIdArticulo(article), article]));
+          todosArticulos = todosArticulos.map((article) => {
+            const synced = syncedByCode.get(obtenerIdArticulo(article));
+            return synced ? { ...article, ...synced } : article;
+          });
         }
+        const syncedCodes = syncSnapshots.map(obtenerIdArticulo).filter(Boolean);
         await setDoc(doc(db, 'config', 'catalogoArticulosCambios'), {
           codigo: obtenerIdArticulo(updated),
+          codigos: syncedCodes,
           version: Number(result?.version || Date.now()),
           updatedAt: serverTimestamp()
         }, { merge: true }).catch(() => {});

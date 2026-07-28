@@ -1248,7 +1248,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="corralon-system.js?v=20260727-catalogo-directo5"></script>
+<script src="corralon-system.js?v=20260728-menu-auth-local1"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot, orderBy, query, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4933,15 +4933,27 @@ document.getElementById('listaArticulos').addEventListener('scroll', maybeAdvanc
 
 window.CorralonSystem?.articleEditor?.configure({
   getArticles: () => todosArticulos,
-  save: (nextList, updated) => {
+  getSearchQuery: () => document.getElementById('searchAdmin')?.value || '',
+  save: (nextList, updated, previousCode, appliedTargets = []) => {
     setTodosArticulos(nextList);
     toast('✅ Artículo actualizado. Sincronizando en segundo plano', 'ok');
+    const syncSnapshots = [...new Map([updated, ...appliedTargets].map((article) => {
+      const code = String(article?.codigo || article?.idart || '').trim();
+      return [code, {
+        ...article,
+        imagenes: Array.isArray(article?.imagenes) ? [...article.imagenes] : article?.imagenes,
+        tagsOcultos: Array.isArray(article?.tagsOcultos) ? [...article.tagsOcultos] : article?.tagsOcultos
+      }];
+    }).filter(([code]) => code)).values()];
     Promise.resolve()
-      .then(() => window.CorralonSystem.catalog.saveArticleEdit(updated))
+      .then(() => window.CorralonSystem.catalog.saveArticleEdits(syncSnapshots))
       .then((result) => {
-        if (result?.article) {
-          const code = String(result.article.codigo || '').trim();
-          setTodosArticulos(todosArticulos.map((article) => String(article.codigo || '').trim() === code ? { ...article, ...result.article } : article));
+        if (Array.isArray(result?.articles) && result.articles.length) {
+          const syncedByCode = new Map(result.articles.map((article) => [String(article.codigo || '').trim(), article]));
+          setTodosArticulos(todosArticulos.map((article) => {
+            const synced = syncedByCode.get(String(article.codigo || '').trim());
+            return synced ? { ...article, ...synced } : article;
+          }));
         }
         toast('✅ Artículo sincronizado', 'ok');
       })

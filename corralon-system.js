@@ -38,6 +38,8 @@
   let articleEditorImageFiles = new Map();
   let articleEditorApplyTargets = new Set();
   let articleEditorApplyFields = new Set(['etiquetas']);
+  const ARTICLE_EDITOR_LABEL_KEYS = ['oferta', 'destacado', 'masVendido', 'accesoRapido', 'ceramico'];
+  let articleEditorApplyLabels = new Set(ARTICLE_EDITOR_LABEL_KEYS);
   let articleEditorFunctionsBound = false;
   let articleEditorBasePrice = 0;
   let articleEditorTargetRubroOpen = false;
@@ -353,7 +355,7 @@
     const fn = window.CorralonFunciones;
     fn?.bindLinearNavigation?.({
       root: articleEditorHost,
-      selector: '.corralon-article-editor-card [data-editor-field],.corralon-article-editor-card [data-editor-chip],.corralon-article-editor-card [data-editor-images-open],.corralon-article-editor-card [data-editor-apply-open],.corralon-article-editor-card [data-editor-save],[data-editor-target-search],[data-editor-target-rubro],[data-editor-target-code],[data-editor-apply-field],[data-editor-apply-confirm]',
+      selector: '.corralon-article-editor-card [data-editor-field],.corralon-article-editor-card [data-editor-chip],.corralon-article-editor-card [data-editor-images-open],.corralon-article-editor-card [data-editor-apply-open],.corralon-article-editor-card [data-editor-save],[data-editor-target-search],[data-editor-target-rubro],[data-editor-target-code],[data-editor-apply-field],[data-editor-apply-label],[data-editor-apply-confirm]',
       selectOnFocus: true,
       navigateLeftRight: true,
       smartCaret: true,
@@ -426,7 +428,16 @@
       }).join('')
       : '<div class="corralon-editor-empty">No hay artículos encontrados.</div>';
     articleEditorHost.querySelectorAll('[data-editor-apply-field]').forEach((button) => {
-      button.classList.toggle('is-active', articleEditorApplyFields.has(button.dataset.editorApplyField));
+      const active = articleEditorApplyFields.has(button.dataset.editorApplyField);
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    const labelSelector = articleEditorHost.querySelector('[data-editor-apply-labels]');
+    if (labelSelector) labelSelector.hidden = !articleEditorApplyFields.has('etiquetas');
+    articleEditorHost.querySelectorAll('[data-editor-apply-label]').forEach((button) => {
+      const active = articleEditorApplyLabels.has(button.dataset.editorApplyLabel);
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
     });
     updateArticleEditorTargetCount();
   }
@@ -482,7 +493,12 @@
 
   function openArticleEditorTargets() {
     if (!articleEditorHost) return;
-    articleEditorHost.querySelector('[data-editor-target-search]').value = '';
+    articleEditorApplyTargets = new Set();
+    articleEditorApplyFields = new Set();
+    articleEditorApplyLabels = new Set();
+    articleEditorHost.querySelector('[data-editor-target-search]').value = String(
+      articleEditorAdapter.getSearchQuery?.() || ''
+    ).trim();
     articleEditorHost.querySelector('[data-editor-target-rubro]').value = '';
     closeArticleEditorRubroOptions();
     renderArticleEditorTargets();
@@ -490,18 +506,36 @@
     setTimeout(() => articleEditorHost.querySelector('[data-editor-target-search]')?.focus(), 0);
   }
 
-  function applyArticleEditorFields(target, source, fields) {
+  function applyArticleEditorFields(target, source, fields, labels = articleEditorApplyLabels) {
     const updated = { ...target };
     if (fields.has('etiquetas')) {
-      ['oferta', 'ofertaPct', 'ofertaHasta', 'destacado', 'masVendido', 'accesoRapido', 'ceramico', 'ceramicoM2', 'ceramicoPlacas'].forEach((key) => {
-        updated[key] = source[key];
-      });
+      if (labels.has('oferta')) {
+        updated.oferta = source.oferta;
+        updated.ofertaPct = source.ofertaPct;
+        updated.ofertaHasta = source.ofertaHasta;
+      }
+      if (labels.has('destacado')) updated.destacado = source.destacado;
+      if (labels.has('masVendido')) updated.masVendido = source.masVendido;
+      if (labels.has('accesoRapido')) updated.accesoRapido = source.accesoRapido;
+      if (labels.has('ceramico')) {
+        updated.ceramico = source.ceramico;
+        updated.ceramicoM2 = source.ceramicoM2;
+        updated.ceramicoPlacas = source.ceramicoPlacas;
+      }
     }
     if (fields.has('detalle')) updated.detalle = source.detalle;
-    if (fields.has('tags')) updated.tagsOcultos = [...articleTags(source.tagsOcultos)];
+    if (fields.has('tags')) {
+      const tags = [...articleTags(source.tagsOcultos)];
+      updated.tagsOcultos = tags;
+      updated.tags_ocultos = [...tags];
+    }
     if (fields.has('foto')) {
-      updated.fotoUrl = source.fotoUrl || '';
-      updated.imagenes = [...articleImages(source)];
+      const images = [...articleImages(source)];
+      const primary = source.fotoUrl || images[0] || '';
+      updated.fotoUrl = primary;
+      updated.foto_url = primary;
+      updated.imagen = primary;
+      updated.imagenes = images;
     }
     updated.timestamp = Date.now();
     return updated;
@@ -578,6 +612,7 @@
       .corralon-editor-rubro-options button:hover,.corralon-editor-rubro-options button.is-active{background:#dededb}
       .corralon-editor-target-list label{display:grid;grid-template-columns:24px 110px 1fr;align-items:center;gap:8px;border:1px solid #ddd;border-radius:9px;padding:8px;cursor:pointer}
       .corralon-editor-target-list label:hover{background:#eee}.corralon-editor-target-fields{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.corralon-editor-target-fields button{border:1px solid #bbb;border-radius:999px;background:#fff;padding:8px 12px;font-weight:800;cursor:pointer}.corralon-editor-target-fields button.is-active{background:#ef111b;border-color:#ef111b;color:#fff}
+      .corralon-editor-label-fields{display:grid;gap:7px;margin:-2px 0 11px;padding:10px 12px;border:1px solid #ddd;border-radius:11px;background:#f5f5f3}.corralon-editor-label-fields[hidden]{display:none!important}.corralon-editor-label-fields>span{font:800 10px/1 Arial,sans-serif;letter-spacing:.65px;text-transform:uppercase;color:#666}.corralon-editor-label-options{display:flex;flex-wrap:wrap;gap:7px}.corralon-editor-label-options button{border:1px solid #bbb;border-radius:999px;background:#fff;color:#222;padding:7px 11px;font-weight:800;cursor:pointer}.corralon-editor-label-options button.is-active{border-color:#555;background:#555;color:#fff}
       .corralon-editor-subactions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.corralon-editor-subactions button{min-height:42px;border:1px solid #bbb;border-radius:10px;background:#fff;padding:0 18px;font-weight:900;cursor:pointer}.corralon-editor-subactions button:last-child{background:#ef111b;border-color:#ef111b;color:#fff}
       .corralon-editor-empty{padding:22px;text-align:center;color:#777}
       @media(max-width:560px){.corralon-article-editor-host{padding:0}.corralon-article-editor-card{width:100%;max-height:100dvh;border-radius:0;padding:18px}.corralon-article-editor-head{margin:-18px -18px 14px;top:-18px;padding:16px 18px 13px}.corralon-article-editor-info{grid-template-columns:90px 1fr}.corralon-article-editor-info-price{grid-row:auto;grid-column:1/-1;align-items:flex-start;text-align:left;padding-top:10px;border-top:1px solid #ddd}.corralon-article-editor-main-grid,.corralon-article-editor-extras,.corralon-editor-target-filters{grid-template-columns:1fr}.corralon-article-editor-actions{margin:0 -18px -18px;padding:12px 18px 16px;grid-template-columns:1fr}.corralon-article-editor-actions button{min-height:42px}}
@@ -649,6 +684,16 @@
           </div>
         </div>
         <div class="corralon-editor-target-fields"><button type="button" data-editor-apply-field="etiquetas">Etiquetas</button><button type="button" data-editor-apply-field="detalle">Detalle</button><button type="button" data-editor-apply-field="tags">Tags</button><button type="button" data-editor-apply-field="foto">Fotos</button></div>
+        <div class="corralon-editor-label-fields" data-editor-apply-labels>
+          <span>Etiquetas a compartir</span>
+          <div class="corralon-editor-label-options">
+            <button type="button" data-editor-apply-label="oferta">En oferta</button>
+            <button type="button" data-editor-apply-label="destacado">Destacado</button>
+            <button type="button" data-editor-apply-label="masVendido">Más vendido</button>
+            <button type="button" data-editor-apply-label="accesoRapido">Acceso rápido</button>
+            <button type="button" data-editor-apply-label="ceramico">Cerámico</button>
+          </div>
+        </div>
         <div class="corralon-editor-target-list" data-editor-target-list></div>
         <div class="corralon-editor-subactions"><button type="button" data-editor-apply-close>Cancelar</button><button type="button" data-editor-apply-confirm>Confirmar selección</button></div>
       </div></div>`;
@@ -713,6 +758,13 @@
         const key = applyField.dataset.editorApplyField;
         if (articleEditorApplyFields.has(key)) articleEditorApplyFields.delete(key);
         else articleEditorApplyFields.add(key);
+        renderArticleEditorTargets();
+      }
+      const applyLabel = event.target.closest('[data-editor-apply-label]');
+      if (applyLabel) {
+        const key = applyLabel.dataset.editorApplyLabel;
+        if (articleEditorApplyLabels.has(key)) articleEditorApplyLabels.delete(key);
+        else articleEditorApplyLabels.add(key);
         renderArticleEditorTargets();
       }
       if (event.target.closest('[data-editor-apply-confirm]')) {
@@ -816,6 +868,8 @@
     articleEditorImageFiles = new Map();
     articleEditorApplyTargets = new Set();
     articleEditorApplyFields = new Set(['etiquetas']);
+    articleEditorApplyLabels = new Set(ARTICLE_EDITOR_LABEL_KEYS);
+    updateArticleEditorTargetCount();
     articleEditorReturnFocus = options.returnFocus || document.activeElement;
     editorInfo('codigo').textContent = articleCodeValue;
     editorInfo('nombre').textContent = String(article.nombre ?? article.descripcion ?? '');
@@ -861,6 +915,9 @@
     articleEditorImages = [];
     articleEditorImageFiles = new Map();
     articleEditorApplyTargets = new Set();
+    articleEditorApplyFields = new Set();
+    articleEditorApplyLabels = new Set(ARTICLE_EDITOR_LABEL_KEYS);
+    updateArticleEditorTargetCount();
     articleEditorHost.querySelectorAll('.corralon-editor-subdialog').forEach((dialog) => dialog.classList.remove('is-open'));
     articleEditorReturnFocus?.focus?.();
     articleEditorReturnFocus = null;
@@ -930,15 +987,20 @@
         ceramicoPlacas: active('ceramico') ? Math.max(0, Math.round(Number(parseFlexibleNumber(editorField('ceramicoPlacas').value) || 0))) : 0,
         timestamp: Date.now()
       };
+      const appliedTargets = [];
       const nextList = list.map((item) => {
         const itemCode = articleCode(item);
         if (itemCode === articleEditorOriginalCode) return updated;
         if (!articleEditorApplyTargets.has(itemCode)) return item;
-        return applyArticleEditorFields(item, updated, articleEditorApplyFields);
+        const applied = applyArticleEditorFields(item, updated, articleEditorApplyFields, articleEditorApplyLabels);
+        appliedTargets.push(applied);
+        return applied;
       });
       if (!articleEditorAdapter.save) throw new Error('El editor no está conectado a esta página');
-      await articleEditorAdapter.save(nextList, updated, articleEditorOriginalCode);
-      window.dispatchEvent(new CustomEvent('corralon:article-updated', { detail: { article: updated, previousCode: articleEditorOriginalCode } }));
+      await articleEditorAdapter.save(nextList, updated, articleEditorOriginalCode, appliedTargets);
+      window.dispatchEvent(new CustomEvent('corralon:article-updated', {
+        detail: { article: updated, articles: [updated, ...appliedTargets], previousCode: articleEditorOriginalCode }
+      }));
       closeArticleEditor();
     } catch (error) {
       console.error(error);
@@ -1933,8 +1995,6 @@
   const CATALOG_EDITOR_SESSION = (() => {
     const LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
     const SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
-    const SESSION_URL = `${SUPABASE_URL}/functions/v1/catalogo-editor-sesion`;
-    const EDIT_URL = `${SUPABASE_URL}/functions/v1/editar-catalogo-articulo`;
 
     function readStorage(storage, key) {
       try {
@@ -1970,62 +2030,130 @@
       try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
     }
 
-    async function login(userId, password, persistent = false) {
-      const response = await fetch(SESSION_URL, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_KEY,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({ action: 'login', userId, password, persistent: Boolean(persistent) })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.token) throw new Error(payload?.error || `No se pudo habilitar la edición (${response.status})`);
-      return store(payload, Boolean(persistent));
+    async function login(userId, password, persistent = false, userSnapshot = null) {
+      const durationMs = persistent ? 30 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
+      return store({
+        ok: true,
+        token: `menu-auth:${String(userId || '')}:${Date.now()}`,
+        expiresAt: Date.now() + durationMs,
+        user: {
+          id: String(userSnapshot?.id || userId || ''),
+          nombre: String(userSnapshot?.nombre || userSnapshot?.usuario || ''),
+          nivel: String(userSnapshot?.nivel || '')
+        }
+      }, Boolean(persistent));
     }
 
     async function logout() {
-      const active = current();
       clear();
-      if (!active?.token) return;
-      fetch(SESSION_URL, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${active.token}`,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({ action: 'logout' })
-      }).catch(() => {});
     }
 
-    async function saveArticle(article) {
+    async function saveArticlesRequest(body) {
       const active = current();
       if (!active?.token) {
         const error = new Error('No hay una sesión de edición activa. Volvé al Menú principal, actualizalo e iniciá sesión.');
         error.code = 'editor_session_required';
         throw error;
       }
-      const response = await fetch(EDIT_URL, {
+      const rawArticles = Array.isArray(body?.articles)
+        ? body.articles
+        : (body?.article ? [body.article] : []);
+      const userId = String(active?.user?.id || active?.userId || active?.user_id || '').trim();
+      const numberValue = (value, fallback = 0) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      };
+      const dateValue = (value) => {
+        const text = String(value || '').trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+      };
+      const edits = [...new Map(rawArticles.map((raw) => {
+        const codigo = articleCode(raw);
+        const imagenes = articleImages(raw);
+        const fotoUrl = String(raw?.fotoUrl ?? raw?.foto_url ?? raw?.imagen ?? imagenes[0] ?? '').trim();
+        if (fotoUrl && !imagenes.includes(fotoUrl)) imagenes.unshift(fotoUrl);
+        return [codigo, {
+          codigo,
+          detalle: String(raw?.detalle || '').trim(),
+          tags_ocultos: articleTags(raw?.tagsOcultos ?? raw?.tags_ocultos),
+          foto_url: fotoUrl,
+          imagenes,
+          oferta: articleBool(raw?.oferta),
+          oferta_pct: Math.max(0, Math.min(100, numberValue(raw?.ofertaPct ?? raw?.oferta_pct))),
+          oferta_hasta: dateValue(raw?.ofertaHasta ?? raw?.oferta_hasta),
+          destacado: articleBool(raw?.destacado),
+          mas_vendido: articleBool(raw?.masVendido ?? raw?.mas_vendido),
+          acceso_rapido: articleBool(raw?.accesoRapido ?? raw?.acceso_rapido),
+          ceramico: articleBool(raw?.ceramico),
+          ceramico_m2: Math.max(0, numberValue(raw?.ceramicoM2 ?? raw?.ceramico_m2)),
+          ceramico_placas: Math.max(0, Math.trunc(numberValue(raw?.ceramicoPlacas ?? raw?.ceramico_placas))),
+          updated_by: userId || 'menu-auth',
+          updated_at: new Date().toISOString()
+        }];
+      }).filter(([codigo]) => codigo)).values()];
+      if (!edits.length) return { ok: true, articles: [] };
+
+      const editResponse = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.catalogEdits}?on_conflict=codigo`, {
         method: 'POST',
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${active.token}`,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({ article })
+        headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(edits)
       });
-      const payload = await response.json().catch(() => ({}));
-      if (response.status === 401) clear();
-      if (!response.ok) {
-        const error = new Error(payload?.error || `No se pudo guardar el artículo (${response.status})`);
-        error.code = payload?.code || (response.status === 401 ? 'editor_session_required' : 'editor_save_failed');
+      if (!editResponse.ok) {
+        const detail = await editResponse.json().catch(() => ({}));
+        const error = new Error(detail?.message || detail?.error || `No se pudo guardar el artículo (${editResponse.status})`);
+        error.code = 'editor_save_failed';
         throw error;
       }
-      return payload;
+
+      const metaResponse = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?id=eq.principal&select=*`, {
+        headers: headers(),
+        cache: 'no-store'
+      });
+      const currentMetaRows = metaResponse.ok ? await metaResponse.json().catch(() => []) : [];
+      const currentMeta = Array.isArray(currentMetaRows) && currentMetaRows[0] ? currentMetaRows[0] : {};
+      const version = Math.max(Date.now(), Number(currentMeta.version || 0) + 1);
+      const codes = edits.map((edit) => edit.codigo);
+      const metaWrite = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?on_conflict=id`, {
+        method: 'POST',
+        headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify({
+          ...currentMeta,
+          id: 'principal',
+          version,
+          previous_version: Number(currentMeta.version || 0) || null,
+          change_mode: 'delta',
+          changed_codes: codes,
+          removed_codes: [],
+          updated_at: new Date().toISOString()
+        })
+      });
+      if (!metaWrite.ok) {
+        const detail = await metaWrite.json().catch(() => ({}));
+        const error = new Error(detail?.message || detail?.error || `Se guardó el artículo, pero no su versión (${metaWrite.status})`);
+        error.code = 'editor_meta_save_failed';
+        throw error;
+      }
+      return {
+        ok: true,
+        version,
+        updated_by: active?.user?.nombre || active?.user?.name || userId || 'menu-auth',
+        articles: []
+      };
     }
 
-    return { current, login, logout, clear, saveArticle };
+    async function saveArticle(article) {
+      return saveArticlesRequest({ article });
+    }
+
+    async function saveArticles(articles) {
+      const unique = [...new Map((Array.isArray(articles) ? articles : [])
+        .map((article) => [articleCode(article), article])
+        .filter(([code]) => code)).values()];
+      if (!unique.length) return { ok: true, articles: [] };
+      return saveArticlesRequest({ articles: unique });
+    }
+
+    return { current, login, logout, clear, saveArticle, saveArticles };
   })();
 
   const CATALOG = (() => {
@@ -2554,12 +2682,24 @@
       return Array.isArray(rows) && rows[0] ? fromSupabase(rows[0]) : null;
     }
 
-    async function saveArticleEdit(article) {
-      const payload = await CATALOG_EDITOR_SESSION.saveArticle(article);
-      const updated = payload?.article ? fromSupabase(payload.article) : await fetchArticle(codeOf(article));
-      if (updated && Array.isArray(memoryCache?.rows)) {
-        const code = codeOf(updated);
-        const rows = memoryCache.rows.map((row) => codeOf(row) === code ? { ...row, ...updated } : row);
+    async function saveArticleEdits(articles) {
+      const requested = [...new Map((Array.isArray(articles) ? articles : [])
+        .map((article) => [codeOf(article), article])
+        .filter(([code]) => code)).values()];
+      if (!requested.length) return { ok: true, articles: [] };
+      const payload = await CATALOG_EDITOR_SESSION.saveArticles(requested);
+      let updatedArticles = Array.isArray(payload?.articles)
+        ? payload.articles.map(fromSupabase)
+        : [];
+      if (!updatedArticles.length) {
+        updatedArticles = (await Promise.all(requested.map((article) => fetchArticle(codeOf(article))))).filter(Boolean);
+      }
+      if (updatedArticles.length && Array.isArray(memoryCache?.rows)) {
+        const byCode = new Map(updatedArticles.map((article) => [codeOf(article), article]));
+        const rows = memoryCache.rows.map((row) => {
+          const updated = byCode.get(codeOf(row));
+          return updated ? { ...row, ...updated } : row;
+        });
         await writeCache({
           ...memoryCache,
           signature: `supabase-directo-v1|${Number(payload?.version || memoryCache.version || 0)}`,
@@ -2568,7 +2708,12 @@
           source: 'supabase'
         });
       }
-      return { ...payload, article: updated };
+      return { ...payload, article: updatedArticles[0] || null, articles: updatedArticles };
+    }
+
+    async function saveArticleEdit(article) {
+      const result = await saveArticleEdits([article]);
+      return { ...result, article: result.articles?.[0] || null };
     }
 
     return {
@@ -2582,6 +2727,7 @@
       fetchCodeIndexRows: fetchSupabaseCodeIndexRows,
       fetchArticle,
       saveArticleEdit,
+      saveArticleEdits,
       mergeMetadata,
       fromSupabase
     };
