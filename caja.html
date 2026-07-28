@@ -2012,6 +2012,18 @@
     let firebaseManualSaveTimer = null;
     let applyingFirebaseSummary = false;
     let lastPublicCajaSignature = '';
+    let lastPublicCajaPayloadSignatures = {
+      movements: '',
+      system: '',
+      cashMovements: '',
+      receipts: ''
+    };
+    let lastPublicCajaUrls = {
+      movements: '',
+      system: '',
+      cashMovements: '',
+      receipts: ''
+    };
     let lastManualCajaSignature = '';
     let pendingCajaRefresh = false;
     let activeCajaBranchId = '';
@@ -5502,6 +5514,35 @@
       ].join('|');
     }
 
+    function cajaPayloadSignature(kind, payload) {
+      const text = JSON.stringify(payload ?? null);
+      let hash = 2166136261;
+      for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+      return `${selectedCajaBranchId()}|${kind}|${(hash >>> 0).toString(36)}|${text.length}`;
+    }
+
+    function renderPublicCajaChanges(changes) {
+      const movementTotalsChanged = changes.movements || changes.cashMovements || changes.receipts;
+      if (changes.system) {
+        renderTransferRows();
+        renderSystemRows();
+      }
+      if (movementTotalsChanged) renderMovementRows();
+      if (
+        changes.movements
+        || (changes.cashMovements && movementViewId === 'cashMovements')
+        || (changes.receipts && movementViewId === 'receipts')
+      ) {
+        renderMovementView();
+      }
+      if (changes.movements || changes.system || changes.cashMovements || changes.receipts) {
+        updateTotals();
+      }
+    }
+
     function manualCajaSignature(payload) {
       if (!payload) return '';
       const updatedAt = payload?.updatedAt?.toMillis?.() ?? payload?.updatedAt?.seconds ?? payload?.updatedAt ?? '';
@@ -5547,33 +5588,73 @@
         const systemUrl = config?.urlTransferencias || CAJA_PUBLIC_JSON_FALLBACK.system;
         const cashMovementsUrl = config?.urlIngresosEgresos || CAJA_PUBLIC_JSON_FALLBACK.cashMovements;
         const receiptsUrl = config?.urlRecibos || CAJA_PUBLIC_JSON_FALLBACK.receipts;
+        const publicUrls = {
+          movements: movementsUrl,
+          system: systemUrl,
+          cashMovements: cashMovementsUrl,
+          receipts: receiptsUrl
+        };
         let publicApplied = false;
+        const publicChanges = {
+          movements: false,
+          system: false,
+          cashMovements: false,
+          receipts: false
+        };
         let publicPayloads = null;
         if (publicChanged) {
           if (!movementsUrl || !systemUrl) return;
           publicPayloads = await Promise.all([
-            fetchPublicCajaJson(movementsUrl),
-            fetchPublicCajaJson(systemUrl),
-            cashMovementsUrl ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null) : Promise.resolve(null),
-            receiptsUrl ? fetchPublicCajaJson(receiptsUrl).catch(() => null) : Promise.resolve(null)
+            force || movementsUrl !== lastPublicCajaUrls.movements
+              ? fetchPublicCajaJson(movementsUrl)
+              : Promise.resolve(undefined),
+            force || systemUrl !== lastPublicCajaUrls.system
+              ? fetchPublicCajaJson(systemUrl)
+              : Promise.resolve(undefined),
+            (force || cashMovementsUrl !== lastPublicCajaUrls.cashMovements) && cashMovementsUrl
+              ? fetchPublicCajaJson(cashMovementsUrl).catch(() => null)
+              : Promise.resolve(undefined),
+            (force || receiptsUrl !== lastPublicCajaUrls.receipts) && receiptsUrl
+              ? fetchPublicCajaJson(receiptsUrl).catch(() => null)
+              : Promise.resolve(undefined)
           ]);
         }
         const focusSnapshot = captureCajaFocusState();
         if (manualChanged) applyCajaManualPayload(manualPayload);
         if (publicPayloads) {
           const [movementsPayload, systemPayload, cashMovementsPayload, receiptsPayload] = publicPayloads;
-          const appliedMovements = applyPublicCajaMovements(movementsPayload);
-          const appliedSystem = applyPublicCajaSystem(systemPayload);
-          const appliedCashMovements = applyPublicCajaCashMovements(cashMovementsPayload);
-          const appliedReceipts = applyPublicCajaReceipts(receiptsPayload);
-          publicApplied = appliedMovements || appliedSystem || appliedCashMovements || appliedReceipts;
+          const payloadsByKind = {
+            movements: movementsPayload,
+            system: systemPayload,
+            cashMovements: cashMovementsPayload,
+            receipts: receiptsPayload
+          };
+          const applyByKind = {
+            movements: applyPublicCajaMovements,
+            system: applyPublicCajaSystem,
+            cashMovements: applyPublicCajaCashMovements,
+            receipts: applyPublicCajaReceipts
+          };
+          Object.keys(payloadsByKind).forEach((kind) => {
+            const payload = payloadsByKind[kind];
+            if (payload === undefined) return;
+            const signature = cajaPayloadSignature(kind, payload);
+            if (!force && signature === lastPublicCajaPayloadSignatures[kind]) return;
+            const applied = applyByKind[kind](payload);
+            if (!applied) return;
+            lastPublicCajaPayloadSignatures[kind] = signature;
+            publicChanges[kind] = true;
+            publicApplied = true;
+          });
+          lastPublicCajaUrls = { ...publicUrls };
           lastPublicCajaSignature = configSignature;
         }
         if (manualChanged) lastManualCajaSignature = manualSignature;
         if (!publicApplied && !manualChanged) return;
         preserveCajaFocusedValue(focusSnapshot);
         persistLocalState();
-        renderAll();
+        if (manualChanged) renderAll();
+        else renderPublicCajaChanges(publicChanges);
         restoreCajaFocusState(focusSnapshot);
         if (!silent) showToast('Caja actualizada', 5000);
       } catch (error) {
