@@ -178,6 +178,23 @@
     min-width: 0;
     white-space: nowrap;
   }
+  .review-item.authorization-item {
+    grid-template-columns: minmax(0,1fr) 172px auto;
+    gap: 16px;
+    cursor: default;
+    padding: 10px 12px;
+  }
+  .authorization-summary { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .authorization-summary strong { color: #111; font-size: 16px; }
+  .authorization-summary span { color: #5d5d5a; font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+  .authorization-actions { display: flex; gap: 7px; justify-content: flex-end; }
+  .authorization-actions button { min-width: 82px; border: 1px solid #cfcfcb; border-radius: 10px; padding: 7px 10px; background: #fff; color: #111; font-weight: 900; cursor: pointer; }
+  .authorization-actions .approve { background: #159447; border-color: #159447; color: #fff; }
+  @media (max-width: 760px) {
+    .review-item.authorization-item { grid-template-columns: 1fr; gap: 8px; }
+    .authorization-actions { justify-content: stretch; }
+    .authorization-actions button { flex: 1; }
+  }
   .review-resolved {
     display: inline-flex;
     align-items: center;
@@ -1576,6 +1593,7 @@
 
     function notificationTitleFor(item = {}) {
       if (item.kind === 'pedido') return `Pedido ${item.id || ''}`.trim();
+      if (item.tipo === 'autorizacion_pedido') return item.title || `Autorizar pedido ${item.id || ''}`.trim();
       if (item.tipo === 'presupuesto') return 'Pres. Web';
       if (item.tipo === 'remito') return 'Remito';
       if (item.tipo === 'garantia') return 'Garantía';
@@ -1681,7 +1699,7 @@
       const historial = historialNotifications
         .filter((item) => !item.resuelta)
         .map((item) => {
-          const notif = { ...item, kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id || item.numero || item.firestoreId || ''), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id || ''}`.trim(), detail: item.detalle || '', date: item.fecha || '', createdAt: item.createdAt, updatedAt: item.updatedAt };
+          const notif = { ...item, kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id || item.numero || item.firestoreId || ''), docId: item.tipo === 'autorizacion_pedido' ? String(item.pedidoDocId || '') : '', tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id || ''}`.trim(), detail: item.detalle || '', date: item.fecha || '', createdAt: item.createdAt, updatedAt: item.updatedAt };
           return { ...notif, title: notificationTitleFor(notif), detail: cleanNotificationDetail(notif) };
         });
       return [...pedidos, ...historial].sort(notifCreatedSort);
@@ -1693,7 +1711,18 @@
       if (reviewModal.classList.contains('visible')) reviewModalSnapshot = currentVisible;
       reviewBell.classList.toggle('visible', currentVisible.length > 0);
       reviewBellCount.textContent = String(currentVisible.length);
-      reviewList.innerHTML = visible.length ? visible.map((item) => `
+      reviewList.innerHTML = visible.length ? visible.map((item) => item.tipo === 'autorizacion_pedido' ? `
+        <div class="review-item authorization-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
+          <div class="authorization-summary">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span>${escapeHtml(item.detail)}</span>
+          </div>
+          <span>${escapeHtml(formatNotifDateTime(item.createdAt || item.updatedAt, item.date))}</span>
+          <span class="authorization-actions">
+            <button class="approve" type="button" data-order-authorization="aprobar" data-review-doc="${escapeHtml(item.firestoreId || '')}">Aprobar</button>
+            <button type="button" data-order-authorization="rechazar" data-review-doc="${escapeHtml(item.firestoreId || '')}">Rechazar</button>
+          </span>
+        </div>` : `
         <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
           <strong>${escapeHtml(item.title)}</strong>
           <span>${escapeHtml(item.detail)}</span>
@@ -1704,6 +1733,29 @@
           </label>
         </div>
       `).join('') : '<div style="padding:18px;font-weight:800;color:var(--muted)">No hay notificaciones.</div>';
+    }
+
+    async function resolveOrderAuthorization(docId, decision) {
+      const target = historialNotifications.find((item) => item.firestoreId === docId);
+      if (!target) return;
+      const user = obtenerUsuarioActivo() || {};
+      const approved = decision === 'aprobar';
+      historialNotifications = historialNotifications.filter((item) => item.firestoreId !== docId);
+      renderReviewNotifications();
+      try {
+        await setDoc(doc(db, 'historialNotificaciones', docId), {
+          estadoAutorizacion: approved ? 'autorizado' : 'rechazado',
+          autorizadoPor: user.nombre || user.usuario || 'Administrador',
+          autorizadoPorId: user.id || user.usuario || '',
+          resuelta: true,
+          resueltaAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        showReviewToast({ toastText: approved ? `Pedido ${target.pedidoId || target.id} autorizado` : `Pedido ${target.pedidoId || target.id} rechazado` });
+      } catch (error) {
+        console.warn('No se pudo responder la autorización', error);
+        preloadReviewNotifications(user);
+      }
     }
 
     async function cargarNotificacionesResueltas() {
@@ -1943,6 +1995,7 @@
     resolvedReviewList.addEventListener('click', (event) => {
       const item = event.target.closest('[data-review-id]');
       if (!item) return;
+      if (item.dataset.tipo === 'autorizacion_pedido') return;
       const keepPopupOpen = event.ctrlKey || event.metaKey;
       if (!keepPopupOpen) resolvedReviewModal.classList.remove('visible');
       if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId, keepPopupOpen);
@@ -1984,6 +2037,12 @@
       }
     });
     reviewList.addEventListener('click', (event) => {
+      const authorizationButton = event.target.closest('[data-order-authorization]');
+      if (authorizationButton) {
+        event.stopPropagation();
+        resolveOrderAuthorization(authorizationButton.dataset.reviewDoc, authorizationButton.dataset.orderAuthorization);
+        return;
+      }
       const resolveCheck = event.target.closest('[data-resolve-notification]');
       if (resolveCheck) {
         event.stopPropagation();
@@ -1993,6 +2052,10 @@
       const item = event.target.closest('[data-review-id]');
       if (!item) return;
       const keepPopupOpen = event.ctrlKey || event.metaKey;
+      if (item.dataset.tipo === 'autorizacion_pedido') {
+        openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
+        return;
+      }
       if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId, keepPopupOpen);
       else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
     });
