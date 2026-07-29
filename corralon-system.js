@@ -560,6 +560,9 @@
       .corralon-article-editor-price{font:900 22px/1 'Barlow Condensed',Arial,sans-serif}
       .corralon-article-editor-price.is-offer{color:#d90009}
       .corralon-article-editor-price-before{font:700 11px/1 Arial,sans-serif;color:#777;text-decoration:line-through}
+      .corralon-article-editor-info-code{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+      .corralon-article-editor-info-sub-label{margin-top:4px;color:#666;font:800 11px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase}
+      .corralon-article-editor-info-sub-value{min-width:0;color:#171717;font:800 14px/1.3 Arial,sans-serif;overflow-wrap:anywhere}
       .corralon-article-editor-info-rubro{grid-column:1/-1;display:flex;gap:7px;align-items:baseline;margin-top:6px;padding-top:10px;border-top:1px solid #ddd}
       .corralon-article-editor-info-rubro .corralon-article-editor-info-value{font-weight:700}
       .corralon-article-editor-main-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -626,7 +629,12 @@
         <div class="corralon-article-editor-head"><div class="corralon-article-editor-title">Editar artículo</div><button class="corralon-article-editor-close" type="button" data-editor-close>×</button></div>
         <div class="corralon-article-editor-info">
           <div class="corralon-article-editor-info-label">Código</div><div class="corralon-article-editor-info-label">Descripción</div>
-          <div class="corralon-article-editor-info-value" data-editor-info="codigo"></div><div class="corralon-article-editor-info-value" data-editor-info="nombre"></div>
+          <div class="corralon-article-editor-info-code">
+            <div class="corralon-article-editor-info-value" data-editor-info="codigo"></div>
+            <span class="corralon-article-editor-info-sub-label">codprov</span>
+            <span class="corralon-article-editor-info-sub-value" data-editor-info="codigoProveedor"></span>
+          </div>
+          <div class="corralon-article-editor-info-value" data-editor-info="nombre"></div>
           <div class="corralon-article-editor-info-price">
             <span class="corralon-article-editor-price-state" data-editor-info="precioEstado">Precio de lista</span>
             <strong class="corralon-article-editor-price" data-editor-info="precio"></strong>
@@ -873,6 +881,9 @@
     articleEditorReturnFocus = options.returnFocus || document.activeElement;
     editorInfo('codigo').textContent = articleCodeValue;
     editorInfo('nombre').textContent = String(article.nombre ?? article.descripcion ?? '');
+    editorInfo('codigoProveedor').textContent = String(
+      article.codigoProveedor ?? article.codigo_proveedor ?? article.idartprov ?? article.codprov ?? ''
+    ).trim() || 'Sin código';
     editorInfo('rubro').textContent = String(article.rubro ?? '') || 'Sin rubro';
     articleEditorBasePrice = Number(article.precio || 0);
     editorField('detalle').value = String(article.detalle ?? '');
