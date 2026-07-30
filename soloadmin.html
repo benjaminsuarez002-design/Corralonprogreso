@@ -1248,10 +1248,10 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="corralon-system.js?v=20260729-codprov-editor3"></script>
+<script src="corralon-system.js?v=20260730-aridos7"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot, orderBy, query, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot, orderBy, query, getDocs, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL      = 'https://tizyjenayrcdkcodsjnc.supabase.co';
@@ -2099,7 +2099,8 @@ function setTodosArticulos(lista, { render = true, adminListSnapshot = null } = 
   const listaConStocks = unificarStocksSucursalesAdmin(lista || []);
   todosArticulos = (listaConStocks || []).map((articulo) => {
     const codigo = String(articulo?.codigo ?? articulo?.idart ?? '').trim();
-    return enriquecerArticuloAdminBusqueda(aplicarMetadatosPreviosSiFaltan(articulo, metaAnterior.get(codigo)));
+    const normalizado = enriquecerArticuloAdminBusqueda(aplicarMetadatosPreviosSiFaltan(articulo, metaAnterior.get(codigo)));
+    return window.CorralonSystem?.aridos?.decorateArticle?.(normalizado) || normalizado;
   });
   articulosMetaMap = construirMapaMetadatos(todosArticulos);
   sincronizarCatalogoGeneradorImagen(todosArticulos);
@@ -4963,6 +4964,45 @@ window.CorralonSystem?.articleEditor?.configure({
       });
   }
 });
+
+const ARIDOS_ARTICULOS_COLLECTION = 'configAridosArticulos';
+const ARIDOS_FLETES_DOC = doc(db, 'config', 'aridosFletes');
+
+window.CorralonSystem?.aridos?.configure({
+  getArticles: () => todosArticulos,
+  getProviders: () => window.CorralonSystem.getProvidersCache(),
+  saveArticleConfig: (codigo, config) => setDoc(
+    doc(db, ARIDOS_ARTICULOS_COLLECTION, encodeURIComponent(String(codigo || '').trim())),
+    {
+      codigo: String(codigo || '').trim(),
+      activo: !!config?.activo,
+      precios: { ...(config?.precios || {}) },
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  ),
+  saveFreightConfig: (config) => setDoc(ARIDOS_FLETES_DOC, {
+    idArtFlete: String(config?.idArtFlete || '012025').trim() || '012025',
+    rawson: Number(config?.rawson || 0),
+    pasandoCalle5: Number(config?.pasandoCalle5 || 0),
+    updatedAt: serverTimestamp()
+  }, { merge: true })
+});
+
+onSnapshot(collection(db, ARIDOS_ARTICULOS_COLLECTION), (snapshot) => {
+  const configs = new Map();
+  snapshot.forEach((entry) => {
+    const data = entry.data() || {};
+    const codigo = String(data.codigo || decodeURIComponent(entry.id) || '').trim();
+    if (codigo) configs.set(codigo, data);
+  });
+  window.CorralonSystem?.aridos?.setConfigMap?.(configs);
+  setTodosArticulos(todosArticulos);
+}, (error) => console.warn('No se pudo cargar la configuración de áridos', error));
+
+onSnapshot(ARIDOS_FLETES_DOC, (snapshot) => {
+  window.CorralonSystem?.aridos?.setFreightConfig?.(snapshot.exists() ? snapshot.data() : {});
+}, (error) => console.warn('No se pudo cargar la configuración de fletes', error));
 
 window.abrirEditar = (codigo) => {
   window.CorralonSystem?.articleEditor?.open(codigo);

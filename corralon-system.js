@@ -45,6 +45,33 @@
   let articleEditorTargetRubroOpen = false;
   let articleEditorTargetRubroIndex = -1;
   let articleSyncIndicatorHideTimer = null;
+  const ARID_PRICE_TIERS = [
+    { key: 'm1', meters: 1, label: '1 m³' },
+    { key: 'm1_5', meters: 1.5, label: '1,5 m³' },
+    { key: 'm2', meters: 2, label: '2 m³' },
+    { key: 'm2_5', meters: 2.5, label: '2,5 m³' },
+    { key: 'm3', meters: 3, label: '3 m³' },
+    { key: 'm3_5', meters: 3.5, label: '3,5 m³' },
+    { key: 'm4', meters: 4, label: '4 m³' },
+    { key: 'm4_5', meters: 4.5, label: '4,5 m³' },
+    { key: 'm5', meters: 5, label: '5 m³' }
+  ];
+  const ARIDOS_GALDEANO_PROVIDER_IDS = new Set(['6072']);
+  let aridosAdapter = {};
+  let aridosConfigMap = new Map();
+  let aridosFreightConfig = {
+    idArtFlete: '012025',
+    rawson: 0,
+    pasandoCalle5: 0
+  };
+  let articleEditorAridEligible = false;
+  let aridosBudgetHost = null;
+  let aridosBudgetArticleCode = '';
+  let aridosBudgetReturnFocus = null;
+  let aridosBudgetItems = [];
+  let aridosBudgetFreightMode = 'none';
+  let aridosBudgetCustomRate = 0;
+  const ARID_COST_VAT_FACTOR = 1.21;
 
   function ensureArticleSyncIndicator() {
     let indicator = document.getElementById('corralonArticleSyncIndicator');
@@ -195,6 +222,140 @@
     return ['1', 'true', 'si', 'sí', 'on'].includes(String(value ?? '').trim().toLowerCase());
   }
 
+  function aridCodeKey(value) {
+    return String(value ?? '').trim().toUpperCase();
+  }
+
+  function normalizeAridPrices(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return Object.fromEntries(ARID_PRICE_TIERS.map((tier) => [
+      tier.key,
+      Math.max(0, Number(parseFlexibleNumber(source[tier.key] ?? source[String(tier.meters)] ?? 0) || 0))
+    ]));
+  }
+
+  function normalizeAridConfig(value = {}, code = '') {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+      codigo: String(source.codigo ?? code ?? '').trim(),
+      activo: articleBool(source.activo ?? source.arido),
+      precios: normalizeAridPrices(source.precios ?? source.aridoPrecios ?? source.preciosArido ?? {})
+    };
+  }
+
+  function normalizeAridFreightConfig(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+      idArtFlete: String(source.idArtFlete ?? source.id_art_flete ?? '012025').trim() || '012025',
+      rawson: Math.max(0, Number(parseFlexibleNumber(source.rawson ?? source.fleteRawson ?? 0) || 0)),
+      pasandoCalle5: Math.max(0, Number(parseFlexibleNumber(source.pasandoCalle5 ?? source.pasando_calle_5 ?? source.fleteCalle5 ?? 0) || 0))
+    };
+  }
+
+  function configureAridos(options = {}) {
+    aridosAdapter = { ...aridosAdapter, ...options };
+  }
+
+  function setAridosConfigMap(source) {
+    const next = new Map();
+    const add = (key, value) => {
+      const normalized = normalizeAridConfig(value, key);
+      const mapKey = aridCodeKey(normalized.codigo || key);
+      if (mapKey) next.set(mapKey, normalized);
+    };
+    if (source instanceof Map) source.forEach((value, key) => add(key, value));
+    else if (Array.isArray(source)) source.forEach((value) => add(value?.codigo, value));
+    else if (source && typeof source === 'object') Object.entries(source).forEach(([key, value]) => add(key, value));
+    aridosConfigMap = next;
+    window.dispatchEvent(new CustomEvent('corralon:aridos-config-loaded', { detail: { configs: next } }));
+    return next;
+  }
+
+  function setAridosFreightConfig(value) {
+    aridosFreightConfig = normalizeAridFreightConfig(value);
+    window.dispatchEvent(new CustomEvent('corralon:aridos-freight-loaded', { detail: { ...aridosFreightConfig } }));
+    return { ...aridosFreightConfig };
+  }
+
+  function aridConfigForArticle(articleOrCode) {
+    const code = typeof articleOrCode === 'object' ? articleCode(articleOrCode) : articleOrCode;
+    const stored = aridosConfigMap.get(aridCodeKey(code));
+    if (stored) return normalizeAridConfig(stored, code);
+    if (articleOrCode && typeof articleOrCode === 'object') {
+      return normalizeAridConfig({
+        codigo: code,
+        activo: articleOrCode.arido,
+        precios: articleOrCode.aridoPrecios ?? articleOrCode.preciosArido
+      }, code);
+    }
+    return normalizeAridConfig({}, code);
+  }
+
+  function decorateAridArticle(article = {}) {
+    const config = aridConfigForArticle(article);
+    return {
+      ...article,
+      arido: config.activo,
+      aridoPrecios: { ...config.precios },
+      preciosArido: { ...config.precios }
+    };
+  }
+
+  function looksLikeAridosGaldeano(value) {
+    const text = norm(value);
+    return text.includes('aridos') && text.includes('galdeano');
+  }
+
+  function articleProviderId(article = {}) {
+    return String(
+      article.idProveedor ?? article.id_proveedor ?? article.idprov ??
+      article.proveedorId ?? article.proveedor_id ?? ''
+    ).trim();
+  }
+
+  function directArticleProviderText(article = {}) {
+    return [
+      article.proveedor,
+      article.nombreProveedor,
+      article.nombre_proveedor,
+      article.razonSocialProveedor,
+      article.razon_social_proveedor
+    ].filter(Boolean).join(' ');
+  }
+
+  async function resolveAridEligibility(article = {}) {
+    const code = aridCodeKey(articleCode(article));
+    if (code === aridCodeKey(aridosFreightConfig.idArtFlete || '012025')) return false;
+    const wantedId = articleProviderId(article).replace(/^0+(?=\d)/, '');
+    if (
+      aridConfigForArticle(article).activo ||
+      looksLikeAridosGaldeano(directArticleProviderText(article)) ||
+      ARIDOS_GALDEANO_PROVIDER_IDS.has(wantedId)
+    ) return true;
+    if (typeof aridosAdapter.isEligible === 'function') {
+      const resolved = await aridosAdapter.isEligible(article);
+      if (typeof resolved === 'boolean') return resolved;
+    }
+    if (!wantedId) return false;
+    let providers = typeof aridosAdapter.getProviders === 'function'
+      ? await aridosAdapter.getProviders()
+      : getProvidersCache();
+    if (!providers || (Array.isArray(providers) && !providers.length) || (!Array.isArray(providers) && !Object.keys(providers).length)) {
+      try {
+        providers = await importProvidersCloud();
+      } catch (_) {
+        providers = providers || {};
+      }
+    }
+    const list = Array.isArray(providers) ? providers : Object.values(providers || {});
+    return list.some((provider) => {
+      const normalized = providerFromObject(provider || {});
+      const providerId = String(normalized.id ?? provider?.id ?? provider?.idProveedor ?? provider?.id_proveedor ?? '').trim();
+      const providerName = normalized.nombre ?? provider?.nombre ?? provider?.razonSocial ?? provider?.razon_social ?? '';
+      return providerId.replace(/^0+(?=\d)/, '') === wantedId && looksLikeAridosGaldeano(providerName);
+    });
+  }
+
   function editorField(id) {
     return articleEditorHost?.querySelector(`[data-editor-field="${id}"]`);
   }
@@ -206,8 +367,10 @@
   function syncArticleEditorSections() {
     const offer = articleEditorHost?.querySelector('[data-editor-extra="oferta"]');
     const ceramic = articleEditorHost?.querySelector('[data-editor-extra="ceramico"]');
+    const arid = articleEditorHost?.querySelector('[data-editor-extra="arido"]');
     if (offer) offer.hidden = !articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active');
     if (ceramic) ceramic.hidden = !articleEditorHost.querySelector('[data-editor-chip="ceramico"]')?.classList.contains('is-active');
+    if (arid) arid.hidden = !articleEditorHost.querySelector('[data-editor-chip="arido"]')?.classList.contains('is-active');
     renderArticleEditorPrice();
   }
 
@@ -574,9 +737,18 @@
       .corralon-article-editor-chips{display:flex;flex-wrap:wrap;gap:8px;margin:5px 0 16px}
       .corralon-article-editor-chip{border:1px solid #ccc;border-radius:999px;background:#f6f6f4;color:#333;padding:8px 12px;font-weight:800;cursor:pointer}
       .corralon-article-editor-chip.is-active{border-color:#d90009;background:#ef111b;color:#fff}
+      .corralon-article-editor-chip[hidden]{display:none!important}
       .corralon-article-editor-extras{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 14px;padding:14px 14px 2px;border:1px solid #ddd;border-radius:14px;background:#f7f7f5}
       .corralon-article-editor-section-title{grid-column:1/-1;font:900 13px/1 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase;color:#333}
+      .corralon-article-editor-section-head{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px}
+      .corralon-article-editor-section-head .corralon-article-editor-section-title{grid-column:auto}
+      .corralon-article-editor-paste{min-height:32px;border:1px solid #bbb;border-radius:9px;background:#fff;color:#171717;padding:0 14px;font:900 12px/1 Arial,sans-serif;cursor:pointer}
+      .corralon-article-editor-paste:hover,.corralon-article-editor-paste:focus-visible{border-color:#777;background:#ededeb;outline:none}
       .corralon-article-editor-extras[hidden]{display:none!important}
+      .corralon-article-editor-arid-prices{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+      .corralon-article-editor-arid-prices .corralon-article-editor-field{margin-bottom:0}
+      .corralon-article-editor-arid-note{grid-column:1/-1;margin:-2px 0 10px;color:#666;font:700 11px/1.35 Arial,sans-serif}
+      .corralon-article-editor-arid-divider{grid-column:1/-1;height:1px;margin:4px 0;background:#d2d2cf}
       .corralon-article-editor-photo-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
       .corralon-article-editor-photo-head label{font:800 11px/1 Arial,sans-serif;letter-spacing:.7px;text-transform:uppercase;color:#666}
       .corralon-article-editor-photo-head button{border:0;border-radius:999px;background:#ef111b;color:#fff;padding:9px 14px;font-weight:900;cursor:pointer}
@@ -617,8 +789,11 @@
       .corralon-editor-target-list label:hover{background:#eee}.corralon-editor-target-fields{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.corralon-editor-target-fields button{border:1px solid #bbb;border-radius:999px;background:#fff;padding:8px 12px;font-weight:800;cursor:pointer}.corralon-editor-target-fields button.is-active{background:#ef111b;border-color:#ef111b;color:#fff}
       .corralon-editor-label-fields{display:grid;gap:7px;margin:-2px 0 11px;padding:10px 12px;border:1px solid #ddd;border-radius:11px;background:#f5f5f3}.corralon-editor-label-fields[hidden]{display:none!important}.corralon-editor-label-fields>span{font:800 10px/1 Arial,sans-serif;letter-spacing:.65px;text-transform:uppercase;color:#666}.corralon-editor-label-options{display:flex;flex-wrap:wrap;gap:7px}.corralon-editor-label-options button{border:1px solid #bbb;border-radius:999px;background:#fff;color:#222;padding:7px 11px;font-weight:800;cursor:pointer}.corralon-editor-label-options button.is-active{border-color:#555;background:#555;color:#fff}
       .corralon-editor-subactions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.corralon-editor-subactions button{min-height:42px;border:1px solid #bbb;border-radius:10px;background:#fff;padding:0 18px;font-weight:900;cursor:pointer}.corralon-editor-subactions button:last-child{background:#ef111b;border-color:#ef111b;color:#fff}
+      .corralon-editor-paste-copy{margin:0 0 10px;color:#666;font:700 12px/1.35 Arial,sans-serif}
+      .corralon-editor-paste-area{width:100%;min-height:190px;box-sizing:border-box;resize:vertical;border:1px solid #aaa;border-radius:11px;background:#fff;color:#171717;padding:12px;font:13px/1.35 Consolas,monospace;outline:none}
+      .corralon-editor-paste-area:focus{border-color:#666;box-shadow:0 0 0 2px rgba(0,0,0,.08)}
       .corralon-editor-empty{padding:22px;text-align:center;color:#777}
-      @media(max-width:560px){.corralon-article-editor-host{padding:0}.corralon-article-editor-card{width:100%;max-height:100dvh;border-radius:0;padding:18px}.corralon-article-editor-head{margin:-18px -18px 14px;top:-18px;padding:16px 18px 13px}.corralon-article-editor-info{grid-template-columns:90px 1fr}.corralon-article-editor-info-price{grid-row:auto;grid-column:1/-1;align-items:flex-start;text-align:left;padding-top:10px;border-top:1px solid #ddd}.corralon-article-editor-main-grid,.corralon-article-editor-extras,.corralon-editor-target-filters{grid-template-columns:1fr}.corralon-article-editor-actions{margin:0 -18px -18px;padding:12px 18px 16px;grid-template-columns:1fr}.corralon-article-editor-actions button{min-height:42px}}
+      @media(max-width:560px){.corralon-article-editor-host{padding:0}.corralon-article-editor-card{width:100%;max-height:100dvh;border-radius:0;padding:18px}.corralon-article-editor-head{margin:-18px -18px 14px;top:-18px;padding:16px 18px 13px}.corralon-article-editor-info{grid-template-columns:90px 1fr}.corralon-article-editor-info-price{grid-row:auto;grid-column:1/-1;align-items:flex-start;text-align:left;padding-top:10px;border-top:1px solid #ddd}.corralon-article-editor-main-grid,.corralon-article-editor-extras,.corralon-editor-target-filters{grid-template-columns:1fr}.corralon-article-editor-arid-prices{grid-template-columns:1fr 1fr}.corralon-article-editor-actions{margin:0 -18px -18px;padding:12px 18px 16px;grid-template-columns:1fr}.corralon-article-editor-actions button{min-height:42px}}
     `;
     document.head.appendChild(style);
     articleEditorHost = document.createElement('div');
@@ -653,6 +828,7 @@
           <button type="button" class="corralon-article-editor-chip" data-editor-chip="masVendido">Más vendido</button>
           <button type="button" class="corralon-article-editor-chip" data-editor-chip="accesoRapido">Acceso rápido</button>
           <button type="button" class="corralon-article-editor-chip" data-editor-chip="ceramico">Cerámico</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="arido" hidden>Árido</button>
         </div>
         <div class="corralon-article-editor-extras" data-editor-extra="oferta" hidden>
           <div class="corralon-article-editor-section-title">Configuración de oferta</div>
@@ -663,6 +839,26 @@
           <div class="corralon-article-editor-section-title">Configuración de cerámico</div>
           <div class="corralon-article-editor-field"><label for="corralonEditCeramicoM2">M² por caja</label><input id="corralonEditCeramicoM2" data-editor-field="ceramicoM2" data-editor-number="2" inputmode="decimal"></div>
           <div class="corralon-article-editor-field"><label for="corralonEditCeramicoPlacas">Placas por caja</label><input id="corralonEditCeramicoPlacas" data-editor-field="ceramicoPlacas" data-editor-number="0" inputmode="numeric"></div>
+        </div>
+        <div class="corralon-article-editor-extras" data-editor-extra="arido" hidden>
+          <div class="corralon-article-editor-section-head">
+            <div class="corralon-article-editor-section-title">Costos del árido por volumen</div>
+            <button type="button" class="corralon-article-editor-paste" data-editor-arid-paste>Pegar</button>
+          </div>
+          <div class="corralon-article-editor-arid-prices">
+            ${ARID_PRICE_TIERS.map((tier) => `
+              <div class="corralon-article-editor-field">
+                <label for="corralonEditArido_${tier.key}">${tier.label}</label>
+                <input id="corralonEditArido_${tier.key}" data-editor-field="arido_${tier.key}" data-editor-number="2" data-editor-kind="money" inputmode="decimal">
+              </div>`).join('')}
+          </div>
+          <div class="corralon-article-editor-arid-note">Estos importes son costos con IVA incluido y representan el total del material para cada cantidad de metros cúbicos.</div>
+          <div class="corralon-article-editor-arid-divider"></div>
+          <div class="corralon-article-editor-section-title">Costos comunes de fletes</div>
+          <div class="corralon-article-editor-field"><label for="corralonEditAridoFleteId">ID artículo de flete</label><input id="corralonEditAridoFleteId" data-editor-field="aridoFleteId" type="text"></div>
+          <div class="corralon-article-editor-field"><label for="corralonEditAridoFleteRawson">Costo flete Rawson por viaje</label><input id="corralonEditAridoFleteRawson" data-editor-field="aridoFleteRawson" data-editor-number="2" data-editor-kind="money" inputmode="decimal"></div>
+          <div class="corralon-article-editor-field"><label for="corralonEditAridoFleteCalle5">Costo flete pasando Calle 5 por viaje</label><input id="corralonEditAridoFleteCalle5" data-editor-field="aridoFleteCalle5" data-editor-number="2" data-editor-kind="money" inputmode="decimal"></div>
+          <div class="corralon-article-editor-arid-note">La configuración de flete es compartida por todos los artículos marcados como Árido.</div>
         </div>
         <div class="corralon-article-editor-photo-head"><label>Foto (arrastrá o hacé clic para cambiar)</label><button type="button" data-editor-images-open>Ver imágenes</button></div>
         <div class="corralon-article-editor-photo" data-editor-photo-zone><img data-editor-photo alt="Foto del artículo"><input type="file" accept="image/*" multiple data-editor-photo-input>
@@ -704,6 +900,12 @@
         </div>
         <div class="corralon-editor-target-list" data-editor-target-list></div>
         <div class="corralon-editor-subactions"><button type="button" data-editor-apply-close>Cancelar</button><button type="button" data-editor-apply-confirm>Confirmar selección</button></div>
+      </div></div>
+      <div class="corralon-editor-subdialog" data-editor-arid-paste-dialog><div class="corralon-editor-subcard">
+        <div class="corralon-editor-subhead"><b>Pegar precios del árido</b><button type="button" data-editor-arid-paste-close>×</button></div>
+        <p class="corralon-editor-paste-copy">Pegá la tabla completa. Se tomará automáticamente la columna correspondiente al árido abierto.</p>
+        <textarea class="corralon-editor-paste-area" data-editor-arid-paste-area placeholder="Pegá acá la tabla de precios..."></textarea>
+        <div class="corralon-editor-subactions"><button type="button" data-editor-arid-paste-close>Cancelar</button><button type="button" data-editor-arid-paste-confirm>Pegar valores</button></div>
       </div></div>`;
     document.body.appendChild(articleEditorHost);
     articleEditorHost.addEventListener('click', (event) => {
@@ -717,11 +919,24 @@
         event.target.classList.remove('is-open');
         articleEditorHost.querySelector('[data-editor-apply-open]')?.focus();
       }
+      if (event.target.matches?.('[data-editor-arid-paste-dialog]')) closeArticleEditorAridPasteDialog();
       if (event.target.closest('[data-editor-close]')) closeArticleEditor();
       const chip = event.target.closest('[data-editor-chip]');
       if (chip) {
         chip.classList.toggle('is-active');
         syncArticleEditorSections();
+      }
+      if (event.target.closest('[data-editor-arid-paste]')) pasteArticleEditorAridPrices();
+      if (event.target.closest('[data-editor-arid-paste-close]')) closeArticleEditorAridPasteDialog();
+      if (event.target.closest('[data-editor-arid-paste-confirm]')) {
+        const text = articleEditorHost.querySelector('[data-editor-arid-paste-area]')?.value || '';
+        try {
+          applyArticleEditorAridPriceText(text);
+          closeArticleEditorAridPasteDialog();
+        } catch (error) {
+          console.warn('No se pudieron pegar los precios del árido', error);
+          alert(error?.message || 'No se pudo interpretar la tabla.');
+        }
       }
       if (event.target.closest('[data-editor-save]')) saveArticleEditor();
       if (event.target.closest('[data-editor-images-open]')) {
@@ -863,6 +1078,173 @@
     articleEditorAdapter = { ...articleEditorAdapter, ...options };
   }
 
+  function splitAridClipboardRow(line) {
+    const text = String(line || '').trim();
+    if (!text) return [];
+    if (text.includes('\t')) return text.split('\t').map((item) => item.trim());
+    if (text.includes('|')) return text.split('|').map((item) => item.trim()).filter((item, index, list) => item || (index > 0 && index < list.length - 1));
+    if (text.includes(';')) return text.split(';').map((item) => item.trim());
+    return [text];
+  }
+
+  function aridClipboardColumnForArticle(article = {}, headers = []) {
+    const articleText = norm([
+      article.nombre,
+      article.descripcion,
+      article.detalle,
+      article.codigoProveedor,
+      article.codigo_proveedor,
+      article.codprov
+    ].filter(Boolean).join(' '));
+    const wanted = articleText.includes('gruesa')
+      ? ['gruesa']
+      : articleText.includes('fina')
+        ? ['fina']
+        : (articleText.includes('clasif') || articleText.includes('19'))
+          ? ['clasif', '19']
+          : (articleText.includes('grancilla') || articleText.includes('piedra bola') || articleText.includes('p bola'))
+            ? ['p bola', 'bola']
+            : (articleText.includes('comun') || articleText.includes('base'))
+              ? ['comun', 'base']
+              : [];
+    if (!wanted.length) return -1;
+    return headers.findIndex((header) => {
+      const normalized = norm(header).replace(/[._-]+/g, ' ');
+      return wanted.some((token) => normalized.includes(token));
+    });
+  }
+
+  function parseAridClipboardMoney(value) {
+    let text = String(value ?? '').replace(/\$/g, '').replace(/\s+/g, '').trim();
+    if (!text) return null;
+    if (text.includes(',')) text = text.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(?:\.\d{3})+$/.test(text)) text = text.replace(/\./g, '');
+    text = text.replace(/[^0-9.-]/g, '');
+    const number = Number(text);
+    return Number.isFinite(number) ? Number(number.toFixed(2)) : null;
+  }
+
+  function parseAridClipboardPrices(text) {
+    const rows = String(text || '')
+      .split(/\r?\n/)
+      .map(splitAridClipboardRow)
+      .filter((row) => row.length && !row.every((cell) => /^:?-{3,}:?$/.test(String(cell).trim())));
+    if (!rows.length) throw new Error('No hay valores para pegar.');
+
+    const list = articleEditorAdapter.getArticles?.() || [];
+    const article = list.find((item) => articleCode(item) === articleEditorOriginalCode) || {};
+    const headerIndex = rows.findIndex((row) => row.some((cell) => /mts|metros|gruesa|fina|comun|base|clasif|bola/i.test(norm(cell))));
+    const headers = headerIndex >= 0 ? rows[headerIndex] : [];
+    const valueColumn = headers.length ? aridClipboardColumnForArticle(article, headers) : -1;
+    const prices = {};
+
+    if (valueColumn >= 0) {
+      rows.slice(headerIndex + 1).forEach((row) => {
+        const meters = parseFlexibleNumber(row[0]);
+        const tier = ARID_PRICE_TIERS.find((item) => Math.abs(item.meters - Number(meters)) < 0.001);
+        const value = parseAridClipboardMoney(row[valueColumn]);
+        if (tier && value !== null) prices[tier.key] = Math.max(0, value);
+      });
+    } else {
+      const candidates = rows
+        .slice(headerIndex >= 0 ? headerIndex + 1 : 0)
+        .map((row) => row.length > 1 ? row[row.length - 1] : row[0])
+        .map(parseAridClipboardMoney)
+        .filter((value) => value !== null);
+      ARID_PRICE_TIERS.forEach((tier, index) => {
+        if (candidates[index] !== undefined) prices[tier.key] = Math.max(0, candidates[index]);
+      });
+    }
+
+    if (Object.keys(prices).length !== ARID_PRICE_TIERS.length) {
+      if (headers.length && valueColumn < 0) {
+        throw new Error('No pude reconocer qué columna corresponde a este árido.');
+      }
+      throw new Error('La tabla debe contener los 9 valores, desde 1 hasta 5 m³.');
+    }
+    return prices;
+  }
+
+  function applyArticleEditorAridPriceText(text) {
+    const prices = parseAridClipboardPrices(text);
+    ARID_PRICE_TIERS.forEach((tier) => {
+      const field = editorField(`arido_${tier.key}`);
+      if (!field) return;
+      field.value = prices[tier.key];
+      formatArticleEditorNumber(field, 2, false);
+    });
+    const button = articleEditorHost?.querySelector('[data-editor-arid-paste]');
+    if (button) {
+      button.textContent = 'Pegado ✓';
+      setTimeout(() => { if (button.isConnected) button.textContent = 'Pegar'; }, 1200);
+    }
+  }
+
+  function openArticleEditorAridPasteDialog(initialText = '') {
+    const dialog = articleEditorHost?.querySelector('[data-editor-arid-paste-dialog]');
+    const area = articleEditorHost?.querySelector('[data-editor-arid-paste-area]');
+    if (!dialog || !area) return;
+    area.value = String(initialText || '');
+    dialog.classList.add('is-open');
+    setTimeout(() => area.focus(), 0);
+  }
+
+  function closeArticleEditorAridPasteDialog() {
+    const dialog = articleEditorHost?.querySelector('[data-editor-arid-paste-dialog]');
+    if (!dialog) return;
+    dialog.classList.remove('is-open');
+    articleEditorHost.querySelector('[data-editor-arid-paste]')?.focus();
+  }
+
+  async function pasteArticleEditorAridPrices() {
+    const button = articleEditorHost?.querySelector('[data-editor-arid-paste]');
+    if (!button) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!String(text || '').trim()) {
+        openArticleEditorAridPasteDialog();
+        return;
+      }
+      applyArticleEditorAridPriceText(text);
+    } catch (error) {
+      console.warn('El navegador no entregó el portapapeles; se habilitó el pegado manual', error);
+      openArticleEditorAridPasteDialog();
+    }
+  }
+
+  function populateArticleEditorAridFields(config = {}) {
+    const normalized = normalizeAridConfig(config, articleEditorOriginalCode);
+    ARID_PRICE_TIERS.forEach((tier) => {
+      const field = editorField(`arido_${tier.key}`);
+      if (field) field.value = normalized.precios[tier.key] || 0;
+    });
+    const freightId = editorField('aridoFleteId');
+    const rawson = editorField('aridoFleteRawson');
+    const calle5 = editorField('aridoFleteCalle5');
+    if (freightId) freightId.value = aridosFreightConfig.idArtFlete;
+    if (rawson) rawson.value = aridosFreightConfig.rawson || 0;
+    if (calle5) calle5.value = aridosFreightConfig.pasandoCalle5 || 0;
+    articleEditorHost?.querySelectorAll('[data-editor-extra="arido"] [data-editor-number]').forEach((field) => {
+      formatArticleEditorNumber(field, Number(field.dataset.editorNumber || 2), false);
+    });
+  }
+
+  function readArticleEditorAridConfig(code, active) {
+    const prices = {};
+    ARID_PRICE_TIERS.forEach((tier) => {
+      prices[tier.key] = Math.max(0, Number(parseFlexibleNumber(editorField(`arido_${tier.key}`)?.value) || 0));
+    });
+    return normalizeAridConfig({ codigo: code, activo: active, precios: prices }, code);
+  }
+
+  function readArticleEditorFreightConfig() {
+    return normalizeAridFreightConfig({
+      idArtFlete: editorField('aridoFleteId')?.value,
+      rawson: editorField('aridoFleteRawson')?.value,
+      pasandoCalle5: editorField('aridoFleteCalle5')?.value
+    });
+  }
+
   function openArticleEditor(code, options = {}) {
     const articleCodeValue = String(code || '').trim();
     const list = options.articles || articleEditorAdapter.getArticles?.() || [];
@@ -877,6 +1259,7 @@
     articleEditorApplyTargets = new Set();
     articleEditorApplyFields = new Set(['etiquetas']);
     articleEditorApplyLabels = new Set(ARTICLE_EDITOR_LABEL_KEYS);
+    articleEditorAridEligible = false;
     updateArticleEditorTargetCount();
     articleEditorReturnFocus = options.returnFocus || document.activeElement;
     editorInfo('codigo').textContent = articleCodeValue;
@@ -892,6 +1275,13 @@
     editorField('ofertaHasta').value = articleEditorDateToDisplay(article.ofertaHasta ?? article.oferta_hasta ?? '');
     editorField('ceramicoM2').value = Number(article.ceramicoM2 ?? article.m2 ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     editorField('ceramicoPlacas').value = Number(article.ceramicoPlacas ?? article.placas ?? 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+    const articleAridConfig = aridConfigForArticle(article);
+    const aridChip = host.querySelector('[data-editor-chip="arido"]');
+    if (aridChip) {
+      aridChip.hidden = true;
+      aridChip.classList.remove('is-active');
+    }
+    populateArticleEditorAridFields(articleAridConfig);
     host.querySelectorAll('[data-editor-number]').forEach((field) => {
       formatArticleEditorNumber(field, Number(field.dataset.editorNumber || 2), false);
     });
@@ -903,7 +1293,8 @@
         destacado: article.destacado,
         masVendido: article.masVendido ?? article.mas_vendido,
         accesoRapido: article.accesoRapido ?? article.rapido,
-        ceramico: article.ceramico
+        ceramico: article.ceramico,
+        arido: false
       };
       chip.classList.toggle('is-active', articleBool(aliases[key]));
     });
@@ -914,6 +1305,16 @@
     renderArticleEditorGallery();
     host.classList.add('is-open');
     host.setAttribute('aria-hidden', 'false');
+    Promise.resolve(resolveAridEligibility(article)).then((eligible) => {
+      if (articleEditorOriginalCode !== articleCodeValue || !host.classList.contains('is-open')) return;
+      articleEditorAridEligible = Boolean(eligible);
+      if (!aridChip) return;
+      aridChip.hidden = !articleEditorAridEligible;
+      aridChip.classList.toggle('is-active', articleEditorAridEligible && articleAridConfig.activo);
+      syncArticleEditorSections();
+    }).catch((error) => {
+      console.warn('No se pudo comprobar el proveedor del árido', error);
+    });
     setTimeout(() => editorField('detalle')?.focus(), 0);
     return true;
   }
@@ -928,6 +1329,7 @@
     articleEditorApplyTargets = new Set();
     articleEditorApplyFields = new Set();
     articleEditorApplyLabels = new Set(ARTICLE_EDITOR_LABEL_KEYS);
+    articleEditorAridEligible = false;
     updateArticleEditorTargetCount();
     articleEditorHost.querySelectorAll('.corralon-editor-subdialog').forEach((dialog) => dialog.classList.remove('is-open'));
     articleEditorReturnFocus?.focus?.();
@@ -975,6 +1377,9 @@
       }
       const savedImages = [...new Set(images.filter((item) => item && !String(item).startsWith('blob:')))];
       const active = (key) => articleEditorHost.querySelector(`[data-editor-chip="${key}"]`)?.classList.contains('is-active');
+      const aridActive = articleEditorAridEligible && active('arido');
+      const aridConfig = readArticleEditorAridConfig(code, aridActive);
+      const freightConfig = readArticleEditorFreightConfig();
       const updated = {
         ...original,
         codigo: code,
@@ -996,6 +1401,9 @@
         ceramico: active('ceramico'),
         ceramicoM2: active('ceramico') ? Number(parseFlexibleNumber(editorField('ceramicoM2').value) || 0) : 0,
         ceramicoPlacas: active('ceramico') ? Math.max(0, Math.round(Number(parseFlexibleNumber(editorField('ceramicoPlacas').value) || 0))) : 0,
+        arido: aridActive,
+        aridoPrecios: { ...aridConfig.precios },
+        preciosArido: { ...aridConfig.precios },
         timestamp: Date.now()
       };
       const appliedTargets = [];
@@ -1009,6 +1417,25 @@
       });
       if (!articleEditorAdapter.save) throw new Error('El editor no está conectado a esta página');
       await articleEditorAdapter.save(nextList, updated, articleEditorOriginalCode, appliedTargets);
+      if (articleEditorAridEligible) {
+        const nextConfigs = new Map(aridosConfigMap);
+        nextConfigs.set(aridCodeKey(code), aridConfig);
+        setAridosConfigMap(nextConfigs);
+        setAridosFreightConfig(freightConfig);
+        const backgroundWrites = [];
+        if (typeof aridosAdapter.saveArticleConfig === 'function') {
+          backgroundWrites.push(Promise.resolve().then(() => aridosAdapter.saveArticleConfig(code, aridConfig)));
+        }
+        if (typeof aridosAdapter.saveFreightConfig === 'function') {
+          backgroundWrites.push(Promise.resolve().then(() => aridosAdapter.saveFreightConfig(freightConfig)));
+        }
+        if (backgroundWrites.length) {
+          Promise.all(backgroundWrites).catch((error) => {
+            console.error('No se pudo sincronizar la configuración de áridos', error);
+            window.dispatchEvent(new CustomEvent('corralon:article-sync-error', { detail: { error } }));
+          });
+        }
+      }
       window.dispatchEvent(new CustomEvent('corralon:article-updated', {
         detail: { article: updated, articles: [updated, ...appliedTargets], previousCode: articleEditorOriginalCode }
       }));
@@ -1020,6 +1447,495 @@
       saveButton.disabled = false;
       saveButton.textContent = 'Guardar cambios';
     }
+  }
+
+  function escapeAridHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function aridArticleName(article = {}) {
+    return String(article.nombre ?? article.descripcion ?? article.articulo ?? '').trim();
+  }
+
+  function aridArticles() {
+    const source = aridosAdapter.getArticles?.() || articleEditorAdapter.getArticles?.() || [];
+    return source
+      .map(decorateAridArticle)
+      .filter((article) => articleCode(article) && aridConfigForArticle(article).activo);
+  }
+
+  function aridArticleByCode(code) {
+    const key = aridCodeKey(code);
+    return aridArticles().find((article) => aridCodeKey(articleCode(article)) === key) || null;
+  }
+
+  function normalizeAridMeters(value) {
+    const parsed = Number(parseFlexibleNumber(value) || 0);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+    return Math.max(1, Math.ceil(parsed * 2 - 1e-9) / 2);
+  }
+
+  function aridTierForMeters(meters) {
+    const normalized = Math.max(1, Math.min(5, Math.ceil(Number(meters || 1) * 2 - 1e-9) / 2));
+    return ARID_PRICE_TIERS.find((tier) => tier.meters === normalized) || ARID_PRICE_TIERS[0];
+  }
+
+  function roundAridMoney(value) {
+    return Math.round(Number(value || 0) * 100) / 100;
+  }
+
+  function aridArticleMargin(article = {}) {
+    let margin = Number(article.margenGanancia ?? article.PorcGanMin ?? article.porcGanMin ?? 0);
+    if (Math.abs(margin) > 1) margin /= 100;
+    const cost = Number(article.precioCostoConImpuestos ?? article.PrecioCpraCI ?? article.precioCpraCI ?? 0);
+    const sale = Number(article.precioVentaPublico ?? article.PrecioVta3 ?? article.precio ?? 0);
+    if (!(margin > 0) && cost > 0 && sale > 0) margin = (sale / cost) - 1;
+    return Number.isFinite(margin) ? Math.max(0, margin) : 0;
+  }
+
+  function aridSaleFromCost(cost, article) {
+    return roundAridMoney(Number(cost || 0) * (1 + aridArticleMargin(article)));
+  }
+
+  function aridInputNumber(value, fallback = 0) {
+    const evaluated = window.CorralonFunciones?.evaluateNumericExpression?.(String(value ?? ''));
+    if (Number.isFinite(evaluated)) return evaluated;
+    const parsed = parseFlexibleNumber(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function calculateAridMaterial(article, metersValue) {
+    if (!article) return null;
+    const meters = normalizeAridMeters(aridInputNumber(metersValue, 1));
+    const config = aridConfigForArticle(article);
+    const fullLoads = Math.floor(meters / 5);
+    const remainder = Math.round((meters - fullLoads * 5) * 2) / 2;
+    const fivePrice = Number(config.precios.m5 || 0);
+    let costTotal = fullLoads * fivePrice;
+    if (remainder > 0) {
+      const tier = aridTierForMeters(remainder);
+      costTotal += Number(config.precios[tier.key] || 0);
+    }
+    const marginRate = aridArticleMargin(article);
+    const total = aridSaleFromCost(costTotal, article);
+    return {
+      article,
+      code: articleCode(article),
+      name: aridArticleName(article),
+      meters,
+      costTotal: roundAridMoney(costTotal),
+      costUnit: meters ? roundAridMoney(costTotal / meters) : 0,
+      marginRate,
+      total,
+      unitPrice: meters ? roundAridMoney(total / meters) : 0
+    };
+  }
+
+  function isLocalAridExportAvailable() {
+    return ['localhost', '127.0.0.1', '::1'].includes(String(location.hostname || '').toLowerCase());
+  }
+
+  function ensureAridosBudgetHost() {
+    if (aridosBudgetHost?.isConnected) return aridosBudgetHost;
+    const style = document.createElement('style');
+    style.id = 'corralonAridosBudgetStyle';
+    style.textContent = `
+      .corralon-aridos-host{position:fixed;inset:0;z-index:2147483050;display:none;align-items:center;justify-content:center;padding:14px;background:rgba(0,0,0,.72);font-family:Arial,sans-serif}
+      .corralon-aridos-host.is-open{display:flex}
+      .corralon-aridos-card{width:min(940px,100%);max-height:94dvh;overflow:auto;border:1px solid #c9c9c9;border-radius:18px;background:#fff;color:#171717;box-shadow:0 24px 70px rgba(0,0,0,.36)}
+      .corralon-aridos-head{position:sticky;top:0;z-index:4;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #ddd;background:#fff}
+      .corralon-aridos-head b{font:900 25px/1 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase}
+      .corralon-aridos-close{width:36px;height:36px;border:0;border-radius:50%;background:#eee;color:#222;font-size:22px;cursor:pointer}
+      .corralon-aridos-body{display:grid;gap:12px;padding:16px 20px 18px}
+      .corralon-aridos-table-wrap{overflow:auto;border:1px solid #c9c9c9;border-radius:14px;background:#fff}
+      .corralon-aridos-table{width:100%;border-collapse:collapse;table-layout:fixed}
+      .corralon-aridos-table th{padding:10px 12px;border-bottom:1px solid #c9c9c9;background:#ececea;color:#555;text-align:left;font:900 11px/1 Arial,sans-serif;letter-spacing:.55px;text-transform:uppercase}
+      .corralon-aridos-table th:nth-child(2){width:145px}.corralon-aridos-table th:nth-child(3){width:175px;text-align:right}
+      .corralon-aridos-table td{padding:9px 12px;border-bottom:1px solid #dedede;vertical-align:middle}
+      .corralon-aridos-table tbody tr:nth-child(even){background:#f4f4f2}
+      .corralon-aridos-table select,.corralon-aridos-table input{width:100%;height:38px;box-sizing:border-box;border:1px solid #aaa;border-radius:9px;background:#fff;color:#171717;padding:7px 9px;font:700 13px/1 Arial,sans-serif;outline:none}
+      .corralon-aridos-table select:focus,.corralon-aridos-table input:focus{border-color:#555;box-shadow:0 0 0 2px rgba(0,0,0,.09)}
+      .corralon-aridos-description{display:flex;align-items:center;gap:8px;min-width:0}
+      .corralon-aridos-description-copy{min-width:0;flex:1}
+      .corralon-aridos-description b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:900 16px/1.15 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase}
+      .corralon-aridos-description small{display:block;margin-top:3px;color:#6a6a6a;font-size:11px;font-weight:700}
+      .corralon-aridos-remove{width:29px;height:29px;flex:0 0 29px;border:1px solid #bbb;border-radius:50%;background:#fff;color:#d90009;font-size:18px;font-weight:900;cursor:pointer}
+      .corralon-aridos-price{text-align:right;font-size:15px;font-weight:900;white-space:nowrap}
+      .corralon-aridos-add-row td{background:#fff}
+      .corralon-aridos-add-row select{color:#555;font-weight:800}
+      .corralon-aridos-freight-copy{display:grid;gap:7px}
+      .corralon-aridos-freight-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+      .corralon-aridos-freight-line>b{font:900 16px/1 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase}
+      .corralon-aridos-freight-options{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+      .corralon-aridos-freight-options button{min-height:31px;border:1px solid #aaa;border-radius:999px;background:#fff;color:#222;padding:0 11px;font:800 11px/1 Arial,sans-serif;cursor:pointer}
+      .corralon-aridos-freight-options button.is-active{border-color:#ef111b;background:#ef111b;color:#fff}
+      .corralon-aridos-custom{display:grid;grid-template-columns:auto minmax(140px,220px);align-items:center;gap:8px}
+      .corralon-aridos-custom[hidden]{display:none!important}
+      .corralon-aridos-custom span{color:#666;font-size:11px;font-weight:800}
+      .corralon-aridos-table tfoot td{border:0;background:#eee9ee;font-size:18px;font-weight:900}
+      .corralon-aridos-table tfoot td:last-child{text-align:right}
+      .corralon-aridos-warning{padding:10px 12px;border:1px solid #ff8a91;border-radius:11px;background:#fff0f1;color:#b50008;font-weight:800}
+      .corralon-aridos-warning[hidden]{display:none!important}
+      .corralon-aridos-actions{position:sticky;bottom:0;z-index:4;display:grid;grid-template-columns:1fr 1.35fr 1.35fr;gap:9px;padding:13px 20px 17px;border-top:1px solid #ddd;background:#fff}
+      .corralon-aridos-actions button{min-height:45px;border:1px solid #bbb;border-radius:11px;background:#fff;color:#171717;font-weight:900;cursor:pointer}
+      .corralon-aridos-actions button[data-arid-cart]{border-color:#ef111b;background:#ef111b;color:#fff}
+      .corralon-aridos-actions button[data-arid-export]{border-color:#171717;background:#171717;color:#fff}
+      .corralon-aridos-actions button[hidden]{display:none!important}
+      @media(max-width:580px){
+        .corralon-aridos-host{padding:0}.corralon-aridos-card{width:100%;max-height:100dvh;border-radius:0}
+        .corralon-aridos-body{padding:10px}.corralon-aridos-table{min-width:650px}
+        .corralon-aridos-actions{grid-template-columns:1fr}
+      }
+    `;
+    document.head.appendChild(style);
+    aridosBudgetHost = document.createElement('div');
+    aridosBudgetHost.className = 'corralon-aridos-host';
+    aridosBudgetHost.setAttribute('aria-hidden', 'true');
+    aridosBudgetHost.innerHTML = `
+      <div class="corralon-aridos-card" role="dialog" aria-modal="true" aria-label="Presupuestar áridos">
+        <div class="corralon-aridos-head"><b>Presupuestar áridos</b><button type="button" class="corralon-aridos-close" data-arid-close>×</button></div>
+        <div class="corralon-aridos-body">
+          <div class="corralon-aridos-table-wrap">
+            <table class="corralon-aridos-table">
+              <thead><tr><th>Descripción</th><th>Cantidad</th><th>Precio</th></tr></thead>
+              <tbody data-arid-table-body></tbody>
+              <tfoot><tr><td colspan="2">Total</td><td data-arid-total>$ 0,00</td></tr></tfoot>
+            </table>
+          </div>
+          <div class="corralon-aridos-warning" data-arid-warning hidden></div>
+        </div>
+        <div class="corralon-aridos-actions">
+          <button type="button" data-arid-close>Cancelar</button>
+          <button type="button" data-arid-export>Generar XLS y actualizar</button>
+          <button type="button" data-arid-cart>Agregar al carrito</button>
+        </div>
+      </div>`;
+    document.body.appendChild(aridosBudgetHost);
+
+    aridosBudgetHost.addEventListener('input', (event) => {
+      const meters = event.target.closest('[data-arid-row-meters]');
+      if (meters) {
+        const index = Number(meters.closest('[data-arid-material-row]')?.dataset.index);
+        if (aridosBudgetItems[index]) aridosBudgetItems[index].meters = meters.value;
+        renderAridosBudgetValues();
+      }
+      if (event.target.matches('[data-arid-custom-rate]')) {
+        aridosBudgetCustomRate = event.target.value;
+        renderAridosBudgetValues();
+      }
+    });
+    aridosBudgetHost.addEventListener('change', (event) => {
+      const materialSelect = event.target.closest('[data-arid-material-select]');
+      if (materialSelect) {
+        const index = Number(materialSelect.closest('[data-arid-material-row]')?.dataset.index);
+        if (aridosBudgetItems[index]) aridosBudgetItems[index].code = materialSelect.value;
+        renderAridosBudgetRows(index);
+        return;
+      }
+      const addSelect = event.target.closest('[data-arid-add]');
+      if (addSelect?.value) {
+        aridosBudgetItems.push({ code: addSelect.value, meters: '1' });
+        renderAridosBudgetRows(aridosBudgetItems.length - 1);
+      }
+    });
+    aridosBudgetHost.addEventListener('focusout', (event) => {
+      const input = event.target.closest('[data-arid-row-meters],[data-arid-custom-rate]');
+      if (!input) return;
+      const evaluated = aridInputNumber(input.value, input.matches('[data-arid-custom-rate]') ? 0 : 1);
+      if (input.matches('[data-arid-custom-rate]')) {
+        aridosBudgetCustomRate = Math.max(0, evaluated);
+        input.value = money(aridosBudgetCustomRate);
+      } else {
+        const index = Number(input.closest('[data-arid-material-row]')?.dataset.index);
+        const normalized = normalizeAridMeters(evaluated);
+        if (aridosBudgetItems[index]) aridosBudgetItems[index].meters = normalized;
+        input.value = normalized.toLocaleString('es-AR', { maximumFractionDigits: 1 });
+      }
+      renderAridosBudgetValues();
+    });
+    aridosBudgetHost.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeAridosBudget();
+      if (event.key === 'Enter' && event.target.matches('[data-arid-row-meters],[data-arid-custom-rate]')) {
+        event.preventDefault();
+        event.target.blur();
+      }
+    });
+    aridosBudgetHost.addEventListener('click', (event) => {
+      if (event.target === aridosBudgetHost || event.target.closest('[data-arid-close]')) {
+        closeAridosBudget();
+        return;
+      }
+      const freight = event.target.closest('[data-arid-freight-option]');
+      if (freight) {
+        aridosBudgetFreightMode = freight.dataset.aridFreightOption || 'none';
+        renderAridosBudgetValues();
+        return;
+      }
+      const remove = event.target.closest('[data-arid-remove]');
+      if (remove) {
+        const index = Number(remove.closest('[data-arid-material-row]')?.dataset.index);
+        if (index > 0) aridosBudgetItems.splice(index, 1);
+        renderAridosBudgetRows(Math.max(0, index - 1));
+        return;
+      }
+      if (event.target.closest('[data-arid-cart]')) addAridosBudgetToCart();
+      if (event.target.closest('[data-arid-export]')) exportAridosBudgetXls();
+    });
+    window.CorralonFunciones?.bindLinearNavigation?.({
+      root: aridosBudgetHost,
+      selector: '[data-arid-material-select],[data-arid-row-meters],[data-arid-freight-option],[data-arid-custom-rate],[data-arid-add],[data-arid-export],[data-arid-cart],[data-arid-close]',
+      selectOnFocus: true,
+      navigateLeftRight: true,
+      smartCaret: true,
+      selectOnAnyFocus: true,
+      selectOnFirstPointerFocus: true
+    });
+    return aridosBudgetHost;
+  }
+
+  function aridBudgetOptions(selectedCode = '', rowIndex = -1) {
+    const used = new Set(aridosBudgetItems
+      .filter((_, index) => index !== rowIndex)
+      .map((item) => aridCodeKey(item.code)));
+    return aridArticles()
+      .filter((article) => !used.has(aridCodeKey(articleCode(article))) || aridCodeKey(articleCode(article)) === aridCodeKey(selectedCode))
+      .map((article) => {
+        const code = articleCode(article);
+        const selected = aridCodeKey(code) === aridCodeKey(selectedCode) ? ' selected' : '';
+        return `<option value="${escapeAridHtml(code)}"${selected}>${escapeAridHtml(code)} · ${escapeAridHtml(aridArticleName(article))}</option>`;
+      }).join('');
+  }
+
+  function renderAridosBudgetRows(focusIndex = null) {
+    if (!aridosBudgetHost) return;
+    const body = aridosBudgetHost.querySelector('[data-arid-table-body]');
+    if (!body) return;
+    const materialRows = aridosBudgetItems.map((item, index) => {
+      const article = aridArticleByCode(item.code);
+      const description = `<div class="corralon-aridos-description">
+        <div class="corralon-aridos-description-copy">
+          <b>${escapeAridHtml(aridArticleName(article))}</b>
+          <small>Código ${escapeAridHtml(articleCode(article))}</small>
+        </div>
+        ${index > 0 ? '<button type="button" class="corralon-aridos-remove" data-arid-remove aria-label="Quitar árido">×</button>' : ''}
+      </div>`;
+      return `<tr data-arid-material-row data-index="${index}">
+        <td>${description}</td>
+        <td><input data-arid-row-meters inputmode="decimal" value="${escapeAridHtml(String(item.meters ?? 1))}" aria-label="Metros cúbicos"></td>
+        <td class="corralon-aridos-price" data-arid-row-price>$ 0,00</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `${materialRows}
+      <tr data-arid-freight-row>
+        <td>
+          <div class="corralon-aridos-freight-copy">
+            <div class="corralon-aridos-freight-line">
+              <b>Flete</b>
+              <div class="corralon-aridos-freight-options">
+                <button type="button" data-arid-freight-option="none">Sin flete</button>
+                <button type="button" data-arid-freight-option="rawson">Rawson</button>
+                <button type="button" data-arid-freight-option="calle5">Pasando Calle 5</button>
+                <button type="button" data-arid-freight-option="custom">Personalizado</button>
+              </div>
+            </div>
+            <div class="corralon-aridos-custom" data-arid-custom hidden>
+              <span>Costo por viaje</span>
+              <input data-arid-custom-rate inputmode="decimal" value="${escapeAridHtml(money(aridInputNumber(aridosBudgetCustomRate, 0)))}">
+            </div>
+          </div>
+        </td>
+        <td class="corralon-aridos-price" data-arid-freight-quantity>0 viajes</td>
+        <td class="corralon-aridos-price" data-arid-freight-price>$ 0,00</td>
+      </tr>
+      <tr class="corralon-aridos-add-row">
+        <td><select data-arid-add aria-label="Agregar otro árido"><option value="">+ Agregar otro árido</option>${aridBudgetOptions('', -1)}</select></td>
+        <td class="corralon-aridos-price">—</td>
+        <td class="corralon-aridos-price">—</td>
+      </tr>`;
+    renderAridosBudgetValues();
+    if (focusIndex !== null) {
+      setTimeout(() => body.querySelector(`[data-arid-material-row][data-index="${focusIndex}"] [data-arid-row-meters]`)?.focus(), 0);
+    }
+  }
+
+  function currentAridosBudget() {
+    if (!aridosBudgetHost) return null;
+    const materials = aridosBudgetItems
+      .map((item) => calculateAridMaterial(aridArticleByCode(item.code), item.meters))
+      .filter(Boolean);
+    const totalMeters = materials.reduce((sum, item) => sum + item.meters, 0);
+    const trips = totalMeters > 0 ? Math.ceil(totalMeters / 5) : 0;
+    const freightMode = aridosBudgetFreightMode;
+    const customRate = Math.max(0, aridInputNumber(aridosBudgetCustomRate, 0));
+    const rate = freightMode === 'rawson'
+      ? aridosFreightConfig.rawson
+      : freightMode === 'calle5'
+        ? aridosFreightConfig.pasandoCalle5
+        : freightMode === 'custom'
+          ? customRate
+          : 0;
+    const freightArticle = aridFreightArticle();
+    const freightCostTotal = freightMode === 'none' ? 0 : roundAridMoney(rate * trips);
+    const freightMarginRate = aridArticleMargin(freightArticle);
+    const freightTotal = aridSaleFromCost(freightCostTotal, freightArticle);
+    const materialTotal = materials.reduce((sum, item) => sum + item.total, 0);
+    const materialCostTotal = materials.reduce((sum, item) => sum + item.costTotal, 0);
+    return {
+      materials,
+      totalMeters,
+      trips,
+      freightMode,
+      freightRate: rate,
+      freightCostTotal,
+      freightMarginRate,
+      freightTotal,
+      materialCostTotal,
+      materialTotal,
+      total: roundAridMoney(materialTotal + freightTotal)
+    };
+  }
+
+  function renderAridosBudgetValues() {
+    if (!aridosBudgetHost) return;
+    const custom = aridosBudgetHost.querySelector('[data-arid-custom]');
+    if (custom) custom.hidden = aridosBudgetFreightMode !== 'custom';
+    aridosBudgetHost.querySelectorAll('[data-arid-freight-option]').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.aridFreightOption === aridosBudgetFreightMode);
+    });
+    const budget = currentAridosBudget();
+    if (!budget) return;
+    budget.materials.forEach((item, index) => {
+      const row = aridosBudgetHost.querySelector(`[data-arid-material-row][data-index="${index}"]`);
+      const price = row?.querySelector('[data-arid-row-price]');
+      if (price) {
+        price.textContent = money(item.total);
+        price.title = `Costo ${money(item.costTotal)} · margen ${(item.marginRate * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`;
+      }
+    });
+    const freightQuantity = aridosBudgetHost.querySelector('[data-arid-freight-quantity]');
+    const freightPrice = aridosBudgetHost.querySelector('[data-arid-freight-price]');
+    const chargedTrips = budget.freightMode === 'none' ? 0 : budget.trips;
+    if (freightQuantity) freightQuantity.textContent = `${chargedTrips} ${chargedTrips === 1 ? 'viaje' : 'viajes'}`;
+    if (freightPrice) {
+      freightPrice.textContent = money(budget.freightTotal);
+      freightPrice.title = `Costo ${money(budget.freightCostTotal)} · margen ${(budget.freightMarginRate * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`;
+    }
+    const total = aridosBudgetHost.querySelector('[data-arid-total]');
+    if (total) total.textContent = money(budget.total);
+    const missing = budget.materials.filter((item) => !(item.costTotal > 0));
+    const warning = aridosBudgetHost.querySelector('[data-arid-warning]');
+    if (warning) {
+      warning.hidden = !missing.length;
+      warning.textContent = missing.length ? `Falta cargar el precio correspondiente para: ${missing.map((item) => item.name).join(', ')}.` : '';
+    }
+  }
+
+  function openAridosBudget(code, options = {}) {
+    const article = aridArticleByCode(code);
+    if (!article) return false;
+    const host = ensureAridosBudgetHost();
+    aridosBudgetArticleCode = articleCode(article);
+    aridosBudgetReturnFocus = options.returnFocus || document.activeElement;
+    aridosBudgetItems = [{ code: aridosBudgetArticleCode, meters: '1' }];
+    aridosBudgetFreightMode = 'rawson';
+    aridosBudgetCustomRate = 0;
+    const exportButton = host.querySelector('[data-arid-export]');
+    if (exportButton) exportButton.hidden = !isLocalAridExportAvailable();
+    host.classList.add('is-open');
+    host.setAttribute('aria-hidden', 'false');
+    renderAridosBudgetRows(0);
+    return true;
+  }
+
+  function closeAridosBudget() {
+    if (!aridosBudgetHost) return;
+    aridosBudgetHost.classList.remove('is-open');
+    aridosBudgetHost.setAttribute('aria-hidden', 'true');
+    aridosBudgetArticleCode = '';
+    aridosBudgetItems = [];
+    aridosBudgetFreightMode = 'none';
+    aridosBudgetCustomRate = 0;
+    aridosBudgetReturnFocus?.focus?.();
+    aridosBudgetReturnFocus = null;
+  }
+
+  function aridFreightArticle() {
+    const key = aridCodeKey(aridosFreightConfig.idArtFlete);
+    const source = aridosAdapter.getArticles?.() || articleEditorAdapter.getArticles?.() || [];
+    return source.find((article) => aridCodeKey(articleCode(article)) === key) || null;
+  }
+
+  function aridosBudgetPayload() {
+    const budget = currentAridosBudget();
+    if (!budget) return null;
+    const freightArticle = aridFreightArticle();
+    return {
+      ...budget,
+      freight: budget.freightTotal > 0 ? {
+        article: freightArticle,
+        code: aridosFreightConfig.idArtFlete,
+        name: budget.freightMode === 'rawson'
+          ? 'FLETE RAWSON'
+          : budget.freightMode === 'calle5'
+            ? 'FLETE PASANDO CALLE 5'
+            : 'FLETE PERSONALIZADO',
+        quantity: 1,
+        trips: budget.trips,
+        costTotal: budget.freightCostTotal,
+        costUnit: budget.freightCostTotal,
+        marginRate: budget.freightMarginRate,
+        total: budget.freightTotal,
+        unitPrice: budget.freightTotal,
+        mode: budget.freightMode
+      } : null
+    };
+  }
+
+  function validateAridosBudget(payload) {
+    if (!payload?.materials?.length) return 'Elegí al menos un árido.';
+    if (payload.materials.some((item) => !(item.costTotal > 0))) return 'Falta cargar el costo del volumen elegido.';
+    if (payload.freightMode !== 'none' && !(payload.freightRate > 0)) return 'Falta cargar el importe del flete elegido.';
+    return '';
+  }
+
+  async function addAridosBudgetToCart() {
+    const payload = aridosBudgetPayload();
+    const error = validateAridosBudget(payload);
+    if (error) return alert(error);
+    if (typeof aridosAdapter.addToCart === 'function') await aridosAdapter.addToCart(payload);
+    else window.dispatchEvent(new CustomEvent('corralon:aridos-add-cart', { detail: payload }));
+    closeAridosBudget();
+  }
+
+  function aridXlsRow(article, name, price) {
+    return {
+      cod_proveedor: String(article?.idartprov ?? article?.codprov ?? '').trim(),
+      articulo: String(name || aridArticleName(article)).trim(),
+      precio_costo: Math.round(Number(price || 0) * 100) / 100,
+      id_proveedor: articleProviderId(article)
+    };
+  }
+
+  async function exportAridosBudgetXls() {
+    const payload = aridosBudgetPayload();
+    const error = validateAridosBudget(payload);
+    if (error) return alert(error);
+    const rows = payload.materials.map((item) => aridXlsRow(item.article, item.name, item.costUnit / ARID_COST_VAT_FACTOR));
+    if (payload.freight) {
+      const freightArticle = payload.freight.article;
+      if (!freightArticle) return alert(`No se encontró el artículo de flete ${aridosFreightConfig.idArtFlete}.`);
+      rows.push(aridXlsRow(freightArticle, payload.freight.name, payload.freight.costTotal / ARID_COST_VAT_FACTOR));
+    }
+    if (rows.some((row) => !row.cod_proveedor || !row.id_proveedor)) {
+      return alert('Uno de los artículos no tiene código o ID de proveedor para actualizar Access.');
+    }
+    if (typeof aridosAdapter.exportXls === 'function') await aridosAdapter.exportXls(payload, rows);
+    else await saveBlobAs(buildArticlesXlsBlob(rows), 'Articulos.xls');
   }
 
   function serializeArticleBase(article = {}) {
@@ -3801,6 +4717,17 @@
       open: openArticleEditor,
       close: closeArticleEditor,
       publishCatalog: publishArticleCatalog
+    },
+    aridos: {
+      configure: configureAridos,
+      setConfigMap: setAridosConfigMap,
+      setFreightConfig: setAridosFreightConfig,
+      decorateArticle: decorateAridArticle,
+      getConfig: aridConfigForArticle,
+      getFreightConfig: () => ({ ...aridosFreightConfig }),
+      openBudget: openAridosBudget,
+      closeBudget: closeAridosBudget,
+      calculateMaterial: calculateAridMaterial
     },
     catalogEditorSession: CATALOG_EDITOR_SESSION,
     catalog: CATALOG,

@@ -3853,8 +3853,9 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=20260729-codprov-editor3"></script>
+<script src="corralon-system.js?v=20260730-aridos7"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4371,7 +4372,7 @@ function normalizarArticulo(raw) {
   const ofertaHasta = sanitizeIsoDate(raw?.ofertaHasta ?? raw?.oferta_hasta ?? raw?.fechaOfertaHasta ?? '');
   const ofertaVigente = !!(oferta && ofertaPct > 0 && ofertaHasta && ofertaHasta >= todayIsoLocal());
   const precioVigente = ofertaVigente ? precioOferta(precioLista, ofertaPct) : precioLista;
-  return {
+  const articuloNormalizado = {
     ...raw,
     codigoArticulo,
     tagsOcultos: obtenerTagsOcultosArticulo(raw),
@@ -4393,6 +4394,7 @@ function normalizarArticulo(raw) {
     ofertaVigente,
     precioVigente
   };
+  return window.CorralonSystem?.aridos?.decorateArticle?.(articuloNormalizado) || articuloNormalizado;
 }
 
 function fmtPrecio(n) {
@@ -6552,6 +6554,7 @@ function abrirDetalleProducto(codigo) {
   if (articulo.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
   if (articulo.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
   if (articulo.ceramico) tags.push(`<span class="chip-ceramico">${etiquetaCeramico(articulo)}</span>`);
+  if (articulo.arido) tags.push('<span class="chip-ceramico">Árido</span>');
   document.getElementById('productDetailTags').innerHTML = tags.join('');
   document.getElementById('productDetailTitle').textContent = descripcion.principal;
   document.getElementById('productDetailCode').textContent = obtenerIdArticulo(articulo);
@@ -6573,7 +6576,7 @@ function abrirDetalleProducto(codigo) {
   qtyInput.placeholder = MODO_A_DESCONTAR ? 'Ej: 4p' : '';
   productDetailAdminCode = obtenerIdArticulo(articulo);
   budgetBtn.dataset.codigo = productDetailAdminCode;
-  budgetBtn.classList.toggle('hidden', !((articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0) || esArticuloPegamento(articulo)));
+  budgetBtn.classList.toggle('hidden', !(articulo.arido || (articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0) || esArticuloPegamento(articulo)));
   const sesionMenuActiva = !!window.CorralonFunciones?.isMenuSessionActive?.(), datosDescuento = datosDescuentoArticulo(articulo);
   discountBtn.classList.toggle('hidden', !sesionMenuActiva);
   editBtn.classList.toggle('hidden', !sesionMenuActiva);
@@ -9071,6 +9074,129 @@ window.CorralonSystem?.articleEditor?.configure({
   }
 });
 
+const ARIDOS_ARTICULOS_COLLECTION = 'configAridosArticulos';
+const ARIDOS_FLETES_DOC = doc(db, 'config', 'aridosFletes');
+
+function refrescarConfiguracionAridosEnIndex() {
+  const decorate = window.CorralonSystem?.aridos?.decorateArticle;
+  if (typeof decorate !== 'function' || !Array.isArray(todosArticulos) || !todosArticulos.length) return;
+  todosArticulos = todosArticulos.map((articulo) => decorate(articulo));
+  actualizarVistaEtiqueta();
+  aplicarBusquedaActual();
+}
+
+function agregarPresupuestoAridosAlCarrito(payload) {
+  (payload.materials || []).forEach((material) => {
+    const articulo = material.article;
+    const codigo = obtenerIdArticulo(articulo);
+    if (!codigo || codigo === '-') return;
+    const previo = carrito[codigo];
+    const cantidadPrevia = Number(previo?.cantidad || 0);
+    const totalPrevio = Number(previo?.precio || 0) * cantidadPrevia;
+    const cantidadNueva = cantidadPrevia + Number(material.meters || 0);
+    carrito[codigo] = {
+      codigo,
+      nombre: material.name || obtenerDescripcionArticulo(articulo).principal,
+      precio: cantidadNueva > 0 ? (totalPrevio + Number(material.total || 0)) / cantidadNueva : Number(material.unitPrice || 0),
+      foto: previo?.foto || imagenPrincipalArticulo(articulo) || '',
+      cantidad: cantidadNueva,
+      tipoPrecio: '',
+      porcentajePrecio: 0
+    };
+    registrarAgregadoCarrito(articulo);
+  });
+
+  if (payload.freight) {
+    const freight = payload.freight;
+    const codigo = String(freight.code || '').trim();
+    const articulo = freight.article || buscarArticuloPorCodigoFlexible(codigo);
+    if (codigo) {
+      const previo = carrito[codigo];
+      const cantidadPrevia = Number(previo?.cantidad || 0);
+      const totalPrevio = Number(previo?.precio || 0) * cantidadPrevia;
+      const cantidadNueva = cantidadPrevia + 1;
+      carrito[codigo] = {
+        codigo,
+        nombre: freight.name || obtenerDescripcionArticulo(articulo).principal || 'FLETE',
+        precio: (totalPrevio + Number(freight.total || 0)) / cantidadNueva,
+        foto: previo?.foto || imagenPrincipalArticulo(articulo) || '',
+        cantidad: cantidadNueva,
+        tipoPrecio: '',
+        porcentajePrecio: 0
+      };
+      registrarAgregadoCarrito(articulo || codigo);
+    }
+  }
+
+  guardarCarrito();
+  actualizarVistaCarrito();
+  mostrarAvisoCarrito('Presupuesto de áridos agregado al carrito');
+}
+
+async function exportarPresupuestoAridosAAccess(payload, rows) {
+  const button = document.querySelector('[data-arid-export]');
+  const previousText = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Generando XLS…';
+  }
+  try {
+    const blob = window.CorralonSystem.buildArticlesXlsBlob(rows);
+    const response = await fetch('/save-articulos-xls', { method: 'POST', body: blob });
+    if (!response.ok) throw new Error(await response.text() || 'No se pudo guardar C:\\Update\\Articulos.xls');
+    const link = document.createElement('a');
+    link.href = 'corralon-access-update://actualizar-precios';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => link.remove(), 1000);
+    mostrarAvisoCarrito('XLS generado. Actualizando precios en Access');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
+}
+
+window.CorralonSystem?.aridos?.configure({
+  getArticles: () => todosArticulos,
+  getProviders: () => window.CorralonSystem.getProvidersCache(),
+  addToCart: agregarPresupuestoAridosAlCarrito,
+  exportXls: exportarPresupuestoAridosAAccess,
+  saveArticleConfig: (codigo, config) => setDoc(
+    doc(db, ARIDOS_ARTICULOS_COLLECTION, encodeURIComponent(String(codigo || '').trim())),
+    {
+      codigo: String(codigo || '').trim(),
+      activo: !!config?.activo,
+      precios: { ...(config?.precios || {}) },
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  ),
+  saveFreightConfig: (config) => setDoc(ARIDOS_FLETES_DOC, {
+    idArtFlete: String(config?.idArtFlete || '012025').trim() || '012025',
+    rawson: Number(config?.rawson || 0),
+    pasandoCalle5: Number(config?.pasandoCalle5 || 0),
+    updatedAt: serverTimestamp()
+  }, { merge: true })
+});
+
+onSnapshot(collection(db, ARIDOS_ARTICULOS_COLLECTION), (snapshot) => {
+  const configs = new Map();
+  snapshot.forEach((entry) => {
+    const data = entry.data() || {};
+    const codigo = String(data.codigo || decodeURIComponent(entry.id) || '').trim();
+    if (codigo) configs.set(codigo, data);
+  });
+  window.CorralonSystem?.aridos?.setConfigMap?.(configs);
+  refrescarConfiguracionAridosEnIndex();
+}, (error) => console.warn('No se pudo cargar la configuración de áridos', error));
+
+onSnapshot(ARIDOS_FLETES_DOC, (snapshot) => {
+  window.CorralonSystem?.aridos?.setFreightConfig?.(snapshot.exists() ? snapshot.data() : {});
+}, (error) => console.warn('No se pudo cargar la configuración de fletes', error));
+
 setTimeout(() => {
   iniciarCargaListaArticulos();
   iniciarActualizacionIncrementalCatalogo();
@@ -9282,7 +9408,15 @@ document.getElementById('productDetailQty').addEventListener('keydown', (e) => {
   document.getElementById('productDetailAddCart').click();
 });
 document.getElementById('productDetailBudget').addEventListener('click', () => {
-  abrirPresupuestoCeramico(document.getElementById('productDetailBudget').dataset.codigo || productDetailAdminCode);
+  const codigo = document.getElementById('productDetailBudget').dataset.codigo || productDetailAdminCode;
+  const articulo = buscarArticuloPorCodigoFlexible(codigo);
+  if (articulo?.arido) {
+    window.CorralonSystem?.aridos?.openBudget?.(codigo, {
+      returnFocus: document.getElementById('productDetailBudget')
+    });
+    return;
+  }
+  abrirPresupuestoCeramico(codigo);
 });
 document.getElementById('ceramicoBudgetMeters').addEventListener('input', calcularPresupuestoCeramico);
 document.getElementById('ceramicoBudgetIncludeGlue').addEventListener('change', (e) => {
