@@ -1834,6 +1834,10 @@
     const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
     const SUPABASE_TABLE_CAJA = 'control_caja_estados';
+    const SUPABASE_CAJA_PUBLICACIONES = 'caja_publicaciones';
+    const SUPABASE_CAJA_SYSTEM = 'caja_transferencias_sistema';
+    const SUPABASE_CAJA_CUTOFF = '2026-07-29';
+    const SUPABASE_CAJA_EDIT_FUNCTION = 'editar-caja-transferencias';
     const TODAY_DATE_KEY = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     let selectedDateKey = TODAY_DATE_KEY;
     const FIREBASE_CONFIG = {
@@ -2025,6 +2029,10 @@
       receipts: ''
     };
     let lastManualCajaSignature = '';
+    let lastSupabaseCajaVersion = '';
+    let systemTableSnapshot = new Map();
+    let systemTableSaveTimer = null;
+    let applyingSystemTable = false;
     let pendingCajaRefresh = false;
     let activeCajaBranchId = '';
     let cajaBranches = [];
@@ -2793,11 +2801,12 @@
     }
 
     function cajaManualPayload(source = state) {
+      const usesTable = usesSupabaseCaja();
       return {
         cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
         transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row))),
-        systemRows: manualSystemRows(source.system || []).map((row) => JSON.parse(JSON.stringify(row))),
-        systemMergeGroups: normalizeSystemMergeGroups(systemMergeGroups),
+        systemRows: usesTable ? [] : manualSystemRows(source.system || []).map((row) => JSON.parse(JSON.stringify(row))),
+        systemMergeGroups: usesTable ? [] : normalizeSystemMergeGroups(systemMergeGroups),
         cashMovementBranches: cashMovementBranchOverrides(source),
         receiptBranches: receiptBranchOverrides(source)
       };
@@ -2814,13 +2823,14 @@
       );
     }
 
-    function applyCajaManualPayload(payload) {
+    function applyCajaManualPayload(payload, options = {}) {
+      const includeSystem = options.includeSystem !== false;
       if (Array.isArray(payload?.cash)) state.cash = CASH_DENOMS.map((denom, idx) => {
         const row = payload.cash.find((item) => Number(item.denom) === denom) || payload.cash[idx] || {};
         return { denom, bills: Number(row.bills || 0), packs: Number(row.packs || 0) };
       });
       if (Array.isArray(payload?.transfers)) state.transfers = payload.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
-      if (Array.isArray(payload?.systemRows)) {
+      if (includeSystem && Array.isArray(payload?.systemRows)) {
         const existingIds = new Set(manualSystemRows(state.system).map((row) => row.id).filter(Boolean));
         payload.systemRows.map(normalizeSystemRow).forEach((row) => {
           if (row.id && existingIds.has(row.id)) return;
@@ -2828,7 +2838,7 @@
           if (row.id) existingIds.add(row.id);
         });
       }
-      if (Array.isArray(payload?.systemMergeGroups)) {
+      if (includeSystem && Array.isArray(payload?.systemMergeGroups)) {
         systemMergeGroups = normalizeSystemMergeGroups(payload.systemMergeGroups);
         state.system = applyPersistentSystemMerges(state.system);
       }
@@ -3150,12 +3160,15 @@
     function normalizeSystemRow(item) {
       const row = {
         id: String(item?.id || ''),
+        sourceKey: String(item?.sourceKey || item?.source_key || ''),
         source: item?.source === 'manual' ? 'manual' : 'imported',
         typeComp: String(item?.typeComp || ''),
         invoice: String(item?.invoice || ''),
         name: String(item?.name || ''),
         amount: Number(item?.amount || 0),
-        paymentType: String(item?.paymentType || item?.type || '')
+        paymentType: String(item?.paymentType || item?.type || ''),
+        order: Number(item?.order ?? item?.orden ?? 0),
+        mergeGroup: String(item?.mergeGroup || item?.merge_group || '')
       };
       if (Array.isArray(item?.children) && item.children.length) {
         row.children = item.children.map(normalizeSystemRow);
@@ -3228,7 +3241,8 @@
     function saveState() {
       persistLocalState();
       queueFirebaseCajaManualSave();
-      queueRemoteSave();
+      if (usesSupabaseCaja()) queueSystemTableSave();
+      else queueRemoteSave();
     }
 
     function loadState(dateKey = selectedDateKey) {
@@ -3250,6 +3264,177 @@
         'Content-Type': 'application/json',
         ...extra
       };
+    }
+
+    function usesSupabaseCaja(dateKey = selectedDateKey) {
+      return String(dateKey || '') >= SUPABASE_CAJA_CUTOFF;
+    }
+
+    function systemDbRowsFromState(rows = state.system, dateKey = selectedDateKey) {
+      const result = [];
+      rows.forEach((displayRow, displayIndex) => {
+        const children = Array.isArray(displayRow?.children) && displayRow.children.length
+          ? displayRow.children
+          : [displayRow];
+        const mergeGroup = children.length > 1
+          ? (String(displayRow.mergeGroup || children.find((row) => row.mergeGroup)?.mergeGroup || '')
+            || `merge-${dateKey}-${Date.now()}-${displayIndex}`)
+          : String(displayRow?.mergeGroup || '');
+        children.map(normalizeSystemRow).forEach((row, childIndex) => {
+          if (!row.id) row.id = `manual-system-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          if (!row.sourceKey) row.sourceKey = row.id;
+          row.mergeGroup = mergeGroup;
+          row.order = Number.isFinite(row.order) && row.order
+            ? row.order
+            : displayIndex + (childIndex / 1000);
+          result.push({
+            id: row.id,
+            fecha: dateKey,
+            source_key: row.sourceKey,
+            source: row.source === 'manual' ? 'manual' : 'imported',
+            tipo_comp: row.typeComp,
+            nro_factura: row.invoice,
+            cliente: row.name,
+            monto: Number(row.amount || 0),
+            tipo_pago: row.paymentType || 'Transf Bria.',
+            orden: row.order,
+            merge_group: row.mergeGroup || null,
+            deleted: false,
+            source_present: true,
+            updated_at: new Date().toISOString()
+          });
+        });
+      });
+      return result;
+    }
+
+    function systemRowsFromDb(rows = []) {
+      const normalized = rows.map((row) => normalizeSystemRow({
+        id: row.id,
+        sourceKey: row.source_key,
+        source: row.source,
+        typeComp: row.tipo_comp,
+        invoice: row.nro_factura,
+        name: row.cliente,
+        amount: row.monto,
+        paymentType: row.tipo_pago,
+        order: row.orden,
+        mergeGroup: row.merge_group
+      }));
+      const grouped = new Map();
+      const result = [];
+      normalized.forEach((row) => {
+        if (!row.mergeGroup) {
+          result.push(row);
+          return;
+        }
+        if (!grouped.has(row.mergeGroup)) grouped.set(row.mergeGroup, []);
+        grouped.get(row.mergeGroup).push(row);
+      });
+      grouped.forEach((children, mergeGroup) => {
+        if (children.length < 2) {
+          result.push(children[0]);
+          return;
+        }
+        result.push(normalizeSystemRow({ ...mergedSystemRow(children), mergeGroup, order: Math.min(...children.map((row) => row.order || 0)) }));
+      });
+      return result.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    }
+
+    async function bumpCajaPublicationVersion(dateKey = selectedDateKey) {
+      const version = Date.now();
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_PUBLICACIONES}?fecha=eq.${encodeURIComponent(dateKey)}`, {
+        method: 'PATCH',
+        headers: supabaseHeaders({ Prefer: 'return=minimal' }),
+        body: JSON.stringify({ version, updated_at: new Date().toISOString() })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      lastSupabaseCajaVersion = String(version);
+    }
+
+    async function persistSystemTable(dateKey, currentRows, removedIds = []) {
+      if (!usesSupabaseCaja(dateKey)) return;
+      if (currentRows.length) {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?on_conflict=id`, {
+          method: 'POST',
+          headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+          body: JSON.stringify(currentRows)
+        });
+        if (!response.ok) throw new Error(await response.text());
+      }
+      if (removedIds.length) {
+        const ids = removedIds.map((id) => `"${String(id).replace(/"/g, '')}"`).join(',');
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?fecha=eq.${encodeURIComponent(dateKey)}&id=in.(${encodeURIComponent(ids)})`, {
+          method: 'PATCH',
+          headers: supabaseHeaders({ Prefer: 'return=minimal' }),
+          body: JSON.stringify({ deleted: true, updated_at: new Date().toISOString() })
+        });
+        if (!response.ok) throw new Error(await response.text());
+      }
+      await bumpCajaPublicationVersion(dateKey);
+    }
+
+    function queueSystemTableSave() {
+      if (!usesSupabaseCaja() || applyingSystemTable || applyingRemoteState) return;
+      clearTimeout(systemTableSaveTimer);
+      const dateKey = selectedDateKey;
+      systemTableSaveTimer = setTimeout(async () => {
+        const currentRows = systemDbRowsFromState(state.system, dateKey);
+        const currentMap = new Map(currentRows.map((row) => [row.id, JSON.stringify(row)]));
+        const changedRows = currentRows.filter((row) => {
+          const previous = systemTableSnapshot.get(row.id);
+          if (!previous) return true;
+          const comparable = { ...row, updated_at: JSON.parse(previous).updated_at };
+          return JSON.stringify(comparable) !== previous;
+        });
+        const removedIds = [...systemTableSnapshot.keys()].filter((id) => !currentMap.has(id));
+        if (!changedRows.length && !removedIds.length) return;
+        try {
+          await persistSystemTable(dateKey, changedRows, removedIds);
+          currentRows.forEach((row) => systemTableSnapshot.set(row.id, JSON.stringify(row)));
+          removedIds.forEach((id) => systemTableSnapshot.delete(id));
+        } catch (error) {
+          showToast('No se pudieron sincronizar los cambios de transferencias.');
+        }
+      }, 350);
+    }
+
+    async function loadSupabaseCaja(dateKey = selectedDateKey, options = {}) {
+      if (!usesSupabaseCaja(dateKey)) return false;
+      const silent = Boolean(options.silent);
+      const publicationUrl = `${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_PUBLICACIONES}?fecha=eq.${encodeURIComponent(dateKey)}&select=fecha,version,movimientos,ingresos_egresos,recibos&limit=1`;
+      const publicationResponse = await fetch(publicationUrl, { headers: supabaseHeaders(), cache: 'no-store' });
+      if (!publicationResponse.ok) throw new Error(await publicationResponse.text());
+      const publication = (await publicationResponse.json())?.[0];
+      if (!publication || dateKey !== selectedDateKey) return false;
+      const version = String(publication.version || '');
+      if (silent && version && version === lastSupabaseCajaVersion) return false;
+      if (silent && cajaHasActiveEditor()) {
+        pendingCajaRefresh = true;
+        return false;
+      }
+      const systemUrl = `${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?fecha=eq.${encodeURIComponent(dateKey)}&deleted=eq.false&source_present=eq.true&select=*&order=orden.asc`;
+      const systemResponse = await fetch(systemUrl, { headers: supabaseHeaders(), cache: 'no-store' });
+      if (!systemResponse.ok) throw new Error(await systemResponse.text());
+      const dbRows = await systemResponse.json();
+      const manualPayload = await loadFirebaseCajaManual(dateKey);
+      const focusSnapshot = captureCajaFocusState();
+      applyingSystemTable = true;
+      applyPublicCajaMovements(publication.movimientos);
+      applyPublicCajaCashMovements(publication.ingresos_egresos);
+      applyPublicCajaReceipts(publication.recibos);
+      state.system = systemRowsFromDb(dbRows);
+      systemTableSnapshot = new Map(systemDbRowsFromState(state.system, dateKey).map((row) => [row.id, JSON.stringify(row)]));
+      if (manualPayload) applyCajaManualPayload(manualPayload, { includeSystem: false });
+      applyingSystemTable = false;
+      lastSupabaseCajaVersion = version;
+      selectedSystemRows.clear();
+      preserveCajaFocusedValue(focusSnapshot);
+      persistLocalState();
+      renderAll();
+      restoreCajaFocusState(focusSnapshot);
+      pendingCajaRefresh = false;
+      return true;
     }
 
     async function loadRemoteState(dateKey = selectedDateKey) {
@@ -3308,7 +3493,7 @@
     }
 
     function queueRemoteSave() {
-      if (remoteSaveBlocked || applyingRemoteState) return;
+      if (usesSupabaseCaja() || remoteSaveBlocked || applyingRemoteState) return;
       clearTimeout(remoteSaveTimer);
       const dateKey = selectedDateKey;
       const payloadData = remoteStatePayload();
@@ -3328,7 +3513,8 @@
       loadState(selectedDateKey);
       renderAll();
       showToast(`Caja ${formatDateLabel(selectedDateKey)} cargada.`);
-      await loadRemoteState(selectedDateKey);
+      if (usesSupabaseCaja()) await loadSupabaseCaja(selectedDateKey);
+      else await loadRemoteState(selectedDateKey);
       await loadSummaryManualState(selectedDateKey);
       if (previousDate !== selectedDateKey) window.scrollTo?.(0, 0);
     }
@@ -4163,6 +4349,10 @@
       rememberSystemMergeGroup(selectedRows);
       const firstIndex = indexes[0];
       const merged = mergedSystemRow(selectedRows);
+      if (usesSupabaseCaja()) {
+        merged.mergeGroup = `merge-${selectedDateKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        merged.children.forEach((row) => { row.mergeGroup = merged.mergeGroup; });
+      }
       const selectedSet = new Set(indexes);
       state.system = state.system.filter((_, idx) => !selectedSet.has(idx));
       state.system.splice(firstIndex, 0, merged);
@@ -4185,7 +4375,7 @@
       forgetSystemMergeGroups(indexes.map((idx) => state.system[idx]));
       const nextRows = [];
       state.system.forEach((row, idx) => {
-        if (selectedSet.has(idx)) nextRows.push(...row.children.map(normalizeSystemRow));
+        if (selectedSet.has(idx)) nextRows.push(...row.children.map((child) => normalizeSystemRow({ ...child, mergeGroup: '' })));
         else nextRows.push(row);
       });
       state.system = nextRows;
@@ -5560,6 +5750,19 @@
     }
 
     async function loadPublicCajaData(options = {}) {
+      if (usesSupabaseCaja()) {
+        const showPublicLoading = !options.silent || Boolean(options.showSystemLoading) || Boolean(options.showPublicLoading);
+        if (showPublicLoading) setCajaPublicLoading(true);
+        try {
+          const loaded = await loadSupabaseCaja(selectedDateKey, options);
+          if (loaded && !options.silent) showToast('Caja actualizada', 5000);
+        } catch (error) {
+          if (!options.silent) showToast('No pude cargar la caja desde Supabase.');
+        } finally {
+          if (showPublicLoading) setCajaPublicLoading(false);
+        }
+        return;
+      }
       if (selectedDateKey !== TODAY_DATE_KEY) {
         setCajaPublicLoading(false);
         await loadFirebaseCajaState(selectedDateKey);
@@ -5858,15 +6061,33 @@
       showToast('Efectivo vaciado.');
     }
 
-    function clearSystem() {
+    async function clearSystem() {
       state.system = [];
       systemMergeGroups = [];
       selectedSystemRows.clear();
       systemSelectionAnchor = -1;
       clearSystemColumnSelection();
-      saveState();
+      persistLocalState();
+      queueFirebaseCajaManualSave();
       renderSystemRows();
       updateTotals();
+      if (usesSupabaseCaja()) {
+        clearTimeout(systemTableSaveTimer);
+        try {
+          const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?fecha=eq.${encodeURIComponent(selectedDateKey)}`, {
+            method: 'DELETE',
+            headers: supabaseHeaders({ Prefer: 'return=minimal' })
+          });
+          if (!response.ok) throw new Error(await response.text());
+          systemTableSnapshot.clear();
+          await bumpCajaPublicationVersion(selectedDateKey);
+          showToast('Transferencias y cambios persistentes de hoy eliminados.');
+        } catch (error) {
+          showToast('No se pudo limpiar la tabla de hoy.');
+        }
+        return;
+      }
+      queueRemoteSave();
       showToast('Transferencias sistema vaciadas.');
     }
 
@@ -6751,7 +6972,8 @@
     loadDolarCards();
     loadState(selectedDateKey);
     renderAll();
-    loadRemoteState(selectedDateKey).finally(() => loadPublicCajaData().finally(() => loadSummaryManualState(selectedDateKey)));
+    (usesSupabaseCaja() ? Promise.resolve() : loadRemoteState(selectedDateKey))
+      .finally(() => loadPublicCajaData().finally(() => loadSummaryManualState(selectedDateKey)));
     startPublicCajaPolling();
   </script>
 </body>
