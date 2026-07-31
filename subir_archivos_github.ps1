@@ -128,7 +128,60 @@ try {
         throw "No pude comprobar los cambios seleccionados:`r`n$($staged.Output)"
     }
 
-    $message = 'Actualizar archivos ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')
+    $changedFilesText = Run-Git -WorkingDirectory $uploadWorktree -Arguments (@('diff', '--cached', '--name-only', '--') + $fileNames)
+    $changedFiles = @($changedFilesText.Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if (-not $changedFiles.Count) {
+        Show-Message -Text 'Los archivos elegidos no tienen cambios para subir.'
+        return
+    }
+
+    $manifestName = 'actualizacion-version.json'
+    $manifestPath = Join-Path $uploadWorktree $manifestName
+    $previousVersion = 0
+    $fileMap = @{}
+    if (Test-Path -LiteralPath $manifestPath) {
+        try {
+            $previousManifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $previousVersion = [int]$previousManifest.version
+            foreach ($entry in @($previousManifest.files)) {
+                if ($entry.path) {
+                    $fileMap[[string]$entry.path] = [ordered]@{
+                        path = [string]$entry.path
+                        hash = [string]$entry.hash
+                        size = [long]$entry.size
+                    }
+                }
+            }
+        } catch {
+            $previousVersion = 0
+            $fileMap = @{}
+        }
+    }
+
+    $newVersion = $previousVersion + 1
+    foreach ($relativePath in $changedFiles) {
+        $normalizedPath = ([string]$relativePath).Replace('\', '/')
+        $fullChangedPath = Join-Path $uploadWorktree $relativePath
+        if (-not (Test-Path -LiteralPath $fullChangedPath -PathType Leaf)) { continue }
+        $info = Get-Item -LiteralPath $fullChangedPath
+        $fileMap[$normalizedPath] = [ordered]@{
+            path = $normalizedPath
+            hash = (Get-FileHash -LiteralPath $fullChangedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            size = [long]$info.Length
+        }
+    }
+
+    $manifest = [ordered]@{
+        version = $newVersion
+        publishedAt = (Get-Date).ToUniversalTime().ToString('o')
+        files = @($fileMap.Values | Sort-Object { $_.path })
+        lastRelease = @($changedFiles | ForEach-Object { ([string]$_).Replace('\', '/') })
+    }
+    $manifestJson = $manifest | ConvertTo-Json -Depth 6
+    [System.IO.File]::WriteAllText($manifestPath, $manifestJson, (New-Object System.Text.UTF8Encoding($false)))
+    Run-Git -WorkingDirectory $uploadWorktree -Arguments @('add', '--', $manifestName) | Out-Null
+
+    $message = 'Version ' + $newVersion
     Run-Git -WorkingDirectory $uploadWorktree -Arguments @('commit', '-m', $message) | Out-Null
 
     $push = Run-Git -WorkingDirectory $uploadWorktree -Arguments @('push', 'origin', 'HEAD:main') -AllowFailure
@@ -136,7 +189,8 @@ try {
         throw "El commit se creo, pero GitHub rechazo la subida:`r`n$($push.Output)"
     }
 
-    Show-Message -Text ("Subida completada correctamente.`r`n`r`n" + (($fileNames | ForEach-Object { "- $_" }) -join "`r`n"))
+    [System.IO.File]::Copy($manifestPath, (Join-Path $repoRoot $manifestName), $true)
+    Show-Message -Text ("Version $newVersion subida correctamente.`r`n`r`n" + (($changedFiles | ForEach-Object { "- $_" }) -join "`r`n"))
 } catch {
     Show-Message -Text $_.Exception.Message -Title 'Error al subir' -Icon ([System.Windows.Forms.MessageBoxIcon]::Error)
     $scriptExitCode = 1

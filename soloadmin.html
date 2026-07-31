@@ -960,8 +960,8 @@
       <div class="drop-zone" id="importDropZone" style="min-height:100px;">
         <input type="file" id="importFile" accept=".xls,.xlsx,.csv">
         <div class="drop-icon">📷</div>
-        <div class="drop-text">Soporta XLS, XLSX y CSV</div>
-        <div class="drop-sub">Al procesar aparecerá una ventana con opciones: actualizar precios, importar faltantes o sincronizar completa.</div>
+        <div class="drop-text" id="importDropText">Arrastrá el Excel para sincronizar todo</div>
+        <div class="drop-sub" id="importSyncStatus">Actualiza el catálogo y conserva imágenes, detalle, tags y etiquetas.</div>
       </div>
     </div>
   </div>
@@ -5163,26 +5163,82 @@ importDropZone.addEventListener('dragover', e => { e.preventDefault(); importDro
 importDropZone.addEventListener('dragleave', () => importDropZone.classList.remove('drag-over'));
 importDropZone.addEventListener('drop', e => { e.preventDefault(); importDropZone.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) handleImportFile(f); });
 
-function handleImportFile(file) {
-  loadSheetJS(async () => {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = new Uint8Array(ev.target.result);
-        const wb = XLSX.read(data, { type: 'array' });
-        // Hoja1 -> artículos
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        importRows = XLSX.utils.sheet_to_json(ws, { defval: '' }).map(r => normalizeRow(r));
-        // Hoja2 -> clientes, Hoja3 -> facturas
-        importClientesRows = parseHoja2(wb);
-        importFacturasRows = parseHoja3(wb);
-        console.log('Artículos:', importRows.length, '| Clientes:', importClientesRows.length, '| Facturas:', importFacturasRows.length);
-        openImportModal(importRows);
-      } catch(err) { console.error(err); toast('Error leyendo el archivo','err'); }
-    };
-    reader.onerror = () => toast('Error leyendo el archivo','err');
-    reader.readAsArrayBuffer(file);
-  });
+let importCatalogSyncTimer = null;
+let importCatalogSyncActive = false;
+
+function setImportSyncStatus(message, state = '') {
+  const status = document.getElementById('importSyncStatus');
+  const title = document.getElementById('importDropText');
+  if (status) {
+    status.textContent = message;
+    status.style.color = state === 'error' ? '#e50000' : state === 'ok' ? '#128a45' : 'var(--muted)';
+  }
+  if (title) title.textContent = importCatalogSyncActive ? 'Sincronizando catálogo...' : 'Arrastrá el Excel para sincronizar todo';
+}
+
+async function pollImportCatalogSync() {
+  try {
+    const response = await fetch('/api/catalog-sync/status', { cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || 'No se pudo consultar el estado');
+    setImportSyncStatus(result.message || (result.running ? 'Sincronizando...' : 'Listo.'));
+
+    if (result.running) {
+      importCatalogSyncTimer = setTimeout(pollImportCatalogSync, 900);
+      return;
+    }
+
+    importCatalogSyncTimer = null;
+    importCatalogSyncActive = false;
+    importFile.value = '';
+    if (result.exitCode === 0) {
+      setImportSyncStatus('Catálogo sincronizado. Se conservaron imágenes, detalle, tags y etiquetas.', 'ok');
+      toast('Sincronización completa finalizada');
+      await cargarCatalogoAdminDirecto();
+    } else {
+      setImportSyncStatus(result.message || 'La sincronización terminó con error.', 'error');
+      toast(result.message || 'Error sincronizando el catálogo', 'err');
+    }
+  } catch (error) {
+    importCatalogSyncTimer = null;
+    importCatalogSyncActive = false;
+    importFile.value = '';
+    setImportSyncStatus(error.message, 'error');
+    toast(error.message, 'err');
+  }
+}
+
+async function handleImportFile(file) {
+  if (importCatalogSyncActive) return toast('Ya hay una sincronización en curso', 'err');
+  const extension = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+  if (!['.xls', '.xlsx', '.csv'].includes(extension)) {
+    importFile.value = '';
+    return toast('Usá un archivo XLS, XLSX o CSV', 'err');
+  }
+  if (!['localhost', '127.0.0.1'].includes(location.hostname)) {
+    importFile.value = '';
+    return toast('La importación masiva se ejecuta desde localhost', 'err');
+  }
+
+  importCatalogSyncActive = true;
+  setImportSyncStatus('Subiendo el archivo y preparando la sincronización...');
+  try {
+    const response = await fetch('/api/catalog-sync/import?ext=' + encodeURIComponent(extension), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || 'No se pudo iniciar la sincronización');
+    setImportSyncStatus(result.message || 'Sincronización iniciada.');
+    if (importCatalogSyncTimer) clearTimeout(importCatalogSyncTimer);
+    importCatalogSyncTimer = setTimeout(pollImportCatalogSync, 500);
+  } catch (error) {
+    importCatalogSyncActive = false;
+    importFile.value = '';
+    setImportSyncStatus(error.message, 'error');
+    toast(error.message, 'err');
+  }
 }
 
 // -- FIX PRINCIPAL: normalizeRow con soporte para Artículos_Descripción --

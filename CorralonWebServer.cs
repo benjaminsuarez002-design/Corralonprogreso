@@ -52,6 +52,10 @@ internal sealed class ServerForm : Form
     private CheckBox startWithWindows;
     private NotifyIcon trayIcon;
     private bool exiting;
+    private readonly object catalogSyncLock = new object();
+    private Process catalogSyncProcess;
+    private string catalogSyncMessage = "Listo para sincronizar.";
+    private int? catalogSyncExitCode;
 
     public ServerForm(bool startInTray)
     {
@@ -255,7 +259,10 @@ internal sealed class ServerForm : Form
             if (String.Equals(Path.GetExtension(fullPath), ".html", StringComparison.OrdinalIgnoreCase))
             {
                 string html = File.ReadAllText(fullPath, Encoding.UTF8);
-                html = InjectUpdateWidget(html);
+                if (String.Equals(Path.GetFileName(fullPath), "menu.html", StringComparison.OrdinalIgnoreCase))
+                {
+                    html = InjectUpdateWidget(html);
+                }
                 html = InjectArticleSharePreview(html, context.Request, fullPath);
                 bytes = Encoding.UTF8.GetBytes(html);
             }
@@ -367,6 +374,21 @@ internal sealed class ServerForm : Form
                 WriteJson(context, 200, ApplyUpdates());
                 return;
             }
+            if (method == "POST" && path == "/api/catalog-sync/full")
+            {
+                WriteJson(context, 200, StartFullCatalogSync(context, null));
+                return;
+            }
+            if (method == "POST" && path == "/api/catalog-sync/import")
+            {
+                WriteJson(context, 200, ImportAndSyncCatalog(context));
+                return;
+            }
+            if (method == "GET" && path == "/api/catalog-sync/status")
+            {
+                WriteJson(context, 200, GetCatalogSyncStatus(context));
+                return;
+            }
             if (method == "POST" && path == "/api/auth/admin")
             {
                 WriteJson(context, 200, ValidateAdminPassword(ReadRequestBody(context)));
@@ -387,6 +409,138 @@ internal sealed class ServerForm : Form
         catch (Exception ex)
         {
             WriteJson(context, 500, "{\"error\":\"" + JsonEscape(ex.Message) + "\"}");
+        }
+    }
+
+    private bool IsLocalRequest(HttpListenerContext context)
+    {
+        if (context == null || context.Request == null || context.Request.RemoteEndPoint == null) return false;
+        return IPAddress.IsLoopback(context.Request.RemoteEndPoint.Address);
+    }
+
+    private string ImportAndSyncCatalog(HttpListenerContext context)
+    {
+        if (!IsLocalRequest(context))
+        {
+            return "{\"ok\":false,\"error\":\"La importacion masiva solo se puede ejecutar desde localhost.\"}";
+        }
+
+        string extension = (context.Request.QueryString["ext"] ?? "").Trim().ToLowerInvariant();
+        if (extension != ".xls" && extension != ".xlsx" && extension != ".csv")
+        {
+            return "{\"ok\":false,\"error\":\"Formato no permitido. Usa XLS, XLSX o CSV.\"}";
+        }
+
+        string tempFile = Path.Combine(Path.GetTempPath(), "corralon_catalogo_" + Guid.NewGuid().ToString("N") + extension);
+        try
+        {
+            using (var output = new FileStream(tempFile, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                context.Request.InputStream.CopyTo(output);
+            }
+
+            if (new FileInfo(tempFile).Length == 0)
+            {
+                File.Delete(tempFile);
+                return "{\"ok\":false,\"error\":\"El archivo esta vacio.\"}";
+            }
+
+            return StartFullCatalogSync(context, tempFile);
+        }
+        catch
+        {
+            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+            throw;
+        }
+    }
+
+    private string StartFullCatalogSync(HttpListenerContext context, string sourceFile)
+    {
+        if (!IsLocalRequest(context))
+        {
+            return "{\"ok\":false,\"error\":\"La sincronizacion completa solo se puede ejecutar desde localhost.\"}";
+        }
+
+        string script = string.IsNullOrEmpty(sourceFile)
+            ? @"C:\Update\actualizaciones\Subir Lista Index\run_sync_articulos.bat"
+            : Path.Combine(root, "catalog-sync-import.bat");
+        if (!File.Exists(script))
+        {
+            return "{\"ok\":false,\"error\":\"No se encontro " + JsonEscape(script) + "\"}";
+        }
+
+        lock (catalogSyncLock)
+        {
+            if (catalogSyncProcess != null && !catalogSyncProcess.HasExited)
+            {
+                try { if (!string.IsNullOrEmpty(sourceFile) && File.Exists(sourceFile)) File.Delete(sourceFile); } catch { }
+                return "{\"ok\":true,\"running\":true,\"message\":\"La sincronizacion completa ya esta en curso.\"}";
+            }
+
+            string arguments = "/d /c \"\"" + script + "\" full";
+            if (!string.IsNullOrEmpty(sourceFile)) arguments += " \"" + sourceFile + "\"";
+            arguments += "\"";
+
+            var info = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = arguments,
+                WorkingDirectory = Path.GetDirectoryName(script),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+
+            catalogSyncExitCode = null;
+            catalogSyncMessage = "Sincronizando el catalogo completo...";
+            catalogSyncProcess = Process.Start(info);
+            Process runningProcess = catalogSyncProcess;
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    runningProcess.WaitForExit();
+                    lock (catalogSyncLock)
+                    {
+                        catalogSyncExitCode = runningProcess.ExitCode;
+                        catalogSyncMessage = runningProcess.ExitCode == 0
+                            ? "Sincronizacion completa finalizada."
+                            : "La sincronizacion termino con error (codigo " + runningProcess.ExitCode + ").";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lock (catalogSyncLock)
+                    {
+                        catalogSyncExitCode = -1;
+                        catalogSyncMessage = "Error: " + ex.Message;
+                    }
+                }
+                finally
+                {
+                    try { if (!string.IsNullOrEmpty(sourceFile) && File.Exists(sourceFile)) File.Delete(sourceFile); } catch { }
+                }
+            });
+
+            return "{\"ok\":true,\"running\":true,\"message\":\"Sincronizacion completa iniciada.\"}";
+        }
+    }
+
+    private string GetCatalogSyncStatus(HttpListenerContext context)
+    {
+        if (!IsLocalRequest(context))
+        {
+            return "{\"ok\":false,\"error\":\"El estado solo se puede consultar desde localhost.\"}";
+        }
+
+        lock (catalogSyncLock)
+        {
+            bool running = catalogSyncProcess != null && !catalogSyncProcess.HasExited;
+            string exitCode = catalogSyncExitCode.HasValue ? catalogSyncExitCode.Value.ToString() : "null";
+            return "{\"ok\":true,\"running\":" + (running ? "true" : "false") +
+                ",\"exitCode\":" + exitCode +
+                ",\"message\":\"" + JsonEscape(catalogSyncMessage) + "\"}";
         }
     }
 
@@ -613,6 +767,11 @@ internal sealed class ServerForm : Form
 
     private string BuildUpdateManifest()
     {
+        string publishedManifest = Path.Combine(root, "actualizacion-version.json");
+        if (File.Exists(publishedManifest))
+        {
+            return File.ReadAllText(publishedManifest, Encoding.UTF8);
+        }
         var files = new List<string>();
         AddUpdateFiles(files, root, "");
         string factPublic = Path.Combine(root, "Fact Web", "public");
@@ -667,8 +826,14 @@ internal sealed class ServerForm : Form
     private string CheckForUpdates()
     {
         string source = GetUpdateSource();
-        if (String.IsNullOrWhiteSpace(source)) return "{\"ok\":true,\"updates\":0,\"files\":[],\"message\":\"Sin fuente de actualizacion\"}";
-        string remote = DownloadText(source + "/updates/manifest.json");
+        if (String.IsNullOrWhiteSpace(source)) return "{\"ok\":true,\"updates\":0,\"version\":0,\"files\":[],\"message\":\"Sin fuente de actualizacion\"}";
+        string remote = DownloadText(source + "/actualizacion-version.json?t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        int remoteVersion = ParseManifestVersion(remote);
+        int localVersion = ReadLocalUpdateVersion();
+        if (remoteVersion <= localVersion)
+        {
+            return UpdateResultJson(true, new List<string>(), "Ya estaba actualizado", source, remoteVersion);
+        }
         var remoteFiles = ParseManifestFiles(remote);
         var changed = new List<string>();
         foreach (var entry in remoteFiles)
@@ -679,14 +844,15 @@ internal sealed class ServerForm : Form
                 changed.Add(entry.Path);
             }
         }
-        return UpdateResultJson(true, changed, "Actualizacion disponible", source);
+        return UpdateResultJson(true, changed, "Nueva version disponible", source, remoteVersion);
     }
 
     private string ApplyUpdates()
     {
         string source = GetUpdateSource();
         if (String.IsNullOrWhiteSpace(source)) return "{\"ok\":false,\"error\":\"No hay fuente de actualizacion configurada\"}";
-        string remote = DownloadText(source + "/updates/manifest.json");
+        string remote = DownloadText(source + "/actualizacion-version.json?t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        int remoteVersion = ParseManifestVersion(remote);
         var remoteFiles = ParseManifestFiles(remote);
         var changed = new List<string>();
         foreach (var entry in remoteFiles)
@@ -710,7 +876,24 @@ internal sealed class ServerForm : Form
             try { File.Delete(temp); } catch { }
             changed.Add(safeRel);
         }
-        return UpdateResultJson(true, changed, changed.Count == 0 ? "Ya estaba actualizado" : "Actualizacion aplicada", source);
+        File.WriteAllText(Path.Combine(root, "actualizacion-version.json"), remote, new UTF8Encoding(false));
+        return UpdateResultJson(true, changed, changed.Count == 0 ? "Ya estaba actualizado" : "Actualizacion aplicada", source, remoteVersion);
+    }
+
+    private int ReadLocalUpdateVersion()
+    {
+        string file = Path.Combine(root, "actualizacion-version.json");
+        if (!File.Exists(file)) return 0;
+        try { return ParseManifestVersion(File.ReadAllText(file, Encoding.UTF8)); }
+        catch { return 0; }
+    }
+
+    private static int ParseManifestVersion(string json)
+    {
+        if (String.IsNullOrWhiteSpace(json)) return 0;
+        var match = System.Text.RegularExpressions.Regex.Match(json, "\\\"version\\\"\\s*:\\s*\\\"?(?<version>\\d+)\\\"?");
+        int version;
+        return match.Success && Int32.TryParse(match.Groups["version"].Value, out version) ? version : 0;
     }
 
     private static string DownloadText(string url)
@@ -742,7 +925,7 @@ internal sealed class ServerForm : Form
     {
         var list = new List<ManifestFile>();
         if (String.IsNullOrWhiteSpace(json)) return list;
-        var rx = new System.Text.RegularExpressions.Regex("\\{\\\"path\\\":\\\"(?<path>(?:\\\\.|[^\\\"])*)\\\",\\\"hash\\\":\\\"(?<hash>[a-fA-F0-9]+)\\\"");
+        var rx = new System.Text.RegularExpressions.Regex("\\{\\s*\\\"path\\\"\\s*:\\s*\\\"(?<path>(?:\\\\.|[^\\\"])*)\\\"\\s*,\\s*\\\"hash\\\"\\s*:\\s*\\\"(?<hash>[a-fA-F0-9]+)\\\"");
         foreach (System.Text.RegularExpressions.Match m in rx.Matches(json))
         {
             list.Add(new ManifestFile { Path = JsonUnescape(m.Groups["path"].Value), Hash = m.Groups["hash"].Value });
@@ -762,10 +945,10 @@ internal sealed class ServerForm : Form
         return String.Join("/", parts);
     }
 
-    private static string UpdateResultJson(bool ok, List<string> files, string message, string source)
+    private static string UpdateResultJson(bool ok, List<string> files, string message, string source, int version)
     {
         var sb = new StringBuilder();
-        sb.Append("{\"ok\":").Append(ok ? "true" : "false").Append(",\"updates\":").Append(files.Count).Append(",\"source\":\"").Append(JsonEscape(source)).Append("\",\"message\":\"").Append(JsonEscape(message)).Append("\",\"files\":[");
+        sb.Append("{\"ok\":").Append(ok ? "true" : "false").Append(",\"updates\":").Append(files.Count).Append(",\"version\":").Append(version).Append(",\"source\":\"").Append(JsonEscape(source)).Append("\",\"message\":\"").Append(JsonEscape(message)).Append("\",\"files\":[");
         for (int i = 0; i < files.Count; i++)
         {
             if (i > 0) sb.Append(',');
@@ -781,9 +964,10 @@ internal sealed class ServerForm : Form
         string widget = @"<script id=""corralon-update-widget"">
 (function(){
   if(window.__corralonUpdater) return; window.__corralonUpdater = true;
-  function css(){var s=document.createElement('style');s.textContent='#corralonUpdateBox{position:fixed;right:14px;bottom:14px;z-index:999999;background:#111827;color:white;border-radius:14px;padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.28);font-family:Arial,sans-serif;font-size:14px;display:none;gap:10px;align-items:center;max-width:360px}#corralonUpdateBox button{border:0;border-radius:10px;padding:8px 11px;font-weight:800;cursor:pointer}#corralonUpdateBox .ok{background:#7c4dff;color:#fff}#corralonUpdateBox .no{background:#374151;color:#fff}';document.head.appendChild(s)}
-  function box(msg){if(!document.body)return;css();var b=document.createElement('div');b.id='corralonUpdateBox';b.innerHTML='<span>'+msg+'</span><button class=""ok"">Actualizar</button><button class=""no"">Luego</button>';document.body.appendChild(b);b.style.display='flex';b.querySelector('.no').onclick=function(){b.style.display='none'};b.querySelector('.ok').onclick=function(){b.querySelector('.ok').textContent='Actualizando...';fetch('/api/update/apply',{method:'POST'}).then(function(r){return r.json()}).then(function(){location.reload()}).catch(function(e){alert('No pude actualizar: '+e.message)})}}
-  setTimeout(function(){fetch('/api/update/check').then(function(r){return r.json()}).then(function(j){if(j&&j.updates>0)box('Hay '+j.updates+' archivo(s) para actualizar')}).catch(function(){})},1800);
+  function css(){var s=document.createElement('style');s.textContent='#corralonUpdateBox{position:fixed;right:16px;bottom:16px;z-index:999999;background:#fff;color:#171717;border:1px solid #c9c9c9;border-radius:16px;padding:14px 16px;box-shadow:0 14px 38px rgba(0,0,0,.25);font-family:Arial,sans-serif;font-size:14px;display:none;gap:10px;align-items:center;max-width:440px}#corralonUpdateBox strong{display:block;font-size:15px}#corralonUpdateBox small{display:block;color:#666;margin-top:3px}#corralonUpdateBox button{border:1px solid #bbb;background:#fff;color:#111;border-radius:10px;padding:8px 12px;font-weight:800;cursor:pointer}#corralonUpdateBox .ok{background:#ef111b;border-color:#ef111b;color:#fff}';document.head.appendChild(s)}
+  function box(j){if(!document.body||document.getElementById('corralonUpdateBox'))return;css();var b=document.createElement('div');b.id='corralonUpdateBox';var n=Number(j.updates||0);b.innerHTML='<span><strong>Nueva version '+j.version+'</strong><small>'+n+' archivo(s) para actualizar</small></span><button class=""ok"">Actualizar</button><button class=""no"">Luego</button>';document.body.appendChild(b);b.style.display='flex';b.querySelector('.no').onclick=function(){b.remove()};b.querySelector('.ok').onclick=function(){var x=b.querySelector('.ok');x.disabled=true;x.textContent='Actualizando...';fetch('/api/update/apply',{method:'POST'}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'No se pudo actualizar');x.textContent='Listo';location.reload()}).catch(function(e){x.disabled=false;x.textContent='Reintentar';alert('No pude actualizar: '+e.message)})}}
+  function check(){fetch('/api/update/check',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.updates>0)box(j)}).catch(function(){})}
+  setTimeout(check,1200); setInterval(check,60000);
 })();
 </script>";
         int idx = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
