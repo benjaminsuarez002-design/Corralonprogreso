@@ -2958,17 +2958,23 @@
     }
 
     async function login(userId, password, persistent = false, userSnapshot = null) {
-      const durationMs = persistent ? 30 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
-      return store({
-        ok: true,
-        token: `menu-auth:${String(userId || '')}:${Date.now()}`,
-        expiresAt: Date.now() + durationMs,
-        user: {
-          id: String(userSnapshot?.id || userId || ''),
-          nombre: String(userSnapshot?.nombre || userSnapshot?.usuario || ''),
-          nivel: String(userSnapshot?.nivel || '')
-        }
-      }, Boolean(persistent));
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/catalogo-editor-sesion`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          action: 'login',
+          userId: String(userId || ''),
+          password: String(password || ''),
+          persistent: Boolean(persistent),
+          userSnapshot: userSnapshot || null
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok || !payload?.token) {
+        throw new Error(payload?.error || `No se pudo iniciar la sesión de administrador (${response.status})`);
+      }
+      store(payload, Boolean(persistent));
+      return payload;
     }
 
     async function logout() {

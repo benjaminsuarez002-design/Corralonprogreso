@@ -1248,11 +1248,16 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="corralon-system.js?v=20260730-aridos7"></script>
+<script src="corralon-system.js?v=20260731-editor-session1"></script>
+<script src="vendor/supabase.js?v=2.111.0"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, onSnapshot, orderBy, query, getDocs, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+const createClient = window.supabase?.createClient;
+if (typeof createClient !== 'function') {
+  document.getElementById('loadingOverlay')?.remove();
+  throw new Error('No se pudo cargar la conexión local con Supabase. Actualizá la página con Ctrl+F5.');
+}
 
 const SUPABASE_URL      = 'https://tizyjenayrcdkcodsjnc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
@@ -5165,6 +5170,7 @@ importDropZone.addEventListener('drop', e => { e.preventDefault(); importDropZon
 
 let importCatalogSyncTimer = null;
 let importCatalogSyncActive = false;
+let remoteCatalogSyncActive = false;
 
 function setImportSyncStatus(message, state = '') {
   const status = document.getElementById('importSyncStatus');
@@ -5209,16 +5215,17 @@ async function pollImportCatalogSync() {
 }
 
 async function handleImportFile(file) {
-  if (importCatalogSyncActive) return toast('Ya hay una sincronización en curso', 'err');
+  if (importCatalogSyncActive || remoteCatalogSyncActive) return toast('Ya hay una sincronización en curso', 'err');
   const extension = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
   if (!['.xls', '.xlsx', '.csv'].includes(extension)) {
     importFile.value = '';
     return toast('Usá un archivo XLS, XLSX o CSV', 'err');
   }
-  if (!['localhost', '127.0.0.1'].includes(location.hostname)) {
-    importFile.value = '';
-    return toast('La importación masiva se ejecuta desde localhost', 'err');
-  }
+  const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
+  // En localhost se usa siempre el mismo flujo que dispara Access:
+  // parse_excel_to_json.js + sync_catalogo_supabase.js --full.
+  // La sesión del editor no debe desviarlo al importador remoto.
+  if (!isLocalHost) return syncCatalogFromRemote(file, extension);
 
   importCatalogSyncActive = true;
   setImportSyncStatus('Subiendo el archivo y preparando la sincronización...');
@@ -5238,6 +5245,155 @@ async function handleImportFile(file) {
     importFile.value = '';
     setImportSyncStatus(error.message, 'error');
     toast(error.message, 'err');
+  }
+}
+
+function loadSheetJSPromise() {
+  return new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('No se pudo cargar la librería de Excel'));
+    document.head.appendChild(s);
+  });
+}
+
+function importFirstValue(row, keys, fallback = '') {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+  }
+  return fallback;
+}
+
+function importNumber(row, keys, fallback = 0) {
+  const value = importFirstValue(row, keys, '');
+  if (value === '') return fallback;
+  const parsed = parsePrecio({ precio: value });
+  return parsed === null ? (Number(value) || fallback) : parsed;
+}
+
+function buildRemoteCatalogRow(row, existing = {}) {
+  const codigo = String(row.codigo || row.idart || existing.codigo || '').trim();
+  const idsuc = String(importFirstValue(row, ['idsuc', 'id_suc', 'idsucursal', 'id_sucursal', 'sucursal_id'], existing.idsuc ?? '') ?? '').trim();
+  const stock = importFirstValue(row, ['stock', 'stockact', 'stock_act', 'existencia'], existing.stock);
+  // Cada fila del Excel representa una sucursal. No completar acá la otra
+  // sucursal con el valor anterior porque, al unir las dos filas, ese valor
+  // viejo terminaría pisando el stock recién importado de la primera.
+  const stockProgreso = importFirstValue(row, ['stockprogreso', 'stocksucursalprogresoruta'], null);
+  const stockCalle5 = importFirstValue(row, ['stockcalle5', 'stockcalle5espana', 'stocksucursalcalle5espana'], null);
+  const sucursalStockProgreso = idsuc === '1' ? stock : stockProgreso;
+  const sucursalStockCalle5 = idsuc === '2' ? stock : stockCalle5;
+  return {
+    codigo,
+    codigo_proveedor: String(row.idartprov || row.codprov || existing.idartprov || existing.codigo_proveedor || '').trim() || null,
+    id_proveedor: String(row.idProveedor || row.id_proveedor || existing.idProveedor || existing.id_proveedor || '').trim() || null,
+    nombre: String(row.nombre || existing.nombre || '').trim(),
+    rubro: String(row.rubro || existing.rubro || '').trim() || null,
+    // normalizeRow concentra los campos de precio del Excel en `precio`.
+    // Se usa como valor base para no perder la actualización al importar desde la web.
+    precio_compra_sin_descuento: importNumber(row, ['preciocprasisdto', 'preciocosto', 'precio_costo', 'precio'], Number(existing.precioCosto ?? existing.precio_compra_sin_descuento ?? 0)),
+    precio_compra_con_impuestos: importNumber(row, ['preciocpraci', 'precio_compra_con_impuestos', 'precio'], Number(existing.precioCostoConImpuestos ?? existing.precio_compra_con_impuestos ?? 0)),
+    porcentaje_ganancia_min: importNumber(row, ['porcganmin', 'porcgananciamin', 'porcentaje_ganancia_min'], Number(existing.porcentajeGananciaMin ?? existing.porcentaje_ganancia_min ?? 0)),
+    precio_venta: importNumber(row, ['preciovta3', 'preciovta', 'precio'], Number(existing.precioVenta ?? existing.precioFinal ?? existing.precio_venta ?? existing.precio ?? 0)),
+    stock: stock === '' || stock === undefined ? null : Number(stock) || 0,
+    idsuc: idsuc || null,
+    stock_progreso: sucursalStockProgreso === '' || sucursalStockProgreso === undefined || sucursalStockProgreso === null ? null : Number(sucursalStockProgreso) || 0,
+    stock_calle5: sucursalStockCalle5 === '' || sucursalStockCalle5 === undefined || sucursalStockCalle5 === null ? null : Number(sucursalStockCalle5) || 0,
+    _stock_progreso_anterior: existing.stockSucursalProgresoRuta ?? existing.stock_progreso ?? null,
+    _stock_calle5_anterior: existing.stockSucursalCalle5Espana ?? existing.stock_calle5 ?? null,
+    source_rows: [row]
+  };
+}
+
+function mergeRemoteCatalogRows(rows) {
+  const merged = new Map();
+  for (const row of rows) {
+    const codigo = String(row.codigo || '').trim();
+    if (!codigo) continue;
+    const previous = merged.get(codigo);
+    if (!previous) {
+      merged.set(codigo, { ...row, source_rows: Array.isArray(row.source_rows) ? [...row.source_rows] : [] });
+      continue;
+    }
+    const next = { ...previous, ...row, source_rows: [...(previous.source_rows || []), ...(row.source_rows || [])] };
+    next.stock_progreso = row.stock_progreso !== null && row.stock_progreso !== undefined
+      ? row.stock_progreso
+      : previous.stock_progreso;
+    next.stock_calle5 = row.stock_calle5 !== null && row.stock_calle5 !== undefined
+      ? row.stock_calle5
+      : previous.stock_calle5;
+    merged.set(codigo, next);
+  }
+  return [...merged.values()].map(row => {
+    const result = { ...row };
+    if (result.stock_progreso === null || result.stock_progreso === undefined) {
+      result.stock_progreso = result._stock_progreso_anterior === null || result._stock_progreso_anterior === undefined
+        ? 0
+        : Number(result._stock_progreso_anterior) || 0;
+    }
+    if (result.stock_calle5 === null || result.stock_calle5 === undefined) {
+      result.stock_calle5 = result._stock_calle5_anterior === null || result._stock_calle5_anterior === undefined
+        ? 0
+        : Number(result._stock_calle5_anterior) || 0;
+    }
+    delete result._stock_progreso_anterior;
+    delete result._stock_calle5_anterior;
+    return result;
+  });
+}
+
+async function syncCatalogFromRemote(file, extension) {
+  if (remoteCatalogSyncActive) return;
+  remoteCatalogSyncActive = true;
+  setImportSyncStatus('Preparando Excel para sincronización remota...');
+  try {
+    const session = window.CorralonSystem?.catalogEditorSession?.current?.();
+    if (!session?.token) throw new Error('Iniciá sesión como administrador antes de sincronizar desde la web');
+    await loadSheetJSPromise();
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: true });
+    const importRowsRemote = rawRows.map(normalizeRow).filter(row => String(row.codigo || row.idart || '').trim());
+    if (!importRowsRemote.length) throw new Error('No se encontraron artículos en la primera hoja del Excel');
+    const byCode = new Map((todosArticulos || []).map(a => [String(a.codigo || '').trim(), a]));
+    const rows = mergeRemoteCatalogRows(importRowsRemote.map(row => buildRemoteCatalogRow(row, byCode.get(String(row.codigo || row.idart || '').trim()) || {})));
+    const endpoint = `${SUPABASE_URL}/functions/v1/catalogo-sync-remoto`;
+    const version = Date.now();
+    const batchSize = 350;
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const batch = rows.slice(offset, offset + batchSize);
+      setImportSyncStatus(`Sincronizando artículos ${Math.min(offset + batch.length, rows.length)}/${rows.length}...`);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.token}`,
+          apikey: SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({ action: 'batch', version, source_file: file.name, rows: batch })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) throw new Error(result.error || `Error remoto HTTP ${response.status}`);
+    }
+    const finalizeResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}`, apikey: SUPABASE_ANON_KEY },
+      body: JSON.stringify({ action: 'finalize', version, source_file: file.name, total_articulos: rows.length, total_filas_fuente: rawRows.length })
+    });
+    const finalized = await finalizeResponse.json().catch(() => ({}));
+    if (!finalizeResponse.ok || !finalized.ok) throw new Error(finalized.error || `No se pudo finalizar la sincronización HTTP ${finalizeResponse.status}`);
+    setImportSyncStatus(`Catálogo sincronizado: ${rows.length} artículos. Se conservaron imágenes, detalle, tags y etiquetas.`, 'ok');
+    toast('Sincronización completa finalizada');
+    await cargarCatalogoAdminDirecto();
+  } catch (error) {
+    console.error(error);
+    setImportSyncStatus(error.message || 'Error sincronizando el catálogo', 'error');
+    toast(error.message || 'Error sincronizando el catálogo', 'err');
+  } finally {
+    remoteCatalogSyncActive = false;
+    importFile.value = '';
   }
 }
 

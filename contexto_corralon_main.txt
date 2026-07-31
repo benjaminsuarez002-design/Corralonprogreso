@@ -1,7 +1,7 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia: 16/07/2026
+Fecha de referencia: 31/07/2026
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -81,9 +81,10 @@ Incluye, entre otras cosas:
 - cálculo especial para cerámicos;
 - acceso a funciones administrativas cuando existe una sesión válida.
 
-La información principal de artículos proviene de un JSON publicado en
-Cloudinary. La ubicación del JSON vigente se obtiene mediante la configuración
-guardada en Firebase.
+La fuente principal vigente del catálogo es la tabla catalogo_articulos de
+Supabase. index.html carga esa tabla mediante corralon-system.js. Los JSON viejos
+de Cloudinary se conservan solamente como respaldo/fallback y no deben borrarse
+sin pedido explícito.
 
 Campos importantes que llegan desde la exportación de artículos:
 
@@ -161,6 +162,16 @@ Maneja datos como:
 - información publicada;
 - ajustes visuales o comerciales del catálogo;
 - metadatos adicionales de artículos.
+
+El importador masivo de este panel realiza una sincronización completa:
+
+- en localhost usa el mismo recorrido externo que dispara Access;
+- fuera de localhost usa la Edge Function catalogo-sync-remoto;
+- consolida las filas repetidas por código usando IdSuc 1 para Progreso e IdSuc
+  2 para Calle 5;
+- conserva imágenes, detalle, tags, etiquetas, ofertas y demás metadatos
+  mantenidos manualmente;
+- los artículos que ya no están en la importación completa quedan inactivos.
 
 
 remitos.html
@@ -441,11 +452,12 @@ globales.
 La fuente remota debe prevalecer sobre una copia local. Una caché local nunca
 debe sobrescribir Firebase o Supabase con datos vacíos o antiguos.
 
-Fuentes de publicación utilizadas por caja:
-
-- caja_dia_tabla.json en Cloudinary;
-- caja_dia_transferencias.json en Cloudinary;
-- estados y datos complementarios en Firebase/Supabase.
+Las exportaciones de Access generan JSON temporales de entrada. caja.html no
+debe depender directamente de esos JSON: el contenido se copia a tablas de
+Supabase y desde allí se consulta por fecha. Las modificaciones manuales de la
+tabla (unificar, separar, eliminar una fila o agregarla) son persistentes. El
+botón general "Eliminar registro" limpia el estado persistente del día para que
+la siguiente actualización de Access pueda volver a importar todo desde cero.
 
 El total de una fila se calcula como:
 
@@ -655,8 +667,7 @@ Se utiliza principalmente para:
 
 - usuarios internos;
 - sesiones y permisos;
-- configuración del catálogo;
-- dirección del JSON vigente;
+- configuración y metadatos auxiliares;
 - notificaciones;
 - pedidos;
 - faltantes sincronizados;
@@ -672,9 +683,12 @@ Se utiliza para:
 
 - proveedores;
 - listas de precios;
-- metadatos;
+- catálogo principal en catalogo_articulos;
+- metadatos manuales del catálogo;
 - manifiestos de JSON por proveedor;
 - estados persistentes;
+- historial diario de caja y transferencias;
+- saldos y facturas de proveedores;
 - historial y datos complementarios;
 - almacenamiento de archivos en algunos módulos.
 
@@ -721,15 +735,20 @@ remota válida con datos viejos, incompletos o vacíos.
 5. FLUJO DEL CATALOGO PRINCIPAL
 ===============================
 
-El catálogo público se genera aproximadamente con este recorrido:
+El catálogo público se genera actualmente con este recorrido:
 
 Access
-  -> exportación Excel
-  -> parseo a JSON
-  -> combinación con metadatos existentes
-  -> publicación en Cloudinary
-  -> actualización del enlace vigente en Firebase
-  -> carga del JSON desde index.html
+  -> exportación de C:\Update\Articulosexp.xls
+  -> C:\Update\run_sync_articulos_silent.vbs
+  -> scripts de C:\Update\actualizaciones\Subir Lista Index
+  -> parseo a JSON temporal
+  -> sincronización completa de catalogo_articulos en Supabase
+  -> carga directa desde Supabase mediante corralon-system.js
+
+El importador masivo de soloadmin.html debe producir el mismo resultado. En
+localhost llama a /api/catalog-sync/import y ejecuta catalog-sync-import.bat con
+--full. En corralonprogreso.com utiliza catalogo-sync-remoto por lotes y luego
+finaliza la versión completa.
 
 Código VBA conocido del botón de exportación:
 
@@ -738,15 +757,16 @@ Código VBA conocido del botón de exportación:
 - ejecuta C:\Update\run_sync_articulos_silent.vbs;
 - el proceso continúa mediante scripts externos.
 
-Archivos externos relacionados, ubicados normalmente en C:\Update:
+Archivos externos relacionados:
 
 - Articulosexp.xls;
 - run_sync_articulos_silent.vbs;
 - run_sync_articulos.bat;
-- parse_excel_to_json.js;
-- publish_lista_from_json.js.
+- C:\Update\actualizaciones\Subir Lista Index\parse_excel_to_json.js;
+- C:\Update\actualizaciones\Subir Lista Index\sync_catalogo_supabase.js;
+- catalog-sync-import.bat dentro del proyecto web.
 
-Los scripts de parseo/publicación deben conservar:
+Los scripts de parseo/sincronización deben conservar:
 
 - PrecioCpraCI;
 - PrecioVta3;
@@ -820,17 +840,17 @@ Imprimir no debe impedir que quede registrada la notificación.
 9. FLUJO DE CAJA
 ================
 
-Access genera informes diarios que luego se transforman y publican para
-caja.html.
+Access genera informes diarios que luego se transforman en JSON temporales de
+importación para caja.html.
 
 Flujo aproximado:
 
 Access / informe diario
   -> archivo de exportación
-  -> JSON de caja
-  -> Cloudinary
-  -> caja.html
-  -> combinación con estados guardados en Firebase/Supabase
+  -> JSON temporal de caja
+  -> sincronización de las tablas diarias en Supabase
+  -> caja.html lee Supabase por fecha
+  -> combinación con cambios persistentes del usuario
 
 Los datos se separan por texto/origen:
 
@@ -1072,7 +1092,100 @@ Ejecución:
 - GitHub como repositorio.
 
 
-17. NOTA FINAL PARA UN CHAT NUEVO
+17. ESTADO FUNCIONAL ACTUAL AL 31/07/2026
+=========================================
+
+Catálogo y edición de artículos
+-------------------------------
+
+- index.html y soloadmin.html usan el editor compartido de corralon-system.js.
+- El lápiz de index solo se muestra con sesión iniciada en el menú.
+- El editor modifica directamente Supabase y refleja primero el cambio local;
+  la sincronización continúa en segundo plano.
+- Código, descripción, código de proveedor, rubro y precio de lista se muestran
+  como información no editable.
+- "Aplicar cambios también a" comparte selectivamente etiquetas, detalle, tags
+  o fotos y utiliza el mismo motor de búsqueda/rubros que index.
+- Los datos manuales no deben perderse al importar una nueva lista base.
+
+Sincronización completa del catálogo
+------------------------------------
+
+- Tabla principal: catalogo_articulos de Supabase.
+- Una fila de Access puede repetirse por sucursal. Debe consolidarse por código.
+- IdSuc=1 carga stock_progreso.
+- IdSuc=2 carga stock_calle5.
+- Si una sucursal no trae stock en una sincronización completa, su valor debe
+  quedar en cero y nunca tomar por accidente el stock de la otra sucursal.
+- idsuc es un dato transitorio de consolidación: no es una columna de
+  catalogo_articulos y se elimina antes del upsert.
+- La Edge Function remota vigente es catalogo-sync-remoto.
+- Los JSON históricos de Cloudinary quedan como respaldo; no eliminarlos.
+
+Áridos
+------
+
+- Los artículos marcados con el chip Árido usan una tabla de precios de costo
+  por volumen: 1; 1,5; 2; 2,5; 3; 3,5; 4; 4,5 y 5 m3.
+- Presupuestar muestra precios de venta calculados con el margen del artículo.
+- Se pueden combinar varios áridos en un mismo presupuesto.
+- Cada viaje admite hasta 5 m3 y los viajes se calculan sobre el volumen total.
+- Los fletes disponibles son Rawson, Pasando Calle 5, Personalizado y Sin flete;
+  son excluyentes y Rawson es la opción predeterminada.
+- La configuración común de fletes se comparte entre todos los áridos.
+- En localhost se puede generar el XLS y disparar el actualizador de Access sin
+  modificar los archivos originales del flujo de actualización.
+
+Pedidos
+-------
+
+- El historial general filtra por sucursal, proveedor y rango de fechas.
+- Buscar en pedidos muestra también la sucursal del pedido encontrado.
+- Los límites mensuales se manejan por sucursal.
+- Un usuario común puede solicitar autorización al superar el límite; la
+  autorización corresponde al estado/importe del pedido y debe invalidarse si
+  el pedido vuelve a modificarse.
+- Los administradores pueden autorizar el exceso desde popups internos.
+- La vista móvil usa tarjetas compactas y los popups de sucursal, historial y
+  detalle de pedido deben adaptarse a toda la pantalla.
+
+Caja
+----
+
+- Los datos nuevos se guardan por fecha en Supabase para poder consultar días
+  anteriores.
+- La actualización periódica no debe volver a renderizar tablas sin cambios ni
+  quitar el foco del campo activo.
+- Transferencias del sistema, ingresos/egresos, recibos y movimientos conservan
+  asignaciones y modificaciones persistentes.
+- Las notas que contienen "Progreso" o "Calle 5" pueden asignar automáticamente
+  la sucursal correspondiente.
+- Los JSON de Access son transporte temporal; Supabase es la fuente persistente
+  que consume la pantalla.
+
+Comprobantes
+------------
+
+- El resumen abre por defecto en la fecha de hoy.
+- Cada alias puede generar su propio enlace compartido de solo lectura.
+- El enlace muestra únicamente los movimientos y comprobantes de ese alias y se
+  actualiza cuando cambian los datos compartidos.
+- Los saldos de proveedores se obtienen de Supabase y se agrupan por ID de
+  proveedor, incluyendo saldo adeudado, vencimiento más antiguo y saldo vencido.
+
+Menú, permisos y actualización local
+------------------------------------
+
+- menu.html es la única página interna que puede abrirse sin redirigir primero a
+  index.html; el resto usa menu-auth-guard.js.
+- Configuración es visible únicamente para administradores.
+- El servidor local puede publicar una nueva versión en Git y las otras PC con
+  localhost reciben el aviso para descargar solamente los archivos modificados.
+- El acceso de bandeja "Abrir menú" debe abrir /menu.html desde la raíz del
+  servidor, no concatenarlo con la URL actual.
+
+
+18. NOTA FINAL PARA UN CHAT NUEVO
 ================================
 
 Este proyecto tiene muchas funciones conectadas entre páginas. Un cambio visual
