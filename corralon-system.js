@@ -1800,6 +1800,42 @@
     };
   }
 
+  function distributeAridFreight(budget) {
+    if (!budget?.materials?.length) return budget;
+    let assignedCost = 0;
+    const lastIndex = budget.materials.length - 1;
+    const materials = budget.materials.map((item, index) => {
+      const ratio = budget.totalMeters > 0 ? item.meters / budget.totalMeters : 0;
+      const freightCostShare = index === lastIndex
+        ? roundAridMoney(budget.freightCostTotal - assignedCost)
+        : roundAridMoney(budget.freightCostTotal * ratio);
+      assignedCost = roundAridMoney(assignedCost + freightCostShare);
+      const freightTotalShare = aridSaleFromCost(freightCostShare, item.article);
+      const materialCostTotal = item.costTotal;
+      const materialTotal = item.total;
+      const costTotal = roundAridMoney(materialCostTotal + freightCostShare);
+      const total = roundAridMoney(materialTotal + freightTotalShare);
+      return {
+        ...item,
+        materialCostTotal,
+        materialTotal,
+        freightCostShare,
+        freightTotalShare,
+        costTotal,
+        total,
+        costUnit: item.meters ? roundAridMoney(costTotal / item.meters) : 0,
+        unitPrice: item.meters ? roundAridMoney(total / item.meters) : 0
+      };
+    });
+    const freightTotal = roundAridMoney(materials.reduce((sum, item) => sum + item.freightTotalShare, 0));
+    return {
+      ...budget,
+      materials,
+      freightTotal,
+      total: roundAridMoney(budget.materialTotal + freightTotal)
+    };
+  }
+
   function renderAridosBudgetValues() {
     if (!aridosBudgetHost) return;
     const custom = aridosBudgetHost.querySelector('[data-arid-custom]');
@@ -1807,14 +1843,16 @@
     aridosBudgetHost.querySelectorAll('[data-arid-freight-option]').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.aridFreightOption === aridosBudgetFreightMode);
     });
-    const budget = currentAridosBudget();
+    const budget = distributeAridFreight(currentAridosBudget());
     if (!budget) return;
     budget.materials.forEach((item, index) => {
       const row = aridosBudgetHost.querySelector(`[data-arid-material-row][data-index="${index}"]`);
       const price = row?.querySelector('[data-arid-row-price]');
       if (price) {
         price.textContent = money(item.total);
-        price.title = `Costo ${money(item.costTotal)} · margen ${(item.marginRate * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`;
+        price.title = item.freightTotalShare > 0
+          ? `Árido ${money(item.materialTotal)} + flete incluido ${money(item.freightTotalShare)}`
+          : `Costo ${money(item.costTotal)} · margen ${(item.marginRate * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`;
       }
     });
     const freightQuantity = aridosBudgetHost.querySelector('[data-arid-freight-quantity]');
@@ -1822,12 +1860,14 @@
     const chargedTrips = budget.freightMode === 'none' ? 0 : budget.trips;
     if (freightQuantity) freightQuantity.textContent = `${chargedTrips} ${chargedTrips === 1 ? 'viaje' : 'viajes'}`;
     if (freightPrice) {
-      freightPrice.textContent = money(budget.freightTotal);
-      freightPrice.title = `Costo ${money(budget.freightCostTotal)} · margen ${(budget.freightMarginRate * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`;
+      freightPrice.textContent = budget.freightTotal > 0 ? 'Incluido' : money(0);
+      freightPrice.title = budget.freightTotal > 0
+        ? `${money(budget.freightTotal)} distribuido entre los áridos`
+        : 'Sin flete';
     }
     const total = aridosBudgetHost.querySelector('[data-arid-total]');
     if (total) total.textContent = money(budget.total);
-    const missing = budget.materials.filter((item) => !(item.costTotal > 0));
+    const missing = budget.materials.filter((item) => !((item.materialCostTotal ?? item.costTotal) > 0));
     const warning = aridosBudgetHost.querySelector('[data-arid-warning]');
     if (warning) {
       warning.hidden = !missing.length;
@@ -1871,7 +1911,7 @@
   }
 
   function aridosBudgetPayload() {
-    const budget = currentAridosBudget();
+    const budget = distributeAridFreight(currentAridosBudget());
     if (!budget) return null;
     const freightArticle = aridFreightArticle();
     return {
@@ -1898,7 +1938,7 @@
 
   function validateAridosBudget(payload) {
     if (!payload?.materials?.length) return 'Elegí al menos un árido.';
-    if (payload.materials.some((item) => !(item.costTotal > 0))) return 'Falta cargar el costo del volumen elegido.';
+    if (payload.materials.some((item) => !((item.materialCostTotal ?? item.costTotal) > 0))) return 'Falta cargar el costo del volumen elegido.';
     if (payload.freightMode !== 'none' && !(payload.freightRate > 0)) return 'Falta cargar el importe del flete elegido.';
     return '';
   }
@@ -1921,16 +1961,24 @@
     };
   }
 
+  function aridUnifiedName(item, includeFreight) {
+    if (!includeFreight) return item.name;
+    const baseName = String(item.name || '')
+      .replace(/\s+X\s+1\s*M(?:T|3)?(?:\s*\(M\))?\s*$/i, '')
+      .trim();
+    const meters = Number(item.meters || 0).toLocaleString('es-AR', { maximumFractionDigits: 1 });
+    return `VIAJE ${baseName} X ${meters} M3`;
+  }
+
   async function exportAridosBudgetXls() {
     const payload = aridosBudgetPayload();
     const error = validateAridosBudget(payload);
     if (error) return alert(error);
-    const rows = payload.materials.map((item) => aridXlsRow(item.article, item.name, item.costUnit / ARID_COST_VAT_FACTOR));
-    if (payload.freight) {
-      const freightArticle = payload.freight.article;
-      if (!freightArticle) return alert(`No se encontró el artículo de flete ${aridosFreightConfig.idArtFlete}.`);
-      rows.push(aridXlsRow(freightArticle, payload.freight.name, payload.freight.costTotal / ARID_COST_VAT_FACTOR));
-    }
+    const rows = payload.materials.map((item) => aridXlsRow(
+      item.article,
+      aridUnifiedName(item, !!payload.freight),
+      item.costUnit / ARID_COST_VAT_FACTOR
+    ));
     if (rows.some((row) => !row.cod_proveedor || !row.id_proveedor)) {
       return alert('Uno de los artículos no tiene código o ID de proveedor para actualizar Access.');
     }

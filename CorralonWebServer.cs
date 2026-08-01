@@ -53,6 +53,7 @@ internal sealed class ServerForm : Form
     private NotifyIcon trayIcon;
     private bool exiting;
     private readonly object catalogSyncLock = new object();
+    private readonly object accessPriceUpdateLock = new object();
     private Process catalogSyncProcess;
     private string catalogSyncMessage = "Listo para sincronizar.";
     private int? catalogSyncExitCode;
@@ -1145,7 +1146,7 @@ internal sealed class ServerForm : Form
         context.Response.OutputStream.Write(bytes, 0, bytes.Length);
     }
 
-    private static void SaveArticulosXls(HttpListenerContext context)
+    private void SaveArticulosXls(HttpListenerContext context)
     {
         string target = @"C:\Update\Articulos.xls";
         Directory.CreateDirectory(Path.GetDirectoryName(target));
@@ -1157,7 +1158,55 @@ internal sealed class ServerForm : Form
         {
             context.Request.InputStream.CopyTo(output);
         }
-        WriteText(context, 200, "OK");
+
+        bool runAccess = String.Equals(context.Request.QueryString["runAccess"], "1", StringComparison.OrdinalIgnoreCase);
+        if (!runAccess)
+        {
+            WriteText(context, 200, "OK");
+            return;
+        }
+
+        if (!Monitor.TryEnter(accessPriceUpdateLock))
+        {
+            WriteText(context, 409, "Ya hay una actualizacion de precios en curso.");
+            return;
+        }
+
+        try
+        {
+            string script = @"C:\Update\actualizaciones\actualizar articulos\corralon_actualizar_precios.ps1";
+            if (!File.Exists(script))
+            {
+                WriteText(context, 500, "No se encontro el actualizador de precios de Access.");
+                return;
+            }
+
+            var info = new ProcessStartInfo("powershell.exe");
+            info.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\"";
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
+            info.WindowStyle = ProcessWindowStyle.Hidden;
+            info.RedirectStandardOutput = true;
+            info.RedirectStandardError = true;
+
+            using (var process = Process.Start(info))
+            {
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+                if (process.ExitCode != 0)
+                {
+                    WriteText(context, 500, String.IsNullOrWhiteSpace(error) ? (String.IsNullOrWhiteSpace(output) ? "Access no pudo actualizar los precios." : output) : error);
+                    return;
+                }
+            }
+
+            WriteText(context, 200, "XLS generado y precios actualizados en Access.");
+        }
+        finally
+        {
+            Monitor.Exit(accessPriceUpdateLock);
+        }
     }
 
     private static string ContentType(string ext)
