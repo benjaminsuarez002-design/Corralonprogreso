@@ -3674,7 +3674,7 @@
         <div id="productDetailTags" class="product-detail-tags"></div>
         <div id="productDetailTitle" class="product-detail-title">Producto</div>
         <div class="product-detail-subline">
-          <div class="product-detail-subline-row">- <strong>Código:</strong> <span id="productDetailCode">-</span></div>
+          <div class="product-detail-subline-row">- <strong>Código:</strong> <span id="productDetailCode">-</span><span id="productDetailProviderCodeWrap" class="hidden"> · <strong>Cód. prov.:</strong> <span id="productDetailProviderCode">-</span></span></div>
           <div class="product-detail-subline-row">- <strong>Detalle:</strong> <span id="productDetailDescription">Sin detalle disponible.</span></div>
           <div id="productDetailStock" class="product-detail-stock-block"></div>
         </div>
@@ -6541,6 +6541,7 @@ function renderDetalleProductoFoto(articulo, titulo) {
 function abrirDetalleProducto(codigo) {
   const articulo = buscarArticuloPorCodigo(codigo);
   if (!articulo) return;
+  const sesionMenuActiva = !!window.CorralonFunciones?.isMenuSessionActive?.();
   const descripcion = obtenerDescripcionArticulo(articulo);
   const { stockText } = obtenerStockInfo(articulo);
   const precioLista = Number(articulo.precio || 0);
@@ -6558,6 +6559,10 @@ function abrirDetalleProducto(codigo) {
   document.getElementById('productDetailTags').innerHTML = tags.join('');
   document.getElementById('productDetailTitle').textContent = descripcion.principal;
   document.getElementById('productDetailCode').textContent = obtenerIdArticulo(articulo);
+  const codigoProveedor = String(articulo.idartprov ?? articulo.idArtProv ?? articulo.codprov ?? articulo.codProv ?? articulo.codigo_proveedor ?? '').trim();
+  const codigoProveedorWrap = document.getElementById('productDetailProviderCodeWrap');
+  document.getElementById('productDetailProviderCode').textContent = codigoProveedor || '-';
+  codigoProveedorWrap.classList.toggle('hidden', !sesionMenuActiva || !codigoProveedor);
   document.getElementById('productDetailStock').innerHTML = renderProductDetailStockHtml(articulo);
   const detailPriceBase = document.getElementById('productDetailPriceBase');
   detailPriceBase.textContent = precioVisual.esCeramico && !articulo.ofertaVigente ? '' : (precioVisual.esCeramico ? precioVisual.precioBaseHtml : (articulo.ofertaVigente ? `Precio lista ${fmtPrecio(precioLista)}` : ''));
@@ -6577,7 +6582,7 @@ function abrirDetalleProducto(codigo) {
   productDetailAdminCode = obtenerIdArticulo(articulo);
   budgetBtn.dataset.codigo = productDetailAdminCode;
   budgetBtn.classList.toggle('hidden', !(articulo.arido || (articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0) || esArticuloPegamento(articulo)));
-  const sesionMenuActiva = !!window.CorralonFunciones?.isMenuSessionActive?.(), datosDescuento = datosDescuentoArticulo(articulo);
+  const datosDescuento = datosDescuentoArticulo(articulo);
   discountBtn.classList.toggle('hidden', !sesionMenuActiva);
   editBtn.classList.toggle('hidden', !sesionMenuActiva);
   discountBtn.disabled = !!articulo.ofertaVigente || !(datosDescuento.maximo > 0);
