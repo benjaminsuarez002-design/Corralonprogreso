@@ -3943,7 +3943,7 @@
         precio_final: Number(row.precioFinal || 0),
         pedido: Boolean(row.pedido),
         origen: row.source || '',
-        orden,
+        orden: Number.isFinite(Number(row.orden)) ? Number(row.orden) : orden,
         updatedAt: window.firebase?.firestore?.FieldValue?.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : Date.now()
       };
     }

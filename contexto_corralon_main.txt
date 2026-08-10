@@ -1251,6 +1251,73 @@ Menú, permisos y actualización local
   servidor, no concatenarlo con la URL actual.
 
 
+Optimizacion del consumo de Supabase
+------------------------------------
+
+Problema diagnosticado:
+
+- La organizacion supero ampliamente el cupo de transferencia del plan gratuito.
+- El consumo principal aparecia como PostgREST Egress, no como Storage Egress.
+- Los dos responsables mas importantes eran index.html y listasproveedores.html.
+- index.html descargaba repetidamente el catalogo completo de articulos aunque
+  la mayoria de las filas no hubiera cambiado.
+- listasproveedores.html consultaba periodicamente los datos remotos con una
+  frecuencia aproximada de 10 segundos.
+- pedidos.html y faltantes.html dependian de la actualizacion de JSON realizada
+  por listasproveedores.html, por lo que abrir una pantalla podia provocar
+  lecturas completas o dejar otra pantalla con informacion desactualizada.
+
+Solucion implementada para el catalogo de index:
+
+- Se incorporo una version global del catalogo y una version por articulo.
+- El navegador conserva el catalogo en IndexedDB junto con la ultima version
+  aplicada.
+- Al abrir index.html se consulta primero el unico registro de version global.
+- Si la version remota coincide con la version local, se utiliza IndexedDB y no
+  se descarga nuevamente la tabla completa.
+- Si existe una version nueva, solo se solicitan los articulos cuya version sea
+  posterior a la que posee IndexedDB y se actualizan esas filas localmente.
+- Si el navegador quedo varias versiones atras, descarga todos los articulos
+  modificados entre su version y la version actual.
+- Las altas, modificaciones y bajas logicas de articulos incrementan la version
+  correspondiente y tambien actualizan la version global.
+- La edicion individual desde Corralon System incrementa la version del articulo.
+- El exportador de Access ubicado en
+  C:\Update\actualizaciones\Subir Lista Index compara la exportacion nueva con
+  el estado publicado y solo incrementa la version de las filas modificadas.
+- El importador masivo de soloadmin.html sigue siendo una sincronizacion completa:
+  fuerza una version nueva para todos los articulos importados y actualiza la
+  version global para que todos los clientes reemplacen su cache.
+- La informacion manual de catalogo_articulos_edicion, como imagenes, etiquetas,
+  tags, ofertas y detalles, permanece separada y no debe sobrescribirse durante
+  una actualizacion del catalogo base.
+
+Solucion implementada para listas y pantallas internas:
+
+- El sondeo automatico de listasproveedores.html paso de aproximadamente 10 a
+  60 segundos.
+- index.html, listasproveedores.html, pedidos.html y faltantes.html actualizan al
+  abrir o recargar la pagina y evitan consultas completas continuas.
+- pedidos.html y faltantes.html ahora consultan la version del JSON igual que
+  listasproveedores.html.
+- Cada pantalla puede detectar por si misma si el JSON cambio; ya no depende de
+  que listasproveedores.html haya sido abierta previamente para actualizarlo.
+- Cuando la version no cambio se reutiliza la copia local. El contenido remoto
+  se descarga solamente cuando la version publicada es diferente.
+
+Resultado esperado:
+
+- La transferencia diaria de PostgREST debe disminuir de forma marcada despues
+  de que los archivos optimizados esten publicados y los clientes los recarguen.
+- El consumo ya acumulado dentro del periodo de facturacion no se reinicia por
+  aplicar el parche; Supabase lo mantiene hasta el comienzo del siguiente ciclo.
+- Para verificar la mejora se debe observar Egress per day durante las horas o
+  dias posteriores a la publicacion, no solamente el total acumulado del periodo.
+- Si el consumo vuelve a crecer, revisar primero solicitudes repetidas a
+  catalogo_articulos, manifiestos/versiones y listas de proveedores antes de
+  cambiar RLS o Storage.
+
+
 18. NOTA FINAL PARA UN CHAT NUEVO
 ================================
 
