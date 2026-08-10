@@ -3283,6 +3283,8 @@
         edicionUpdatedAt: row.edicion_updated_at || '',
         sourceRows: Array.isArray(row.source_rows) ? row.source_rows : [],
         source_rows: Array.isArray(row.source_rows) ? row.source_rows : [],
+        activo: row.activo !== false,
+        active: row.activo !== false,
         syncVersion: Number(row.sync_version || 0),
         sourceFile: String(row.source_file || ''),
         updatedAt: row.updated_at || ''
@@ -3307,8 +3309,10 @@
       return Array.isArray(rows) && rows[0] ? rows[0] : null;
     }
 
-    function supabaseCatalogQuery(extra = '') {
-      return `${SUPABASE_URL}/rest/v1/${TABLES.catalogPublic}?select=${encodeURIComponent(SELECT_COLUMNS)}&activo=eq.true${extra}&order=codigo.asc`;
+    function supabaseCatalogQuery(extra = '', options = {}) {
+      const activeFilter = options.includeInactive ? '' : '&activo=eq.true';
+      const order = String(options.order || 'codigo.asc');
+      return `${SUPABASE_URL}/rest/v1/${TABLES.catalogPublic}?select=${encodeURIComponent(SELECT_COLUMNS)}${activeFilter}${extra}&order=${encodeURIComponent(order)}`;
     }
 
     async function fetchSupabaseRange(from = 0, to = from + PAGE_SIZE - 1) {
@@ -3370,6 +3374,32 @@
       for (let from = 0; ; from += PAGE_SIZE) {
         const to = from + PAGE_SIZE - 1;
         const rows = await fetchSupabaseRange(from, to);
+        result.push(...rows);
+        if (rows.length < PAGE_SIZE) break;
+      }
+      return result;
+    }
+
+    async function fetchSupabaseDeltaRange(version, from = 0, to = from + PAGE_SIZE - 1) {
+      const safeVersion = Math.max(0, Math.trunc(Number(version || 0)));
+      const query = supabaseCatalogQuery(`&sync_version=gt.${safeVersion}`, {
+        includeInactive: true,
+        order: 'sync_version.asc,codigo.asc'
+      });
+      const response = await fetch(query, {
+        headers: headers({ Range: `${from}-${to}` }),
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      if (!Array.isArray(rows)) throw new Error('Respuesta incremental de catalogo invalida');
+      return rows;
+    }
+
+    async function fetchSupabaseDeltaRows(version) {
+      const result = [];
+      for (let from = 0; ; from += PAGE_SIZE) {
+        const rows = await fetchSupabaseDeltaRange(version, from, from + PAGE_SIZE - 1);
         result.push(...rows);
         if (rows.length < PAGE_SIZE) break;
       }
@@ -3471,14 +3501,13 @@
 
     function canApplyDelta(context) {
       if (!Array.isArray(context?.cached?.rows) || !context.cached.rows.length) return false;
-      if (String(context?.metaRow?.change_mode || '') !== 'delta') return false;
-      const previousVersion = Number(context?.metaRow?.previous_version || 0);
+      if (String(context?.cached?.source || '') !== 'supabase') return false;
       const cachedVersion = Number(context?.cached?.version || 0);
-      const changedCodes = metaCodeList(context.metaRow, 'changed_codes');
-      const removedCodes = metaCodeList(context.metaRow, 'removed_codes');
-      return previousVersion > 0
-        && previousVersion === cachedVersion
-        && changedCodes.length + removedCodes.length <= 2500;
+      const lastFullVersion = Number(context?.metaRow?.last_full_version || 0);
+      return cachedVersion > 0
+        && lastFullVersion > 0
+        && cachedVersion >= lastFullVersion
+        && cachedVersion < Number(context?.version || 0);
     }
 
     function startDeltaLoad(context, options = {}) {
@@ -3486,9 +3515,13 @@
       if (activeFullLoad?.key === loadKey) return activeFullLoad.promise;
       const promise = (async () => {
         try {
-          const changedCodes = metaCodeList(context.metaRow, 'changed_codes');
-          const removedCodes = metaCodeList(context.metaRow, 'removed_codes');
-          const changedRows = (await fetchSupabaseCodes(changedCodes)).map(fromSupabase);
+          const deltaRows = await fetchSupabaseDeltaRows(context.cached.version);
+          const changedCodes = deltaRows.map((row) => String(row?.codigo || '').trim()).filter(Boolean);
+          const removedCodes = deltaRows
+            .filter((row) => row?.activo === false)
+            .map((row) => String(row?.codigo || '').trim())
+            .filter(Boolean);
+          const changedRows = deltaRows.filter((row) => row?.activo !== false).map(fromSupabase);
           const removedSet = new Set(removedCodes);
           const changedSet = new Set(changedCodes);
           const merged = new Map();
@@ -3514,8 +3547,8 @@
           }));
           return rows;
         } catch (error) {
-          console.warn('No se pudo aplicar el delta del catalogo; se recarga el catalogo completo', error);
-          return startFullLoad(context, options);
+          console.warn('No se pudo aplicar el delta del catalogo; se conserva la cache y se reintentara', error);
+          return context.cached.rows;
         }
       })();
       activeFullLoad = { key: loadKey, promise };
@@ -4592,9 +4625,14 @@
 
     async function syncCatalogInBackground(useProviderList = false, cache = {}, onUpdated = null) {
       try {
-        const updated = useProviderList
-          ? await readProviderArticlesRemoteIfChanged()
-          : await CATALOG.load({ force: true, fallback: true });
+        let updated;
+        if (useProviderList) {
+          updated = await readProviderArticlesRemoteIfChanged();
+        } else {
+          const refresh = await CATALOG.refresh({ fallback: true });
+          if (!refresh.changed) return false;
+          updated = refresh.rows;
+        }
         if (!updated?.length) return false;
         if (useProviderList) cache.proveedores = sortCatalogByDescription(updated);
         else cache.index = sortCatalogByDescription(

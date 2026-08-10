@@ -1,7 +1,7 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia: 31/07/2026
+Fecha de referencia: 10/08/2026
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -19,6 +19,10 @@ REGLAS DE TRABAJO
 - Si aparece cualquier duda, ambigüedad o decisión con más de una interpretación,
   preguntar al usuario antes de modificar.
 - Solo hacer una revisión profunda cuando el usuario lo pida específicamente.
+- No crear copias locales .bak ni backups de ejecutables o archivos antes de
+  reemplazarlos. El usuario conserva las versiones recuperables en GitHub.
+- Cuando el usuario pide diagnosticar o revisar sin tocar nada, las consultas a
+  Access, Supabase y archivos deben ser de solo lectura.
 
 
 1. DESCRIPCION GENERAL
@@ -107,6 +111,10 @@ de venta para calcular el margen real. El descuento:
 - se mantiene al agregar el artículo al carrito;
 - también se usa en el presupuesto de cerámicos;
 - se identifica con chips verdes de “Oferta” o “Descuento”.
+
+En el detalle ampliado, el código de proveedor se muestra junto a IDArt solamente
+cuando existe una sesión interna iniciada desde menu.html. Para el público no
+autenticado permanece oculto.
 
 
 menu.html
@@ -402,6 +410,12 @@ una tolerancia del 2%.
 
 Las modificaciones realizadas dentro del comparador son temporales y no deben
 alterar la tabla original salvo que exista una acción explícita para hacerlo.
+
+Los campos de cabecera Desc. factura, Desc. final factura, Flete, IVA incluido e
+IVA funcionan como ajustes temporales de la planilla. Al modificarlos se recalcula
+la carga actual, pero no se actualiza el registro persistente del proveedor en
+Supabase. Los valores originales vuelven al recargar la página o seleccionar
+nuevamente el proveedor. La edición persistente se realiza desde proveedores.html.
 
 
 diferencias-proveedores.html
@@ -859,8 +873,33 @@ Los datos se separan por texto/origen:
 - registros sin sucursal quedan como globales;
 - los globales aparecen únicamente en Todas las sucursales.
 
+El exportador externo vigente está en:
+
+C:\Update\actualizaciones\Exportar caja\export_caja_json.ps1
+
+La clasificación por depósito incluye actualmente:
+
+- PROGRESO y 3-Ariel -> progreso_ruta;
+- A. GOMEZ / A.GOMEZ / CALLE 5 -> calle5_espana.
+
+La pantalla no calcula "Movimientos del día" desde la tabla de transferencias.
+Son dos fuentes separadas en Supabase:
+
+- caja_transferencias_sistema: detalle de comprobantes y transferencias;
+- caja_publicaciones.movimientos: totales de Access por medio de pago;
+- caja_publicaciones.recibos: recibos de cobro del día;
+- caja_publicaciones.ingresos_egresos: movimientos en efectivo.
+
+Los puntos de venta 0000 a 0008 se consideran Progreso y 0009/0010 se consideran
+Calle 5 para filtrar las transferencias del sistema. No confundir punto de venta
+con el texto del depósito usado por el exportador de movimientos.
+
 Los ingresos/egresos globales y cobros de cuenta corriente deben integrarse al
 resultado de “Actualizar saldo”.
+
+Los recibos confirmados y no anulados deben exportarse aunque IDCaja tenga valor.
+El HTML conserva la sucursal automática enviada por el exportador y distribuye el
+importe del recibo desde el total global hacia su sucursal sin duplicarlo.
 
 
 10. SERVIDOR LOCAL
@@ -884,6 +923,13 @@ El servidor local:
 - tiene una ventana de control;
 - tiene icono y menú en la bandeja;
 - puede iniciarse con Windows.
+
+El endpoint POST /save-articulos-xls?runAccess=1 guarda el XLS y dispara el
+actualizador de precios de Access de forma centralizada en la sesión del servidor.
+Esto permite que usuarios conectados por Escritorio remoto generen el archivo y
+ejecuten la consulta aunque su sesión no tenga registrado el protocolo local.
+Existe un bloqueo accessPriceUpdateLock para impedir dos actualizaciones de Access
+simultáneas.
 
 Dirección habitual:
 
@@ -1092,7 +1138,7 @@ Ejecución:
 - GitHub como repositorio.
 
 
-17. ESTADO FUNCIONAL ACTUAL AL 31/07/2026
+17. ESTADO FUNCIONAL ACTUAL AL 10/08/2026
 =========================================
 
 Catálogo y edición de artículos
@@ -1135,6 +1181,15 @@ Sincronización completa del catálogo
 - La configuración común de fletes se comparte entre todos los áridos.
 - En localhost se puede generar el XLS y disparar el actualizador de Access sin
   modificar los archivos originales del flujo de actualización.
+- En el presupuesto web el flete se distribuye entre los áridos según los metros
+  de cada artículo. Cada parte del flete usa el margen del árido al que se aplica.
+- El cliente ve el precio final de cada árido con su parte de flete incluida; no
+  se agrega una fila de flete separada al carrito ni al XLS.
+- Los viajes se calculan sobre el volumen combinado, con capacidad de 5 m3. Por
+  ejemplo, 3 m3 + 3 m3 requieren dos viajes y 2 m3 + 2 m3 requieren uno.
+- Al exportar a Access, cada árido conserva cantidad en metros y precio unitario
+  final prorrateado. El costo unitario enviado mantiene la conversión vigente
+  costo / 1,21; esa conversión ya forma parte del exportador.
 
 Pedidos
 -------
@@ -1162,6 +1217,17 @@ Caja
   la sucursal correspondiente.
 - Los JSON de Access son transporte temporal; Supabase es la fuente persistente
   que consume la pantalla.
+- El depósito 3-Ariel se asigna a Progreso en ventas, recibos e ingresos/egresos.
+- Los recibos con IDCaja asignada también se publican. Antes se filtraban con
+  "IDCaja Is Null", lo que podía ocultarlos tanto del detalle como del total.
+- Al comparar Access con el HTML, descomponer siempre el total por origen:
+  ventas FacturasATP + recibos RecibosXTP + ingresos/egresos. Una diferencia
+  exacta al importe de un recibo suele indicar una asociación IDCaja incorrecta.
+- Caso de referencia diagnosticado: el recibo 0006-00000931 de PASTEN MARCELO,
+  por $75.659,71 y fecha 04/08/2026, estaba ligado a IDCaja 93209 del 03/08,
+  mientras la caja abierta del 04/08 era IDCaja 93210. Access lo omitía del día
+  actual, pero el HTML lo incluía correctamente por fecha y coincidía con el
+  efectivo físico. No corregir asociaciones dentro del MDB automáticamente.
 
 Comprobantes
 ------------
