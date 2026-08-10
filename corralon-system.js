@@ -4488,7 +4488,6 @@
         const local = localProviderListMeta();
         const hasCachedRows = await providerCacheHasRows();
         const metaVersionMatches = local && Number(local.lista_version) === Number(meta.lista_version);
-        if (metaVersionMatches && hasCachedRows) return null;
         if (local && hasCachedRows) {
           const jsonResult = await syncProviderJsonBlocks(meta, { updateWhenNoChanges: Boolean(metaVersionMatches) });
           if (jsonResult) return jsonResult;
