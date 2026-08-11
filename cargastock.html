@@ -2267,7 +2267,7 @@ function calculatedUnitPrice() {
 function updateCalcResult() {
   el.calcTotal.value = money(calculatedUnitPrice());
 }
-function openUnitPriceCalc(rowIndex) {
+function openUnitPriceCalc(rowIndex, initialField = 'divide') {
   const row = rowsData[rowIndex];
   if (!row || isBlankStockRow(row)) {
     show('La fila esta vacia');
@@ -2281,8 +2281,9 @@ function openUnitPriceCalc(rowIndex) {
   updateCalcResult();
   el.calcBackdrop.classList.add('visible');
   requestAnimationFrame(() => {
-    el.calcDivide.focus();
-    el.calcDivide.select();
+    const target = initialField === 'multiply' ? el.calcMultiply : el.calcDivide;
+    target.focus();
+    target.select();
   });
 }
 function closeUnitPriceCalc() {
@@ -2978,6 +2979,11 @@ el.calcBackdrop.addEventListener('keydown', (event) => {
     applyCalculatedUnitPrice();
     return;
   }
+  if (event.key === 'Enter' && (event.target === el.calcDivide || event.target === el.calcMultiply) && String(event.target.value || '').trim()) {
+    event.preventDefault();
+    el.calcApplyBtn.focus();
+    return;
+  }
   if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
     event.preventDefault();
     const backwards = event.shiftKey || event.key === 'ArrowUp' || event.key === 'ArrowLeft';
@@ -3155,6 +3161,14 @@ el.rows.addEventListener('keydown', (event) => {
   if (event.defaultPrevented) return;
   const cell = event.target.closest('[contenteditable="true"]');
   if (!cell) return;
+  const opensDivide = event.key === '/' || event.code === 'NumpadDivide';
+  const opensMultiply = event.key === '*' || event.code === 'NumpadMultiply';
+  if (cell.dataset.field === 'precio' && !event.ctrlKey && !event.metaKey && !event.altKey && (opensDivide || opensMultiply)) {
+    event.preventDefault();
+    event.stopPropagation();
+    openUnitPriceCalc(Number(cell.dataset.row), opensMultiply ? 'multiply' : 'divide');
+    return;
+  }
   if (isPrintableTypingKey(event)) cell.dataset.fullSelected = '0';
   if (isPrintableTypingKey(event) || event.key === 'F2') mouseEditTarget = cell;
   if (event.key === 'F2') {
