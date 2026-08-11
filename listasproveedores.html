@@ -894,6 +894,7 @@
   </div>
   <div class="context-menu" id="rowContextMenu">
     <button type="button" id="compareContextBtn">Comparar</button>
+    <button type="button" id="sendRowMissingBtn">Enviar a faltantes</button>
     <button type="button" id="calcContextBtn">Dividir / multiplicar</button>
   </div>
   <div class="context-menu" id="slotContextMenu">
@@ -995,6 +996,7 @@
       slots: document.getElementById('slots'),
       rowContextMenu: document.getElementById('rowContextMenu'),
       compareContextBtn: document.getElementById('compareContextBtn'),
+      sendRowMissingBtn: document.getElementById('sendRowMissingBtn'),
       calcContextBtn: document.getElementById('calcContextBtn'),
       calcBackdrop: document.getElementById('calcBackdrop'),
       calcOriginalPrice: document.getElementById('calcOriginalPrice'),
@@ -1461,6 +1463,7 @@
       state.contextRow = row;
       state.contextRowId = row?.idorden ?? null;
       el.compareContextBtn.dataset.rowId = state.contextRowId ?? '';
+      el.sendRowMissingBtn.dataset.rowId = state.contextRowId ?? '';
       el.calcContextBtn.dataset.rowId = state.contextRowId ?? '';
       el.rowContextMenu.style.left = `${event.clientX}px`;
       el.rowContextMenu.style.top = `${event.clientY}px`;
@@ -2093,11 +2096,8 @@
       await CorralonSystem.faltantes.addRow({ ...row, sucursalId: sucursal.id, sucursal: sucursal.label });
       showToast('Enviado a faltantes.');
     }
-    async function sendSlotToMissing() {
-      const row = state.slots[state.slotContextIndex];
-      if (!row) return;
-      hideSlotContextMenu();
-      const missingRow = {
+    function priceListRowToMissing(row) {
+      return {
         idart: row.idart ? String(row.idart).padStart(6, '0') : '',
         idProveedor: String(row.id_proveedor || row.idProveedor || '').trim(),
         codProv: String(row.cod_proveedor || '').trim(),
@@ -2110,7 +2110,22 @@
         pedido: false,
         source: 'proveedores'
       };
+    }
+    async function sendSlotToMissing() {
+      const row = state.slots[state.slotContextIndex];
+      if (!row) return;
+      hideSlotContextMenu();
+      const missingRow = priceListRowToMissing(row);
       openMissingBranchPicker(missingRow);
+    }
+    async function sendTableRowToMissing(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rowId = event.currentTarget.dataset.rowId || state.contextRowId;
+      const row = rowById(rowId) || state.contextRow || state.selectedRow;
+      if (!row) return;
+      hideRowContextMenu();
+      openMissingBranchPicker(priceListRowToMissing(row));
     }
     function slotDiff(row) {
       const base = parseMoney(el.basePrice.value) || Number(state.base?.precio_costo || 0);
@@ -2949,6 +2964,7 @@
       hideRowContextMenu();
     }
     el.compareContextBtn.addEventListener('mousedown', compareContextRow);
+    el.sendRowMissingBtn.addEventListener('mousedown', sendTableRowToMissing);
     el.calcContextBtn.addEventListener('mousedown', (event) => {
       event.preventDefault();
       event.stopPropagation();
