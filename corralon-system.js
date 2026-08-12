@@ -22,6 +22,8 @@
   const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
   const IMAGE_GENERATOR_CATALOG_KEY = 'corralon_image_generator_catalog_v1';
   const IMAGE_GENERATOR_PAYLOAD_KEY = 'corralon_image_generator_payload_v1';
+  const LARGE_CACHE_DB = 'corralon_cache_grande_v1';
+  let imageGeneratorCatalogMemory = null;
   const BRANCHES = [
     { id: 'progreso_ruta', label: 'Suc. Progreso y Ruta' },
     { id: 'calle5_espana', label: 'Suc. Calle 5 y Espana' }
@@ -2323,19 +2325,36 @@
 
   function setImageGeneratorCatalog(articles = []) {
     const catalog = (articles || []).map(imageGeneratorNormalizeArticle).filter((article) => article.codigo || article.nombre);
-    try {
-      localStorage.setItem(IMAGE_GENERATOR_CATALOG_KEY, JSON.stringify({ savedAt: Date.now(), articles: catalog }));
-    } catch (e) {}
+    imageGeneratorCatalogMemory = catalog;
+    writeLargeCache(IMAGE_GENERATOR_CATALOG_KEY, { savedAt: Date.now(), articles: catalog })
+      .then(() => { try { localStorage.removeItem(IMAGE_GENERATOR_CATALOG_KEY); } catch (_) {} })
+      .catch((error) => console.warn('No se pudo guardar el catalogo del generador en IndexedDB', error));
     return catalog;
   }
 
   function getImageGeneratorCatalog() {
+    if (Array.isArray(imageGeneratorCatalogMemory)) return imageGeneratorCatalogMemory;
     try {
       const parsed = JSON.parse(localStorage.getItem(IMAGE_GENERATOR_CATALOG_KEY) || '{}');
-      return Array.isArray(parsed.articles) ? parsed.articles : [];
+      if (Array.isArray(parsed.articles)) {
+        imageGeneratorCatalogMemory = parsed.articles;
+        writeLargeCache(IMAGE_GENERATOR_CATALOG_KEY, parsed)
+          .then(() => { try { localStorage.removeItem(IMAGE_GENERATOR_CATALOG_KEY); } catch (_) {} })
+          .catch(() => {});
+        return imageGeneratorCatalogMemory;
+      }
+      return [];
     } catch (e) {
       return [];
     }
+  }
+
+  async function getImageGeneratorCatalogAsync() {
+    const immediate = getImageGeneratorCatalog();
+    if (immediate.length) return immediate;
+    const stored = await readLargeCache(IMAGE_GENERATOR_CATALOG_KEY).catch(() => null);
+    imageGeneratorCatalogMemory = Array.isArray(stored?.articles) ? stored.articles : [];
+    return imageGeneratorCatalogMemory;
   }
 
   function setImageGeneratorPayload(articleOrPayload = {}) {
@@ -2430,6 +2449,31 @@
       request.onupgradeneeded = () => upgrade(request.result, request.transaction);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  function openLargeCacheDb() {
+    return openDb(LARGE_CACHE_DB, (database) => {
+      if (!database.objectStoreNames.contains('cache')) database.createObjectStore('cache', { keyPath: 'id' });
+    });
+  }
+
+  async function readLargeCache(id) {
+    const database = await openLargeCacheDb();
+    return new Promise((resolve, reject) => {
+      const request = database.transaction('cache').objectStore('cache').get(String(id));
+      request.onsuccess = () => resolve(request.result?.value ?? null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function writeLargeCache(id, value) {
+    const database = await openLargeCacheDb();
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction('cache', 'readwrite');
+      tx.objectStore('cache').put({ id: String(id), value, savedAt: Date.now() });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -3198,6 +3242,11 @@
       }
     }
 
+    async function hasLocalCache() {
+      const cached = await readCache();
+      return Boolean(Array.isArray(cached?.rows) && cached.rows.length);
+    }
+
     async function getConfigUrl(docId) {
       const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/config/${encodeURIComponent(docId)}?key=${FIRESTORE_API_KEY}`;
       const response = await fetch(url, { cache: 'no-store' });
@@ -3880,6 +3929,7 @@
       loadProgressive,
       refresh,
       clearCache,
+      hasLocalCache,
       getConfigUrl,
       fetchSupabaseInitialRows,
       fetchSupabaseRows,
@@ -4060,6 +4110,8 @@
     const PROVIDER_LIST_META_KEY = 'corralon_lista_proveedores_meta_v1';
     const LOCAL_KEY = 'corralon_faltantes_rows_v2';
     const SUGGESTIONS_KEY = 'corralon_faltantes_sugerencias_v1';
+    const ROWS_DB = 'corralon_faltantes_cache_v1';
+    const ROWS_CACHE_ID = 'filas';
     const COLLECTION = 'faltantes';
     const FIREBASE_CONFIG = {
       apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -4070,6 +4122,8 @@
       appId: '1:466583614632:web:42cb839f83e97475fabe9d'
     };
     let firebaseDb = null;
+    let localRowsMemory = null;
+    let localRowsHydratePromise = null;
 
     function searchNorm(value) {
       return norm(value)
@@ -4260,12 +4314,67 @@
       return `${LOCAL_KEY}_filtro`;
     }
 
-    function loadLocalRows() {
+    function readLegacyLocalRows() {
       try {
         return JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]') || [];
       } catch {
         return [];
       }
+    }
+
+    function openRowsDb() {
+      return openDb(ROWS_DB, (database) => {
+        if (!database.objectStoreNames.contains('cache')) database.createObjectStore('cache', { keyPath: 'id' });
+      });
+    }
+
+    async function writeLocalRowsCache(rows) {
+      const database = await openRowsDb();
+      await new Promise((resolve, reject) => {
+        const tx = database.transaction('cache', 'readwrite');
+        tx.objectStore('cache').put({ id: ROWS_CACHE_ID, rows: rows || [], savedAt: Date.now() });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function loadLocalRowsAsync() {
+      if (Array.isArray(localRowsMemory)) return localRowsMemory;
+      if (localRowsHydratePromise) return localRowsHydratePromise;
+      localRowsHydratePromise = (async () => {
+        const legacy = readLegacyLocalRows();
+        if (legacy.length) {
+          localRowsMemory = legacy;
+          await writeLocalRowsCache(legacy);
+          try { localStorage.removeItem(LOCAL_KEY); } catch (_) {}
+          return localRowsMemory;
+        }
+        try {
+          const database = await openRowsDb();
+          localRowsMemory = await new Promise((resolve, reject) => {
+            const request = database.transaction('cache').objectStore('cache').get(ROWS_CACHE_ID);
+            request.onsuccess = () => resolve(Array.isArray(request.result?.rows) ? request.result.rows : []);
+            request.onerror = () => reject(request.error);
+          });
+        } catch (error) {
+          console.warn('No se pudo leer Faltantes desde IndexedDB', error);
+          localRowsMemory = [];
+        }
+        return localRowsMemory;
+      })();
+      return localRowsHydratePromise;
+    }
+
+    function loadLocalRows() {
+      if (Array.isArray(localRowsMemory)) return localRowsMemory;
+      const legacy = readLegacyLocalRows();
+      if (legacy.length) {
+        localRowsMemory = legacy;
+        writeLocalRowsCache(legacy).then(() => { try { localStorage.removeItem(LOCAL_KEY); } catch (_) {} }).catch(() => {});
+        return localRowsMemory;
+      }
+      loadLocalRowsAsync().catch(() => {});
+      return [];
     }
 
     function buildSuggestionSummary(rows = []) {
@@ -4311,9 +4420,12 @@
     }
 
     function saveLocalRows(rows, columnFiltro = '') {
-      localStorage.setItem(localFiltroKey(), String(columnFiltro || ''));
-      localStorage.setItem(LOCAL_KEY, JSON.stringify(rows || []));
-      refreshSuggestionSummary(rows || []);
+      localRowsMemory = Array.isArray(rows) ? rows : [];
+      try { localStorage.setItem(localFiltroKey(), String(columnFiltro || '')); } catch (_) {}
+      writeLocalRowsCache(localRowsMemory)
+        .then(() => { try { localStorage.removeItem(LOCAL_KEY); } catch (_) {} })
+        .catch((error) => console.warn('No se pudo guardar Faltantes en IndexedDB', error));
+      refreshSuggestionSummary(localRowsMemory);
     }
 
     function loadColumnFiltro() {
@@ -4368,7 +4480,7 @@
         localUid: row?.localUid || makeLocalUid(),
         pedido: Boolean(row?.pedido)
       };
-      const localRows = loadLocalRows();
+      const localRows = await loadLocalRowsAsync();
       localRows.push(item);
       saveLocalRows(localRows, loadColumnFiltro());
       const db = firebaseDatabase();
@@ -4387,7 +4499,14 @@
 
     async function readIndexCache() {
       try {
-        const raw = JSON.parse(localStorage.getItem(INDEX_CACHE_KEY) || 'null');
+        let raw = await readLargeCache(INDEX_CACHE_KEY);
+        if (!raw) {
+          try { raw = JSON.parse(localStorage.getItem(INDEX_CACHE_KEY) || 'null'); } catch (_) {}
+          if (raw) {
+            await writeLargeCache(INDEX_CACHE_KEY, raw);
+            try { localStorage.removeItem(INDEX_CACHE_KEY); } catch (_) {}
+          }
+        }
         const rows = (Array.isArray(raw?.data) ? raw.data : []).map(normalizeIndexItem).filter((item) => item.descripcion || item.idart);
         const enrichedRows = await enrichIndexProviders(rows);
         return enrichedRows;
@@ -4438,7 +4557,8 @@
         if (!response.ok) throw new Error(await response.text());
         const data = await response.json();
         if (!Array.isArray(data) || !data.length) return [];
-        localStorage.setItem(INDEX_CACHE_KEY, JSON.stringify({ url, savedAt: Date.now(), data }));
+        await writeLargeCache(INDEX_CACHE_KEY, { url, savedAt: Date.now(), data });
+        try { localStorage.removeItem(INDEX_CACHE_KEY); } catch (_) {}
         return enrichIndexProviders(data.map(normalizeIndexItem).filter((item) => item.descripcion || item.idart));
       } catch (error) {
         console.warn(error);
@@ -4453,7 +4573,7 @@
         const snap = await db.collection('config').doc('listaActual').get();
         const url = snap.exists ? String(snap.data()?.url || '').trim() : '';
         if (!url) return null;
-        const raw = JSON.parse(localStorage.getItem(INDEX_CACHE_KEY) || 'null');
+        const raw = await readLargeCache(INDEX_CACHE_KEY);
         if (raw?.url === url && Array.isArray(raw?.data) && raw.data.length) return null;
         return readIndexRemote();
       } catch (error) {
@@ -5085,6 +5205,7 @@
       blankRow,
       isBlank,
       loadLocalRows,
+      loadLocalRowsAsync,
       buildSuggestionSummary,
       refreshSuggestionSummary,
       loadSuggestionSummary,
@@ -5155,6 +5276,7 @@
     buildImageGeneratorPayload,
     setImageGeneratorCatalog,
     getImageGeneratorCatalog,
+    getImageGeneratorCatalogAsync,
     setImageGeneratorPayload,
     readImageGeneratorPayload,
     openImageGenerator,
@@ -5181,6 +5303,14 @@
     faltantes: FALTANTES
   };
   CATALOG_REALTIME.start();
+  const migrateLargeLocalCaches = async () => {
+    try { await getImageGeneratorCatalogAsync(); } catch (_) {}
+    try {
+      if (await CATALOG.hasLocalCache()) localStorage.removeItem('corralon_index_lista_articulos_cache_v1');
+    } catch (_) {}
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(() => migrateLargeLocalCaches(), { timeout: 2500 });
+  else setTimeout(migrateLargeLocalCaches, 600);
   } catch (error) {
     window.__corralonSystemError = {
       name: String(error?.name || 'Error'),

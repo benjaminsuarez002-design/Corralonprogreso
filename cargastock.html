@@ -7,7 +7,8 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=20260812-catalog-realtime1"></script>
+<script src="corralon-system.js?v=20260812-cache-idb1"></script>
+  <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="carga_stock"></script>
@@ -514,11 +515,13 @@ function show(message) {
   show.timer = setTimeout(() => el.toast.classList.remove('visible'), 1800);
 }
 function saveRows() {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(rowsData)); } catch (_) {}
+  window.CorralonCacheDB.set(CACHE_KEY, rowsData).then(() => {
+    try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
+  }).catch((error) => console.warn('No se pudo guardar la carga en IndexedDB', error));
 }
-function loadRows() {
+async function loadRows() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
+    const parsed = await window.CorralonCacheDB.migrateLocalStorage(CACHE_KEY);
     rowsData = Array.isArray(parsed) ? parsed : [];
   } catch (_) {
     rowsData = [];
@@ -2077,13 +2080,11 @@ async function loadIndexCodes(providedList = null) {
     indexCodeDescriptions = codeDescriptions;
     const saveIndexCodesCache = () => {
       if (generation !== indexCodesLoadGeneration) return;
-      try {
-        localStorage.setItem(INDEX_CODES_CACHE_KEY, JSON.stringify(
-          [...codeProviders].map(([key, providerKeys]) => [key, [...providerKeys]])
-        ));
-      } catch (_) {
+      window.CorralonCacheDB.set(INDEX_CODES_CACHE_KEY,
+        [...codeProviders].map(([key, providerKeys]) => [key, [...providerKeys]])
+      ).then(() => {
         try { localStorage.removeItem(INDEX_CODES_CACHE_KEY); } catch (_) {}
-      }
+      }).catch((error) => console.warn('No se pudo guardar el índice de códigos en IndexedDB', error));
     };
     if ('requestIdleCallback' in window) requestIdleCallback(saveIndexCodesCache, { timeout: 1500 });
     else setTimeout(saveIndexCodesCache, 0);
@@ -2091,7 +2092,7 @@ async function loadIndexCodes(providedList = null) {
   } catch (error) {
     console.warn(error);
     try {
-      const cached = JSON.parse(localStorage.getItem(INDEX_CODES_CACHE_KEY) || '[]');
+      const cached = await window.CorralonCacheDB.migrateLocalStorage(INDEX_CODES_CACHE_KEY) || [];
       indexCodeProviders = new Map(cached.map(([key, providerKeys]) => [key, new Set(providerKeys)]));
       indexCodeMatchCounts = new Map();
       indexCodeDescriptions = new Map();
@@ -3246,8 +3247,6 @@ document.querySelector('.table-wrap').addEventListener('keydown', (event) => {
 });
 
 initFuncionesJsBindings();
-loadRows();
-render();
 let refreshIndexCodesTimer = null;
 const refreshIndexCodesFromCatalog = (event) => {
   const list = event?.detail?.rows;
@@ -3257,7 +3256,7 @@ const refreshIndexCodesFromCatalog = (event) => {
 };
 window.addEventListener('corralon:catalog-delta', refreshIndexCodesFromCatalog);
 window.addEventListener('corralon:catalog-ready', refreshIndexCodesFromCatalog);
-Promise.all([loadProviders(), loadIndexCodes()]).then(() => render());
+(async()=>{await loadRows();render();await Promise.all([loadProviders(),loadIndexCodes()]);render()})().catch(console.warn);
 </script>
 </body>
 </html>
