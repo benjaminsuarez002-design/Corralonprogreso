@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=20260727-catalogo-directo3"></script>
+<script src="corralon-system.js?v=20260812-catalog-realtime1"></script>
   <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -171,9 +171,8 @@ async function loadProviders(){try{providerRows=await FaltantesCore.loadProvider
 async function loadCatalog(force=false){els.status.textContent='Cargando articulos...';const useProviderList=Boolean(els.useProviderList.checked);if(useProviderList&&!providerCatalogReady)await loadProviderCatalogInBackground(force);const loaded=await FaltantesCore.loadCatalog(useProviderList,force?{}:catalogCache,force);applyActiveCatalog(loaded,useProviderList);if(Array.isArray(catalogCache.proveedores))await rebuildProviderCodeMapAsync(catalogCache.proveedores)}
 function rebuildIdartMap(rows){const byIdart=new Map();for(const row of rows){const digits=String(row.idart||'').replace(/\D/g,'').padStart(6,'0');if(digits&&!byIdart.has(digits))byIdart.set(digits,row)}return byIdart}
 function syncCatalogBackground(){const useProviderList=Boolean(els.useProviderList.checked);FaltantesCore.syncCatalogInBackground(useProviderList,catalogCache,(updated,cache)=>{catalogCache=cache;if(Boolean(els.useProviderList.checked)!==useProviderList)return;catalog=updated;catalogByIdart=rebuildIdartMap(updated);els.sourceInfo.textContent=`Combo: ${FaltantesCore.catalogSourceLabel(useProviderList)} actualizado`;if(!gridEditing()&&!els.comboMenu.classList.contains('visible'))els.status.textContent=`${catalog.length.toLocaleString('es-AR')} articulos disponibles`})}
-let catalogVersionPollTimer=null;
-function syncAllCatalogVersions(){return Promise.all([FaltantesCore.syncCatalogInBackground(false,catalogCache,(updated,cache)=>{catalogCache=cache;if(!els.useProviderList.checked&&Array.isArray(updated)){catalog=updated;catalogByIdart=rebuildIdartMap(updated)}}),FaltantesCore.syncCatalogInBackground(true,catalogCache,(updated,cache)=>{catalogCache=cache;if(Array.isArray(updated)){providerCatalogReady=true;rebuildProviderCodeMapAsync(updated).catch(console.warn);if(els.useProviderList.checked){catalog=updated;catalogByIdart=rebuildIdartMap(updated)}}})])}
-function startCatalogVersionPolling(){if(catalogVersionPollTimer)return;catalogVersionPollTimer=setInterval(()=>{if(document.visibilityState!=='visible')return;syncAllCatalogVersions().catch(console.warn)},60000)}
+let catalogRealtimeBound=false;
+function startCatalogVersionPolling(){if(catalogRealtimeBound)return;catalogRealtimeBound=true;window.CorralonSystem?.catalogRealtime?.start?.();const syncIndex=()=>setTimeout(()=>FaltantesCore.syncCatalogInBackground(false,catalogCache,(updated,cache)=>{catalogCache=cache;if(!els.useProviderList.checked&&Array.isArray(updated)){catalog=updated;catalogByIdart=rebuildIdartMap(updated)}}).catch(console.warn),0);window.addEventListener('corralon:catalog-delta',syncIndex);window.addEventListener('corralon:catalog-ready',syncIndex)}
 let catalogReady=false,providerCatalogReady=false,providerCatalogLoading=null;
 function showProviderCatalogProgress(pct){const p=document.getElementById('catalogProgress'),f=document.getElementById('catalogProgressFill');if(!p||!f)return;const value=Math.max(0,Math.min(100,Number(pct)||0));p.classList.add('active');f.style.width=value+'%';if(value>=100)setTimeout(()=>{p.classList.remove('active');f.style.width='0%'},500)}
 function showCatalogProgress(pct){setLoadingProgress(pct);showProviderCatalogProgress(pct)}

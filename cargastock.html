@@ -7,7 +7,7 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=20260727-catalogo-directo3"></script>
+<script src="corralon-system.js?v=20260812-catalog-realtime1"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="carga_stock"></script>
@@ -2029,14 +2029,22 @@ async function fetchJson(url) {
   const data = await response.json();
   return Array.isArray(data) ? data : [];
 }
-async function loadIndexCodes() {
+let indexCodesLoadGeneration = 0;
+function yieldIndexCodesWork() {
+  return new Promise((resolve) => {
+    if ('requestIdleCallback' in window) requestIdleCallback(() => resolve(), { timeout: 40 });
+    else setTimeout(resolve, 0);
+  });
+}
+async function loadIndexCodes(providedList = null) {
+  const generation = ++indexCodesLoadGeneration;
   el.status.textContent = 'Cargando lista de index...';
   try {
-    let list = [];
+    let list = Array.isArray(providedList) ? providedList : [];
     const codeIndexLoader = window.CorralonSystem?.catalog?.fetchCodeIndexRows;
     const sharedLoader = window.CorralonSystem?.catalog?.load;
-    if (typeof codeIndexLoader === 'function') list = await codeIndexLoader();
-    else if (typeof sharedLoader === 'function') list = await sharedLoader({ fallback: true });
+    if (!list.length && typeof sharedLoader === 'function') list = await sharedLoader({ fallback: true });
+    else if (!list.length && typeof codeIndexLoader === 'function') list = await codeIndexLoader();
     if (!Array.isArray(list) || !list.length) {
       const snap = await getDocFromServer(doc(db, 'config', 'listaActual')).catch(() => getDoc(doc(db, 'config', 'listaActual')));
       const url = snap.exists() ? String(snap.data()?.url || '').trim() : '';
@@ -2046,7 +2054,9 @@ async function loadIndexCodes() {
     const codeProviders = new Map();
     const codeMatchCounts = new Map();
     const codeDescriptions = new Map();
-    list.forEach((article) => {
+    for (let articleIndex = 0; articleIndex < list.length; articleIndex += 1) {
+      if (generation !== indexCodesLoadGeneration) return;
+      const article = list[articleIndex];
       const providerKeys = articleProviderIdentityKeys(article);
       const description = String(readField(article, [
         'nombre', 'descripcion', 'descripción', 'detalle',
@@ -2059,17 +2069,24 @@ async function loadIndexCodes() {
         if (!codeProviders.has(key)) codeProviders.set(key, new Set());
         providerKeys.forEach((providerKey) => codeProviders.get(key).add(providerKey));
       });
-    });
+      if (articleIndex > 0 && articleIndex % 150 === 0) await yieldIndexCodesWork();
+    }
+    if (generation !== indexCodesLoadGeneration) return;
     indexCodeProviders = codeProviders;
     indexCodeMatchCounts = codeMatchCounts;
     indexCodeDescriptions = codeDescriptions;
-    try {
-      localStorage.setItem(INDEX_CODES_CACHE_KEY, JSON.stringify(
-        [...codeProviders].map(([key, providerKeys]) => [key, [...providerKeys]])
-      ));
-    } catch (_) {
-      try { localStorage.removeItem(INDEX_CODES_CACHE_KEY); } catch (_) {}
-    }
+    const saveIndexCodesCache = () => {
+      if (generation !== indexCodesLoadGeneration) return;
+      try {
+        localStorage.setItem(INDEX_CODES_CACHE_KEY, JSON.stringify(
+          [...codeProviders].map(([key, providerKeys]) => [key, [...providerKeys]])
+        ));
+      } catch (_) {
+        try { localStorage.removeItem(INDEX_CODES_CACHE_KEY); } catch (_) {}
+      }
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(saveIndexCodesCache, { timeout: 1500 });
+    else setTimeout(saveIndexCodesCache, 0);
     el.status.textContent = `${codeProviders.size.toLocaleString('es-AR')} codigos de proveedor listos`;
   } catch (error) {
     console.warn(error);
@@ -3231,6 +3248,15 @@ document.querySelector('.table-wrap').addEventListener('keydown', (event) => {
 initFuncionesJsBindings();
 loadRows();
 render();
+let refreshIndexCodesTimer = null;
+const refreshIndexCodesFromCatalog = (event) => {
+  const list = event?.detail?.rows;
+  if (!Array.isArray(list) || !list.length) return;
+  clearTimeout(refreshIndexCodesTimer);
+  refreshIndexCodesTimer = setTimeout(() => loadIndexCodes(list).catch(console.warn), 120);
+};
+window.addEventListener('corralon:catalog-delta', refreshIndexCodesFromCatalog);
+window.addEventListener('corralon:catalog-ready', refreshIndexCodesFromCatalog);
 Promise.all([loadProviders(), loadIndexCodes()]).then(() => render());
 </script>
 </body>

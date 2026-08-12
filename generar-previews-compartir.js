@@ -66,9 +66,17 @@ async function readJson(url) {
 async function readSupabaseCatalog() {
   const rows = [];
   const pageSize = 1000;
+  const select = [
+    'codigo', 'codigo_proveedor', 'id_proveedor', 'nombre', 'rubro',
+    'precio_compra_sin_descuento', 'precio_compra_con_impuestos',
+    'porcentaje_ganancia_min', 'precio_venta', 'stock_progreso', 'stock_calle5',
+    'detalle', 'tags_ocultos', 'foto_url', 'imagenes', 'oferta', 'oferta_pct',
+    'oferta_hasta', 'destacado', 'mas_vendido', 'acceso_rapido', 'ceramico',
+    'ceramico_m2', 'ceramico_placas'
+  ].join(',');
   for (let from = 0; ; from += pageSize) {
     const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/catalogo_articulos_publico?select=*&activo=eq.true&order=codigo.asc`,
+      `${SUPABASE_URL}/rest/v1/catalogo_articulos_publico?select=${encodeURIComponent(select)}&activo=eq.true&order=codigo.asc`,
       {
         headers: {
           apikey: SUPABASE_ANON_KEY,

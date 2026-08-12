@@ -10,6 +10,7 @@
     priceListJsonProviders: 'listas_json_proveedores',
     catalog: 'catalogo_articulos',
     catalogMeta: 'catalogo_articulos_meta',
+    catalogChanges: 'catalogo_articulos_cambios',
     catalogPublic: 'catalogo_articulos_publico',
     catalogEdits: 'catalogo_articulos_edicion'
   };
@@ -3150,8 +3151,8 @@
       'codigo', 'codigo_proveedor', 'id_proveedor', 'nombre', 'rubro',
       'precio_compra_sin_descuento', 'precio_compra_con_impuestos',
       'porcentaje_ganancia_min', 'precio_venta', 'stock',
-      'stock_progreso', 'stock_calle5', 'source_rows',
-      'sync_version', 'source_file', 'activo', 'updated_at',
+      'stock_progreso', 'stock_calle5',
+      'sync_version', 'activo',
       'detalle', 'tags_ocultos', 'foto_url', 'imagenes',
       'oferta', 'oferta_pct', 'oferta_hasta', 'destacado',
       'mas_vendido', 'acceso_rapido', 'ceramico',
@@ -3281,8 +3282,6 @@
         ceramico_placas: Number(row.ceramico_placas || 0),
         editadoPor: String(row.editado_por || ''),
         edicionUpdatedAt: row.edicion_updated_at || '',
-        sourceRows: Array.isArray(row.source_rows) ? row.source_rows : [],
-        source_rows: Array.isArray(row.source_rows) ? row.source_rows : [],
         activo: row.activo !== false,
         active: row.activo !== false,
         syncVersion: Number(row.sync_version || 0),
@@ -3302,7 +3301,8 @@
     }
 
     async function fetchMetaRow() {
-      const query = `${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?id=eq.principal&select=*`;
+      const select = 'id,version,patch_version,total_articulos,last_full_version,change_mode,updated_at';
+      const query = `${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?id=eq.principal&select=${select}&limit=1`;
       const response = await fetch(query, { headers: headers(), cache: 'no-store' });
       if (!response.ok) throw new Error(await response.text());
       const rows = await response.json();
@@ -3483,11 +3483,13 @@
         console.warn('No se pudo consultar la version del catalogo', error);
       }
       const version = Number(metaRow?.version || 0);
+      const patchVersion = Number(metaRow?.patch_version || 0);
       return {
         cached,
         metaRow,
         metadataUrl,
         version,
+        patchVersion,
         versionKnown: Boolean(metaRow),
         signature: `supabase-directo-v1|${version}`
       };
@@ -3508,6 +3510,132 @@
         && lastFullVersion > 0
         && cachedVersion >= lastFullVersion
         && cachedVersion < Number(context?.version || 0);
+    }
+
+    function applySupabasePatch(article = {}, changes = {}) {
+      const next = { ...article };
+      const set = (names, value) => names.forEach((name) => { next[name] = value; });
+      for (const [field, rawValue] of Object.entries(changes || {})) {
+        switch (field) {
+          case 'codigo_proveedor': set(['idartprov', 'codprov'], String(rawValue || '')); break;
+          case 'id_proveedor': set(['idProveedor', 'id_proveedor'], String(rawValue || '')); break;
+          case 'nombre': set(['nombre', 'descripcion'], String(rawValue || '')); break;
+          case 'rubro': next.rubro = String(rawValue || ''); break;
+          case 'precio_compra_sin_descuento': set(['precioCosto', 'precio_costo', 'PrecioCpraSISDto'], Number(rawValue || 0)); break;
+          case 'precio_compra_con_impuestos': next.PrecioCpraCI = Number(rawValue || 0); break;
+          case 'porcentaje_ganancia_min': next.PorcGanMin = Number(rawValue || 0); break;
+          case 'precio_venta': set(['precio', 'PrecioVta3'], Number(rawValue || 0)); break;
+          case 'stock': next.stock = rawValue === null ? '' : Number(rawValue); break;
+          case 'stock_progreso': next.stockSucursalProgresoRuta = rawValue === null ? '' : Number(rawValue); break;
+          case 'stock_calle5': next.stockSucursalCalle5Espana = rawValue === null ? '' : Number(rawValue); break;
+          case 'detalle': next.detalle = String(rawValue || ''); break;
+          case 'tags_ocultos': set(['tagsOcultos', 'tags_ocultos'], Array.isArray(rawValue) ? rawValue : []); break;
+          case 'foto_url': set(['fotoUrl', 'foto_url', 'imagen'], String(rawValue || '')); break;
+          case 'imagenes': next.imagenes = Array.isArray(rawValue) ? rawValue : []; break;
+          case 'oferta': next.oferta = Boolean(rawValue); break;
+          case 'oferta_pct': set(['ofertaPct', 'oferta_pct'], Number(rawValue || 0)); break;
+          case 'oferta_hasta': set(['ofertaHasta', 'oferta_hasta'], String(rawValue || '')); break;
+          case 'destacado': next.destacado = Boolean(rawValue); break;
+          case 'mas_vendido': set(['masVendido', 'mas_vendido'], Boolean(rawValue)); break;
+          case 'acceso_rapido': set(['accesoRapido', 'acceso_rapido'], Boolean(rawValue)); break;
+          case 'ceramico': next.ceramico = Boolean(rawValue); break;
+          case 'ceramico_m2': set(['ceramicoM2', 'ceramico_m2'], Number(rawValue || 0)); break;
+          case 'ceramico_placas': set(['ceramicoPlacas', 'ceramico_placas'], Number(rawValue || 0)); break;
+          case 'editado_por': next.editadoPor = String(rawValue || ''); break;
+          case 'edicion_updated_at': next.edicionUpdatedAt = rawValue || ''; break;
+          case 'activo': set(['activo', 'active'], rawValue !== false); break;
+        }
+      }
+      delete next.sourceRows;
+      delete next.source_rows;
+      return next;
+    }
+
+    async function fetchSupabasePatchRows(version = 0, targetVersion = 0) {
+      const result = [];
+      const safeVersion = Math.max(0, Math.trunc(Number(version || 0)));
+      const safeTarget = Math.max(0, Math.trunc(Number(targetVersion || 0)));
+      const upper = safeTarget ? `&version=lte.${safeTarget}` : '';
+      for (let from = 0; ; from += PAGE_SIZE) {
+        const query = `${SUPABASE_URL}/rest/v1/${TABLES.catalogChanges}?select=version,codigo,cambios,eliminado&version=gt.${safeVersion}${upper}&order=version.asc`;
+        const response = await fetch(query, {
+          headers: headers({ Range: `${from}-${from + PAGE_SIZE - 1}` }),
+          cache: 'no-store'
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const rows = await response.json();
+        if (!Array.isArray(rows)) throw new Error('Respuesta de parches de catalogo invalida');
+        result.push(...rows);
+        if (rows.length < PAGE_SIZE) return result;
+      }
+    }
+
+    function canApplyPatches(context) {
+      return Array.isArray(context?.cached?.rows)
+        && context.cached.rows.length
+        && String(context.cached.source || '') === 'supabase'
+        && Number(context.patchVersion || 0) > Number(context.cached.patchVersion || 0);
+    }
+
+    function startPatchLoad(context) {
+      const loadKey = `${context.signature}|patches|${context.patchVersion}`;
+      if (activeFullLoad?.key === loadKey) return activeFullLoad.promise;
+      const promise = (async () => {
+        try {
+          const patches = await fetchSupabasePatchRows(context.cached.patchVersion, context.patchVersion);
+          const merged = new Map(context.cached.rows.map((row) => [codeOf(row), row]));
+          const changedCodes = new Set();
+          const removedCodes = [];
+          for (const entry of patches) {
+            const code = String(entry?.codigo || '').trim();
+            if (!code) continue;
+            const changes = entry?.cambios && typeof entry.cambios === 'object' ? entry.cambios : {};
+            if (entry?.eliminado || changes.activo === false) {
+              merged.delete(code);
+              removedCodes.push(code);
+              changedCodes.delete(code);
+              continue;
+            }
+            const current = merged.get(code) || { codigo: code, idart: code, idArt: code, activo: true, active: true };
+            merged.set(code, applySupabasePatch(current, changes));
+            changedCodes.add(code);
+          }
+          const rows = [...merged.values()].sort((left, right) =>
+            codeOf(left).localeCompare(codeOf(right), 'es', { numeric: true, sensitivity: 'base' })
+          );
+          const changedRows = [...changedCodes].map((code) => merged.get(code)).filter(Boolean);
+          await writeCache({
+            ...context.cached,
+            signature: context.signature,
+            version: context.version,
+            patchVersion: context.patchVersion,
+            rows,
+            source: 'supabase'
+          });
+          window.dispatchEvent(new CustomEvent('corralon:catalog-delta', {
+            detail: { changedRows, removedCodes, rows, version: context.version, patchVersion: context.patchVersion, source: 'supabase' }
+          }));
+          return rows;
+        } catch (error) {
+          console.warn('No se pudieron aplicar los parches del catalogo; se conserva la cache', error);
+          return context.cached.rows;
+        }
+      })();
+      activeFullLoad = { key: loadKey, promise };
+      const clear = () => { if (activeFullLoad?.promise === promise) activeFullLoad = null; };
+      promise.then(clear, clear);
+      return promise;
+    }
+
+    async function alignCachedVersion(context) {
+      await writeCache({
+        ...context.cached,
+        signature: context.signature,
+        version: context.version,
+        patchVersion: context.patchVersion,
+        source: 'supabase'
+      });
+      return context.cached.rows;
     }
 
     function startDeltaLoad(context, options = {}) {
@@ -3538,6 +3666,7 @@
             ...context.cached,
             signature: context.signature,
             version: context.version,
+            patchVersion: context.patchVersion,
             metadataUrl: context.metadataUrl,
             rows,
             source: 'supabase'
@@ -3560,6 +3689,14 @@
     }
 
     function startCatalogLoad(context, options = {}) {
+      if (canApplyPatches(context)) return startPatchLoad(context, options);
+      if (Array.isArray(context?.cached?.rows)
+          && context.cached.rows.length
+          && String(context.cached.source || '') === 'supabase'
+          && Object.prototype.hasOwnProperty.call(context.cached, 'patchVersion')
+          && Number(context.cached.patchVersion || 0) === Number(context.patchVersion || 0)) {
+        return alignCachedVersion(context);
+      }
       return canApplyDelta(context)
         ? startDeltaLoad(context, options)
         : startFullLoad(context, options);
@@ -3577,6 +3714,7 @@
           await writeCache({
             signature: context.signature,
             version: context.version,
+            patchVersion: context.patchVersion,
             metadataUrl: context.metadataUrl,
             rows,
             source: 'supabase'
@@ -3593,7 +3731,8 @@
               if (fallback.rows.length) {
                 await writeCache({
                   signature: `fallback|${fallback.baseUrl}|${fallback.metaUrl}`,
-                  version: context.version,
+            version: context.version,
+            patchVersion: context.patchVersion,
                   metadataUrl: fallback.metaUrl,
                   rows: fallback.rows,
                   source: 'cloudinary'
@@ -3621,7 +3760,10 @@
       if (!force && Array.isArray(cached?.rows) && cached.rows.length) {
         const complete = (async () => {
           const context = await catalogContext(cached);
-          if (!context.versionKnown || cached.signature === context.signature) return cached.rows;
+          if (!context.versionKnown || (
+            cached.signature === context.signature
+            && Number(cached.patchVersion || 0) === Number(context.patchVersion || 0)
+          )) return cached.rows;
           return startCatalogLoad(context, options);
         })();
         return {
@@ -3662,10 +3804,13 @@
         return { changed: true, mode: 'full', rows };
       }
       const context = await catalogContext(cached);
-      if (!context.versionKnown || cached.signature === context.signature) {
+      if (!context.versionKnown || (
+        cached.signature === context.signature
+        && Number(cached.patchVersion || 0) === Number(context.patchVersion || 0)
+      )) {
         return { changed: false, mode: 'none', rows: cached.rows };
       }
-      const mode = canApplyDelta(context) ? 'delta' : 'full';
+      const mode = canApplyPatches(context) ? 'patch' : (canApplyDelta(context) ? 'delta' : 'full');
       const rows = await startCatalogLoad(context, options);
       return { changed: true, mode, rows, version: context.version };
     }
@@ -3744,6 +3889,168 @@
       saveArticleEdits,
       mergeMetadata,
       fromSupabase
+    };
+  })();
+
+  const CATALOG_REALTIME = (() => {
+    const LEADER_KEY = 'corralon_catalog_realtime_leader_v1';
+    const MESSAGE_KEY = 'corralon_catalog_realtime_message_v1';
+    const CHANNEL_NAME = 'corralon_catalog_realtime_v1';
+    const LEASE_MS = 15000;
+    const RENEW_MS = 5000;
+    const tabId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    let started = false;
+    let leader = false;
+    let leaseTimer = null;
+    let refreshTimer = null;
+    let broadcast = null;
+    let supabaseClient = null;
+    let realtimeChannel = null;
+    let realtimeLibraryPromise = null;
+
+    function readLeader() {
+      try {
+        const value = JSON.parse(localStorage.getItem(LEADER_KEY) || 'null');
+        return value && typeof value === 'object' ? value : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function writeLeader(expiresAt) {
+      try {
+        localStorage.setItem(LEADER_KEY, JSON.stringify({ tabId, expiresAt }));
+        return readLeader()?.tabId === tabId;
+      } catch (_) {
+        return true;
+      }
+    }
+
+    function announceCatalogChange() {
+      const message = { type: 'catalog-change', sender: tabId, at: Date.now() };
+      try { broadcast?.postMessage(message); } catch (_) {}
+      try { localStorage.setItem(MESSAGE_KEY, JSON.stringify(message)); } catch (_) {}
+    }
+
+    function scheduleRefresh() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        CATALOG.refresh({ fallback: false }).catch((error) => {
+          console.warn('No se pudo aplicar la actualizacion en tiempo real del catalogo', error);
+        });
+      }, 80);
+    }
+
+    function loadRealtimeLibrary() {
+      if (window.supabase?.createClient) return Promise.resolve(window.supabase);
+      if (realtimeLibraryPromise) return realtimeLibraryPromise;
+      realtimeLibraryPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = new URL('vendor/supabase.js?v=20260812-catalog-realtime1', document.baseURI).href;
+        script.async = true;
+        script.onload = () => window.supabase?.createClient
+          ? resolve(window.supabase)
+          : reject(new Error('No se encontro el cliente Realtime de Supabase'));
+        script.onerror = () => reject(new Error('No se pudo cargar el cliente Realtime de Supabase'));
+        document.head.appendChild(script);
+      });
+      return realtimeLibraryPromise;
+    }
+
+    async function disconnectRealtime() {
+      if (realtimeChannel && supabaseClient) {
+        try { await supabaseClient.removeChannel(realtimeChannel); } catch (_) {}
+      }
+      realtimeChannel = null;
+      supabaseClient = null;
+    }
+
+    async function connectRealtime() {
+      if (realtimeChannel || !leader) return;
+      try {
+        const library = await loadRealtimeLibrary();
+        if (!leader || realtimeChannel) return;
+        supabaseClient = library.createClient(SUPABASE_URL, SUPABASE_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+          global: { headers: { 'x-client-info': 'corralon-catalog-realtime' } }
+        });
+        realtimeChannel = supabaseClient
+          .channel('catalogo-meta-principal-v1')
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: TABLES.catalogMeta,
+            filter: 'id=eq.principal'
+          }, () => {
+            announceCatalogChange();
+            scheduleRefresh();
+          })
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') scheduleRefresh();
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              const failedChannel = realtimeChannel;
+              realtimeChannel = null;
+              if (failedChannel && supabaseClient) {
+                try { supabaseClient.removeChannel(failedChannel); } catch (_) {}
+              }
+            }
+          });
+      } catch (error) {
+        console.warn('Realtime de catalogo no disponible; se reintentara', error);
+        realtimeChannel = null;
+        supabaseClient = null;
+      }
+    }
+
+    function evaluateLeadership() {
+      const now = Date.now();
+      const current = readLeader();
+      const canClaim = !current || current.tabId === tabId || Number(current.expiresAt || 0) <= now;
+      const shouldLead = canClaim && writeLeader(now + LEASE_MS);
+      document.documentElement.dataset.catalogRealtimeLeader = shouldLead ? 'true' : 'false';
+      if (shouldLead) {
+        leader = true;
+        connectRealtime();
+      } else if (leader) {
+        leader = false;
+        disconnectRealtime();
+      }
+    }
+
+    function onStorage(event) {
+      if (event.key === MESSAGE_KEY && event.newValue) {
+        try {
+          const message = JSON.parse(event.newValue);
+          if (message?.sender !== tabId && message?.type === 'catalog-change') scheduleRefresh();
+        } catch (_) {}
+      }
+      if (event.key === LEADER_KEY) evaluateLeadership();
+    }
+
+    function start() {
+      if (started) return;
+      started = true;
+      if ('BroadcastChannel' in window) {
+        broadcast = new BroadcastChannel(CHANNEL_NAME);
+        broadcast.onmessage = (event) => {
+          if (event.data?.sender !== tabId && event.data?.type === 'catalog-change') scheduleRefresh();
+        };
+      }
+      window.addEventListener('storage', onStorage);
+      window.addEventListener('focus', evaluateLeadership);
+      document.addEventListener('visibilitychange', evaluateLeadership);
+      window.addEventListener('pagehide', () => {
+        if (leader && readLeader()?.tabId === tabId) {
+          try { localStorage.removeItem(LEADER_KEY); } catch (_) {}
+        }
+      }, { once: true });
+      evaluateLeadership();
+      leaseTimer = setInterval(evaluateLeadership, RENEW_MS);
+    }
+
+    return {
+      start,
+      isLeader: () => leader
     };
   })();
 
@@ -4822,8 +5129,10 @@
     },
     catalogEditorSession: CATALOG_EDITOR_SESSION,
     catalog: CATALOG,
+    catalogRealtime: CATALOG_REALTIME,
     faltantes: FALTANTES
   };
+  CATALOG_REALTIME.start();
   } catch (error) {
     window.__corralonSystemError = {
       name: String(error?.name || 'Error'),
