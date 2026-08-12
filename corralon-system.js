@@ -4059,6 +4059,7 @@
     const LIST_DB = 'corralon_lista_proveedores_v1';
     const PROVIDER_LIST_META_KEY = 'corralon_lista_proveedores_meta_v1';
     const LOCAL_KEY = 'corralon_faltantes_rows_v2';
+    const SUGGESTIONS_KEY = 'corralon_faltantes_sugerencias_v1';
     const COLLECTION = 'faltantes';
     const FIREBASE_CONFIG = {
       apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -4267,9 +4268,52 @@
       }
     }
 
+    function buildSuggestionSummary(rows = []) {
+      const groups = new Map();
+      for (const row of rows || []) {
+        if (isBlank(row) || row?.pedido) continue;
+        const branchId = String(row.sucursalId || row.sucursal_id || '').trim();
+        const branch = normalizeBranch(branchId || row.sucursal || '');
+        const providerId = cleanId(row.idProveedor || row.id_proveedor || '');
+        const provider = String(row.proveedor || '').trim();
+        if (!branchId || (!providerId && !provider)) continue;
+        const providerKey = providerId || searchNorm(provider);
+        const key = `${providerKey}|${branchId}`;
+        if (!groups.has(key)) groups.set(key, {
+          key,
+          providerId,
+          provider,
+          branchId,
+          branch,
+          articleCount: 0,
+          quantityTotal: 0,
+          updatedAt: Date.now()
+        });
+        const group = groups.get(key);
+        group.articleCount += 1;
+        group.quantityTotal += Number(row.cantidad || 0);
+      }
+      return [...groups.values()].sort((a, b) => b.articleCount - a.articleCount || String(a.provider).localeCompare(String(b.provider), 'es'));
+    }
+
+    function refreshSuggestionSummary(rows = loadLocalRows()) {
+      const summary = buildSuggestionSummary(rows);
+      try { localStorage.setItem(SUGGESTIONS_KEY, JSON.stringify(summary)); } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('corralon:faltantes-summary', { detail: summary })); } catch (_) {}
+      return summary;
+    }
+
+    function loadSuggestionSummary(limit = 5) {
+      let summary = [];
+      try { summary = JSON.parse(localStorage.getItem(SUGGESTIONS_KEY) || '[]') || []; } catch (_) {}
+      if (!Array.isArray(summary) || !summary.length) summary = refreshSuggestionSummary();
+      return summary.slice(0, Math.max(0, Number(limit) || 5));
+    }
+
     function saveLocalRows(rows, columnFiltro = '') {
       localStorage.setItem(localFiltroKey(), String(columnFiltro || ''));
       localStorage.setItem(LOCAL_KEY, JSON.stringify(rows || []));
+      refreshSuggestionSummary(rows || []);
     }
 
     function loadColumnFiltro() {
@@ -5034,12 +5078,16 @@
 
     return {
       LOCAL_KEY,
+      SUGGESTIONS_KEY,
       COLLECTION,
       searchNorm,
       makeLocalUid,
       blankRow,
       isBlank,
       loadLocalRows,
+      buildSuggestionSummary,
+      refreshSuggestionSummary,
+      loadSuggestionSummary,
       saveLocalRows,
       loadColumnFiltro,
       loadRemoteRows,
