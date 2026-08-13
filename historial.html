@@ -116,6 +116,10 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .budget-search-detail-row div { overflow:hidden; padding:8px 10px; border-right:1px solid #d7efff; text-overflow:ellipsis; white-space:nowrap; }
 .budget-search-detail-row .num { text-align:right; font-variant-numeric:tabular-nums; }
 .budget-search-empty { display:flex; min-height:90px; align-items:center; justify-content:center; padding:18px; color:#888; font-weight:800; text-align:center; }
+.budget-item-context { position:fixed; z-index:850; display:none; min-width:210px; padding:6px; border:1px solid var(--borde); border-radius:12px; background:#fff; box-shadow:0 16px 42px rgba(0,0,0,.24); }
+.budget-item-context.open { display:block; }
+.budget-item-context button { width:100%; border:0; border-radius:8px; padding:10px 12px; background:#fff; color:var(--texto-dark); font-family:'Barlow Condensed',sans-serif; font-size:17px; font-weight:900; text-align:left; cursor:pointer; }
+.budget-item-context button:hover,.budget-item-context button:focus { background:#f1f1ef; color:var(--rojo); outline:none; }
 @media(max-width:720px) {
   .budget-search-bg { padding:8px; }
   .budget-search-modal { width:100%; height:94vh; border-radius:14px; }
@@ -405,6 +409,10 @@ input[type="checkbox"]{accent-color:#ef1015}
       <div class="budget-search-detail" id="budgetSearchDetail"><div class="budget-search-empty">Elegí un presupuesto para ver el detalle.</div></div>
     </div>
   </div>
+</div>
+
+<div class="budget-item-context" id="budgetItemContext" role="menu">
+  <button id="budgetItemSearchAction" type="button" role="menuitem">Buscar en presupuestos</button>
 </div>
 
 <!-- ── DETALLE ── -->
@@ -966,14 +974,15 @@ function renderBusquedaPresupuestos() {
   }
 }
 
-async function abrirBusquedaPresupuestos() {
+async function abrirBusquedaPresupuestos(consultaInicial = '') {
   const bg = document.getElementById('budgetSearchBg');
   const input = document.getElementById('budgetSearchInput');
   if (!bg || !input) return;
   bg.classList.add('open');
-  input.value = '';
+  input.value = String(consultaInicial || '').trim();
   renderBusquedaPresupuestos();
   if (!_presupuestosCache.length) await cargarPresupuestos();
+  if (input.value) renderBusquedaPresupuestos();
   requestAnimationFrame(() => {
     input.focus();
     input.select();
@@ -1394,12 +1403,12 @@ function abrirDetallePresupuesto(index) {
       <div class="detalle-th" style="text-align:right">Precio</div>
       <div class="detalle-th" style="text-align:right">Subtotal</div>
     </div>
-    ${items.length ? items.map(it => {
+    ${items.length ? items.map((it, itemIndex) => {
       const cant = Number(it.cantidad) || 0;
       const precio = Number(it.precio) || 0;
       const subtotal = cant * precio;
       return `
-        <div class="detalle-fila">
+        <div class="detalle-fila" data-budget-item-index="${itemIndex}">
           <div class="detalle-td" style="text-align:center">${fmtCantidad(cant)}</div>
           <div class="detalle-td">${esc(it.nombre || '')}${it.codigo ? ` <span style="color:#999;">(${esc(it.codigo)})</span>` : ''}</div>
           <div class="detalle-td num">$${precio.toLocaleString('es-AR')}</div>
@@ -2521,7 +2530,7 @@ function generarPDFPresupuestoDoc(p) {
 // Estado inicial
 inicializarHistorial();
 document.getElementById('remitosSearch')?.addEventListener('input', renderRemitosHistorial);
-document.getElementById('openBudgetSearchBtn')?.addEventListener('click', abrirBusquedaPresupuestos);
+document.getElementById('openBudgetSearchBtn')?.addEventListener('click', () => abrirBusquedaPresupuestos());
 document.getElementById('closeBudgetSearchBtn')?.addEventListener('click', cerrarBusquedaPresupuestos);
 document.getElementById('budgetSearchInput')?.addEventListener('input', renderBusquedaPresupuestos);
 document.querySelector('.budget-search-field label')?.addEventListener('click', () => {
@@ -2558,7 +2567,48 @@ document.getElementById('budgetSearchResults')?.addEventListener('keydown', (eve
     if (next) renderDetalleBusquedaPresupuesto(next.dataset.budgetSearchKey);
   }
 });
+let _budgetContextItem = null;
+
+function cerrarMenuContextualPresupuesto() {
+  document.getElementById('budgetItemContext')?.classList.remove('open');
+  _budgetContextItem = null;
+}
+
+document.getElementById('detalleBody')?.addEventListener('contextmenu', (event) => {
+  const row = event.target.closest('[data-budget-item-index]');
+  if (!row || _detalleTipoActual !== 'presupuesto') return;
+  const items = Array.isArray(_presupuestoDetalleActual?.items) ? _presupuestoDetalleActual.items : [];
+  const item = items[Number(row.dataset.budgetItemIndex)];
+  if (!item) return;
+  event.preventDefault();
+  _budgetContextItem = item;
+  const menu = document.getElementById('budgetItemContext');
+  menu.classList.add('open');
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(6, Math.min(event.clientX, window.innerWidth - rect.width - 6))}px`;
+  menu.style.top = `${Math.max(6, Math.min(event.clientY, window.innerHeight - rect.height - 6))}px`;
+  document.getElementById('budgetItemSearchAction')?.focus();
+});
+
+document.getElementById('budgetItemSearchAction')?.addEventListener('click', () => {
+  const item = _budgetContextItem;
+  cerrarMenuContextualPresupuesto();
+  if (!item) return;
+  abrirBusquedaPresupuestos(item.codigo || item.idart || item.idArt || item.nombre || item.descripcion || '');
+});
+
+document.addEventListener('mousedown', (event) => {
+  if (!event.target.closest('#budgetItemContext')) cerrarMenuContextualPresupuesto();
+});
+window.addEventListener('blur', cerrarMenuContextualPresupuesto);
+window.addEventListener('resize', cerrarMenuContextualPresupuesto);
+document.addEventListener('scroll', cerrarMenuContextualPresupuesto, true);
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.getElementById('budgetItemContext')?.classList.contains('open')) {
+    event.preventDefault();
+    cerrarMenuContextualPresupuesto();
+    return;
+  }
   if (event.key === 'Escape' && document.getElementById('budgetSearchBg')?.classList.contains('open')) {
     event.preventDefault();
     cerrarBusquedaPresupuestos();

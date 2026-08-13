@@ -170,6 +170,12 @@
   .review-history-btn svg { width: 19px; height: 19px; stroke: currentColor; }
   .review-add-btn { width: 38px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 22px; line-height: 1; }
   .review-list { max-height: 560px; overflow: auto; padding: 10px; }
+  .review-tabs { position: sticky; top: -10px; z-index: 2; display: grid; grid-template-columns: 1fr 1fr; margin: -10px -10px 10px; border-bottom: 1px solid #dededb; }
+  .review-tab { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 9px 14px; border: 0; background: #f7f7f5; color: #171717; cursor: pointer; font: inherit; font-size: 15px; font-weight: 1000; text-align: left; }
+  .review-tab + .review-tab { border-left: 4px solid #171717; }
+  .review-tab.is-active { background: #fff; color: #ef1015; }
+  .review-tab-count { min-width: 24px; padding: 2px 7px; border-radius: 999px; background: #ef1015; color: #fff; font-size: 11px; text-align: center; }
+  .review-section-empty { padding: 18px 12px; border: 1px dashed #d7d7d3; border-radius: 10px; color: var(--muted); font-size: 13px; font-weight: 800; }
   .review-item { display: grid; grid-template-columns: 160px minmax(360px,1fr) 172px 112px; gap: 12px; align-items: center; min-height: 46px; padding: 8px 10px; border: 1px solid #e4dcfb; border-radius: 12px; margin-bottom: 8px; background: #fff; cursor: pointer; font-weight: 800; }
   .review-item:hover { background: #f4f0ff; }
   .review-item strong { color: var(--purple-dark); }
@@ -210,6 +216,17 @@
     font-weight: 900;
   }
   .review-resolved input { accent-color: var(--purple); cursor: pointer; }
+  .review-ignore-list {
+    height: 30px;
+    border: 1px solid #d1d1ce;
+    border-radius: 999px;
+    background: #f6f6f4;
+    color: #171717;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .review-ignore-list:hover { border-color: #9b9b97; background: #ececea; }
   .pending-form { padding: 14px 16px 18px; display: grid; gap: 12px; }
   .pending-counter {
     width: fit-content;
@@ -775,6 +792,8 @@
     let reviewOrders = [];
     let historialNotifications = [];
     let staleProviderNotifications = [];
+    let ignoredStaleProviderNotifications = new Map();
+    let reviewActiveSection = 'general';
     let reviewModalSnapshot = null;
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
@@ -1534,10 +1553,23 @@
     async function preloadStaleProviderNotifications(usuario) {
       if (!isAdminUser(usuario)) {
         staleProviderNotifications = [];
+        ignoredStaleProviderNotifications = new Map();
         renderReviewNotifications();
         return;
       }
       try {
+        try {
+          const preferencesSnap = await getDocFromServer(doc(db, MENU_ORDER_COLLECTION, menuOrderDocId(usuario)));
+          const ignoredItems = preferencesSnap.exists() && Array.isArray(preferencesSnap.data()?.listasIgnoradas)
+            ? preferencesSnap.data().listasIgnoradas
+            : [];
+          ignoredStaleProviderNotifications = new Map(ignoredItems
+            .map((item) => [String(item?.providerId || '').trim(), String(item?.lastUpdate || '')])
+            .filter(([providerId]) => providerId));
+        } catch (error) {
+          ignoredStaleProviderNotifications = new Map();
+          console.warn('No se pudieron leer las listas ignoradas', error);
+        }
         const response = await fetch(`${SUPABASE_URL}/rest/v1/proveedores?select=id_proveedor,proveedor,ultima_actualizacion,updated_at&order=proveedor.asc`, {
           headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
         });
@@ -1561,12 +1593,42 @@
           .filter((item) => {
             const updatedMs = notifValueMs(item.updatedAt);
             return updatedMs > 0 && updatedMs < cutoff;
-          });
+          })
+          .filter((item) => ignoredStaleProviderNotifications.get(String(item.providerId)) !== String(item.updatedAt || ''));
         renderReviewNotifications();
       } catch (error) {
         staleProviderNotifications = [];
         renderReviewNotifications();
         console.warn('No se pudieron revisar las listas de proveedores desactualizadas', error);
+      }
+    }
+
+    async function ignoreStaleProviderNotification(providerId) {
+      const id = String(providerId || '').trim();
+      const target = staleProviderNotifications.find((item) => String(item.providerId || item.id) === id);
+      if (!target) return;
+
+      ignoredStaleProviderNotifications.set(id, String(target.updatedAt || target.date || ''));
+      staleProviderNotifications = staleProviderNotifications.filter((item) => String(item.providerId || item.id) !== id);
+      renderReviewNotifications();
+
+      const usuario = obtenerUsuarioActivo();
+      try {
+        await setDoc(doc(db, MENU_ORDER_COLLECTION, menuOrderDocId(usuario)), {
+          listasIgnoradas: [...ignoredStaleProviderNotifications.entries()].map(([ignoredProviderId, lastUpdate]) => ({
+            providerId: ignoredProviderId,
+            lastUpdate
+          })),
+          listasIgnoradasUpdatedAt: serverTimestamp()
+        }, { merge: true });
+        showReviewToast({ toastText: `Lista de ${target.detail} ignorada` });
+      } catch (error) {
+        console.warn('No se pudo guardar la lista ignorada', error);
+        ignoredStaleProviderNotifications.delete(id);
+        staleProviderNotifications.push(target);
+        staleProviderNotifications.sort(notifCreatedSort);
+        renderReviewNotifications();
+        showReviewToast({ toastText: 'No se pudo ignorar la lista' });
       }
     }
 
@@ -1748,13 +1810,8 @@
       return [...pedidos, ...historial, ...staleProviderNotifications].sort(notifCreatedSort);
     }
 
-    function renderReviewNotifications() {
-      const currentVisible = allVisibleNotifications();
-      const visible = currentVisible;
-      if (reviewModal.classList.contains('visible')) reviewModalSnapshot = currentVisible;
-      reviewBell.classList.toggle('visible', currentVisible.length > 0);
-      reviewBellCount.textContent = String(currentVisible.length);
-      reviewList.innerHTML = visible.length ? visible.map((item) => item.tipo === 'autorizacion_pedido' ? `
+    function renderReviewNotificationItem(item) {
+      return item.tipo === 'autorizacion_pedido' ? `
         <div class="review-item authorization-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
           <div class="authorization-summary">
             <strong>${escapeHtml(item.title)}</strong>
@@ -1770,7 +1827,7 @@
           <strong>Actualizar lista</strong>
           <span>${escapeHtml(item.detail)}</span>
           <span>Última: ${escapeHtml(formatNotifDate(item.date))}</span>
-          <span class="review-resolved">Pendiente</span>
+          <button class="review-ignore-list" type="button" data-ignore-stale-provider="${escapeHtml(item.providerId || item.id)}">Ignorar</button>
         </div>` : `
         <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
           <strong>${escapeHtml(item.title)}</strong>
@@ -1779,9 +1836,35 @@
           <label class="review-resolved" title="Marcar como resuelto" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
             <input type="checkbox" data-resolve-notification="1" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
             Resuelto
-          </label>
+           </label>
+         </div>
+       `;
+    }
+
+    function renderReviewNotifications() {
+      const currentVisible = allVisibleNotifications();
+      const generalNotifications = currentVisible.filter((item) => item.kind !== 'lista_proveedor');
+      const listNotifications = currentVisible.filter((item) => item.kind === 'lista_proveedor');
+      const visibleItems = reviewActiveSection === 'lists' ? listNotifications : generalNotifications;
+      const emptyText = reviewActiveSection === 'lists'
+        ? 'No hay listas pendientes de actualización.'
+        : 'No hay notificaciones pendientes.';
+      if (reviewModal.classList.contains('visible')) reviewModalSnapshot = currentVisible;
+      reviewBell.classList.toggle('visible', currentVisible.length > 0);
+      reviewBellCount.textContent = String(currentVisible.length);
+      reviewList.innerHTML = `
+        <div class="review-tabs" role="tablist" aria-label="Secciones de notificaciones">
+          <button class="review-tab ${reviewActiveSection === 'general' ? 'is-active' : ''}" type="button" role="tab" aria-selected="${reviewActiveSection === 'general'}" data-review-section="general">
+            Notificaciones <span class="review-tab-count">${generalNotifications.length}</span>
+          </button>
+          <button class="review-tab ${reviewActiveSection === 'lists' ? 'is-active' : ''}" type="button" role="tab" aria-selected="${reviewActiveSection === 'lists'}" data-review-section="lists">
+            Listas pendientes <span class="review-tab-count">${listNotifications.length}</span>
+          </button>
         </div>
-      `).join('') : '<div style="padding:18px;font-weight:800;color:var(--muted)">No hay notificaciones.</div>';
+        <div role="tabpanel">
+          ${visibleItems.length ? visibleItems.map(renderReviewNotificationItem).join('') : `<div class="review-section-empty">${escapeHtml(emptyText)}</div>`}
+        </div>
+      `;
     }
 
     async function resolveOrderAuthorization(docId, decision) {
@@ -2084,6 +2167,18 @@
       }
     });
     reviewList.addEventListener('click', (event) => {
+      const sectionButton = event.target.closest('[data-review-section]');
+      if (sectionButton) {
+        reviewActiveSection = sectionButton.dataset.reviewSection === 'lists' ? 'lists' : 'general';
+        renderReviewNotifications();
+        return;
+      }
+      const ignoreListButton = event.target.closest('[data-ignore-stale-provider]');
+      if (ignoreListButton) {
+        event.stopPropagation();
+        ignoreStaleProviderNotification(ignoreListButton.dataset.ignoreStaleProvider);
+        return;
+      }
       const authorizationButton = event.target.closest('[data-order-authorization]');
       if (authorizationButton) {
         event.stopPropagation();
