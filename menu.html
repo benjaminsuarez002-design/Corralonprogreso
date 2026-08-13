@@ -774,6 +774,7 @@
     let historialUnsubscribe = null;
     let reviewOrders = [];
     let historialNotifications = [];
+    let staleProviderNotifications = [];
     let reviewModalSnapshot = null;
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
@@ -1352,7 +1353,8 @@
         ocultarCargaMenu();
         Promise.all([
           preloadAliasObjectives(),
-          preloadReviewNotifications(usuario)
+          preloadReviewNotifications(usuario),
+          preloadStaleProviderNotifications(usuario)
         ]).catch((error) => console.warn('No se pudo completar la precarga del menú', error));
       } else {
         loginError.textContent = '❌ Usuario o contraseña incorrectos';
@@ -1529,6 +1531,45 @@
       }
     }
 
+    async function preloadStaleProviderNotifications(usuario) {
+      if (!isAdminUser(usuario)) {
+        staleProviderNotifications = [];
+        renderReviewNotifications();
+        return;
+      }
+      try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/proveedores?select=id_proveedor,proveedor,ultima_actualizacion,updated_at&order=proveedor.asc`, {
+          headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const cutoff = Date.now() - (45 * 24 * 60 * 60 * 1000);
+        staleProviderNotifications = (await response.json())
+          .map((provider) => {
+            const lastUpdate = provider.ultima_actualizacion || provider.updated_at || '';
+            return {
+              kind: 'lista_proveedor',
+              tipo: 'pendiente_lista',
+              id: String(provider.id_proveedor || ''),
+              providerId: String(provider.id_proveedor || ''),
+              title: 'Actualizar lista',
+              detail: String(provider.proveedor || `Proveedor ${provider.id_proveedor || ''}`).trim(),
+              date: lastUpdate,
+              createdAt: lastUpdate,
+              updatedAt: lastUpdate
+            };
+          })
+          .filter((item) => {
+            const updatedMs = notifValueMs(item.updatedAt);
+            return updatedMs > 0 && updatedMs < cutoff;
+          });
+        renderReviewNotifications();
+      } catch (error) {
+        staleProviderNotifications = [];
+        renderReviewNotifications();
+        console.warn('No se pudieron revisar las listas de proveedores desactualizadas', error);
+      }
+    }
+
     function setupAliasObjectives() {
       if (!objectiveSummaryUnsubscribe) {
         objectiveSummaryUnsubscribe = onSnapshot(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()), (snap) => {
@@ -1551,6 +1592,7 @@
       if (tipo === 'presupuesto') return 'Pres. Web';
       if (tipo === 'garantia') return 'Garantía';
       if (tipo === 'pendiente') return 'Pendiente';
+      if (tipo === 'pendiente_lista') return 'Actualizar lista';
       return 'Historial';
     }
 
@@ -1593,6 +1635,7 @@
 
     function notificationTitleFor(item = {}) {
       if (item.kind === 'pedido') return `Pedido ${item.id || ''}`.trim();
+      if (item.kind === 'lista_proveedor') return 'Actualizar lista';
       if (item.tipo === 'autorizacion_pedido') return item.title || `Autorizar pedido ${item.id || ''}`.trim();
       if (item.tipo === 'presupuesto') return 'Pres. Web';
       if (item.tipo === 'remito') return 'Remito';
@@ -1702,7 +1745,7 @@
           const notif = { ...item, kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id || item.numero || item.firestoreId || ''), docId: item.tipo === 'autorizacion_pedido' ? String(item.pedidoDocId || '') : '', tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id || ''}`.trim(), detail: item.detalle || '', date: item.fecha || '', createdAt: item.createdAt, updatedAt: item.updatedAt };
           return { ...notif, title: notificationTitleFor(notif), detail: cleanNotificationDetail(notif) };
         });
-      return [...pedidos, ...historial].sort(notifCreatedSort);
+      return [...pedidos, ...historial, ...staleProviderNotifications].sort(notifCreatedSort);
     }
 
     function renderReviewNotifications() {
@@ -1722,6 +1765,12 @@
             <button class="approve" type="button" data-order-authorization="aprobar" data-review-doc="${escapeHtml(item.firestoreId || '')}">Aprobar</button>
             <button type="button" data-order-authorization="rechazar" data-review-doc="${escapeHtml(item.firestoreId || '')}">Rechazar</button>
           </span>
+        </div>` : item.kind === 'lista_proveedor' ? `
+        <div class="review-item" data-kind="lista_proveedor" data-review-id="${escapeHtml(item.id)}" data-provider-id="${escapeHtml(item.providerId || item.id)}" data-tipo="pendiente_lista">
+          <strong>Actualizar lista</strong>
+          <span>${escapeHtml(item.detail)}</span>
+          <span>Última: ${escapeHtml(formatNotifDate(item.date))}</span>
+          <span class="review-resolved">Pendiente</span>
         </div>` : `
         <div class="review-item" data-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" data-review-doc="${escapeHtml(item.docId || '')}" data-tipo="${escapeHtml(item.tipo || '')}">
           <strong>${escapeHtml(item.title)}</strong>
@@ -2054,7 +2103,8 @@
         openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
         return;
       }
-      if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId, keepPopupOpen);
+      if (item.dataset.kind === 'lista_proveedor') window.open('actualizar articulos.html', '_blank', 'noopener');
+      else if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId, keepPopupOpen);
       else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
     });
 
@@ -2110,7 +2160,8 @@
         mostrarCargaMenu('Cargando comprobantes y notificaciones...');
         await Promise.all([
           preloadAliasObjectives(),
-          preloadReviewNotifications(usuarioActivo)
+          preloadReviewNotifications(usuarioActivo),
+          preloadStaleProviderNotifications(usuarioActivo)
         ]);
         await mostrarMenu(usuarioActivo);
         ocultarCargaMenu();
