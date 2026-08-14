@@ -620,6 +620,8 @@ function notificarRemitoHistorial(r) {
     detalle: r.detalle || r.cliente || 'Cliente',
     cliente: r.cliente || '',
     fecha: r.fecha || '',
+    usuario_id: r.usuario_id || '',
+    usuario_nombre: r.usuario_nombre || '',
     total: Number(r.total || 0),
     resuelta: false
   });
@@ -639,6 +641,8 @@ function notificarPresupuestoHistorial(p) {
     medio_pago: datos.medioPago,
     telefono: datos.telefono,
     nota: datos.nota,
+    usuario_id: p.usuario_id || '',
+    usuario_nombre: p.usuario_nombre || '',
     resuelta: false
   });
 }
@@ -688,6 +692,9 @@ function fmtCantidad(valor) {
     useGrouping: false,
     maximumFractionDigits: 6
   });
+}
+function usuarioRegistroNombre(registro = {}) {
+  return String(registro.usuario_nombre || registro.usuario || registro.usuario_id || '').trim();
 }
 function parseMonto(valor) {
   let texto = String(valor ?? '').trim();
@@ -781,7 +788,8 @@ function datosExtraPresupuesto(p = {}) {
     nombre: String(p.cliente_nombre || p.nombre || '').trim(),
     telefono: String(p.telefono || p.telefono_cliente || p.celular || '').trim(),
     medioPago: String(p.medio_pago || p.medioPago || '').trim(),
-    nota: String(p.nota || '').trim()
+    nota: String(p.nota || '').trim(),
+    usuario: usuarioRegistroNombre(p)
   };
 }
 
@@ -797,6 +805,7 @@ function metaExtraPresupuestoHtml(p = {}) {
   if (datos.medioPago) chips.push(`<span class="h-chip">Pago: ${esc(datos.medioPago)}</span>`);
   if (datos.telefono) chips.push(`<span class="h-chip">Tel: ${esc(datos.telefono)}</span>`);
   if (datos.nota) chips.push(`<span class="h-chip">Nota: ${esc(datos.nota)}</span>`);
+  if (datos.usuario) chips.push(`<span class="h-chip">Usuario: ${esc(datos.usuario)}</span>`);
   return chips.length ? `<div class="h-extra">${chips.join('')}</div>` : '';
 }
 
@@ -829,6 +838,13 @@ function detalleExtraPresupuestoHtml(p = {}) {
       <div class="detalle-campo" style="grid-column:1/3">
         <div class="detalle-lbl">Nota</div>
         <div class="detalle-val pre-line">${esc(datos.nota)}</div>
+      </div>`);
+  }
+  if (datos.usuario) {
+    campos.push(`
+      <div class="detalle-campo">
+        <div class="detalle-lbl">Usuario</div>
+        <div class="detalle-val">${esc(datos.usuario)}</div>
       </div>`);
   }
   return campos.join('');
@@ -1485,7 +1501,7 @@ function renderRemitosHistorial() {
   let rows = _remitosCache;
   if(search) {
     rows = rows.filter((r) => {
-      const text = `${r.nro ? remitoFull(r.nro) : ''} ${r.nro || ''} ${r.cliente || ''} ${r.fecha || ''} ${fmt(r.total || 0)} ${r.total || ''}`
+      const text = `${r.nro ? remitoFull(r.nro) : ''} ${r.nro || ''} ${r.cliente || ''} ${r.sucursal || ''} ${usuarioRegistroNombre(r)} ${r.fecha || ''} ${fmt(r.total || 0)} ${r.total || ''}`
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
       return text.includes(search);
     });
@@ -1503,7 +1519,7 @@ function renderRemitosHistorial() {
       <div class="h-nro">${r.nro ? remitoFull(r.nro) : '—'}</div>
       <div class="h-info">
         <div class="h-cliente">${r.cliente||'—'}</div>
-        <div class="h-meta">${r.fecha||''}</div>
+        <div class="h-meta">${esc(r.sucursal||'Sin sucursal')} · ${r.fecha||''}${usuarioRegistroNombre(r)?` · Usuario: ${esc(usuarioRegistroNombre(r))}`:''}</div>
       </div>
       <div class="h-total">${fmt(r.total||0)}</div>
       <span style="color:#ccc;font-size:18px;">›</span>
@@ -1529,6 +1545,14 @@ function renderDetalleRemito(remito) {
       <div class="detalle-campo">
         <div class="detalle-lbl">Fecha</div>
         <div class="detalle-val">${esc(remito.fecha||'—')}</div>
+      </div>
+      <div class="detalle-campo">
+        <div class="detalle-lbl">Sucursal</div>
+        <div class="detalle-val">${esc(remito.sucursal||'Sin sucursal')}</div>
+      </div>
+      <div class="detalle-campo">
+        <div class="detalle-lbl">Usuario</div>
+        <div class="detalle-val">${esc(usuarioRegistroNombre(remito)||'Sin usuario')}</div>
       </div>
       <div class="detalle-campo">
         <div class="detalle-lbl">N° Remito</div>
@@ -1620,12 +1644,12 @@ function generarPdfDetalleActual() {
   }));
   const total = its.reduce((s,it) => s + (it.precio||0)*(it.cantidad||0), 0);
   const nroRemito = r.nro ? remitoFull(r.nro) : '-';
-  const doc = generarPDFDoc(r.cliente, r.fecha, nroRemito, total, its);
+  const doc = generarPDFDoc(r.cliente, r.fecha, nroRemito, total, its, r.sucursal);
   return {
     doc,
     titulo: `${r.cliente || 'Cliente'} - ${nroRemito} - ${r.fecha || '-'}`,
     archivo: nombreArchivoPdfDetalle(`${r.cliente || 'Cliente'}-${nroRemito}-${r.fecha || '-'}`),
-    info: `<strong>Remito:</strong> ${esc(nroRemito)}<br><strong>Cliente:</strong> ${esc(r.cliente || 'Cliente')}<br><strong>Total:</strong> ${fmt(total)}`
+    info: `<strong>Remito:</strong> ${esc(nroRemito)}<br><strong>Cliente:</strong> ${esc(r.cliente || 'Cliente')}<br><strong>Sucursal:</strong> ${esc(r.sucursal || 'Sin sucursal')}<br><strong>Total:</strong> ${fmt(total)}`
   };
 }
 
@@ -2506,14 +2530,15 @@ function ejecutarConfirm() {
 }
 
 // ── PDF ──
-function generarPDFDoc(cliente, fecha, nro, total, its) {
+function generarPDFDoc(cliente, fecha, nro, total, its, sucursal = '') {
   return window.PresupuestoShared.generarPDFRemitoDoc({
     numero: nro,
     fecha,
     total,
     items: its,
     logoDataUrl: logoCacheData,
-    headerName: cliente || 'Cliente'
+    headerName: cliente || 'Cliente',
+    sucursal
   });
 }
 

@@ -146,6 +146,11 @@
     if (opts.subtitle) {
       doc.text(opts.subtitle, 105, 34, { align: 'center' });
     }
+    if (opts.sucursal) {
+      doc.setFontSize(9);
+      doc.text('Sucursal: ' + String(opts.sucursal).substring(0, 42), 195, 35, { align: 'right' });
+      doc.setFontSize(11);
+    }
     doc.text((opts.numberLabel || 'Pedido Nro: ') + (opts.numero || '-'), 15, 42);
     doc.text('Fecha: ' + normalizarFecha(opts.fecha), 195, 42, { align: 'right' });
     doc.line(15, 49, 195, 49);

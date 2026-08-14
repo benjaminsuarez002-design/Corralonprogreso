@@ -3928,6 +3928,15 @@ const INDEX_ENLACE_COMPARTIDO = (() => {
 })();
 let ultimoPedidoGenerado = null;
 
+function usuarioMenuPresupuestoActual() {
+  const user = window.CorralonFunciones?.menuSessionUser?.();
+  if(!user?.id) return { id: '', nombre: '' };
+  return {
+    id: String(user.id || '').trim(),
+    nombre: String(user.nombre || user.usuario || user.id || '').trim()
+  };
+}
+
 function historialNotifId(tipo, id) {
   return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
 }
@@ -3950,6 +3959,8 @@ async function guardarNotificacionPresupuesto(registro) {
       telefono: registro.telefono || '',
       medio_pago: registro.medio_pago || '',
       nota: registro.nota || '',
+      usuario_id: registro.usuario_id || '',
+      usuario_nombre: registro.usuario_nombre || '',
       resuelta: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -9669,6 +9680,7 @@ async function crearPresupuesto() {
   if (datosPresupuesto.medioPago) extrasPresupuesto.push(`Medio de pago: ${datosPresupuesto.medioPago}`);
   if (datosPresupuesto.nota) extrasPresupuesto.push(`Nota: ${datosPresupuesto.nota}`);
   const leyendaImpuestos = 'Los precios y el total ya tienen todos los impuestos incluidos';
+  const usuarioPresupuesto = usuarioMenuPresupuestoActual();
   const doc = window.PresupuestoShared.generarPDFPresupuestoDoc({
     numero: numeroPedido,
     fecha: fechaStr,
@@ -9694,6 +9706,8 @@ async function crearPresupuesto() {
     telefono: datosPresupuesto.telefono,
     medio_pago: datosPresupuesto.medioPago,
     nota: datosPresupuesto.nota,
+    usuario_id: usuarioPresupuesto.id || null,
+    usuario_nombre: usuarioPresupuesto.nombre || null,
     items: items.map(it => ({
       codigo: it.codigo || '',
       nombre: it.nombre || '',

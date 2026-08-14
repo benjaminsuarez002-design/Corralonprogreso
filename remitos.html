@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="presupuesto-shared.js"></script>
+<script src="funciones.js?v=20260610-menu-session"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <style>
@@ -93,9 +94,24 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .confirm-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 350; display: none; align-items: center; justify-content: center; padding: 20px; }
 .confirm-bg.open { display: flex; }
 .confirm-box { background: #fff; border-radius: 18px; padding: 24px; width: 100%; max-width: 320px; text-align: center; box-shadow: var(--sombra); }
+.confirm-box:has(.confirm-branch.open) { max-width: 390px; }
 .confirm-icon { font-size: 36px; margin-bottom: 10px; }
 .confirm-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; color: var(--texto-dark); text-transform: uppercase; margin-bottom: 8px; }
 .confirm-sub { font-size: 13px; color: #888; margin-bottom: 20px; line-height: 1.5; }
+.confirm-branch { display: none; gap: 6px; margin: -6px 0 18px; text-align: left; }
+.confirm-branch.open { display: grid; }
+.confirm-branch label { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 900; text-transform: uppercase; color: #777; }
+.confirm-branch-options { display: grid; gap: 8px; }
+.confirm-branch-option { position: relative; display: block; cursor: pointer; }
+.confirm-branch-option input { position: absolute; opacity: 0; pointer-events: none; }
+.confirm-branch-option span { position: relative; display: grid; gap: 2px; min-height: 54px; padding: 9px 42px 9px 12px; border: 1.5px solid var(--borde); border-radius: 12px; background: linear-gradient(180deg,#fff,#f7f7f5); color: var(--texto-dark); box-shadow: 0 3px 9px rgba(0,0,0,.05); transition: border-color .15s, background .15s, color .15s, transform .15s, box-shadow .15s; }
+.confirm-branch-option b { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 900; line-height: 1.1; }
+.confirm-branch-option small { color: #888; font-size: 11px; font-weight: 600; }
+.confirm-branch-option span::after { content: ''; position: absolute; right: 13px; top: 50%; width: 20px; height: 20px; border: 2px solid #c7c7c3; border-radius: 50%; transform: translateY(-50%); background: #fff; }
+.confirm-branch-option:hover span { transform: translateY(-1px); border-color: #aaa; box-shadow: 0 6px 14px rgba(0,0,0,.09); }
+.confirm-branch-option input:focus-visible + span { outline: 3px solid rgba(239,16,21,.18); outline-offset: 2px; }
+.confirm-branch-option input:checked + span { border-color: var(--rojo); background: linear-gradient(135deg,#fff4f4,#ffe5e5); color: var(--rojo2); box-shadow: 0 7px 16px rgba(201,0,6,.13); }
+.confirm-branch-option input:checked + span::after { content: '✓'; display: flex; align-items: center; justify-content: center; border-color: var(--rojo); background: var(--rojo); color: #fff; font: 900 13px Arial,sans-serif; }
 .confirm-btns { display: flex; gap: 10px; }
 .btn-confirm-cancel { flex: 1; padding: 12px; border: 1.5px solid var(--borde); border-radius: 10px; background: transparent; color: #888; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; }
 .btn-confirm-ok { flex: 2; padding: 12px; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; color: #fff; }
@@ -237,6 +253,19 @@ input[type="checkbox"]{accent-color:#ef1015}
     <div class="confirm-icon" id="confirmIcon">⚠️</div>
     <div class="confirm-title" id="confirmTitle">¿Confirmar?</div>
     <div class="confirm-sub" id="confirmSub">Esta acción dará el remito como terminado.</div>
+    <div class="confirm-branch" id="confirmBranchField">
+      <label>Sucursal del pedido</label>
+      <div class="confirm-branch-options" id="confirmBranchSelect">
+        <label class="confirm-branch-option">
+          <input type="radio" name="confirmBranchOption" value="Suc. Progreso y Ruta">
+          <span><b>Progreso y Ruta</b><small>Pedido para sucursal Progreso</small></span>
+        </label>
+        <label class="confirm-branch-option">
+          <input type="radio" name="confirmBranchOption" value="Suc. Calle 5 y Espana">
+          <span><b>Calle 5 y España</b><small>Pedido para sucursal Calle 5</small></span>
+        </label>
+      </div>
+    </div>
     <div class="confirm-btns">
       <button class="btn-confirm-cancel" onclick="cerrarConfirm()">Cancelar</button>
       <button class="btn-confirm-ok" id="confirmOkBtn" onclick="ejecutarConfirm()">Confirmar</button>
@@ -299,6 +328,15 @@ const FIREBASE_CONFIG = {
 };
 if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
 const remitosDb = firebase.firestore();
+
+function usuarioMenuActual() {
+  const user = window.CorralonFunciones?.menuSessionUser?.();
+  if(!user?.id) return { id: '', nombre: '' };
+  return {
+    id: String(user.id || '').trim(),
+    nombre: String(user.nombre || user.usuario || user.id || '').trim()
+  };
+}
 
 // ── ESTADO ──────────────────────────────────────────────────────
 let items = [];
@@ -485,6 +523,9 @@ async function guardarNotificacionRemito(remito) {
       detalle: remito.detalle || remito.cliente || 'Proveedor',
       cliente: remito.cliente || '',
       fecha: remito.fecha || '',
+      sucursal: remito.sucursal || '',
+      usuario_id: remito.usuario_id || '',
+      usuario_nombre: remito.usuario_nombre || '',
       total: Number(remito.total || 0),
       resuelta: false,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1015,7 +1056,7 @@ function iniciarAutoRefreshNroRemito() {
 }
 
 // ── GUARDAR EN SUPABASE (remito + ítems) ─────────────────────────
-async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar) {
+async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar, sucursal = '', usuario = {}) {
   const nroShort = remitoShort(nro);
   // 1. Guardar remito
   const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos`, {
@@ -1026,9 +1067,19 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar)
       'Content-Type': 'application/json',
       'Prefer': 'return=representation'
     },
-    body: JSON.stringify({ nro: remitoFull(nroShort), cliente, fecha, total, link_pdf: linkPdf || null })
+    body: JSON.stringify({
+      nro: remitoFull(nroShort),
+      cliente,
+      fecha,
+      total,
+      link_pdf: linkPdf || null,
+      sucursal: sucursal || null,
+      usuario_id: usuario.id || null,
+      usuario_nombre: usuario.nombre || null
+    })
   });
   const data = await res.json();
+  if(!res.ok) throw new Error(data?.message || 'No se pudo guardar el remito');
   const remitoId = Array.isArray(data) && data[0] ? data[0].id : null;
 
   // 2. Guardar ítems si tenemos el id del remito
@@ -1056,7 +1107,7 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar)
 }
 
 // ── GENERAR PDF ──────────────────────────────────────────────────
-function generarPDFDoc(cliente, fecha, nro, total, itsOverride) {
+function generarPDFDoc(cliente, fecha, nro, total, itsOverride, sucursal = '') {
   const lista = (itsOverride || items).map(it => ({
     cantidad: Number(it.cant ?? it.cantidad) || 0,
     nombre: it.desc || it.nombre || it.descripcion || '',
@@ -1069,7 +1120,8 @@ function generarPDFDoc(cliente, fecha, nro, total, itsOverride) {
     total,
     items: lista,
     logoDataUrl: logoCacheData,
-    headerName: cliente || 'Proveedor'
+    headerName: cliente || 'Proveedor',
+    sucursal
   });
 }
 
@@ -1082,17 +1134,32 @@ function pedirConfirm(opts) {
   document.getElementById('confirmSub').textContent   = opts.sub   || 'Esta acción dará el remito como terminado.';
   document.getElementById('confirmOkBtn').style.background = opts.color || 'var(--violeta)';
   document.getElementById('confirmOkBtn').textContent = opts.btnTxt || 'Confirmar';
+  const branchField = document.getElementById('confirmBranchField');
+  const branchSelect = document.getElementById('confirmBranchSelect');
+  branchField.classList.toggle('open', Boolean(opts.seleccionarSucursal));
+  if(opts.seleccionarSucursal) branchSelect.querySelectorAll('input').forEach(input => { input.checked = false; });
   _confirmCallback = opts.callback;
   document.getElementById('confirmBg').classList.add('open');
+  if(opts.seleccionarSucursal) requestAnimationFrame(() => branchSelect.querySelector('input')?.focus());
 }
 function cerrarConfirm() {
   document.getElementById('confirmBg').classList.remove('open');
+  document.getElementById('confirmBranchField').classList.remove('open');
   _confirmCallback = null;
 }
 function ejecutarConfirm() {
+  const branchField = document.getElementById('confirmBranchField');
+  const sucursal = branchField.classList.contains('open')
+    ? document.querySelector('input[name="confirmBranchOption"]:checked')?.value || ''
+    : '';
+  if(branchField.classList.contains('open') && !sucursal) {
+    toast('⚠️ Elegí la sucursal del pedido');
+    document.querySelector('input[name="confirmBranchOption"]')?.focus();
+    return;
+  }
   const cb = _confirmCallback;
   cerrarConfirm();
-  if(cb) cb();
+  if(cb) cb(sucursal);
 }
 
 function avisarConfirmacionAntesDeImprimir() {
@@ -1155,7 +1222,7 @@ function escapeHtml(txt) {
 }
 
 function generarDocRemitoConfirmado(remito) {
-  return generarPDFDoc(remito.cliente, remito.fecha, remito.nro, remito.total, remito.items);
+  return generarPDFDoc(remito.cliente, remito.fecha, remito.nro, remito.total, remito.items, remito.sucursal);
 }
 
 function prepararRemitoDesdeFormulario() {
@@ -1179,6 +1246,8 @@ function abrirRemitoActions(remito) {
   info.innerHTML = `
     <strong>Remito:</strong> ${remitoFull(remito.nro)}<br>
     <strong>Proveedor:</strong> ${escapeHtml(remito.cliente)}<br>
+    <strong>Sucursal:</strong> ${escapeHtml(remito.sucursal || '—')}<br>
+    <strong>Usuario:</strong> ${escapeHtml(remito.usuario_nombre || remito.usuario_id || '—')}<br>
     <strong>Total:</strong> ${fmt(remito.total)}
   `;
   document.getElementById('remitoActionsBg').classList.add('open');
@@ -1188,13 +1257,35 @@ function cerrarRemitoActions() {
   document.getElementById('remitoActionsBg').classList.remove('open');
 }
 
-async function confirmarRemitoFinal() {
+async function confirmarRemitoFinal(sucursal = '') {
+  if(!sucursal) {
+    const remitoValido = prepararRemitoDesdeFormulario();
+    if(!remitoValido) return;
+    pedirConfirm({
+      icon: '📍',
+      titulo: 'Sucursal del pedido',
+      sub: 'Elegí la sucursal a la que corresponde este remito antes de confirmarlo.',
+      color: 'var(--rojo)',
+      btnTxt: 'Confirmar remito',
+      seleccionarSucursal: true,
+      callback: confirmarRemitoFinal
+    });
+    return;
+  }
   await refrescarNroRemitoSiCorresponde(true).catch(() => {});
   const remito = prepararRemitoDesdeFormulario();
   if(!remito) return;
+  const usuario = usuarioMenuActual();
+  if(!usuario.id) {
+    toast('⚠️ No pude identificar al usuario del menú. Volvé a ingresar.');
+    return;
+  }
+  remito.sucursal = sucursal;
+  remito.usuario_id = usuario.id;
+  remito.usuario_nombre = usuario.nombre;
   loading(true);
   try {
-    const remitoId = await guardarRemito(remito.nro, remito.cliente, remito.fecha, remito.total, null, remito.items);
+    const remitoId = await guardarRemito(remito.nro, remito.cliente, remito.fecha, remito.total, null, remito.items, remito.sucursal, usuario);
     remitoConfirmadoActual = { ...remito, id: remitoId };
     await guardarNotificacionRemito(remitoConfirmadoActual);
     clearRemitoDraft();
