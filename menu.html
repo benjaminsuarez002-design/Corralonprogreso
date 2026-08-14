@@ -755,6 +755,7 @@
     const MENU_ORDER_DB_NAME = 'corralon_menu_cache_v1';
     const MENU_ORDER_DB_VERSION = 1;
     const MENU_ORDER_STORE = 'menuOrdenes';
+    const PROVIDER_LIST_UPDATES_CHANNEL = 'corralon_provider_list_updates_v1';
     const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'carga_stock', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
     const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
     const loginBg = document.getElementById('loginBg');
@@ -794,6 +795,8 @@
     let staleProviderNotifications = [];
     let ignoredStaleProviderNotifications = new Map();
     let reviewActiveSection = 'general';
+    let providerListUpdatesChannel = null;
+    const processedProviderListUpdateEvents = new Set();
     let reviewModalSnapshot = null;
     let knownReviewIds = new Set();
     let knownHistorialIds = new Set();
@@ -1632,6 +1635,52 @@
       }
     }
 
+    async function resolveUpdatedProviderList(detail = {}) {
+      const eventId = String(detail.eventId || '').trim();
+      if (eventId && processedProviderListUpdateEvents.has(eventId)) return;
+      const providerId = String(detail.providerId || '').trim();
+      const target = staleProviderNotifications.find((item) => String(item.providerId || item.id) === providerId);
+      if (!target) return;
+      if (eventId) processedProviderListUpdateEvents.add(eventId);
+
+      staleProviderNotifications = staleProviderNotifications.filter((item) => String(item.providerId || item.id) !== providerId);
+      if (reviewModalSnapshot) reviewModalSnapshot = reviewModalSnapshot.filter((item) => !(item.kind === 'lista_proveedor' && String(item.providerId || item.id) === providerId));
+      renderReviewNotifications();
+      showReviewToast({ toastText: `Lista de ${target.detail} actualizada` });
+
+      try {
+        const docId = `lista_${providerId}_${Number(detail.sentAt || Date.now())}`;
+        await setDoc(doc(db, 'historialNotificaciones', docId), {
+          id: providerId,
+          tipo: 'pendiente_lista',
+          titulo: 'Actualizar lista',
+          detalle: target.detail,
+          fecha: todayIso(),
+          fechaListaAnterior: target.date || '',
+          fechaListaActual: String(detail.updatedAt || ''),
+          resuelta: true,
+          resolucion: 'lista_actualizada',
+          createdAt: serverTimestamp(),
+          resueltaAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        if (resolvedReviewModal.classList.contains('visible')) cargarNotificacionesResueltas();
+      } catch (error) {
+        console.warn('No se pudo guardar la lista actualizada en el historial', error);
+      }
+    }
+
+    function setupProviderListUpdatesListener() {
+      if (!providerListUpdatesChannel && 'BroadcastChannel' in window) {
+        providerListUpdatesChannel = new BroadcastChannel(PROVIDER_LIST_UPDATES_CHANNEL);
+        providerListUpdatesChannel.addEventListener('message', (event) => resolveUpdatedProviderList(event.data));
+      }
+      window.addEventListener('storage', (event) => {
+        if (event.key !== PROVIDER_LIST_UPDATES_CHANNEL || !event.newValue) return;
+        try { resolveUpdatedProviderList(JSON.parse(event.newValue)); } catch (_) {}
+      });
+    }
+
     function setupAliasObjectives() {
       if (!objectiveSummaryUnsubscribe) {
         objectiveSummaryUnsubscribe = onSnapshot(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()), (snap) => {
@@ -1910,7 +1959,7 @@
           .map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
           .filter((item) => notifDesdeHoy(item))
           .map((item) => {
-            const notif = { ...item, kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id || item.numero || item.firestoreId || ''), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id || ''}`.trim(), detail: item.detalle || '', date: item.fecha || '', resolvedAt: item.resueltaAt || null, createdAt: item.resueltaAt || item.createdAt, updatedAt: item.updatedAt };
+            const notif = { ...item, kind: item.tipo === 'pendiente_lista' ? 'lista_proveedor' : (item.tipo === 'pendiente' ? 'pendiente' : 'historial'), id: String(item.id || item.numero || item.firestoreId || ''), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id || ''}`.trim(), detail: item.detalle || '', date: item.fecha || '', resolvedAt: item.resueltaAt || null, createdAt: item.resueltaAt || item.createdAt, updatedAt: item.updatedAt };
             return { ...notif, title: notificationTitleFor(notif), detail: cleanNotificationDetail(notif) };
           });
         const resueltas = [...pedidos, ...historial].sort(notifResolvedSort);
@@ -2241,6 +2290,7 @@
     }
 
     async function inicializarMenu() {
+      setupProviderListUpdatesListener();
       loadDolarCards();
       if (!usuariosMenu.length && !cargarUsuariosMenuDesdeCache()) {
         usuariosMenu = usuariosDefault();

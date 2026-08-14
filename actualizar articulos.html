@@ -164,6 +164,7 @@
 const SUPABASE_URL='https://tizyjenayrcdkcodsjnc.supabase.co';
 const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const P_TABLE='proveedores', A_TABLE='lista_precios', DB='actualizar_articulos_v1', PROVIDERS_DB='proveedores_cache_v1';
+const PROVIDER_LIST_UPDATES_CHANNEL='corralon_provider_list_updates_v1';
 let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, paintedCount=0, selectionMode={type:null,cols:[]}, comboMatches=[], comboActive=0, tablePasteReady=false, contextArticle=null, calcArticle=null;
 const statusEl = document.getElementById('status');
 const syncProgress = document.getElementById('syncProgress');
@@ -261,6 +262,12 @@ async function deleteProviderArticles(id){const r=await fetch(`${SUPABASE_URL}/r
 async function insertArticles(data){for(let i=0;i<data.length;i+=1000){const chunk=data.slice(i,i+1000).map((a,n)=>({...a,idorden:Date.now()*1000+i+n,articulo_source:'actualizar_articulos'}));const r=await fetch(`${SUPABASE_URL}/rest/v1/${A_TABLE}?on_conflict=idorden`,{method:'POST',headers:h({Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(chunk)});if(!r.ok)throw new Error(await r.text())}}
 function currentProviderTimestamp(){return CorralonSystem.nowTimestamp ? CorralonSystem.nowTimestamp() : `${today()} ${new Date().toLocaleTimeString('es-AR',{hour12:false})}`}
 function applyProviderTimestamp(value){if(!provider)return null;provider.ultima_actualizacion=value;const stored=providers.find(p=>String(p.id_proveedor)===String(provider.id_proveedor));if(stored)stored.ultima_actualizacion=value;provDate.textContent=value;articles.forEach(article=>{article.ultima_actualizacion=value});return stored||provider}
+function notifyProviderListUpdated(updatedAt){
+  if(!provider)return;
+  const detail={eventId:`${provider.id_proveedor}_${Date.now()}`,providerId:String(provider.id_proveedor||''),providerName:String(provider.proveedor||''),updatedAt:String(updatedAt||''),sentAt:Date.now()};
+  try{if('BroadcastChannel'in window){const channel=new BroadcastChannel(PROVIDER_LIST_UPDATES_CHANNEL);channel.postMessage(detail);channel.close()}}catch(_){}
+  try{localStorage.setItem(PROVIDER_LIST_UPDATES_CHANNEL,JSON.stringify(detail))}catch(_){}
+}
 async function updateProviderDate(value=currentProviderTimestamp()){if(!provider)return;const updated=applyProviderTimestamp(value);await Promise.all([putStoreItem('providers',updated),CorralonSystem.updateProviderDateOnly(updated,value)])}
 async function syncProviderArticles(){
   await CorralonSystem.replaceProviderArticles(provider.id_proveedor,articles,(done,total)=>{
@@ -308,6 +315,7 @@ async function exportAndUpdate(){
     await syncProviderArticles();
     setSyncProgress(88);
     await updateProviderDate(stamp);
+    notifyProviderListUpdated(stamp);
     setSyncProgress(100);
   }catch(error){
     statusEl.textContent='XLS generado, pero fallo la sincronizacion.';
