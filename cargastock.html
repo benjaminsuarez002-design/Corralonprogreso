@@ -228,8 +228,9 @@
       <span id="totalRows">0 filas</span>
       <span>Doble clic en la esquina roja para pegar todo. Ctrl+Z deshace. Enter, Tab y flechas navegan. El copiado usa solo filas verdes.</span>
       <div class="foot-totals">
-        <span id="totalUnitario">Unitario: $ 0,00</span>
-        <span id="totalFinal">Final: $ 0,00</span>
+        <span id="totalUnitario">Bruto: $ 0,00</span>
+        <span id="totalFinal">Con dto. precio unit.: $ 0,00</span>
+        <span id="totalDescuentoSobreTotal">Dto. sobre total: $ 0,00</span>
       </div>
     </div>
   </section>
@@ -438,6 +439,7 @@ const el = {
   totalRows: document.getElementById('totalRows'),
   totalUnitario: document.getElementById('totalUnitario'),
   totalFinal: document.getElementById('totalFinal'),
+  totalDescuentoSobreTotal: document.getElementById('totalDescuentoSobreTotal'),
   copySummary: document.getElementById('copySummary'),
   tableContextMenu: document.getElementById('tableContextMenu'),
   providerContextMenu: document.getElementById('providerContextMenu'),
@@ -639,6 +641,10 @@ function calcPrecioFinal(row) {
 }
 function calcPrecioFinalCantidad(row) {
   return calcPrecioFinal(row) * (quantityNumber(row.cantidad) || 0);
+}
+function calcDescuentoSobreTotal(total) {
+  const descuentoTotal = Number(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0) || 0;
+  return total * (1 - descuentoTotal);
 }
 function calcPrecioFinalTotal(row) {
   const precio = Number(row.precio) || 0;
@@ -1401,8 +1407,9 @@ function render() {
   const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
   const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
   el.totalRows.textContent = `${rowsData.filter((row) => !isBlankStockRow(row)).length.toLocaleString('es-AR')} filas`;
-  el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
-  el.totalFinal.textContent = `Final: ${money(totalFinal)}`;
+  el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
+  el.totalFinal.textContent = `Con dto. precio unit.: ${money(totalFinal)}`;
+  el.totalDescuentoSobreTotal.textContent = `Dto. sobre total: ${money(calcDescuentoSobreTotal(totalUnitario))}`;
   el.copySummary.textContent = `${okCount.toLocaleString('es-AR')} listos para copiar`;
   applyTableSelectionMarks();
 }
@@ -1415,8 +1422,9 @@ function updateCalculatedCells() {
   });
   const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
   const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
-  el.totalUnitario.textContent = `Unitario: ${money(totalUnitario)}`;
-  el.totalFinal.textContent = `Final: ${money(totalFinal)}`;
+  el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
+  el.totalFinal.textContent = `Con dto. precio unit.: ${money(totalFinal)}`;
+  el.totalDescuentoSobreTotal.textContent = `Dto. sobre total: ${money(calcDescuentoSobreTotal(totalUnitario))}`;
 }
 async function pasteAll() {
   const text = await navigator.clipboard.readText();

@@ -128,7 +128,9 @@ try {
         throw "No pude comprobar los cambios seleccionados:`r`n$($staged.Output)"
     }
 
-    $changedFilesText = Run-Git -WorkingDirectory $uploadWorktree -Arguments (@('diff', '--cached', '--name-only', '--') + $fileNames)
+    # Sin esto Git escapa nombres Unicode (por ejemplo, garantias con tilde)
+    # como "garant\303\255as.html" y Windows lo interpreta como una ruta invalida.
+    $changedFilesText = Run-Git -WorkingDirectory $uploadWorktree -Arguments (@('-c', 'core.quotepath=false', 'diff', '--cached', '--name-only', '--') + $fileNames)
     $changedFiles = @($changedFilesText.Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if (-not $changedFiles.Count) {
         Show-Message -Text 'Los archivos elegidos no tienen cambios para subir.'
