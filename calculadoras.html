@@ -262,7 +262,7 @@
     .clear-price-btn:hover{background:#fff1f1}
     input[type="checkbox"]{accent-color:#ef1015}
   </style>
-<script src="corralon-system.js?v=20260812-cache-idb1"></script>
+<script src="corralon-system.js?v=20260814-provider-editor1"></script>
   <script src="funciones.js"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="calculadoras"></script>
@@ -456,7 +456,8 @@
       <div class="provider-modal-grid">
         <label>IDProveedor</label><input id="modalProviderId" readonly>
         <label>Proveedor</label><input id="modalProviderName" readonly>
-        <label>Desc. factura</label><input id="modalDiscountInvoice" readonly>
+        <label>Dto. precio unit.</label><input id="modalDiscountInvoice" readonly>
+        <label>Dto. sobre total</label><input id="modalDiscountFinalInvoice" readonly>
         <label>Desc. lista</label><input id="modalDiscountList" readonly>
         <label>Ultima act.</label><input id="modalDate" readonly>
         <label>Vendedor</label><input id="modalSeller" readonly>
@@ -476,6 +477,10 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const providerEditorLayout = CorralonSystem.providerEditor.apply({
+      root:'#providerModal .provider-modal',grid:'.provider-modal-grid',
+      fields:{id:'#modalProviderId',name:'#modalProviderName',seller:'#modalSeller',phone:'#modalPhone',page:'#modalPageLink',date:'#modalDate',invoice:'#modalDiscountInvoice',final:'#modalDiscountFinalInvoice',list:'#modalDiscountList',freight:'#modalFreight',iva:'#modalIva',ivaIncluded:'#modalIvaIncluded',note:'#modalNote'}
+    });
 
     function parseEsNumber(value) {
       if (window.CorralonFunciones?.evaluateNumericExpression) {
@@ -582,7 +587,7 @@
       document.querySelectorAll('.provider-extra').forEach((el) => {
         el.classList.toggle('provider-hidden', !enabled);
       });
-      $('dto1Label').textContent = enabled ? 'Porcentaje de descuento' : 'Descuento 1';
+      $('dto1Label').textContent = enabled ? 'Dto. precio unit.' : 'Descuento 1';
       if (enabled) {
         $('dto2').value = '0,00%';
         $('dto3').value = '0,00%';
@@ -702,6 +707,7 @@
       $('modalProviderId').value = provider.id_proveedor || '';
       $('modalProviderName').value = provider.proveedor || '';
       $('modalDiscountInvoice').value = percentDisplay(provider.descuento_factura);
+      $('modalDiscountFinalInvoice').value = percentDisplay(provider.descuento_total_fc ?? provider.descuento_final_factura ?? 0);
       $('modalDiscountList').value = percentDisplay(provider.descuento_lista);
       $('modalDate').value = provider.ultima_actualizacion || '';
       $('modalSeller').value = provider.vendedor || '';
@@ -711,6 +717,7 @@
       $('modalIva').value = percentDisplay(provider.porc_iva);
       $('modalIvaIncluded').checked = boolInput(provider.iva_incluido);
       $('modalNote').value = provider.nota || '';
+      providerEditorLayout?.setIdentity(provider.proveedor, provider.id_proveedor);
       $('providerModal').classList.add('visible');
     }
 
@@ -720,7 +727,7 @@
     }
 
     function setProviderModalEditing(enabled) {
-      ['modalProviderName','modalDiscountInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
+      ['modalProviderName','modalDiscountInvoice','modalDiscountFinalInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
         const field = $(id);
         if (field) field.readOnly = !enabled;
       });
@@ -737,6 +744,7 @@
         id_proveedor: String(id).trim(),
         proveedor: String($('modalProviderName').value).trim(),
         descuento_factura: parsePercentField('modalDiscountInvoice'),
+        descuento_total_fc: parsePercentField('modalDiscountFinalInvoice'),
         descuento_lista: parsePercentField('modalDiscountList'),
         ultima_actualizacion: $('modalDate').value || null,
         vendedor: String($('modalSeller').value).trim(),
@@ -781,7 +789,7 @@
       });
       CorralonFunciones.bindLiveLocaleNumber?.({
         root,
-        selector: '#modalDiscountInvoice, #modalDiscountList, #modalFreight, #modalIva',
+        selector: '#modalDiscountInvoice, #modalDiscountFinalInvoice, #modalDiscountList, #modalFreight, #modalIva',
         decimals: 2,
         suffix: '%'
       });

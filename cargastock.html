@@ -7,7 +7,7 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=20260812-cache-idb1"></script>
+<script src="corralon-system.js?v=20260814-provider-editor1"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -195,10 +195,10 @@
         <div class="combo-list" id="providerList"></div>
       </div>
     </label>
-    <label>Desc. factura
+    <label>Dto. precio unit.
       <input id="providerInvoiceDiscount" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
     </label>
-    <label>Desc. final factura
+    <label>Dto. sobre total
       <input id="providerFinalInvoiceDiscount" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
     </label>
     <label>Flete
@@ -283,8 +283,8 @@
     <div class="provider-modal-grid">
       <label>IDProveedor</label><input id="modalProviderId" readonly>
       <label>Proveedor</label><input id="modalProviderName" readonly>
-      <label>Desc. factura</label><input id="modalDiscountInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
-      <label>Desc. final factura</label><input id="modalDiscountFinalInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
+      <label>Dto. precio unit.</label><input id="modalDiscountInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
+      <label>Dto. sobre total</label><input id="modalDiscountFinalInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
       <label>Desc. lista</label><input id="modalDiscountList" class="provider-percent-live" type="text" inputmode="decimal" readonly>
       <label>Ultima act.</label><input id="modalDate" readonly>
       <label>Vendedor</label><input id="modalSeller" readonly>
@@ -459,6 +459,11 @@ const el = {
   articleProviderMenu: document.getElementById('articleProviderMenu'),
   toast: document.getElementById('toast')
 };
+
+const providerEditorLayout = CorralonSystem.providerEditor.apply({
+  root:'#providerModal .provider-modal',grid:'.provider-modal-grid',
+  fields:{id:'#modalProviderId',name:'#modalProviderName',seller:'#modalSeller',phone:'#modalPhone',page:'#modalPageLink',date:'#modalDate',invoice:'#modalDiscountInvoice',final:'#modalDiscountFinalInvoice',list:'#modalDiscountList',freight:'#modalFreight',iva:'#modalIva',ivaIncluded:'#modalIvaIncluded',note:'#modalNote'}
+});
 
 function norm(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
@@ -868,11 +873,11 @@ async function applyPricesToAccess() {
 }
 function providerModalRows() {
   const ids = [
-    ['modalProviderId', 'modalProviderName'],
-    ['modalDiscountInvoice', 'modalDiscountFinalInvoice'],
-    ['modalDiscountList', 'modalDate'],
+    ['modalProviderName', 'modalProviderId'],
     ['modalSeller', 'modalPhone'],
-    ['modalPageLink', 'modalFreight'],
+    ['modalPageLink', 'modalDate'],
+    ['modalDiscountInvoice', 'modalDiscountFinalInvoice'],
+    ['modalDiscountList', 'modalFreight'],
     ['modalIva', 'modalIvaIncluded'],
     ['modalNote'],
     ['deleteProviderModalBtn', 'saveProviderModalBtn', 'closeProviderModalActionBtn']
@@ -1012,6 +1017,7 @@ function openProviderModal() {
   modalValue('modalIva').value = percent(current.porc_iva);
   modalValue('modalIvaIncluded').checked = boolInput(current.iva_incluido);
   modalValue('modalNote').value = current.nota || '';
+  providerEditorLayout?.setIdentity(current.proveedor, current.id_proveedor);
   modalValue('providerModal').classList.add('visible');
   requestAnimationFrame(() => focusProviderModalControl(modalValue('modalProviderId')));
 }
@@ -1427,12 +1433,16 @@ async function pasteAll() {
 }
 async function copyGreen() {
   const greenRows = rowsData.filter(isGreen);
-  const rows = greenRows.map((row) => [row.codigo, quantityNumber(row.cantidad)]);
+  const rows = greenRows.map((row) => `CODPROV=${String(row.codigo || '').trim()}\tCANTIDAD=${quantityNumber(row.cantidad)}`);
   if (!greenRows.length) {
     show('No hay filas verdes para copiar');
     return;
   }
-  const text = FX.formatClipboardTable ? FX.formatClipboardTable(rows) : rows.map((row) => row.join('\t')).join('\n');
+  const text = [
+    'CORRALON_IMPORT_V1',
+    'MODO=CODPROV',
+    ...rows
+  ].join('\n');
   await navigator.clipboard.writeText(text);
   const duplicateCodes = [...new Map(
     greenRows

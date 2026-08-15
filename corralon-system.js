@@ -5236,6 +5236,161 @@
     };
   })();
 
+  function applyProviderEditorLayout(options = {}) {
+    const resolve = (value, scope = document) => typeof value === 'string' ? scope.querySelector(value) : value;
+    const root = resolve(options.root);
+    if (!root) return null;
+    const modal = resolve(options.modal, root) || (root.matches('.modal,.provider-modal,form') ? root : root.querySelector('.modal,.provider-modal,form'));
+    const grid = resolve(options.grid, modal || root) || (modal || root).querySelector('.modal-grid,.provider-edit-grid,.provider-modal-grid');
+    if (!modal || !grid) return null;
+
+    if (!document.getElementById('corralon-provider-editor-style')) {
+      const style = document.createElement('style');
+      style.id = 'corralon-provider-editor-style';
+      style.textContent = `
+        .corralon-provider-editor{width:min(94vw,920px)!important;max-height:min(94vh,760px)!important;background:#fff!important;border:1px solid #d9d9d6!important;border-radius:18px!important;box-shadow:0 24px 70px rgba(20,20,20,.28)!important;overflow:auto!important}
+        .corralon-provider-editor .corralon-provider-editor-head{padding:12px 18px!important;min-height:58px!important;background:#fff!important;border-bottom:1px solid #e3e3df!important;display:flex!important;align-items:center!important;gap:10px!important}
+        .corralon-provider-editor-head .corralon-provider-head-copy{display:flex;flex-direction:column;gap:1px;min-width:0;margin-right:auto}
+        .corralon-provider-editor-head .corralon-provider-head-copy>span:first-child{font:900 25px/1 'Barlow Condensed',sans-serif!important;color:#171717!important}
+        .corralon-provider-editor-head .corralon-provider-editor-subtitle{font:700 12px/1.2 Barlow,sans-serif;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .corralon-provider-editor .corralon-provider-editor-grid{display:flex!important;flex-direction:column!important;gap:8px!important;padding:10px 18px!important}
+        .corralon-provider-section{border:1px solid #e2e2de;border-radius:11px;padding:8px 10px;background:#fff}
+        .corralon-provider-section-title{margin:0 0 6px;font:900 13px/1 'Barlow Condensed',sans-serif;letter-spacing:.05em;color:#191919;text-transform:uppercase}
+        .corralon-provider-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px}
+        .corralon-provider-field{display:grid;grid-template-columns:128px minmax(0,1fr);align-items:center;gap:7px;min-width:0}
+        .corralon-provider-field>label{margin:0!important;font:800 13px/1.1 'Barlow Condensed',sans-serif!important;color:#666!important;align-self:center!important}
+        .corralon-provider-field>input,.corralon-provider-field>textarea,.corralon-provider-field>select{width:100%!important;min-width:0!important;height:32px!important;margin:0!important;padding:4px 8px!important;border:1px solid #c9c9c5!important;border-radius:7px!important;background:#fff!important;color:#171717!important;box-shadow:none!important}
+        .corralon-provider-field>input:focus,.corralon-provider-field>textarea:focus,.corralon-provider-field>select:focus{border-color:#ef1015!important;box-shadow:0 0 0 2px rgba(239,16,21,.12)!important;outline:0!important}
+        .corralon-provider-field.is-check{grid-template-columns:128px 1fr}
+        .corralon-provider-field.is-check>input{width:18px!important;height:18px!important;justify-self:start}
+        .corralon-provider-section.is-notes{background:#fffaf0;border-color:#eadbb8}
+        .corralon-provider-section.is-notes .corralon-provider-fields{display:block}
+        .corralon-provider-field.is-note{display:block}
+        .corralon-provider-field.is-note>label{display:none}
+        .corralon-provider-field.is-note>textarea{height:72px!important;min-height:72px!important;resize:vertical!important;background:#fffdf8!important}
+        .corralon-provider-note-help{margin-top:4px;font:600 11px/1.2 Barlow,sans-serif;color:#8a7652}
+        .corralon-provider-editor .corralon-provider-editor-actions{display:flex!important;justify-content:flex-end!important;align-items:center!important;gap:8px!important;padding:9px 18px 11px!important;border-top:1px solid #e3e3df!important;background:#fff!important}
+        .corralon-provider-editor-actions .danger,.corralon-provider-editor-actions [id*="delete" i]{margin-right:auto!important}
+        .corralon-provider-editor-actions button{min-height:34px!important;padding:6px 16px!important;border-radius:8px!important}
+        @media(max-width:700px){.corralon-provider-editor{width:96vw!important}.corralon-provider-fields{grid-template-columns:1fr}.corralon-provider-field{grid-template-columns:118px minmax(0,1fr)}.corralon-provider-editor .corralon-provider-editor-grid{padding:8px!important}.corralon-provider-editor .corralon-provider-editor-actions{padding:8px!important}}
+      `;
+      document.head.appendChild(style);
+    }
+
+    modal.classList.add('corralon-provider-editor');
+    grid.classList.add('corralon-provider-editor-grid');
+    const head = modal.querySelector('.modal-head,.provider-modal-head');
+    const actions = modal.querySelector('.modal-actions,.provider-modal-actions');
+    if (head) {
+      head.classList.add('corralon-provider-editor-head');
+      let copy = head.querySelector('.corralon-provider-head-copy');
+      if (!copy) {
+        copy = document.createElement('div');
+        copy.className = 'corralon-provider-head-copy';
+        [...head.children].filter((node) => node.tagName !== 'BUTTON').forEach((node) => copy.appendChild(node));
+        head.prepend(copy);
+      }
+      if (!copy.querySelector('.corralon-provider-editor-subtitle')) {
+        const subtitle = document.createElement('small');
+        subtitle.className = 'corralon-provider-editor-subtitle';
+        copy.appendChild(subtitle);
+      }
+    }
+    actions?.classList.add('corralon-provider-editor-actions');
+
+    const labels = {
+      id: 'IDProveedor', name: 'Proveedor', seller: 'Vendedor', phone: 'Teléfono', page: 'Página web', date: 'Última actualización',
+      invoice: 'Dto. precio unit.', final: 'Dto. sobre total', list: 'Dto. lista', freight: 'Porc. flete', iva: 'Porc. IVA',
+      ivaIncluded: 'IVA incluido en lista', note: 'Nota'
+    };
+    const fieldGroups = {
+      general: ['name', 'id', 'seller', 'phone', 'page', 'date'],
+      commercial: ['invoice', 'final', 'list', 'freight', 'iva', 'ivaIncluded'],
+      notes: ['note']
+    };
+    const fields = options.fields || {};
+    const makeField = (key) => {
+      const control = resolve(fields[key], modal);
+      if (!control) return null;
+      let label = control.id ? modal.querySelector(`label[for="${CSS.escape(control.id)}"]`) : null;
+      if (!label && control.previousElementSibling?.tagName === 'LABEL') label = control.previousElementSibling;
+      const wrap = document.createElement('div');
+      wrap.className = `corralon-provider-field${key === 'ivaIncluded' ? ' is-check' : ''}${key === 'note' ? ' is-note' : ''}`;
+      if (label) {
+        label.textContent = labels[key] || label.textContent;
+        if (control.id) label.htmlFor = control.id;
+        wrap.appendChild(label);
+      }
+      wrap.appendChild(control);
+      return wrap;
+    };
+    const sectionData = [
+      ['general', 'Datos del proveedor'],
+      ['commercial', 'Condiciones comerciales'],
+      ['notes', 'Notas y forma de trabajo']
+    ];
+    if (!grid.dataset.corralonProviderLayout) {
+      const used = new Set();
+      sectionData.forEach(([groupKey, title]) => {
+        const section = document.createElement('section');
+        section.className = `corralon-provider-section${groupKey === 'notes' ? ' is-notes' : ''}`;
+        const heading = document.createElement('h3');
+        heading.className = 'corralon-provider-section-title';
+        heading.textContent = title;
+        const body = document.createElement('div');
+        body.className = 'corralon-provider-fields';
+        fieldGroups[groupKey].forEach((key) => {
+          const field = makeField(key);
+          if (field) { body.appendChild(field); used.add(field.querySelector('input,textarea,select')); }
+        });
+        if (!body.children.length) return;
+        section.append(heading, body);
+        if (groupKey === 'notes') {
+          const help = document.createElement('div');
+          help.className = 'corralon-provider-note-help';
+          help.textContent = 'Condiciones, bonificaciones y observaciones operativas del proveedor.';
+          section.appendChild(help);
+        }
+        grid.appendChild(section);
+      });
+      grid.dataset.corralonProviderLayout = '1';
+    }
+    if (!modal.dataset.corralonProviderTabOrder) {
+      modal.dataset.corralonProviderTabOrder = '1';
+      modal.addEventListener('keydown', (event) => {
+        if (event.key !== 'Tab' || event.ctrlKey || event.altKey || event.metaKey) return;
+        const orderedKeys = [...fieldGroups.general, ...fieldGroups.commercial, ...fieldGroups.notes];
+        const controls = orderedKeys.map((key) => resolve(fields[key], modal));
+        const footerButtons = [...(actions?.querySelectorAll('button,[href],[tabindex]') || [])];
+        const headerButtons = [...(head?.querySelectorAll('button,[href],[tabindex]') || [])];
+        const isAvailable = (control) => {
+          if (!control || control.disabled || control.hidden || control.tabIndex < 0) return false;
+          if (control.closest('.hidden,.provider-hidden,[hidden]')) return false;
+          const style = getComputedStyle(control);
+          return style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const order = [...controls, ...footerButtons, ...headerButtons].filter(isAvailable);
+        if (!order.length) return;
+        const current = order.indexOf(document.activeElement);
+        const nextIndex = current < 0
+          ? (event.shiftKey ? order.length - 1 : 0)
+          : (current + (event.shiftKey ? -1 : 1) + order.length) % order.length;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const next = order[nextIndex];
+        next.focus({ preventScroll: true });
+        if (next.matches('input:not([type="checkbox"]),textarea')) next.select?.();
+      }, true);
+    }
+    const subtitle = head?.querySelector('.corralon-provider-editor-subtitle');
+    return {
+      setIdentity(name, id, isNew = false) {
+        if (!subtitle) return;
+        subtitle.textContent = isNew ? 'Alta de nuevo proveedor' : [name, id ? `ID ${id}` : ''].filter(Boolean).join(' · ');
+      }
+    };
+  }
+
   window.CorralonSystem = {
     SUPABASE_URL,
     SUPABASE_KEY,
@@ -5280,6 +5435,9 @@
     setImageGeneratorPayload,
     readImageGeneratorPayload,
     openImageGenerator,
+    providerEditor: {
+      apply: applyProviderEditorLayout
+    },
     articleEditor: {
       configure: configureArticleEditor,
       open: openArticleEditor,

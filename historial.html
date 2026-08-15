@@ -1354,11 +1354,21 @@ async function copiarContenidoDetalle() {
   const items = _detalleTipoActual === 'remito'
     ? (Array.isArray(_remitoDetalleActual?.items) ? _remitoDetalleActual.items : [])
     : (Array.isArray(_presupuestoDetalleActual?.items) ? _presupuestoDetalleActual.items : []);
-  const texto = items.map((it) => {
+  const movimiento = _detalleTipoActual === 'remito'
+    ? _remitoDetalleActual
+    : _presupuestoDetalleActual;
+  const numeroFactura = String(movimiento?.numero || document.getElementById('detalleNro')?.textContent || '').trim();
+  const lineas = items.map((it) => {
     const idart = it.idart || it.idArt || it.codigo || '';
     const cantidad = fmtCantidad(it.cantidad ?? it.cant);
-    return [idart, cantidad].join('\t');
-  }).join('\n');
+    return `IDART=${idart}\tCANTIDAD=${cantidad}`;
+  });
+  const texto = [
+    'CORRALON_IMPORT_V1',
+    'MODO=IDART',
+    `NROFACTURA=${numeroFactura}`,
+    ...lineas
+  ].join('\n');
   if (!texto.trim()) { toast('No hay datos para copiar'); return; }
   try {
     await navigator.clipboard.writeText(texto);
