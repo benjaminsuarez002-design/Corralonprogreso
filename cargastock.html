@@ -198,8 +198,11 @@
     <label>Dto. precio unit.
       <input id="providerInvoiceDiscount" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
     </label>
-    <label>Dto. sobre total
+    <label>Dto. pronto pago
       <input id="providerFinalInvoiceDiscount" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
+    </label>
+    <label>Dto. factura
+      <input id="providerPrintedInvoiceDiscount" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
     </label>
     <label>Flete
       <input id="providerFreight" class="provider-percent-live" type="text" inputmode="decimal" data-format="percent" value="0,00 %">
@@ -229,8 +232,8 @@
       <span>Doble clic en la esquina roja para pegar todo. Ctrl+Z deshace. Enter, Tab y flechas navegan. El copiado usa solo filas verdes.</span>
       <div class="foot-totals">
         <span id="totalUnitario">Bruto: $ 0,00</span>
-        <span id="totalFinal">Con dto. precio unit.: $ 0,00</span>
-        <span id="totalDescuentoSobreTotal">Dto. sobre total: $ 0,00</span>
+        <span id="totalDescuentoSobreTotal">Subtotal factura: $ 0,00</span>
+        <span id="totalFinal">Costo final: $ 0,00</span>
       </div>
     </div>
   </section>
@@ -285,7 +288,7 @@
       <label>IDProveedor</label><input id="modalProviderId" readonly>
       <label>Proveedor</label><input id="modalProviderName" readonly>
       <label>Dto. precio unit.</label><input id="modalDiscountInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
-      <label>Dto. sobre total</label><input id="modalDiscountFinalInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
+      <label>Dto. pronto pago</label><input id="modalDiscountFinalInvoice" class="provider-percent-live" type="text" inputmode="decimal" readonly>
       <label>Desc. lista</label><input id="modalDiscountList" class="provider-percent-live" type="text" inputmode="decimal" readonly>
       <label>Ultima act.</label><input id="modalDate" readonly>
       <label>Vendedor</label><input id="modalSeller" readonly>
@@ -431,6 +434,7 @@ const el = {
   providerList: document.getElementById('providerList'),
   providerInvoiceDiscount: document.getElementById('providerInvoiceDiscount'),
   providerFinalInvoiceDiscount: document.getElementById('providerFinalInvoiceDiscount'),
+  providerPrintedInvoiceDiscount: document.getElementById('providerPrintedInvoiceDiscount'),
   providerFreight: document.getElementById('providerFreight'),
   providerIvaIncluded: document.getElementById('providerIvaIncluded'),
   providerIva: document.getElementById('providerIva'),
@@ -630,21 +634,34 @@ function isGreen(row) {
 }
 function calcPrecioFinal(row) {
   const precio = Number(row.precio) || 0;
-  const descuento = Number(row.descuento ?? providerDiscountValue()) || 0;
+  const descuentoUnitario = providerDiscountValue();
+  const descuentoAdicional = Number(row.descuentoAdicional || 0) || 0;
+  const descuentoProntoPago = Number(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0) || 0;
   const flete = Number(provider?.porc_flete || 0) || 0;
   const iva = Number(provider?.porc_iva || 0) || 0;
   const ivaIncluido = boolInput(provider?.iva_incluido);
-  let base = precio * (1 - descuento) * (1 + flete);
-  base *= (1 - (Number(row.descuentoAdicional || 0) || 0));
-  base = ivaIncluido ? (base / (1 + iva)) : (base * (1 + iva));
+  let base = precio;
+  if (descuentoAdicional > 0) {
+    base *= (1 - descuentoAdicional) * (1 - descuentoProntoPago);
+  } else {
+    base *= (1 - descuentoUnitario);
+  }
+  base *= (1 + flete);
+  if (ivaIncluido && iva > 0) base /= (1 + iva);
   return base;
 }
 function calcPrecioFinalCantidad(row) {
   return calcPrecioFinal(row) * (quantityNumber(row.cantidad) || 0);
 }
-function calcDescuentoSobreTotal(total) {
-  const descuentoTotal = Number(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0) || 0;
-  return total * (1 - descuentoTotal);
+function calcSubtotalFactura() {
+  const descuentoFactura = Number(provider?.descuento_factura_impreso || 0) || 0;
+  return rowsData.reduce((sum, row) => {
+    const precio = Number(row.precio) || 0;
+    const cantidad = quantityNumber(row.cantidad) || 0;
+    const descuentoAdicional = Number(row.descuentoAdicional || 0) || 0;
+    const descuentoAplicable = descuentoAdicional > 0 ? descuentoAdicional : descuentoFactura;
+    return sum + (precio * cantidad * (1 - descuentoAplicable));
+  }, 0);
 }
 function calcPrecioFinalTotal(row) {
   const precio = Number(row.precio) || 0;
@@ -665,6 +682,7 @@ function boolInput(value) {
 function renderProviderInfo() {
   el.providerInvoiceDiscount.value = percent(provider?.descuento_factura || 0);
   el.providerFinalInvoiceDiscount.value = percent(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0);
+  el.providerPrintedInvoiceDiscount.value = percent(provider?.descuento_factura_impreso || 0);
   el.providerFreight.value = percent(provider?.porc_flete || 0);
   el.providerIvaIncluded.checked = boolInput(provider?.iva_incluido);
   el.providerIva.value = percent(provider?.porc_iva || 0);
@@ -674,6 +692,7 @@ function updateProviderOverrides() {
   if (!provider) provider = {};
   provider.descuento_factura = parsePercent(el.providerInvoiceDiscount.value);
   provider.descuento_total_fc = parsePercent(el.providerFinalInvoiceDiscount.value);
+  provider.descuento_factura_impreso = parsePercent(el.providerPrintedInvoiceDiscount.value);
   provider.porc_flete = parsePercent(el.providerFreight.value);
   provider.iva_incluido = el.providerIvaIncluded.checked;
   provider.porc_iva = parsePercent(el.providerIva.value);
@@ -1125,6 +1144,7 @@ function navigationFields() {
     el.providerInput,
     el.providerInvoiceDiscount,
     el.providerFinalInvoiceDiscount,
+    el.providerPrintedInvoiceDiscount,
     el.providerFreight,
     el.providerIvaIncluded,
     el.providerIva,
@@ -1206,7 +1226,7 @@ function focusNavigationTarget(target) {
   return true;
 }
 function toolbarFieldPointerDown(event) {
-  const field = event.target.closest('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva');
+  const field = event.target.closest('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerPrintedInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva');
   if (!field) return;
   if (field === el.providerInput) {
     if (activeToolbarField === el.providerInput) {
@@ -1271,7 +1291,7 @@ function moveTableToEdge(cell, key) {
 }
 function handleRuleNavigation(event) {
   if (event.defaultPrevented || event.altKey || event.metaKey) return;
-  const target = event.target?.closest?.('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva,#copyBtn,[data-field][data-row][data-col]');
+  const target = event.target?.closest?.('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerPrintedInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva,#copyBtn,[data-field][data-row][data-col]');
   if (!target) return;
   const key = event.key;
   if (event.ctrlKey) {
@@ -1408,8 +1428,8 @@ function render() {
   const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
   el.totalRows.textContent = `${rowsData.filter((row) => !isBlankStockRow(row)).length.toLocaleString('es-AR')} filas`;
   el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
-  el.totalFinal.textContent = `Con dto. precio unit.: ${money(totalFinal)}`;
-  el.totalDescuentoSobreTotal.textContent = `Dto. sobre total: ${money(calcDescuentoSobreTotal(totalUnitario))}`;
+  el.totalFinal.textContent = `Costo final: ${money(totalFinal)}`;
+  el.totalDescuentoSobreTotal.textContent = `Subtotal factura: ${money(calcSubtotalFactura())}`;
   el.copySummary.textContent = `${okCount.toLocaleString('es-AR')} listos para copiar`;
   applyTableSelectionMarks();
 }
@@ -1423,8 +1443,8 @@ function updateCalculatedCells() {
   const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
   const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
   el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
-  el.totalFinal.textContent = `Con dto. precio unit.: ${money(totalFinal)}`;
-  el.totalDescuentoSobreTotal.textContent = `Dto. sobre total: ${money(calcDescuentoSobreTotal(totalUnitario))}`;
+  el.totalFinal.textContent = `Costo final: ${money(totalFinal)}`;
+  el.totalDescuentoSobreTotal.textContent = `Subtotal factura: ${money(calcSubtotalFactura())}`;
 }
 async function pasteAll() {
   const text = await navigator.clipboard.readText();
@@ -2630,7 +2650,7 @@ el.providerList.addEventListener('mousedown', (event) => {
 document.addEventListener('mousedown', (event) => {
   if (!event.target.closest('#providerCombo')) closeProviderList();
 }, true);
-[el.providerInvoiceDiscount, el.providerFinalInvoiceDiscount, el.providerFreight, el.providerIva].forEach((input) => {
+[el.providerInvoiceDiscount, el.providerFinalInvoiceDiscount, el.providerPrintedInvoiceDiscount, el.providerFreight, el.providerIva].forEach((input) => {
   input.addEventListener('input', () => { input.dataset.fullSelected = '0'; });
   input.addEventListener('focus', () => {
     input.value = rawNumber(moneyNumber(input.value));

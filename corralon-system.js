@@ -5300,7 +5300,7 @@
 
     const labels = {
       id: 'IDProveedor', name: 'Proveedor', seller: 'Vendedor', phone: 'Teléfono', page: 'Página web', date: 'Última actualización',
-      invoice: 'Dto. precio unit.', final: 'Dto. sobre total', list: 'Dto. lista', freight: 'Porc. flete', iva: 'Porc. IVA',
+      invoice: 'Dto. precio unit.', final: 'Dto. pronto pago', list: 'Dto. lista', freight: 'Porc. flete', iva: 'Porc. IVA',
       ivaIncluded: 'IVA incluido en lista', note: 'Nota'
     };
     const fieldGroups = {
