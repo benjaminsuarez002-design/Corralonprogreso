@@ -2155,6 +2155,191 @@
     return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
+  const NUMERIC_CALCULATOR = (() => {
+    let ui = null;
+    let state = null;
+
+    function factor(value) {
+      const parsed = parseFlexibleNumber(value);
+      return Number.isFinite(parsed) && parsed !== 0 ? parsed : 1;
+    }
+
+    function calculate(value, divideBy, multiplyBy) {
+      return Number(value || 0) / factor(divideBy) * factor(multiplyBy);
+    }
+
+    function ensureUi() {
+      if (ui?.backdrop?.isConnected) return ui;
+      if (!document.getElementById('corralonNumericCalculatorStyles')) {
+        const style = document.createElement('style');
+        style.id = 'corralonNumericCalculatorStyles';
+        style.textContent = `
+          .corralon-number-calc-backdrop{position:fixed;inset:0;z-index:10050;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(18,24,38,.58)}
+          .corralon-number-calc-backdrop.is-visible{display:flex}
+          .corralon-number-calc-modal{width:min(94vw,680px);background:#fff;border:2px solid #bde4ff;border-radius:18px;padding:26px;box-shadow:0 20px 50px rgba(16,32,59,.35);color:#172033}
+          .corralon-number-calc-title{margin:0 0 18px;font:900 42px 'Barlow Condensed',Arial,sans-serif;color:#6557dd}
+          .corralon-number-calc-grid{display:grid;grid-template-columns:240px minmax(0,1fr);border:1px solid #9bcfff}
+          .corralon-number-calc-label,.corralon-number-calc-field{min-height:48px;border-bottom:1px solid #d9edff;padding:8px 12px;font:700 25px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-number-calc-label{display:flex;align-items:center;background:#eef8ff;color:#6d7190;cursor:pointer}
+          .corralon-number-calc-field{padding:0}
+          .corralon-number-calc-grid>:nth-last-child(-n+2){border-bottom:0}
+          .corralon-number-calc-field input{box-sizing:border-box;width:100%;height:100%;min-height:48px;border:0;border-radius:0;padding:0 12px;text-align:right;box-shadow:none;font:700 25px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-number-calc-field input:focus{outline:0;box-shadow:inset 0 0 0 2px #7d6cff}
+          .corralon-number-calc-field input[readonly]{font-weight:900;background:#fff;color:#172033}
+          .corralon-number-calc-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:18px}
+          .corralon-number-calc-actions button{min-height:48px;padding:8px 18px;border:1px solid #c8d2e4;border-radius:10px;background:#fff;color:#172033;font:800 19px 'Barlow Condensed',Arial,sans-serif;cursor:pointer}
+          .corralon-number-calc-actions button[data-number-calc-apply]{border-color:#7062f0;background:linear-gradient(180deg,#a9dfff,#7062f0);color:#fff}
+          @media(max-width:620px){.corralon-number-calc-modal{padding:18px}.corralon-number-calc-title{font-size:32px}.corralon-number-calc-grid{grid-template-columns:1fr}.corralon-number-calc-label{min-height:34px;border-bottom:0}.corralon-number-calc-actions{flex-wrap:wrap}.corralon-number-calc-actions button{flex:1 1 130px}}
+        `;
+        document.head.appendChild(style);
+      }
+      const backdrop = document.createElement('div');
+      backdrop.className = 'corralon-number-calc-backdrop';
+      backdrop.innerHTML = `
+        <div class="corralon-number-calc-modal" role="dialog" aria-modal="true" aria-labelledby="corralonNumberCalcTitle">
+          <h2 class="corralon-number-calc-title" id="corralonNumberCalcTitle">Dividir / multiplicar</h2>
+          <div class="corralon-number-calc-grid">
+            <label class="corralon-number-calc-label" data-number-calc-label="original">Valor inicial</label>
+            <div class="corralon-number-calc-field"><input data-number-calc-original readonly></div>
+            <label class="corralon-number-calc-label" data-number-calc-label="divide">Dividir por</label>
+            <div class="corralon-number-calc-field"><input data-number-calc-divide inputmode="decimal" autocomplete="off"></div>
+            <label class="corralon-number-calc-label" data-number-calc-label="multiply">Multiplicar por</label>
+            <div class="corralon-number-calc-field"><input data-number-calc-multiply inputmode="decimal" autocomplete="off"></div>
+            <label class="corralon-number-calc-label" data-number-calc-label="result">Resultado</label>
+            <div class="corralon-number-calc-field"><input data-number-calc-result readonly></div>
+          </div>
+          <div class="corralon-number-calc-actions">
+            <button type="button" data-number-calc-cancel>Cancelar</button>
+            <button type="button" data-number-calc-restore>Volver a original</button>
+            <button type="button" data-number-calc-apply>Guardar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(backdrop);
+      ui = {
+        backdrop,
+        modal: backdrop.firstElementChild,
+        title: backdrop.querySelector('.corralon-number-calc-title'),
+        originalLabel: backdrop.querySelector('[data-number-calc-label="original"]'),
+        resultLabel: backdrop.querySelector('[data-number-calc-label="result"]'),
+        original: backdrop.querySelector('[data-number-calc-original]'),
+        divide: backdrop.querySelector('[data-number-calc-divide]'),
+        multiply: backdrop.querySelector('[data-number-calc-multiply]'),
+        result: backdrop.querySelector('[data-number-calc-result]'),
+        cancel: backdrop.querySelector('[data-number-calc-cancel]'),
+        restore: backdrop.querySelector('[data-number-calc-restore]'),
+        apply: backdrop.querySelector('[data-number-calc-apply]')
+      };
+      const format = (value) => state?.formatValue?.(value) ?? Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const resultValue = () => calculate(state?.value || 0, ui.divide.value, ui.multiply.value);
+      const update = () => { if (state) ui.result.value = format(resultValue()); };
+      const restoreFocus = () => {
+        const target = state?.returnFocus;
+        requestAnimationFrame(() => {
+          if (typeof target === 'function') target();
+          else target?.focus?.({ preventScroll: true });
+        });
+      };
+      const close = () => {
+        if (!state) return;
+        ui.backdrop.classList.remove('is-visible');
+        const previous = state;
+        state = null;
+        const target = previous.returnFocus;
+        requestAnimationFrame(() => {
+          if (typeof target === 'function') target();
+          else target?.focus?.({ preventScroll: true });
+        });
+      };
+      const apply = () => {
+        if (!state) return;
+        const current = state;
+        const result = resultValue();
+        current.onApply?.(result, {
+          original: current.value,
+          divide: String(ui.divide.value || '').trim(),
+          multiply: String(ui.multiply.value || '').trim()
+        });
+        close();
+      };
+      const restore = () => {
+        if (!state) return;
+        const current = state;
+        if (current.onRestore) current.onRestore(current.value);
+        else current.onApply?.(current.value, { original: current.value, divide: '', multiply: '', restored: true });
+        close();
+      };
+      ui.divide.addEventListener('input', update);
+      ui.multiply.addEventListener('input', update);
+      ui.cancel.addEventListener('click', close);
+      ui.apply.addEventListener('click', apply);
+      ui.restore.addEventListener('click', restore);
+      ui.backdrop.addEventListener('mousedown', (event) => { if (event.target === ui.backdrop) close(); });
+      ui.modal.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+        if (event.key === 'Enter' && event.target === ui.apply) { event.preventDefault(); apply(); return; }
+        if (event.key === 'Enter' && (event.target === ui.divide || event.target === ui.multiply) && String(event.target.value || '').trim()) {
+          event.preventDefault();
+          ui.apply.focus();
+          return;
+        }
+        if (!['Enter', 'Tab', 'ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+        event.preventDefault();
+        const fields = [ui.divide, ui.multiply, ui.cancel, ui.restore, ui.apply];
+        const current = fields.indexOf(event.target);
+        if (current < 0) return;
+        const backwards = event.shiftKey || event.key === 'ArrowUp' || event.key === 'ArrowLeft';
+        const next = fields[(current + (backwards ? -1 : 1) + fields.length) % fields.length];
+        next.focus();
+        next.select?.();
+      });
+      backdrop.querySelectorAll('[data-number-calc-label]').forEach((label) => {
+        label.addEventListener('click', () => {
+          const key = label.dataset.numberCalcLabel;
+          const target = key === 'divide' ? ui.divide : key === 'multiply' ? ui.multiply : null;
+          target?.focus();
+          target?.select?.();
+        });
+      });
+      ui.update = update;
+      ui.close = close;
+      return ui;
+    }
+
+    function open(options = {}) {
+      const value = Number(options.value);
+      if (!Number.isFinite(value)) return false;
+      const elements = ensureUi();
+      state = {
+        value,
+        formatValue: typeof options.formatValue === 'function' ? options.formatValue : null,
+        onApply: options.onApply,
+        onRestore: options.onRestore,
+        returnFocus: options.returnFocus || document.activeElement
+      };
+      elements.title.textContent = options.title || 'Dividir / multiplicar';
+      elements.originalLabel.textContent = options.originalLabel || 'Valor inicial';
+      elements.resultLabel.textContent = options.resultLabel || 'Resultado';
+      elements.original.value = state.formatValue?.(value) ?? value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      elements.divide.value = options.divide ?? '';
+      elements.multiply.value = options.multiply ?? '';
+      elements.update();
+      elements.backdrop.classList.add('is-visible');
+      requestAnimationFrame(() => {
+        const target = options.initialField === 'multiply' ? elements.multiply : elements.divide;
+        target.focus();
+        target.select();
+      });
+      return true;
+    }
+
+    return {
+      open,
+      close: () => ui?.close?.(),
+      isOpen: () => !!state,
+      calculate
+    };
+  })();
+
   function normalizeBranch(value) {
     const raw = String(value ?? '').trim();
     if (!raw) return '';
@@ -5502,6 +5687,7 @@
     providerEditor: {
       apply: applyProviderEditorLayout
     },
+    numericCalculator: NUMERIC_CALCULATOR,
     articleEditor: {
       configure: configureArticleEditor,
       open: openArticleEditor,

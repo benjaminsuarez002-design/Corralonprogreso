@@ -4033,6 +4033,8 @@ if (MODO_A_DESCONTAR) {
   if (buyButton) buyButton.textContent = 'Confirmar descuento';
 }
 const CARRITO_STORAGE_KEY = MODO_A_DESCONTAR ? 'carrito_a_descontar' : 'carrito';
+const CARRITOS_USUARIOS_COLLECTION = 'carritosUsuarios';
+const CARRITO_FIREBASE_FIELD = MODO_A_DESCONTAR ? 'carrito_a_descontar' : 'carrito';
 let homeLandingConfig = { mode: 'auto', sections: { destacado: [], masVendido: [], oferta: [] } };
 let rankingVentasCargado = false;
 let rankingVentasPorCodigo = new Map();
@@ -9190,8 +9192,133 @@ setTimeout(() => {
 }, 0);
 
 let carrito = {};
-function guardarCarrito() { localStorage.setItem(CARRITO_STORAGE_KEY, JSON.stringify(carrito)); }
-function cargarCarrito() { try { carrito = JSON.parse(localStorage.getItem(CARRITO_STORAGE_KEY)) || {}; } catch(e) { carrito = {}; } actualizarVistaCarrito(); }
+let carritoFirebaseUsuario = null;
+let carritoFirebaseRef = null;
+let carritoFirebaseUnsubscribe = null;
+let carritoFirebaseTimer = null;
+let carritoFirebaseCambioLocalPendiente = false;
+let carritoFirebasePrimeraLectura = true;
+
+function normalizarCarritoPersistido(valor) {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return {};
+  const limpio = {};
+  Object.entries(valor).forEach(([clave, item]) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+    const codigo = String(item.codigo || clave || '').trim();
+    const cantidad = Number(item.cantidad);
+    if (!codigo || !Number.isFinite(cantidad) || cantidad === 0) return;
+    limpio[codigo] = { ...item, codigo, cantidad };
+  });
+  return limpio;
+}
+
+function firmaCarrito(valor) {
+  try { return JSON.stringify(normalizarCarritoPersistido(valor)); } catch (_) { return '{}'; }
+}
+
+function claveStorageCarritoActual() {
+  const usuario = usuarioMenuPresupuestoActual();
+  return usuario.id
+    ? `${CARRITO_STORAGE_KEY}_usuario_${encodeURIComponent(usuario.id)}`
+    : CARRITO_STORAGE_KEY;
+}
+
+async function publicarCarritoFirebase() {
+  if (!carritoFirebaseRef || !carritoFirebaseUsuario?.id) return;
+  const carritoAEnviar = JSON.parse(JSON.stringify(normalizarCarritoPersistido(carrito)));
+  carritoFirebaseCambioLocalPendiente = false;
+  try {
+    await setDoc(carritoFirebaseRef, {
+      usuario_id: carritoFirebaseUsuario.id,
+      usuario_nombre: carritoFirebaseUsuario.nombre || carritoFirebaseUsuario.id,
+      [CARRITO_FIREBASE_FIELD]: carritoAEnviar,
+      [`${CARRITO_FIREBASE_FIELD}_actualizado`]: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    carritoFirebaseCambioLocalPendiente = true;
+    console.warn('No se pudo sincronizar el carrito con Firebase', error);
+  }
+}
+
+function programarPublicacionCarritoFirebase() {
+  if (!carritoFirebaseRef) return;
+  clearTimeout(carritoFirebaseTimer);
+  carritoFirebaseTimer = setTimeout(publicarCarritoFirebase, 350);
+}
+
+function guardarCarrito({ desdeFirebase = false } = {}) {
+  try { localStorage.setItem(claveStorageCarritoActual(), JSON.stringify(carrito)); } catch (_) {}
+  if (desdeFirebase) return;
+  carritoFirebaseCambioLocalPendiente = true;
+  programarPublicacionCarritoFirebase();
+}
+
+function iniciarSincronizacionCarritoFirebase() {
+  const usuario = usuarioMenuPresupuestoActual();
+  if (!usuario.id) return;
+
+  carritoFirebaseUsuario = usuario;
+  carritoFirebaseRef = doc(db, CARRITOS_USUARIOS_COLLECTION, encodeURIComponent(usuario.id));
+  carritoFirebaseUnsubscribe?.();
+  carritoFirebaseUnsubscribe = onSnapshot(carritoFirebaseRef, (snapshot) => {
+    const remoto = snapshot.exists()
+      ? normalizarCarritoPersistido(snapshot.data()?.[CARRITO_FIREBASE_FIELD])
+      : {};
+
+    if (carritoFirebasePrimeraLectura) {
+      carritoFirebasePrimeraLectura = false;
+      if (snapshot.exists() && !carritoFirebaseCambioLocalPendiente) {
+        carrito = remoto;
+        guardarCarrito({ desdeFirebase: true });
+        actualizarVistaCarrito();
+      } else if (!snapshot.exists() || carritoFirebaseCambioLocalPendiente) {
+        programarPublicacionCarritoFirebase();
+      }
+      return;
+    }
+
+    if (snapshot.metadata.hasPendingWrites || carritoFirebaseCambioLocalPendiente) return;
+    if (firmaCarrito(remoto) === firmaCarrito(carrito)) return;
+    carrito = remoto;
+    guardarCarrito({ desdeFirebase: true });
+    actualizarVistaCarrito();
+  }, (error) => console.warn('No se pudo escuchar el carrito de Firebase', error));
+}
+
+function cargarCarrito() {
+  try { carrito = normalizarCarritoPersistido(JSON.parse(localStorage.getItem(claveStorageCarritoActual())) || {}); }
+  catch(e) { carrito = {}; }
+  actualizarVistaCarrito();
+  iniciarSincronizacionCarritoFirebase();
+}
+async function copiarCarritoParaAccess() {
+  const items = Object.values(carrito).filter((item) => String(item?.codigo || '').trim() && Number(item?.cantidad));
+  if (!items.length) {
+    mostrarAvisoCarrito('El carrito esta vacio');
+    return false;
+  }
+  const lineas = items.map((item) => {
+    const idart = String(item.codigo || '').trim();
+    const cantidad = Number(item.cantidad || 0).toLocaleString('es-AR', { useGrouping: false, maximumFractionDigits: 3 });
+    return `IDART=${idart}\tCANTIDAD=${cantidad}`;
+  });
+  const texto = ['CORRALON_IMPORT_V1', 'MODO=IDART', ...lineas].join('\n');
+  const copiado = await copiarTextoSeguro(texto);
+  mostrarAvisoCarrito(copiado
+    ? `${items.length} articulo${items.length === 1 ? '' : 's'} copiado${items.length === 1 ? '' : 's'} para Access`
+    : 'No se pudo copiar el carrito');
+  return copiado;
+}
+document.addEventListener('keydown', (event) => {
+  const key = String(event.key || '').toLowerCase();
+  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey || key !== 'c') return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  copiarCarritoParaAccess().catch((error) => {
+    console.error('No se pudo copiar el carrito para Access', error);
+    mostrarAvisoCarrito('No se pudo copiar el carrito');
+  });
+}, true);
 function numeroCantidadCarrito(value) {
   let text = String(value ?? '').trim().replace(/\s+/g, '');
   const dot = text.lastIndexOf('.');

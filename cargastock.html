@@ -7,7 +7,7 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=20260814-provider-editor1"></script>
+<script src="corralon-system.js?v=20260818-numeric-calculator1"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1368,7 +1368,7 @@ function normalizeRow(row = {}, index = 0) {
     id: row.id || `${Date.now()}_${index}_${Math.random().toString(16).slice(2)}`,
     codigo: String(row.codigo ?? '').trim(),
     descripcion: String(row.descripcion ?? '').trim(),
-    cantidad: String(row.cantidad ?? '').trim(),
+    cantidad: String(row.cantidad ?? '').trim() ? rawNumber(quantityNumber(row.cantidad)) : '',
     precio: moneyNumber(row.precio ?? 0),
     precioOriginal: moneyNumber(row.precioOriginal ?? 0),
     precioDivisor: String(row.precioDivisor ?? ''),
@@ -1433,7 +1433,7 @@ function stockRowHtml(row, rowIndex) {
     <div data-row-select="${rowIndex}" class="${selectedRows.has(rowIndex) ? 'is-selected' : ''}"></div>
     <div contenteditable="true" data-field="codigo" data-row="${rowIndex}" data-col="0">${escapeHtml(row.codigo)}</div>
     <div contenteditable="true" data-field="descripcion" data-row="${rowIndex}" data-col="1" title="${escapeHtml(row.descripcion)}">${escapeHtml(row.descripcion)}</div>
-    <div class="num" contenteditable="true" data-field="cantidad" data-row="${rowIndex}" data-col="2">${escapeHtml(row.cantidad)}</div>
+    <div class="num" contenteditable="true" data-field="cantidad" data-row="${rowIndex}" data-col="2">${blank || !String(row.cantidad || '').trim() ? '' : escapeHtml(rawNumber(quantityNumber(row.cantidad)))}</div>
     <div class="num" contenteditable="true" data-field="precio" data-row="${rowIndex}" data-col="3" data-currency-cell="1">${blank ? '' : money(row.precio)}</div>
     <div class="num" contenteditable="true" data-field="descuento" data-row="${rowIndex}" data-col="4">${row.descuentoAdicional ? percent(row.descuentoAdicional) : ''}</div>
     <div class="num" tabindex="0" data-field="precioFinal" data-row="${rowIndex}" data-col="5" data-readonly-cell="1" data-currency-cell="1">${blank ? '' : money(calcPrecioFinal(row))}</div>
@@ -2336,80 +2336,69 @@ function calcBaseUnitPrice(row) {
   if (!row) return 0;
   return Number(row.precioOriginal || row.precio || 0);
 }
-function calculatedUnitPrice() {
-  const row = rowsData[calcRowIndex];
-  return calcBaseUnitPrice(row)
-    / parseCalcFactor(el.calcDivide.value, 1)
-    * parseCalcFactor(el.calcMultiply.value, 1);
+function focusCalculatedRow(rowId, col) {
+  const rowIndex = rowsData.findIndex((row) => row.id === rowId);
+  if (rowIndex >= 0) focusNavigationTarget(editableCellAt(rowIndex, col));
 }
-function updateCalcResult() {
-  el.calcTotal.value = money(calculatedUnitPrice());
-}
-function openUnitPriceCalc(rowIndex, initialField = 'divide') {
+function openRowNumberCalc(rowIndex, field, initialField = 'divide') {
   const row = rowsData[rowIndex];
   if (!row || isBlankStockRow(row)) {
     show('La fila esta vacia');
-    return;
+    return false;
   }
-  calcRowIndex = rowIndex;
-  calcReturnFocus = { rowId: row.id, col: 3 };
-  el.calcOriginalPrice.value = money(calcBaseUnitPrice(row));
-  el.calcDivide.value = row.precioDivisor || '';
-  el.calcMultiply.value = row.precioMultiplicador || '';
-  updateCalcResult();
-  el.calcBackdrop.classList.add('visible');
-  requestAnimationFrame(() => {
-    const target = initialField === 'multiply' ? el.calcMultiply : el.calcDivide;
-    target.focus();
-    target.select();
+  const isPrice = field === 'precio';
+  const original = isPrice ? calcBaseUnitPrice(row) : quantityNumber(row.cantidad);
+  if (!isPrice && !String(row.cantidad || '').trim()) {
+    show('La cantidad esta vacia');
+    return false;
+  }
+  const col = isPrice ? 3 : 2;
+  const calculator = window.CorralonSystem?.numericCalculator;
+  if (!calculator?.open) {
+    show('No se pudo abrir la calculadora');
+    return false;
+  }
+  return calculator.open({
+    value: original,
+    divide: isPrice ? row.precioDivisor || '' : '',
+    multiply: isPrice ? row.precioMultiplicador || '' : '',
+    initialField,
+    originalLabel: isPrice ? 'Precio inicial' : 'Cantidad inicial',
+    resultLabel: isPrice ? 'Precio calculado' : 'Cantidad calculada',
+    formatValue: isPrice ? money : rawNumber,
+    returnFocus: () => focusCalculatedRow(row.id, col),
+    onApply: (result, details) => {
+      pushUndoSnapshot();
+      if (isPrice) {
+        row.precio = Math.round(result * 100) / 100;
+        row.precioOriginal = original;
+        row.precioDivisor = details.divide;
+        row.precioMultiplicador = details.multiply;
+      } else {
+        row.cantidad = rawNumber(result);
+      }
+      saveRows();
+      render();
+      show(isPrice ? 'Precio unitario guardado' : 'Cantidad guardada');
+    },
+    onRestore: () => {
+      pushUndoSnapshot();
+      if (isPrice) {
+        row.precio = original;
+        row.precioOriginal = 0;
+        row.precioDivisor = '';
+        row.precioMultiplicador = '';
+      } else {
+        row.cantidad = rawNumber(original);
+      }
+      saveRows();
+      render();
+      show(isPrice ? 'Precio original restaurado' : 'Cantidad original restaurada');
+    }
   });
 }
-function closeUnitPriceCalc() {
-  el.calcBackdrop.classList.remove('visible');
-  calcRowIndex = null;
-  const returnFocus = calcReturnFocus;
-  calcReturnFocus = null;
-  requestAnimationFrame(() => {
-    if (!returnFocus) return;
-    const rowIndex = rowsData.findIndex((row) => row.id === returnFocus.rowId);
-    if (rowIndex < 0) return;
-    focusNavigationTarget(editableCellAt(rowIndex, returnFocus.col));
-  });
-}
-function applyCalculatedUnitPrice() {
-  const row = rowsData[calcRowIndex];
-  if (!row) return;
-  pushUndoSnapshot();
-  const original = calcBaseUnitPrice(row);
-  row.precio = Math.round(calculatedUnitPrice() * 100) / 100;
-  row.precioOriginal = original;
-  row.precioDivisor = String(el.calcDivide.value || '').trim();
-  row.precioMultiplicador = String(el.calcMultiply.value || '').trim();
-  saveRows();
-  render();
-  closeUnitPriceCalc();
-  show('Precio unitario guardado');
-}
-function restoreOriginalUnitPrice() {
-  const row = rowsData[calcRowIndex];
-  if (!row) return;
-  pushUndoSnapshot();
-  row.precio = calcBaseUnitPrice(row);
-  row.precioOriginal = 0;
-  row.precioDivisor = '';
-  row.precioMultiplicador = '';
-  saveRows();
-  render();
-  closeUnitPriceCalc();
-  show('Precio original restaurado');
-}
-function moveCalcFocus(current, direction) {
-  const fields = [el.calcDivide, el.calcMultiply, el.calcCancelBtn, el.calcUndoBtn, el.calcApplyBtn];
-  const index = fields.indexOf(current);
-  if (index < 0) return;
-  const next = fields[(index + direction + fields.length) % fields.length];
-  next.focus();
-  next.select?.();
+function openUnitPriceCalc(rowIndex, initialField = 'divide') {
+  return openRowNumberCalc(rowIndex, 'precio', initialField);
 }
 function copyTextForContextMenu(text) {
   const fallback = () => {
@@ -3079,36 +3068,6 @@ el.clearTableContextBtn.addEventListener('click', () => {
   closeTableContextMenu();
   clearStockTable();
 });
-el.calcDivide.addEventListener('input', updateCalcResult);
-el.calcMultiply.addEventListener('input', updateCalcResult);
-el.calcCancelBtn.addEventListener('click', closeUnitPriceCalc);
-el.calcUndoBtn.addEventListener('click', restoreOriginalUnitPrice);
-el.calcApplyBtn.addEventListener('click', applyCalculatedUnitPrice);
-el.calcBackdrop.addEventListener('mousedown', (event) => {
-  if (event.target === el.calcBackdrop) closeUnitPriceCalc();
-});
-el.calcBackdrop.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    closeUnitPriceCalc();
-    return;
-  }
-  if (event.key === 'Enter' && event.target === el.calcApplyBtn) {
-    event.preventDefault();
-    applyCalculatedUnitPrice();
-    return;
-  }
-  if (event.key === 'Enter' && (event.target === el.calcDivide || event.target === el.calcMultiply) && String(event.target.value || '').trim()) {
-    event.preventDefault();
-    el.calcApplyBtn.focus();
-    return;
-  }
-  if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-    event.preventDefault();
-    const backwards = event.shiftKey || event.key === 'ArrowUp' || event.key === 'ArrowLeft';
-    moveCalcFocus(event.target, backwards ? -1 : 1);
-  }
-});
 document.addEventListener('mousedown', (event) => {
   if (!event.target.closest('#tableContextMenu')) closeTableContextMenu();
   if (!event.target.closest('#providerContextMenu')) el.providerContextMenu.classList.remove('visible');
@@ -3264,7 +3223,7 @@ el.rows.addEventListener('blur', (event) => {
     const row = rowFromCell(cell);
     cell.textContent = row?.descuentoAdicional ? percent(row.descuentoAdicional) : '';
   }
-  if (el.calcBackdrop.classList.contains('visible')) return;
+  if (el.calcBackdrop.classList.contains('visible') || window.CorralonSystem?.numericCalculator?.isOpen?.()) return;
   if (!document.hasFocus()) return;
   if (!cell.closest('.row')?.contains(event.relatedTarget)) cell.closest('.row')?.classList.remove('has-focused-cell');
   if (!el.rows.contains(event.relatedTarget)) render();
@@ -3282,10 +3241,10 @@ el.rows.addEventListener('keydown', (event) => {
   if (!cell) return;
   const opensDivide = event.key === '/' || event.code === 'NumpadDivide';
   const opensMultiply = event.key === '*' || event.code === 'NumpadMultiply';
-  if (cell.dataset.field === 'precio' && !event.ctrlKey && !event.metaKey && !event.altKey && (opensDivide || opensMultiply)) {
+  if ((cell.dataset.field === 'precio' || cell.dataset.field === 'cantidad') && !event.ctrlKey && !event.metaKey && !event.altKey && (opensDivide || opensMultiply)) {
     event.preventDefault();
     event.stopPropagation();
-    openUnitPriceCalc(Number(cell.dataset.row), opensMultiply ? 'multiply' : 'divide');
+    openRowNumberCalc(Number(cell.dataset.row), cell.dataset.field, opensMultiply ? 'multiply' : 'divide');
     return;
   }
   if (isPrintableTypingKey(event)) cell.dataset.fullSelected = '0';
