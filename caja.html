@@ -116,6 +116,7 @@
     }
     .dolar-cards {
       display: flex;
+      flex-wrap: wrap;
       align-items: stretch;
       gap: 8px;
       flex: 0 0 auto;
@@ -144,6 +145,14 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
     }
+    .dolar-status {
+      flex: 0 0 100%;
+      color: #666;
+      font-size: 10px;
+      font-weight: 800;
+      text-align: right;
+    }
+    .dolar-status.is-stale { color: #c90006; }
     .top-link {
       margin-left: auto;
       border: 1px solid var(--borde);
@@ -1513,6 +1522,7 @@
         <div class="dolar-card"><div class="dolar-label">Oficial compra</div><div class="dolar-value" data-dolar-compra>...</div></div>
         <div class="dolar-card"><div class="dolar-label">Oficial venta</div><div class="dolar-value" data-dolar-venta>...</div></div>
         <div class="dolar-card"><div class="dolar-label">Promedio</div><div class="dolar-value" data-dolar-promedio>...</div></div>
+        <div class="dolar-status" data-dolar-estado>Actualizando...</div>
       </div>
       <div class="date-nav" aria-label="Navegar dias de caja">
         <button class="date-nav-btn" id="prevCajaDayBtn" type="button" aria-label="Dia anterior">&lt;</button>
@@ -2707,25 +2717,74 @@
       return number ? `$ ${number.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '...';
     }
 
-    async function loadDolarCards() {
+    const DOLAR_REFRESH_MS = 60 * 1000;
+    const DOLAR_MIN_REFRESH_MS = 15 * 1000;
+    const DOLAR_CACHE_KEY = 'corralon_dolar_oficial_cache_v2';
+    let dolarLastAttempt = 0;
+    let dolarRequest = null;
+
+    function renderDolarCards(data, options = {}) {
       const compraEl = document.querySelector('[data-dolar-compra]');
       const ventaEl = document.querySelector('[data-dolar-venta]');
       const promedioEl = document.querySelector('[data-dolar-promedio]');
-      if (!compraEl || !ventaEl || !promedioEl) return;
+      const estadoEl = document.querySelector('[data-dolar-estado]');
+      if (!compraEl || !ventaEl || !promedioEl) return false;
+      const compra = Number(data?.compra || 0);
+      const venta = Number(data?.venta || 0);
+      if (!(compra > 0) || !(venta > 0)) return false;
+      compraEl.textContent = formatDolarValue(compra);
+      ventaEl.textContent = formatDolarValue(venta);
+      promedioEl.textContent = formatDolarValue((compra + venta) / 2);
+      if (estadoEl) {
+        const fechaDato = new Date(data.fechaActualizacion || options.consultadoEn || Date.now());
+        const hora = Number.isNaN(fechaDato.getTime()) ? '' : fechaDato.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+        estadoEl.textContent = options.stale ? `Sin conexión · último dato ${hora}` : `Actualizado ${hora}`;
+        estadoEl.classList.toggle('is-stale', Boolean(options.stale));
+      }
+      return true;
+    }
+
+    function renderDolarCache() {
       try {
+        const cache = JSON.parse(localStorage.getItem(DOLAR_CACHE_KEY) || 'null');
+        return cache?.data ? renderDolarCards(cache.data, { consultadoEn: cache.consultadoEn, stale: true }) : false;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    async function loadDolarCards() {
+      const now = Date.now();
+      if (dolarRequest) return dolarRequest;
+      if (now - dolarLastAttempt < DOLAR_MIN_REFRESH_MS) return;
+      dolarLastAttempt = now;
+      dolarRequest = (async () => {
+        try {
         const response = await fetch('https://dolarapi.com/v1/dolares/oficial', { cache: 'no-store' });
         if (!response.ok) throw new Error('No pude leer dolar oficial');
         const data = await response.json();
-        const compra = Number(data.compra || 0);
-        const venta = Number(data.venta || 0);
-        compraEl.textContent = formatDolarValue(compra);
-        ventaEl.textContent = formatDolarValue(venta);
-        promedioEl.textContent = formatDolarValue((compra + venta) / 2);
-      } catch (error) {
-        compraEl.textContent = 'Error';
-        ventaEl.textContent = 'Error';
-        promedioEl.textContent = 'Error';
-      }
+          if (!renderDolarCards(data)) throw new Error('Cotización inválida');
+          try { localStorage.setItem(DOLAR_CACHE_KEY, JSON.stringify({ data, consultadoEn: Date.now() })); } catch (_) {}
+        } catch (error) {
+          if (!renderDolarCache()) {
+            document.querySelectorAll('[data-dolar-compra],[data-dolar-venta],[data-dolar-promedio]').forEach((el) => { el.textContent = 'Error'; });
+          }
+        } finally {
+          dolarRequest = null;
+        }
+      })();
+      return dolarRequest;
+    }
+
+    function iniciarActualizacionDolar() {
+      renderDolarCache();
+      loadDolarCards();
+      setInterval(loadDolarCards, DOLAR_REFRESH_MS);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') loadDolarCards();
+      });
+      window.addEventListener('focus', loadDolarCards);
+      window.addEventListener('online', loadDolarCards);
     }
 
     function resetState() {
@@ -6973,7 +7032,7 @@
     applyCajaMode();
     initializeMovementViewSelectors();
     updateDateLabel();
-    loadDolarCards();
+    iniciarActualizacionDolar();
     loadState(selectedDateKey);
     renderAll();
     (usesSupabaseCaja() ? Promise.resolve() : loadRemoteState(selectedDateKey))
