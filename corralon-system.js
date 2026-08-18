@@ -3394,6 +3394,29 @@
       return pages.flat();
     }
 
+    function articleNeedsHydration(article = {}) {
+      return !String(article.id_proveedor ?? article.idProveedor ?? '').trim();
+    }
+
+    async function hydrateIncompleteRows(rows = [], requiredCodes = []) {
+      const byCode = new Map((rows || []).map((row) => [codeOf(row), row]).filter(([code]) => code));
+      const codes = [...new Set([
+        ...(requiredCodes || []),
+        ...[...byCode.values()].filter(articleNeedsHydration).map(codeOf)
+      ].map((code) => String(code || '').trim()).filter(Boolean))];
+      if (!codes.length) return { rows: [...byCode.values()], changedRows: [] };
+
+      const fullRows = (await fetchSupabaseCodes(codes)).map(fromSupabase);
+      fullRows.forEach((row) => {
+        const code = codeOf(row);
+        if (code) byCode.set(code, row);
+      });
+      return {
+        rows: [...byCode.values()],
+        changedRows: fullRows
+      };
+    }
+
     async function fetchSupabaseInitialRows(priorityCodes = [], limit = INITIAL_PAGE_SIZE) {
       const safeLimit = Math.max(24, Math.min(300, Number(limit || INITIAL_PAGE_SIZE)));
       const [priorityRows, firstRows] = await Promise.all([
@@ -3634,6 +3657,7 @@
           const patches = await fetchSupabasePatchRows(context.cached.patchVersion, context.patchVersion);
           const merged = new Map(context.cached.rows.map((row) => [codeOf(row), row]));
           const changedCodes = new Set();
+          const missingCodes = new Set();
           const removedCodes = [];
           for (const entry of patches) {
             const code = String(entry?.codigo || '').trim();
@@ -3645,14 +3669,18 @@
               changedCodes.delete(code);
               continue;
             }
+            if (!merged.has(code)) missingCodes.add(code);
             const current = merged.get(code) || { codigo: code, idart: code, idArt: code, activo: true, active: true };
             merged.set(code, applySupabasePatch(current, changes));
             changedCodes.add(code);
           }
-          const rows = [...merged.values()].sort((left, right) =>
+          const hydrated = await hydrateIncompleteRows([...merged.values()], [...missingCodes]);
+          const rows = hydrated.rows.sort((left, right) =>
             codeOf(left).localeCompare(codeOf(right), 'es', { numeric: true, sensitivity: 'base' })
           );
-          const changedRows = [...changedCodes].map((code) => merged.get(code)).filter(Boolean);
+          const rowsByCode = new Map(rows.map((row) => [codeOf(row), row]));
+          hydrated.changedRows.forEach((row) => changedCodes.add(codeOf(row)));
+          const changedRows = [...changedCodes].map((code) => rowsByCode.get(code)).filter(Boolean);
           await writeCache({
             ...context.cached,
             signature: context.signature,
@@ -3677,14 +3705,31 @@
     }
 
     async function alignCachedVersion(context) {
+      const hydrated = await hydrateIncompleteRows(context.cached.rows);
+      const rows = hydrated.rows.sort((left, right) =>
+        codeOf(left).localeCompare(codeOf(right), 'es', { numeric: true, sensitivity: 'base' })
+      );
       await writeCache({
         ...context.cached,
         signature: context.signature,
         version: context.version,
         patchVersion: context.patchVersion,
+        rows,
         source: 'supabase'
       });
-      return context.cached.rows;
+      if (hydrated.changedRows.length) {
+        window.dispatchEvent(new CustomEvent('corralon:catalog-delta', {
+          detail: {
+            changedRows: hydrated.changedRows,
+            removedCodes: [],
+            rows,
+            version: context.version,
+            patchVersion: context.patchVersion,
+            source: 'repair'
+          }
+        }));
+      }
+      return rows;
     }
 
     function startDeltaLoad(context, options = {}) {
@@ -3890,6 +3935,24 @@
       return Array.isArray(rows) && rows[0] ? fromSupabase(rows[0]) : null;
     }
 
+    async function repairCachedArticle(code) {
+      const article = await fetchArticle(code);
+      if (!article) return null;
+      const safeCode = codeOf(article);
+      const cached = await readCache();
+      if (!safeCode || !Array.isArray(cached?.rows)) return article;
+      const byCode = new Map(cached.rows.map((row) => [codeOf(row), row]).filter(([key]) => key));
+      byCode.set(safeCode, article);
+      const rows = [...byCode.values()].sort((left, right) =>
+        codeOf(left).localeCompare(codeOf(right), 'es', { numeric: true, sensitivity: 'base' })
+      );
+      await writeCache({ ...cached, rows });
+      window.dispatchEvent(new CustomEvent('corralon:catalog-delta', {
+        detail: { changedRows: [article], removedCodes: [], rows, version: cached.version, source: 'repair' }
+      }));
+      return article;
+    }
+
     async function saveArticleEdits(articles) {
       const requested = [...new Map((Array.isArray(articles) ? articles : [])
         .map((article) => [codeOf(article), article])
@@ -3935,6 +3998,7 @@
       fetchSupabaseRows,
       fetchCodeIndexRows: fetchSupabaseCodeIndexRows,
       fetchArticle,
+      repairArticle: repairCachedArticle,
       saveArticleEdit,
       saveArticleEdits,
       mergeMetadata,

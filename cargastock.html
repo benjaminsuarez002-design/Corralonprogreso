@@ -384,6 +384,7 @@ let rowsData = [];
 let indexCodeProviders = new Map();
 let indexCodeMatchCounts = new Map();
 let indexCodeDescriptions = new Map();
+const indexCodeRepairsAttempted = new Set();
 let compareSystemRows = [];
 let comparePairs = [];
 const compareSelections = { left: new Set(), right: new Set() };
@@ -631,6 +632,26 @@ function isGreen(row) {
   const allowedProviders = indexCodeProviders.get(key);
   if (!allowedProviders?.size) return false;
   return selectedProviderIdentityKeys().some((identity) => allowedProviders.has(identity));
+}
+async function repairUnmatchedIndexRows() {
+  const repairArticle = window.CorralonSystem?.catalog?.repairArticle;
+  if (!provider || typeof repairArticle !== 'function') return;
+  const candidates = [...new Set(rowsData
+    .filter((row) => !isBlankStockRow(row) && !isGreen(row))
+    .map((row) => String(row.codigo || '').trim())
+    .filter(Boolean))]
+    .filter((code) => !indexCodeRepairsAttempted.has(code))
+    .slice(0, 10);
+  if (!candidates.length) return;
+  for (const code of candidates) {
+    indexCodeRepairsAttempted.add(code);
+    try {
+      await repairArticle(code);
+    } catch (error) {
+      indexCodeRepairsAttempted.delete(code);
+      console.warn(`No se pudo reparar el artículo ${code}`, error);
+    }
+  }
 }
 function calcPrecioFinal(row) {
   const precio = Number(row.precio) || 0;
@@ -2127,6 +2148,7 @@ async function loadIndexCodes(providedList = null) {
     if ('requestIdleCallback' in window) requestIdleCallback(saveIndexCodesCache, { timeout: 1500 });
     else setTimeout(saveIndexCodesCache, 0);
     el.status.textContent = `${codeProviders.size.toLocaleString('es-AR')} codigos de proveedor listos`;
+    queueMicrotask(() => repairUnmatchedIndexRows().catch(console.warn));
   } catch (error) {
     console.warn(error);
     try {
@@ -2402,6 +2424,47 @@ function copyTextForContextMenu(text) {
   };
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(fallback);
   else fallback();
+}
+function selectedStockRowForAccessPriceCopy() {
+  if (selectedRows.size > 1) {
+    show('Seleccioná una sola fila para copiar el precio');
+    return null;
+  }
+  let rowIndex = selectedRows.size === 1 ? Number([...selectedRows][0]) : NaN;
+  if (!Number.isFinite(rowIndex)) {
+    const activeCell = document.activeElement?.closest?.('[data-field][data-row][data-col]');
+    rowIndex = Number(activeCell?.dataset.row ?? lastFocusedTableCell?.row);
+  }
+  const row = Number.isFinite(rowIndex) ? rowsData[rowIndex] : null;
+  if (!row || isBlankStockRow(row)) {
+    show('Seleccioná una fila con un artículo');
+    return null;
+  }
+  if (!String(row.codigo || '').trim()) {
+    show('La fila seleccionada no tiene código de proveedor');
+    return null;
+  }
+  return row;
+}
+function copySelectedStockPriceForAccess() {
+  const row = selectedStockRowForAccessPriceCopy();
+  if (!row) return false;
+  const currentProvider = selectedProvider();
+  const providerId = String(currentProvider?.id_proveedor || '').trim();
+  if (!providerId) {
+    show('Seleccioná un proveedor antes de copiar');
+    return false;
+  }
+  const text = [
+    'CORRALON_PRECIO_ARTICULO_V1',
+    'MODO=CODPROV',
+    `IDPROVEEDOR=${providerId}`,
+    `CODPROV=${String(row.codigo || '').trim()}`,
+    `PRECIO_FINAL=${rawNumber(calcPrecioFinal(row))}`
+  ].join('\r\n');
+  copyTextForContextMenu(text);
+  show(`Copiado ${String(row.codigo || '').trim()} · ${money(calcPrecioFinal(row))}`);
+  return true;
 }
 function pasteIntoSelectedColumns(text) {
   if (!selectedCols.size) return false;
@@ -3243,6 +3306,12 @@ el.rows.addEventListener('keydown', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === 'c') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    copySelectedStockPriceForAccess();
+    return;
+  }
   if (event.key === 'F1') {
     const activeCell = document.activeElement?.closest?.('[data-field][data-row][data-col]');
     const row = Number(activeCell?.dataset.row ?? lastFocusedTableCell?.row);
@@ -3294,7 +3363,13 @@ const refreshIndexCodesFromCatalog = (event) => {
 };
 window.addEventListener('corralon:catalog-delta', refreshIndexCodesFromCatalog);
 window.addEventListener('corralon:catalog-ready', refreshIndexCodesFromCatalog);
-(async()=>{await loadRows();render();await Promise.all([loadProviders(),loadIndexCodes()]);render()})().catch(console.warn);
+(async()=>{
+  await loadRows();
+  render();
+  await Promise.all([loadProviders(), loadIndexCodes()]);
+  await repairUnmatchedIndexRows();
+  render();
+})().catch(console.warn);
 </script>
 </body>
 </html>
