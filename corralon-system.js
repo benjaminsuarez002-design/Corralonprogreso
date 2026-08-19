@@ -5640,6 +5640,246 @@
     };
   }
 
+  const BUDGET_SEARCH = (() => {
+    const TABLE = 'presupuestos_web';
+    let budgets = [];
+    let groups = [];
+    let selectedKey = '';
+    let returnFocus = null;
+    let openOptions = {};
+    let uiBound = false;
+
+    const escapeHtml = (value) => String(value ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const normalizeSearch = (value) => String(value || '').normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const budgetTimestamp = (budget = {}) => {
+      const iso = Date.parse(String(budget.fecha_iso || ''));
+      if (Number.isFinite(iso)) return iso;
+      const parts = String(budget.fecha || '').trim().split(/[\/\-.\s]+/).map(Number);
+      if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) return 0;
+      const isoFormat = parts[0] > 31;
+      const baseYear = isoFormat ? parts[0] : parts[2];
+      const year = baseYear < 100 ? 2000 + baseYear : baseYear;
+      const date = new Date(year, parts[1] - 1, isoFormat ? parts[2] : parts[0]);
+      return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    };
+    const isRecentBudget = (budget = {}) => {
+      const timestamp = budgetTimestamp(budget);
+      const limitDate = new Date();
+      limitDate.setHours(0, 0, 0, 0);
+      limitDate.setDate(limitDate.getDate() - 30);
+      return timestamp >= limitDate.getTime();
+    };
+    const budgetTitle = (budget = {}) => {
+      const type = String(budget.tipo || 'Presupuesto web').trim() || 'Presupuesto web';
+      const name = String(budget.cliente_nombre || budget.nombre || '').trim();
+      return name ? `${type} - ${name}` : type;
+    };
+    const budgetUser = (budget = {}) => String(
+      budget.usuario_nombre || budget.usuario || budget.user_name || budget.creado_por || ''
+    ).trim() || 'Sin informar';
+    const budgetNote = (budget = {}) => String(
+      budget.nota || budget.observaciones || budget.observacion || ''
+    ).trim() || 'Sin informar';
+    const budgetDate = (budget = {}) => budget.fecha || (budget.fecha_iso
+      ? new Date(budget.fecha_iso).toLocaleDateString('es-AR') : '');
+    const formatMoney = (value) => `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })}`;
+    const formatQuantity = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? number.toLocaleString('es-AR', { maximumFractionDigits:3 }) : String(value ?? '');
+    };
+
+    function ensureUi() {
+      if (!document.getElementById('corralonBudgetSearchStyle')) {
+        const style = document.createElement('style');
+        style.id = 'corralonBudgetSearchStyle';
+        style.textContent = `
+          .corralon-budget-search-bg{position:fixed;inset:0;z-index:2147483600;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.58);backdrop-filter:blur(5px)}
+          .corralon-budget-search-bg.open{display:flex}
+          .corralon-budget-search-modal{width:min(1180px,96vw);height:min(760px,90vh);display:grid;grid-template-rows:auto 1fr;overflow:hidden;border:1px solid #dededb;border-radius:20px;background:#fff;box-shadow:0 28px 80px rgba(0,0,0,.32);font-family:Arial,sans-serif}
+          .corralon-budget-search-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #dededb;background:linear-gradient(90deg,#f1f1ef,#fff)}
+          .corralon-budget-search-head h2{margin:0;color:#ef1015;font:900 29px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-budget-search-close{margin-left:auto;border:1px solid #c9c9c6;border-radius:12px;background:#fff;color:#171717;padding:9px 18px;font:900 18px 'Barlow Condensed',Arial,sans-serif;cursor:pointer}
+          .corralon-budget-search-body{min-height:0;display:grid;grid-template-rows:auto auto minmax(130px,.8fr) minmax(220px,1.2fr);gap:10px;padding:14px;overflow:hidden}
+          .corralon-budget-search-field{overflow:hidden;border:1px solid #c9c9c6;border-radius:14px;background:#fff;box-shadow:0 5px 15px rgba(0,0,0,.08)}
+          .corralon-budget-search-field label{display:block;padding:7px 11px 0;color:#666;font:900 16px 'Barlow Condensed',Arial,sans-serif;cursor:pointer}
+          .corralon-budget-search-field input{width:100%;height:44px;border:0;outline:0;padding:4px 11px 9px;color:#171717;background:#fff;font:700 23px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-budget-search-field:focus-within{border-color:#ef1015;box-shadow:0 0 0 3px rgba(239,16,21,.14)}
+          .corralon-budget-search-count{color:#666;font:900 17px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-budget-search-results{display:grid;gap:8px;align-content:start;overflow:auto;padding-right:4px}
+          .corralon-budget-search-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;min-height:60px;padding:10px 13px;border:1px solid #dededb;border-radius:14px;background:linear-gradient(90deg,#f5f5f3,#fff);cursor:pointer;outline:none}
+          .corralon-budget-search-card:hover,.corralon-budget-search-card.active,.corralon-budget-search-card:focus{border-color:#ef1015;background:#fff1f1;box-shadow:0 8px 22px rgba(239,16,21,.13)}
+          .corralon-budget-search-card strong{display:block;color:#171717;font:900 22px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-budget-search-card span{display:block;margin-top:2px;color:#666;font-size:13px;font-weight:800}
+          .corralon-budget-search-card b{color:#ef1015;font:900 20px 'Barlow Condensed',Arial,sans-serif;white-space:nowrap}
+          .corralon-budget-search-detail{overflow:auto;border:1px solid #dededb;border-radius:14px;background:#fff}
+          .corralon-budget-search-detail-title{padding:9px 12px;border-bottom:1px solid #dededb;background:linear-gradient(90deg,#f1f1ef,#fff);color:#ef1015;font:900 22px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-budget-search-meta{display:grid;grid-template-columns:minmax(180px,.35fr) minmax(280px,1fr);gap:0;border-bottom:1px solid #dededb;background:#fff}
+          .corralon-budget-search-meta>div{padding:9px 12px;border-right:1px solid #dededb;white-space:pre-wrap;overflow-wrap:anywhere}
+          .corralon-budget-search-meta>div:last-child{border-right:0}
+          .corralon-budget-search-meta b{display:block;margin-bottom:2px;color:#666;font:900 14px 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase}
+          .corralon-budget-search-meta span{color:#171717;font:700 15px Arial,sans-serif}
+          .corralon-budget-search-detail-row{display:grid;grid-template-columns:130px minmax(360px,1fr) 110px 150px;min-height:36px;border-bottom:1px solid #e8e8e5}
+          .corralon-budget-search-detail-row:nth-child(even){background:#f7f7f5}
+          .corralon-budget-search-detail-row.head{position:sticky;top:0;z-index:1;background:#eeeeeb;color:#171717;font:900 16px 'Barlow Condensed',Arial,sans-serif}
+          .corralon-budget-search-detail-row div{overflow:hidden;padding:8px 10px;border-right:1px solid #dededb;text-overflow:ellipsis;white-space:nowrap}
+          .corralon-budget-search-detail-row .num{text-align:right;font-variant-numeric:tabular-nums}
+          .corralon-budget-search-empty{display:flex;min-height:90px;align-items:center;justify-content:center;padding:18px;color:#888;font-weight:800;text-align:center}
+          @media(max-width:720px){.corralon-budget-search-bg{padding:8px}.corralon-budget-search-modal{width:100%;height:94vh;border-radius:14px}.corralon-budget-search-head{padding:10px 12px}.corralon-budget-search-head h2{font-size:23px}.corralon-budget-search-body{padding:9px;grid-template-rows:auto auto minmax(120px,.75fr) minmax(210px,1.25fr)}.corralon-budget-search-meta{grid-template-columns:1fr}.corralon-budget-search-meta>div{border-right:0;border-bottom:1px solid #dededb}.corralon-budget-search-detail-row{min-width:700px}.corralon-budget-search-card{grid-template-columns:1fr}.corralon-budget-search-card b{white-space:normal}}
+        `;
+        document.head.appendChild(style);
+      }
+      let bg = document.getElementById('corralonBudgetSearchBg');
+      if (!bg) {
+        bg = document.createElement('div');
+        bg.id = 'corralonBudgetSearchBg';
+        bg.className = 'corralon-budget-search-bg';
+        bg.innerHTML = `
+          <div class="corralon-budget-search-modal" role="dialog" aria-modal="true" aria-labelledby="corralonBudgetSearchTitle">
+            <div class="corralon-budget-search-head"><h2 id="corralonBudgetSearchTitle">Buscar en presupuestos</h2><button class="corralon-budget-search-close" type="button">Cerrar</button></div>
+            <div class="corralon-budget-search-body">
+              <div class="corralon-budget-search-field"><label>Buscar artículo presupuestado</label><input type="text" autocomplete="off" placeholder="Ej: cemento, grifería, código..."></div>
+              <div class="corralon-budget-search-count">Escribí para buscar en presupuestos.</div>
+              <div class="corralon-budget-search-results"></div>
+              <div class="corralon-budget-search-detail"><div class="corralon-budget-search-empty">Elegí un presupuesto para ver el detalle.</div></div>
+            </div>
+          </div>`;
+        document.body.appendChild(bg);
+      }
+      if (!uiBound) {
+        uiBound = true;
+        const input = bg.querySelector('input');
+        const results = bg.querySelector('.corralon-budget-search-results');
+        input.addEventListener('input', render);
+        bg.querySelector('label').addEventListener('click', () => input.select());
+        bg.querySelector('.corralon-budget-search-close').addEventListener('click', close);
+        bg.addEventListener('mousedown', (event) => { if (event.target === bg) close(); });
+        results.addEventListener('click', (event) => {
+          const card = event.target.closest('[data-budget-search-key]');
+          if (card) renderDetail(card.dataset.budgetSearchKey);
+        });
+        results.addEventListener('dblclick', (event) => {
+          const card = event.target.closest('[data-budget-search-key]');
+          const group = groups.find((item) => item.key === card?.dataset.budgetSearchKey);
+          if (!group || typeof openOptions.onOpenBudget !== 'function') return;
+          close();
+          openOptions.onOpenBudget(group.budget, group.index);
+        });
+        results.addEventListener('keydown', (event) => {
+          const card = event.target.closest('[data-budget-search-key]');
+          if (!card) return;
+          const cards = [...results.querySelectorAll('[data-budget-search-key]')];
+          const index = cards.indexOf(card);
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); renderDetail(card.dataset.budgetSearchKey); }
+          else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            const next = cards[(index + (event.key === 'ArrowDown' ? 1 : -1) + cards.length) % cards.length];
+            next?.focus();
+            if (next) renderDetail(next.dataset.budgetSearchKey);
+          }
+        });
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape' && bg.classList.contains('open')) { event.preventDefault(); close(); }
+        });
+      }
+      return bg;
+    }
+
+    function collect(queryText) {
+      const words = normalizeSearch(queryText).split(' ').filter(Boolean);
+      if (!words.length) return [];
+      return budgets.map((budget, index) => {
+        if (!isRecentBudget(budget)) return null;
+        const lines = (Array.isArray(budget.items) ? budget.items : []).filter((item) => {
+          const text = normalizeSearch(`${item.codigo || item.idart || item.idArt || ''} ${item.nombre || item.descripcion || ''}`);
+          return words.every((word) => text.includes(word));
+        }).map((item) => ({
+          codigo: item.codigo || item.idart || item.idArt || '',
+          descripcion: item.nombre || item.descripcion || '',
+          cantidad: item.cantidad ?? item.cant ?? '',
+          precio: Number(item.precio ?? item.price ?? 0) || 0
+        }));
+        if (!lines.length) return null;
+        return { key:String(budget.id || budget.numero || budget.nro || index + 1), index, budget, lines, timestamp:budgetTimestamp(budget) };
+      }).filter(Boolean).sort((a, b) => b.timestamp - a.timestamp || String(b.key).localeCompare(String(a.key), 'es', { numeric:true }));
+    }
+
+    function renderDetail(key) {
+      const bg = ensureUi();
+      const detail = bg.querySelector('.corralon-budget-search-detail');
+      const group = groups.find((item) => item.key === String(key));
+      selectedKey = group?.key || '';
+      bg.querySelectorAll('[data-budget-search-key]').forEach((card) => card.classList.toggle('active', card.dataset.budgetSearchKey === selectedKey));
+      if (!group) { detail.innerHTML = '<div class="corralon-budget-search-empty">Elegí un presupuesto para ver el detalle.</div>'; return; }
+      const rows = group.lines.map((item) => `<div class="corralon-budget-search-detail-row"><div>${escapeHtml(item.codigo)}</div><div title="${escapeHtml(item.descripcion)}">${escapeHtml(item.descripcion)}</div><div class="num">${escapeHtml(formatQuantity(item.cantidad))}</div><div class="num">${escapeHtml(formatMoney(item.precio))}</div></div>`).join('');
+      detail.innerHTML = `<div class="corralon-budget-search-detail-title">${budgetDate(group.budget) ? `${escapeHtml(budgetDate(group.budget))} - ` : ''}${escapeHtml(budgetTitle(group.budget))} - Presupuesto ${escapeHtml(group.budget.numero || group.budget.id || '-')}</div><div class="corralon-budget-search-meta"><div><b>Usuario</b><span>${escapeHtml(budgetUser(group.budget))}</span></div><div><b>Nota</b><span>${escapeHtml(budgetNote(group.budget))}</span></div></div><div class="corralon-budget-search-detail-row head"><div>Código</div><div>Descripción</div><div class="num">Cantidad</div><div class="num">Precio</div></div>${rows}`;
+    }
+
+    function render() {
+      const bg = ensureUi();
+      const input = bg.querySelector('input');
+      const count = bg.querySelector('.corralon-budget-search-count');
+      const results = bg.querySelector('.corralon-budget-search-results');
+      const detail = bg.querySelector('.corralon-budget-search-detail');
+      const queryText = input.value.trim();
+      if (!queryText) {
+        groups = []; selectedKey = ''; count.textContent = 'Escribí para buscar en presupuestos.'; results.innerHTML = '';
+        detail.innerHTML = '<div class="corralon-budget-search-empty">Elegí un presupuesto para ver el detalle.</div>'; return;
+      }
+      groups = collect(queryText);
+      count.textContent = `${groups.length} presupuesto${groups.length === 1 ? '' : 's'} encontrado${groups.length === 1 ? '' : 's'} en los últimos 30 días para "${queryText}"`;
+      results.innerHTML = groups.map((group) => `<div class="corralon-budget-search-card" tabindex="0" role="button" data-budget-search-key="${escapeHtml(group.key)}"><div><strong>${budgetDate(group.budget) ? `${escapeHtml(budgetDate(group.budget))} - ` : ''}${escapeHtml(budgetTitle(group.budget))}</strong><span>${group.lines.length} línea${group.lines.length === 1 ? '' : 's'} encontrada${group.lines.length === 1 ? '' : 's'}</span></div><b>Presupuesto ${escapeHtml(group.budget.numero || group.budget.id || '-')} · ${escapeHtml(formatMoney(group.budget.total || 0))}</b></div>`).join('') || '<div class="corralon-budget-search-empty">No encontré presupuestos con ese artículo en los últimos 30 días.</div>';
+      if (groups.length) renderDetail(groups[0].key);
+      else { selectedKey = ''; detail.innerHTML = '<div class="corralon-budget-search-empty">Sin resultados para mostrar.</div>'; }
+    }
+
+    async function fetchBudgets() {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=*&order=fecha_iso.desc.nullslast,id.desc&limit=100`, { headers:headers() });
+      if (!response.ok) throw new Error(await response.text() || 'No se pudieron cargar los presupuestos');
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
+    }
+
+    async function open(initialQuery = '', options = {}) {
+      const bg = ensureUi();
+      returnFocus = options.returnFocus || document.activeElement;
+      openOptions = options;
+      bg.classList.add('open');
+      const input = bg.querySelector('input');
+      input.value = String(initialQuery || '').trim();
+      if (Array.isArray(options.budgets)) budgets = options.budgets.slice();
+      render();
+      if (!budgets.length) {
+        bg.querySelector('.corralon-budget-search-count').textContent = 'Cargando presupuestos...';
+        try {
+          const loaded = typeof options.loadBudgets === 'function' ? await options.loadBudgets() : await fetchBudgets();
+          budgets = Array.isArray(loaded) ? loaded.slice() : [];
+          render();
+        } catch (error) {
+          bg.querySelector('.corralon-budget-search-count').textContent = 'No se pudieron cargar los presupuestos.';
+          console.error('No se pudo abrir la búsqueda de presupuestos', error);
+        }
+      }
+      requestAnimationFrame(() => { input.focus(); input.select(); });
+    }
+
+    function close() {
+      document.getElementById('corralonBudgetSearchBg')?.classList.remove('open');
+      const target = returnFocus;
+      returnFocus = null;
+      target?.focus?.({ preventScroll:true });
+    }
+
+    return {
+      open,
+      close,
+      setBudgets(value) { budgets = Array.isArray(value) ? value.slice() : []; },
+      isOpen() { return document.getElementById('corralonBudgetSearchBg')?.classList.contains('open') || false; }
+    };
+  })();
+
   window.CorralonSystem = {
     SUPABASE_URL,
     SUPABASE_KEY,
@@ -5688,6 +5928,7 @@
       apply: applyProviderEditorLayout
     },
     numericCalculator: NUMERIC_CALCULATOR,
+    budgetSearch: BUDGET_SEARCH,
     articleEditor: {
       configure: configureArticleEditor,
       open: openArticleEditor,

@@ -9381,6 +9381,7 @@ function actualizarVistaCarrito() {
     total += importe;
     const div = document.createElement('div');
     div.className = 'cart-item';
+    div.dataset.cartCode = String(itm.codigo || clave || '').trim();
     div.innerHTML = `<img src="${itm.foto || placeholderData}" alt="${itm.nombre}">
       <div class="cart-item-details">
         <div>${itm.nombre}</div>
@@ -9668,6 +9669,65 @@ document.getElementById('cartItems').addEventListener('click', e => {
     guardarCarrito(); actualizarVistaCarrito();
   }
   else if(e.target.classList.contains('remove-item')) { delete carrito[codigo]; guardarCarrito(); actualizarVistaCarrito(); }
+});
+let cartContextArticle = null;
+
+function ensureCartContextMenu() {
+  let menu = document.getElementById('cartItemContextMenu');
+  if (menu) return menu;
+  const style = document.createElement('style');
+  style.id = 'cartItemContextMenuStyle';
+  style.textContent = `
+    #cartItemContextMenu{position:fixed;z-index:2147483500;display:none;min-width:210px;padding:6px;border:1px solid #d2d2cf;border-radius:12px;background:#fff;box-shadow:0 14px 38px rgba(0,0,0,.24)}
+    #cartItemContextMenu.open{display:block}
+    #cartItemContextMenu button{width:100%;padding:10px 13px;border:0;border-radius:8px;background:#fff;color:#171717;text-align:left;font:900 17px 'Barlow Condensed',Arial,sans-serif;cursor:pointer}
+    #cartItemContextMenu button:hover,#cartItemContextMenu button:focus{outline:0;background:#ef1015;color:#fff}
+  `;
+  document.head.appendChild(style);
+  menu = document.createElement('div');
+  menu.id = 'cartItemContextMenu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = '<button type="button" role="menuitem" data-cart-search-orders>Buscar en pedidos</button>';
+  document.body.appendChild(menu);
+  menu.querySelector('[data-cart-search-orders]').addEventListener('click', () => {
+    const selected = cartContextArticle;
+    closeCartContextMenu();
+    if (!selected) return;
+    window.CorralonSystem?.budgetSearch?.open(selected.codigo, { returnFocus:selected.row });
+  });
+  return menu;
+}
+
+function closeCartContextMenu() {
+  document.getElementById('cartItemContextMenu')?.classList.remove('open');
+  cartContextArticle = null;
+}
+
+document.getElementById('cartItems').addEventListener('contextmenu', (event) => {
+  const row = event.target.closest('.cart-item[data-cart-code]');
+  if (!row || !window.CorralonFunciones?.menuUserHasAccess?.('historial')) return;
+  const codigo = String(row.dataset.cartCode || '').trim();
+  if (!codigo) return;
+  event.preventDefault();
+  cartContextArticle = { codigo, row };
+  const menu = ensureCartContextMenu();
+  menu.classList.add('open');
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(6, Math.min(event.clientX, window.innerWidth - rect.width - 6))}px`;
+  menu.style.top = `${Math.max(6, Math.min(event.clientY, window.innerHeight - rect.height - 6))}px`;
+  menu.querySelector('button')?.focus();
+});
+document.addEventListener('mousedown', (event) => {
+  if (!event.target.closest('#cartItemContextMenu')) closeCartContextMenu();
+});
+window.addEventListener('blur', closeCartContextMenu);
+window.addEventListener('resize', closeCartContextMenu);
+document.addEventListener('scroll', closeCartContextMenu, true);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.getElementById('cartItemContextMenu')?.classList.contains('open')) {
+    event.preventDefault();
+    closeCartContextMenu();
+  }
 });
 document.getElementById('cartItems').addEventListener('change', e => {
   if(e.target.classList.contains('qty-input')) {

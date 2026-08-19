@@ -772,12 +772,22 @@ async function loadProviderArticles(nextProvider) {
 function filteredProviderArticles(cell) {
   const rowIndex = Number(cell?.dataset?.row);
   const row = rowsData[rowIndex] || {};
-  const terms = norm(`${row.codigo || ''} ${cell?.textContent || ''}`).split(' ').filter(Boolean);
-  const source = terms.length ? providerArticles.filter((item) => {
+  const terms = norm(cell?.textContent || '').split(' ').filter(Boolean);
+  const descriptionMatches = terms.length ? providerArticles.filter((item) => {
     const hay = norm(`${item.codProv || ''} ${item.idart || ''} ${item.descripcion || ''}`);
     return terms.every((term) => hay.includes(term));
   }) : providerArticles;
-  return source.slice(0, 80);
+  const typedCode = codeKey(row.codigo);
+  if (!typedCode) return descriptionMatches.slice(0, 80);
+  const exactMatches = providerArticles.filter((item) => (
+    codeKey(item.codProv) === typedCode || codeKey(item.idart) === typedCode
+  ));
+  if (!exactMatches.length) return descriptionMatches.slice(0, 80);
+  const exactItems = new Set(exactMatches);
+  return [
+    ...exactMatches,
+    ...descriptionMatches.filter((item) => !exactItems.has(item))
+  ].slice(0, 80);
 }
 function renderArticleProviderList() {
   el.articleProviderMenu.innerHTML = articleProviderOptions.length

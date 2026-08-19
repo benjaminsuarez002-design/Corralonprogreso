@@ -1347,6 +1347,16 @@
     return Boolean(menuSessionUser());
   }
 
+  function menuUserHasAccess(menuId) {
+    const user = menuSessionUser();
+    const wanted = String(menuId || '').trim();
+    if (!user || !wanted) return false;
+    const level = String(user.nivel || '').trim().toLowerCase();
+    if (level === 'administrador') return true;
+    if (level === 'vendedor') return ['lista', 'remitos', 'admin', 'garantias', 'historial'].includes(wanted);
+    return Array.isArray(user.permisos) && user.permisos.map(String).includes(wanted);
+  }
+
   const PRESUPUESTO_MEDIOS_PAGO = [
     'Banco santander',
     'Cheques',
@@ -1402,6 +1412,7 @@
     bindShiftEnterNewLine,
     menuSessionUser,
     isMenuSessionActive,
+    menuUserHasAccess,
     presupuestoMediosPago,
     normalizePresupuestoDatos
   };
