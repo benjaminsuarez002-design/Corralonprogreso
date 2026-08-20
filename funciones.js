@@ -1011,6 +1011,7 @@
       });
     const selected = new Map();
     let activeCell = null;
+    let columnAnchor = null;
 
     function keyFromPosition(position) {
       return `${position.row}:${position.col}`;
@@ -1114,7 +1115,16 @@
         const col = column.dataset.col ?? column.dataset.colSelect ?? column.dataset.selectColumn;
         if (col !== undefined) {
           event.preventDefault();
-          selectColumn(col, event.ctrlKey || event.metaKey);
+          const targetCol = Number(col);
+          if (event.shiftKey && Number.isFinite(columnAnchor)) {
+            if (!(event.ctrlKey || event.metaKey)) clearSelection();
+            const from = Math.min(columnAnchor, targetCol);
+            const to = Math.max(columnAnchor, targetCol);
+            for (let index = from; index <= to; index += 1) selectColumn(index, true);
+          } else {
+            selectColumn(targetCol, event.ctrlKey || event.metaKey);
+            columnAnchor = targetCol;
+          }
         }
         return;
       }

@@ -7,7 +7,7 @@
   const USERS_COLLECTION = 'menuUsuarios';
   const CATALOG_EDITOR_LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
   const CATALOG_EDITOR_SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
-  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'actualizar_articulos', 'carga_stock', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
+  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'actualizar_articulos', 'carga_stock', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const firebaseConfig = {
     apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -24,6 +24,7 @@
     caja: 'caja',
     faltantes: 'faltantes',
     pedidos: 'pedidos',
+    facturacion: 'facturacion',
     'actualizar articulos': 'actualizar_articulos',
     'actualizar%20articulos': 'actualizar_articulos',
     cargastock: 'carga_stock',

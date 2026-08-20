@@ -4450,6 +4450,8 @@
         item.precio
       );
       const precioFinal = firstNumber(item.precioFinal, item.precioVigente, item.PrecioVta, item.precio, precioCosto);
+      const stock = firstNumber(item.StockAct, item.stockAct, item.stock_act, item.stock, item.Stock);
+      const iva = firstNumber(item.PorcIVA, item.porcIVA, item.porc_iva, item.iva, item.IVA, 21);
       const codProv = String(
         item.idartprov || item.idArtProv || item.idart_prov || item.id_art_prov || item.artprov || item.idProveedorArticulo ||
         item.codprov || item.codProv || item.cod_prov || item.codigo_proveedor || item.codigoProveedor || item.codigo_prov ||
@@ -4499,7 +4501,9 @@
         proveedor,
         descripcion,
         precioCosto,
-        precioFinal
+        precioFinal,
+        stock,
+        iva
       });
     }
 

@@ -9256,13 +9256,17 @@ async function publicarCarritoFirebase() {
   if (!carritoFirebaseRef || !carritoFirebaseUsuario?.id) return;
   const carritoAEnviar = JSON.parse(JSON.stringify(normalizarCarritoPersistido(carrito)));
   const firmaEnviada = firmaCarrito(carritoAEnviar);
+  const campoActualizado = `${CARRITO_FIREBASE_FIELD}_actualizado`;
+  const datosCarrito = {
+    usuario_id: carritoFirebaseUsuario.id,
+    usuario_nombre: carritoFirebaseUsuario.nombre || carritoFirebaseUsuario.id,
+    [CARRITO_FIREBASE_FIELD]: carritoAEnviar,
+    [campoActualizado]: serverTimestamp()
+  };
   try {
-    await setDoc(carritoFirebaseRef, {
-      usuario_id: carritoFirebaseUsuario.id,
-      usuario_nombre: carritoFirebaseUsuario.nombre || carritoFirebaseUsuario.id,
-      [CARRITO_FIREBASE_FIELD]: carritoAEnviar,
-      [`${CARRITO_FIREBASE_FIELD}_actualizado`]: serverTimestamp()
-    }, { merge: true });
+    await setDoc(carritoFirebaseRef, datosCarrito, {
+      mergeFields: ['usuario_id', 'usuario_nombre', CARRITO_FIREBASE_FIELD, campoActualizado]
+    });
     if (firmaCarrito(carrito) === firmaEnviada) {
       carritoFirebaseCambioLocalPendiente = false;
     } else {
