@@ -6091,7 +6091,36 @@ function abrirDescuentoPresupuestoCeramico() {
   mostrarPopupDescuentoArticulo(ceramicoBudgetArticulo, document.getElementById('ceramicoBudgetDiscount'));
 }
 function cerrarDescuentoDetalleProducto() { const returnFocus = productDiscountReturnFocus; document.getElementById('productDiscountModal').classList.add('hidden'); productDiscountArticle = null; productDiscountReturnFocus = null; returnFocus?.focus?.(); }
-function aplicarDescuentoDetalleProducto() { if (!productDiscountArticle || productDiscountArticle.ofertaVigente) return; const articuloAplicado = productDiscountArticle, datos = datosDescuentoArticulo(articuloAplicado), porcentaje = Math.max(0, Math.min(normalizarNumeroConsulta(String(document.getElementById('productDiscountPercent').value || '').replace(/%/g, '')) || 0, datos.maximo)), codigo = obtenerIdArticulo(articuloAplicado); if (porcentaje > 0) productDiscountsByCode.set(codigo, porcentaje); else productDiscountsByCode.delete(codigo); actualizarPrecioDetalleProducto(articuloAplicado); if (ceramicoBudgetArticulo && obtenerIdArticulo(ceramicoBudgetArticulo) === codigo) { actualizarIndicadorPrecioPresupuestoCeramico(); calcularPresupuestoCeramico(); } cerrarDescuentoDetalleProducto(); }
+function aplicarDescuentoDetalleProducto() {
+  if (!productDiscountArticle || productDiscountArticle.ofertaVigente) return;
+  const articuloAplicado = productDiscountArticle;
+  const datos = datosDescuentoArticulo(articuloAplicado);
+  const porcentaje = Math.max(0, Math.min(
+    normalizarNumeroConsulta(String(document.getElementById('productDiscountPercent').value || '').replace(/%/g, '')) || 0,
+    datos.maximo
+  ));
+  const codigo = obtenerIdArticulo(articuloAplicado);
+  if (porcentaje > 0) productDiscountsByCode.set(codigo, porcentaje);
+  else productDiscountsByCode.delete(codigo);
+
+  actualizarPrecioDetalleProducto(articuloAplicado);
+  const itemCarrito = Object.values(carrito || {}).find((item) =>
+    normalizarCodigoArticuloComparacion(item?.codigo) === normalizarCodigoArticuloComparacion(codigo)
+  );
+  if (itemCarrito) {
+    const chipPrecio = datosChipPrecioArticulo(articuloAplicado);
+    itemCarrito.precio = precioActualParaCarrito(articuloAplicado);
+    itemCarrito.tipoPrecio = chipPrecio.tipo;
+    itemCarrito.porcentajePrecio = chipPrecio.porcentaje;
+    guardarCarrito();
+    actualizarVistaCarrito();
+  }
+  if (ceramicoBudgetArticulo && obtenerIdArticulo(ceramicoBudgetArticulo) === codigo) {
+    actualizarIndicadorPrecioPresupuestoCeramico();
+    calcularPresupuestoCeramico();
+  }
+  cerrarDescuentoDetalleProducto();
+}
 
 function fmtBolsas(value) {
   const n = Number(value || 0);
@@ -9226,7 +9255,7 @@ function claveStorageCarritoActual() {
 async function publicarCarritoFirebase() {
   if (!carritoFirebaseRef || !carritoFirebaseUsuario?.id) return;
   const carritoAEnviar = JSON.parse(JSON.stringify(normalizarCarritoPersistido(carrito)));
-  carritoFirebaseCambioLocalPendiente = false;
+  const firmaEnviada = firmaCarrito(carritoAEnviar);
   try {
     await setDoc(carritoFirebaseRef, {
       usuario_id: carritoFirebaseUsuario.id,
@@ -9234,6 +9263,12 @@ async function publicarCarritoFirebase() {
       [CARRITO_FIREBASE_FIELD]: carritoAEnviar,
       [`${CARRITO_FIREBASE_FIELD}_actualizado`]: serverTimestamp()
     }, { merge: true });
+    if (firmaCarrito(carrito) === firmaEnviada) {
+      carritoFirebaseCambioLocalPendiente = false;
+    } else {
+      carritoFirebaseCambioLocalPendiente = true;
+      programarPublicacionCarritoFirebase();
+    }
   } catch (error) {
     carritoFirebaseCambioLocalPendiente = true;
     console.warn('No se pudo sincronizar el carrito con Firebase', error);
@@ -9687,8 +9722,18 @@ function ensureCartContextMenu() {
   menu = document.createElement('div');
   menu.id = 'cartItemContextMenu';
   menu.setAttribute('role', 'menu');
-  menu.innerHTML = '<button type="button" role="menuitem" data-cart-search-orders>Buscar en pedidos</button>';
+  menu.innerHTML = `
+    <button type="button" role="menuitem" data-cart-apply-discount>Aplicar descuento</button>
+    <button type="button" role="menuitem" data-cart-search-orders>Buscar en pedidos</button>
+  `;
   document.body.appendChild(menu);
+  menu.querySelector('[data-cart-apply-discount]').addEventListener('click', () => {
+    const selected = cartContextArticle;
+    closeCartContextMenu();
+    if (!selected) return;
+    const articulo = obtenerArticuloDesdeCodigo(selected.codigo);
+    mostrarPopupDescuentoArticulo(articulo, selected.row);
+  });
   menu.querySelector('[data-cart-search-orders]').addEventListener('click', () => {
     const selected = cartContextArticle;
     closeCartContextMenu();
@@ -9705,17 +9750,18 @@ function closeCartContextMenu() {
 
 document.getElementById('cartItems').addEventListener('contextmenu', (event) => {
   const row = event.target.closest('.cart-item[data-cart-code]');
-  if (!row || !window.CorralonFunciones?.menuUserHasAccess?.('historial')) return;
+  if (!row || !window.CorralonFunciones?.isMenuSessionActive?.()) return;
   const codigo = String(row.dataset.cartCode || '').trim();
   if (!codigo) return;
   event.preventDefault();
   cartContextArticle = { codigo, row };
   const menu = ensureCartContextMenu();
+  menu.querySelector('[data-cart-search-orders]').hidden = !window.CorralonFunciones?.menuUserHasAccess?.('historial');
   menu.classList.add('open');
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(6, Math.min(event.clientX, window.innerWidth - rect.width - 6))}px`;
   menu.style.top = `${Math.max(6, Math.min(event.clientY, window.innerHeight - rect.height - 6))}px`;
-  menu.querySelector('button')?.focus();
+  menu.querySelector('button:not([hidden])')?.focus();
 });
 document.addEventListener('mousedown', (event) => {
   if (!event.target.closest('#cartItemContextMenu')) closeCartContextMenu();
