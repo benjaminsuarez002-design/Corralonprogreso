@@ -5542,6 +5542,61 @@ function evaluarArticuloBusqueda(articulo, parsed) {
   return { score, highlightTerms: [...highlightTerms], matchedFields: [...matchedFields] };
 }
 
+function normalizarFiltroDescripcionFlexible(texto) {
+  return String(texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function procesarFiltroDescripcionFlexible(parsed) {
+  if (!parsed?.hasText) return [];
+  const consulta = normalizarFiltroDescripcionFlexible(parsed.freeText);
+  if (!consulta) return [];
+  const terminos = consulta.split(/\s+/).filter(Boolean);
+  const resultados = [];
+
+  todosArticulos.forEach((articulo) => {
+    if (!cumpleFiltrosBusqueda(articulo, parsed)) return;
+    const descripcion = normalizarFiltroDescripcionFlexible(obtenerDescripcionArticulo(articulo).principal);
+    const codigos = [
+      obtenerIdArticulo(articulo),
+      articulo.idartprov,
+      articulo.idArtProv,
+      articulo.codprov,
+      articulo.codProv
+    ].map(normalizarFiltroDescripcionFlexible).filter(Boolean);
+    const palabras = descripcion.split(/\s+/).filter(Boolean);
+    const textoCompleto = `${codigos.join(' ')} ${descripcion}`.trim();
+    let score = null;
+
+    if (codigos.includes(consulta)) score = 0;
+    else if (descripcion.startsWith(consulta)) score = 1;
+    else if (terminos.every((termino) => palabras.some((palabra) => palabra.startsWith(termino)))) score = 2;
+    else if (terminos.every((termino) => textoCompleto.includes(termino))) score = 3;
+    if (score === null) return;
+
+    resultados.push({
+      articulo,
+      score,
+      meta: {
+        score,
+        highlightTerms: terminos.filter((termino) => termino.length > 1),
+        matchedFields: score === 0 ? ['code'] : ['principal']
+      }
+    });
+  });
+
+  resultados.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return obtenerDescripcionArticulo(a.articulo).principal.localeCompare(obtenerDescripcionArticulo(b.articulo).principal, 'es');
+  });
+  return resultados;
+}
+
 function procesarBusquedaArticulos(rawInput) {
   const parsed = parsearBusquedaAvanzada(rawInput);
   const evaluados = [];
@@ -5549,6 +5604,15 @@ function procesarBusquedaArticulos(rawInput) {
   if (!parsed.hasText && !parsed.hasFilters) {
     const resultados = [...todosArticulos].sort((a, b) => obtenerDescripcionArticulo(a).principal.localeCompare(obtenerDescripcionArticulo(b).principal, 'es')).map((articulo) => ({ ...articulo, _searchMeta: { score: 0, highlightTerms: [], matchedFields: [] } }));
     return { parsed, resultados, highlightTerms: [] };
+  }
+
+  const flexibles = procesarFiltroDescripcionFlexible(parsed);
+  if (flexibles.length) {
+    return {
+      parsed,
+      resultados: flexibles.map(({ articulo, meta }) => ({ ...articulo, _searchMeta: meta })),
+      highlightTerms: parsed.highlightTerms
+    };
   }
 
   todosArticulos.forEach((articulo) => {
