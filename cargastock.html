@@ -671,6 +671,22 @@ function calcPrecioFinal(row) {
   if (ivaIncluido && iva > 0) base /= (1 + iva);
   return base;
 }
+function precioUnitarioDesdeFinal(row, precioFinal) {
+  const final = Number(precioFinal) || 0;
+  if (!final) return 0;
+  const descuentoUnitario = providerDiscountValue();
+  const descuentoAdicional = Number(row?.descuentoAdicional || 0) || 0;
+  const descuentoProntoPago = Number(provider?.descuento_total_fc ?? provider?.descuento_final_factura ?? 0) || 0;
+  const flete = Number(provider?.porc_flete || 0) || 0;
+  const iva = Number(provider?.porc_iva || 0) || 0;
+  const ivaIncluido = boolInput(provider?.iva_incluido);
+  let factor = descuentoAdicional > 0
+    ? (1 - descuentoAdicional) * (1 - descuentoProntoPago)
+    : (1 - descuentoUnitario);
+  factor *= (1 + flete);
+  if (ivaIncluido && iva > 0) factor /= (1 + iva);
+  return factor > 0 ? final / factor : 0;
+}
 function calcPrecioFinalCantidad(row) {
   return calcPrecioFinal(row) * (quantityNumber(row.cantidad) || 0);
 }
@@ -816,11 +832,41 @@ function pickArticleProviderOption(index = articleProviderActive) {
   pushUndoSnapshot();
   row.codigo = String(item.codProv || item.idart || '').trim();
   row.descripcion = String(item.descripcion || '').trim();
+  if (!moneyNumber(row.precio)) {
+    row.precio = precioUnitarioDesdeFinal(row, moneyNumber(item.precioFinal || item.precioCosto || 0));
+    row.precioOriginal = 0;
+    row.precioDivisor = '';
+    row.precioMultiplicador = '';
+  }
   saveRows();
   closeArticleProviderList();
   render();
   const nextCell = editableCellAt(rowIndex, 1);
   focusNavigationTarget(nextCell);
+  show('Artículo seleccionado');
+  return true;
+}
+function applyExactProviderCode(cell) {
+  if (!cell?.matches?.('[data-field="codigo"]')) return false;
+  const rowIndex = Number(cell.dataset.row);
+  const row = rowsData[rowIndex];
+  const typedCode = codeKey(cell.textContent || row?.codigo);
+  if (!row || !typedCode) return false;
+  const item = providerArticles.find((article) => codeKey(article.codProv) === typedCode)
+    || providerArticles.find((article) => codeKey(article.idart) === typedCode);
+  if (!item) return false;
+
+  row.codigo = String(item.codProv || item.idart || '').trim();
+  row.descripcion = String(item.descripcion || '').trim();
+  if (!moneyNumber(row.precio)) {
+    row.precio = precioUnitarioDesdeFinal(row, moneyNumber(item.precioFinal || item.precioCosto || 0));
+    row.precioOriginal = 0;
+    row.precioDivisor = '';
+    row.precioMultiplicador = '';
+  }
+  saveRows();
+  render();
+  requestAnimationFrame(() => focusNavigationTarget(editableCellAt(rowIndex, 2)));
   show('Artículo seleccionado');
   return true;
 }
@@ -1352,6 +1398,11 @@ function handleRuleNavigation(event) {
   if (providerListOpen && (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter')) return;
   const articleListOpen = target.dataset.field === 'descripcion' && el.articleProviderMenu.classList.contains('open');
   if (articleListOpen && (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter')) return;
+  if (isTable && target.dataset.field === 'codigo' && (key === 'Enter' || key === 'Tab') && applyExactProviderCode(target)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
 
   let moved = false;
   if (key === 'Tab') {

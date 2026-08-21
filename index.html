@@ -6244,6 +6244,7 @@ function agregarArticuloCarritoDesdeArticulo(articulo, cantidad) {
       precio: precioActual,
       foto: imagenPrincipalArticulo(articulo) || '',
       cantidad: qty,
+      orden: nuevoOrdenCarrito(),
       tipoPrecio: chipPrecio.tipo,
       porcentajePrecio: chipPrecio.porcentaje
     };
@@ -9210,6 +9211,7 @@ function agregarPresupuestoAridosAlCarrito(payload) {
       precio: cantidadNueva > 0 ? (totalPrevio + Number(material.total || 0)) / cantidadNueva : Number(material.unitPrice || 0),
       foto: previo?.foto || imagenPrincipalArticulo(articulo) || '',
       cantidad: cantidadNueva,
+      orden: previo?.orden || nuevoOrdenCarrito(),
       tipoPrecio: '',
       porcentajePrecio: 0
     };
@@ -9291,16 +9293,34 @@ let carritoFirebaseUnsubscribe = null;
 let carritoFirebaseTimer = null;
 let carritoFirebaseCambioLocalPendiente = false;
 let carritoFirebasePrimeraLectura = true;
+let carritoOrdenSecuencia = 0;
+
+function nuevoOrdenCarrito() {
+  carritoOrdenSecuencia = (carritoOrdenSecuencia + 1) % 1000;
+  return (Date.now() * 1000) + carritoOrdenSecuencia;
+}
+
+function itemsCarritoOrdenados(valor = carrito) {
+  return Object.entries(valor || {}).sort(([claveA, itemA], [claveB, itemB]) => {
+    const ordenA = Number(itemA?.orden);
+    const ordenB = Number(itemB?.orden);
+    if (Number.isFinite(ordenA) && Number.isFinite(ordenB) && ordenA !== ordenB) return ordenA - ordenB;
+    if (Number.isFinite(ordenA) !== Number.isFinite(ordenB)) return Number.isFinite(ordenA) ? -1 : 1;
+    return String(itemA?.codigo || claveA).localeCompare(String(itemB?.codigo || claveB), 'es', { numeric: true });
+  });
+}
 
 function normalizarCarritoPersistido(valor) {
   if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return {};
   const limpio = {};
+  let ordenLegacy = 0;
   Object.entries(valor).forEach(([clave, item]) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return;
     const codigo = String(item.codigo || clave || '').trim();
     const cantidad = Number(item.cantidad);
     if (!codigo || !Number.isFinite(cantidad) || cantidad === 0) return;
-    limpio[codigo] = { ...item, codigo, cantidad };
+    const ordenGuardado = Number(item.orden);
+    limpio[codigo] = { ...item, codigo, cantidad, orden: Number.isFinite(ordenGuardado) && ordenGuardado > 0 ? ordenGuardado : ++ordenLegacy };
   });
   return limpio;
 }
@@ -9473,8 +9493,7 @@ function actualizarVistaCarrito() {
   const cont = document.getElementById('cartItems');
   cont.innerHTML = '';
   let total = 0;
-  for (const clave in carrito) {
-    const itm = carrito[clave];
+  for (const [clave, itm] of itemsCarritoOrdenados()) {
     const articulo = obtenerArticuloDesdeCodigo(itm.codigo);
     const chipActual = articulo ? datosChipPrecioArticulo(articulo) : { tipo: '', porcentaje: 0 };
     const tipoPrecio = chipActual.tipo || ((!articulo || itm.tipoPrecio === 'Descuento') ? String(itm.tipoPrecio || '') : '');
@@ -9603,6 +9622,7 @@ document.getElementById('productDetailAddCart').addEventListener('click', () => 
       precio: parseFloat(btn.dataset.precio) || 0,
       foto: btn.dataset.foto || '',
       cantidad,
+      orden: nuevoOrdenCarrito(),
       tipoPrecio: chipPrecio.tipo,
       porcentajePrecio: chipPrecio.porcentaje
     };
@@ -9690,7 +9710,7 @@ document.getElementById('modalAddCart').addEventListener('click', () => {
     mostrarErrorSinPlacas(cantidadInput);
     return;
   }
-  if(!carrito[codigo]) { carrito[codigo] = { codigo, nombre: btn.dataset.nombre, precio: parseFloat(btn.dataset.precio)||0, foto: btn.dataset.foto, cantidad: cant, tipoPrecio: chipPrecio.tipo, porcentajePrecio: chipPrecio.porcentaje }; }
+  if(!carrito[codigo]) { carrito[codigo] = { codigo, nombre: btn.dataset.nombre, precio: parseFloat(btn.dataset.precio)||0, foto: btn.dataset.foto, cantidad: cant, orden: nuevoOrdenCarrito(), tipoPrecio: chipPrecio.tipo, porcentajePrecio: chipPrecio.porcentaje }; }
   else { carrito[codigo].tipoPrecio = chipPrecio.tipo; carrito[codigo].porcentajePrecio = chipPrecio.porcentaje; carrito[codigo].cantidad += cant; }
   registrarAgregadoCarrito(articulo || codigo);
   guardarCarrito(); actualizarVistaCarrito();
