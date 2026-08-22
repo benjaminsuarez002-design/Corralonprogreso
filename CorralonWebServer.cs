@@ -385,6 +385,16 @@ internal sealed class ServerForm : Form
                 WriteJson(context, 200, ImportAndSyncCatalog(context));
                 return;
             }
+            if (method == "GET" && path == "/api/articulos-nuevos/validate")
+            {
+                ValidateNewArticlesMaximum(context);
+                return;
+            }
+            if (method == "POST" && path == "/api/articulos-nuevos/import")
+            {
+                ImportNewArticles(context);
+                return;
+            }
             if (method == "GET" && path == "/api/catalog-sync/status")
             {
                 WriteJson(context, 200, GetCatalogSyncStatus(context));
@@ -1148,24 +1158,7 @@ internal sealed class ServerForm : Form
 
     private void SaveArticulosXls(HttpListenerContext context)
     {
-        string target = @"C:\Update\Articulos.xls";
-        Directory.CreateDirectory(Path.GetDirectoryName(target));
-        if (File.Exists(target))
-        {
-            File.Delete(target);
-        }
-        using (var output = File.Create(target))
-        {
-            context.Request.InputStream.CopyTo(output);
-        }
-
         bool runAccess = String.Equals(context.Request.QueryString["runAccess"], "1", StringComparison.OrdinalIgnoreCase);
-        if (!runAccess)
-        {
-            WriteText(context, 200, "OK");
-            return;
-        }
-
         if (!Monitor.TryEnter(accessPriceUpdateLock))
         {
             WriteText(context, 409, "Ya hay una actualizacion de precios en curso.");
@@ -1174,6 +1167,14 @@ internal sealed class ServerForm : Form
 
         try
         {
+            string target = @"C:\Update\Articulos.xls";
+            SaveRequestBodyAtomically(context, target);
+            if (!runAccess)
+            {
+                WriteText(context, 200, "OK");
+                return;
+            }
+
             string script = @"C:\Update\actualizaciones\actualizar articulos\corralon_actualizar_precios.ps1";
             if (!File.Exists(script))
             {
@@ -1181,24 +1182,13 @@ internal sealed class ServerForm : Form
                 return;
             }
 
-            var info = new ProcessStartInfo("powershell.exe");
-            info.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\"";
-            info.UseShellExecute = false;
-            info.CreateNoWindow = true;
-            info.WindowStyle = ProcessWindowStyle.Hidden;
-            info.RedirectStandardOutput = true;
-            info.RedirectStandardError = true;
-
-            using (var process = Process.Start(info))
+            string output;
+            string error;
+            int exitCode = RunPowerShellScript(script, "", out output, out error);
+            if (exitCode != 0)
             {
-                string output = process.StandardOutput.ReadToEnd();
-                string error = process.StandardError.ReadToEnd();
-                process.WaitForExit();
-                if (process.ExitCode != 0)
-                {
-                    WriteText(context, 500, String.IsNullOrWhiteSpace(error) ? (String.IsNullOrWhiteSpace(output) ? "Access no pudo actualizar los precios." : output) : error);
-                    return;
-                }
+                WriteText(context, 500, PowerShellMessage(output, error, "Access no pudo actualizar los precios."));
+                return;
             }
 
             WriteText(context, 200, "XLS generado y precios actualizados en Access.");
@@ -1207,6 +1197,144 @@ internal sealed class ServerForm : Form
         {
             Monitor.Exit(accessPriceUpdateLock);
         }
+    }
+
+    private void ValidateNewArticlesMaximum(HttpListenerContext context)
+    {
+        if (!IsLocalRequest(context))
+        {
+            WriteJson(context, 403, "{\"ok\":false,\"error\":\"El importador solo se puede ejecutar desde localhost.\"}");
+            return;
+        }
+        int expectedMax = ParseInt(context.Request.QueryString["maxIndex"]);
+        if (expectedMax <= 0)
+        {
+            WriteJson(context, 400, "{\"ok\":false,\"error\":\"El IDArt maximo de Index es invalido.\"}");
+            return;
+        }
+        if (!Monitor.TryEnter(accessPriceUpdateLock))
+        {
+            WriteJson(context, 409, "{\"ok\":false,\"error\":\"Ya hay una operacion de Access en curso.\"}");
+            return;
+        }
+        try
+        {
+            string output;
+            string error;
+            int exitCode = RunNewArticlesScript(expectedMax, true, out output, out error);
+            if (exitCode != 0)
+            {
+                WriteJson(context, 409, "{\"ok\":false,\"error\":\"" + JsonEscape(PowerShellMessage(output, error, "No se pudo validar Access.")) + "\"}");
+                return;
+            }
+            WriteJson(context, 200, String.IsNullOrWhiteSpace(output) ? "{\"ok\":true}" : output.Trim());
+        }
+        finally
+        {
+            Monitor.Exit(accessPriceUpdateLock);
+        }
+    }
+
+    private void ImportNewArticles(HttpListenerContext context)
+    {
+        if (!IsLocalRequest(context))
+        {
+            WriteJson(context, 403, "{\"ok\":false,\"error\":\"El importador solo se puede ejecutar desde localhost.\"}");
+            return;
+        }
+        int expectedMax = ParseInt(context.Request.QueryString["maxIndex"]);
+        if (expectedMax <= 0)
+        {
+            WriteJson(context, 400, "{\"ok\":false,\"error\":\"El IDArt maximo de Index es invalido.\"}");
+            return;
+        }
+        if (!Monitor.TryEnter(accessPriceUpdateLock))
+        {
+            WriteJson(context, 409, "{\"ok\":false,\"error\":\"Ya hay una operacion de Access en curso.\"}");
+            return;
+        }
+        try
+        {
+            string output;
+            string error;
+            SaveRequestBodyAtomically(context, @"C:\Update\Articulos.xls");
+
+            int exitCode = RunNewArticlesScript(expectedMax, false, out output, out error);
+            if (exitCode != 0)
+            {
+                WriteJson(context, 409, "{\"ok\":false,\"error\":\"" + JsonEscape(PowerShellMessage(output, error, "Access no pudo importar los articulos.")) + "\"}");
+                return;
+            }
+            WriteJson(context, 200, String.IsNullOrWhiteSpace(output) ? "{\"ok\":true}" : output.Trim());
+        }
+        finally
+        {
+            Monitor.Exit(accessPriceUpdateLock);
+        }
+    }
+
+    private static void SaveRequestBodyAtomically(HttpListenerContext context, string target)
+    {
+        string directory = Path.GetDirectoryName(target);
+        Directory.CreateDirectory(directory);
+        string temporary = Path.Combine(directory, "." + Path.GetFileName(target) + "." + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                context.Request.InputStream.CopyTo(output);
+                output.Flush(true);
+            }
+            if (File.Exists(target)) File.Replace(temporary, target, null);
+            else File.Move(temporary, target);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    private static int RunNewArticlesScript(int expectedMax, bool validateOnly, out string output, out string error)
+    {
+        string script = @"C:\Update\actualizaciones\importar articulos nuevos\importar_articulos_nuevos.ps1";
+        if (!File.Exists(script))
+        {
+            output = "";
+            error = "No se encontro el importador de articulos nuevos.";
+            return 2;
+        }
+        string arguments = "-ExpectedIndexMax " + expectedMax + (validateOnly ? " -ValidateOnly" : "");
+        return RunPowerShellScript(script, arguments, out output, out error);
+    }
+
+    private static int RunPowerShellScript(string script, string arguments, out string output, out string error)
+    {
+        var info = new ProcessStartInfo("powershell.exe");
+        info.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\" " + (arguments ?? "");
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+        info.WindowStyle = ProcessWindowStyle.Hidden;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+        info.StandardOutputEncoding = Encoding.UTF8;
+        info.StandardErrorEncoding = Encoding.UTF8;
+        using (var process = Process.Start(info))
+        {
+            output = process.StandardOutput.ReadToEnd();
+            error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            return process.ExitCode;
+        }
+    }
+
+    private static string PowerShellMessage(string output, string error, string fallback)
+    {
+        string value = !String.IsNullOrWhiteSpace(error) ? error : output;
+        if (String.IsNullOrWhiteSpace(value)) value = fallback;
+        value = value.Trim();
+        int marker = value.LastIndexOf("throw ", StringComparison.OrdinalIgnoreCase);
+        if (marker >= 0) value = value.Substring(marker + 6).Trim();
+        return value;
     }
 
     private static string ContentType(string ext)

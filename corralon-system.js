@@ -3179,6 +3179,49 @@
     return new Blob([out.join('')], { type: 'application/vnd.ms-excel;charset=utf-8' });
   }
 
+  function buildNewArticlesXlsBlob(articles) {
+    const headers = ['IDArt', 'CodProveedor', 'Articulo', 'CodBarra', 'PrecioCosto', 'preciolista', 'PrecioVta', 'IDProveedor', 'IDRubro', 'IDMoneda', 'Nota', 'PorcIVA', 'PorcGanMin', 'PorcGanInt', 'PorcGanMay'];
+    const dataRows = (articles || []).map((article) => [
+      String(article.id_art || article.idart || '').padStart(6, '0'),
+      String(article.cod_proveedor || article.codProveedor || '').trim(),
+      String(article.articulo || article.descripcion || '').trim().toLocaleUpperCase('es-AR'),
+      '',
+      Number(article.precio_costo || 0),
+      Number(article.precio_lista || article.precio_costo || 0),
+      Number(article.precio_venta || 0),
+      Number(article.id_proveedor || 0),
+      Number(article.id_rubro || 0),
+      Number(article.id_moneda || 1),
+      String(article.nota || '').trim(),
+      Number(article.porc_iva || 0),
+      Number(article.porc_gan_min ?? article.margen ?? 0),
+      Number(article.porc_gan_int ?? article.margen ?? 0),
+      Number(article.porc_gan_may ?? article.margen ?? 0)
+    ]);
+    const rows = [headers, ...dataRows];
+
+    if (window.XLSX) {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Hoja1');
+      const output = XLSX.write(workbook, { bookType: 'biff8', type: 'array' });
+      return new Blob([output], { type: 'application/vnd.ms-excel' });
+    }
+
+    const out = [
+      '<?xml version="1.0"?>',
+      '<?mso-application progid="Excel.Sheet"?>',
+      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">',
+      '<Worksheet ss:Name="Hoja1"><Table>',
+      '<Row>' + headers.map((header) => xmlCell(header)).join('') + '</Row>'
+    ];
+    for (const row of dataRows) {
+      out.push('<Row>' + row.map((value, index) => xmlCell(value, [4, 5, 6, 7, 8, 9, 11, 12, 13, 14].includes(index) ? 'Number' : 'String')).join('') + '</Row>');
+    }
+    out.push('</Table></Worksheet></Workbook>');
+    return new Blob([out.join('')], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  }
+
   async function saveBlobAs(blob, fileName) {
     if (window.showSaveFilePicker) {
       const handle = await window.showSaveFilePicker({
@@ -3377,7 +3420,7 @@
     const FIRESTORE_PROJECT = 'corralon-progreso';
     const FIRESTORE_API_KEY = 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0';
     const SELECT_COLUMNS = [
-      'codigo', 'codigo_proveedor', 'id_proveedor', 'nombre', 'rubro',
+      'codigo', 'codigo_proveedor', 'id_proveedor', 'nombre', 'rubro', 'id_rubro',
       'precio_compra_sin_descuento', 'precio_compra_con_impuestos',
       'porcentaje_ganancia_min', 'precio_venta', 'stock',
       'stock_progreso', 'stock_calle5',
@@ -3432,6 +3475,19 @@
       return Boolean(Array.isArray(cached?.rows) && cached.rows.length);
     }
 
+    function cacheHasRubros(cached) {
+      const rows = Array.isArray(cached?.rows) ? cached.rows : [];
+      const rubroIds = new Set();
+      rows.forEach((row) => {
+        const id = Number(row?.id_rubro ?? row?.idRubro ?? row?.IDRubro ?? 0);
+        const name = String(row?.rubro ?? row?.Rubros_Descripción ?? row?.rubro_descripcion ?? '').trim();
+        if (Number.isInteger(id) && id > 0 && name) rubroIds.add(id);
+      });
+      // El catalogo real contiene muchos rubros. Una cache con uno solo suele
+      // ser la portada parcial que se guardo antes de incorporar IDRubro.
+      return rubroIds.size > 1;
+    }
+
     async function getConfigUrl(docId) {
       const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/config/${encodeURIComponent(docId)}?key=${FIRESTORE_API_KEY}`;
       const response = await fetch(url, { cache: 'no-store' });
@@ -3482,6 +3538,8 @@
         nombre,
         descripcion: nombre,
         rubro: String(row.rubro || ''),
+        id_rubro: row.id_rubro === null || row.id_rubro === undefined ? '' : Number(row.id_rubro),
+        idRubro: row.id_rubro === null || row.id_rubro === undefined ? '' : Number(row.id_rubro),
         precio: precioVenta,
         precioCosto,
         precio_costo: precioCosto,
@@ -3778,6 +3836,7 @@
           case 'id_proveedor': set(['idProveedor', 'id_proveedor'], String(rawValue || '')); break;
           case 'nombre': set(['nombre', 'descripcion'], String(rawValue || '')); break;
           case 'rubro': next.rubro = String(rawValue || ''); break;
+          case 'id_rubro': set(['id_rubro', 'idRubro'], rawValue === null ? '' : Number(rawValue)); break;
           case 'precio_compra_sin_descuento': set(['precioCosto', 'precio_costo', 'PrecioCpraSISDto'], Number(rawValue || 0)); break;
           case 'precio_compra_con_impuestos': next.PrecioCpraCI = Number(rawValue || 0); break;
           case 'porcentaje_ganancia_min': next.PorcGanMin = Number(rawValue || 0); break;
@@ -4035,7 +4094,10 @@
 
     async function loadProgressive(options = {}) {
       const force = Boolean(options.force);
-      const cached = await readCache();
+      const storedCache = await readCache();
+      // Una cache anterior a IDRubro no sirve para los selectores de rubros.
+      // Se ignora una sola vez y el siguiente full load vuelve a guardarla completa.
+      const cached = cacheHasRubros(storedCache) ? storedCache : null;
       if (!force && Array.isArray(cached?.rows) && cached.rows.length) {
         const complete = (async () => {
           const context = await catalogContext(cached);
@@ -5644,6 +5706,497 @@
     };
   }
 
+  const NEW_ARTICLES_IMPORTER = (() => {
+    let state = null;
+    let returnFocus = null;
+
+    function text(value) {
+      return String(value ?? '').trim();
+    }
+
+    function normalized(value) {
+      return text(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ');
+    }
+
+    function escape(value) {
+      return text(value).replace(/[&<>"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+    }
+
+    function field(source, names) {
+      if (!source || typeof source !== 'object') return '';
+      const wanted = names.map(normalized);
+      for (const [key, value] of Object.entries(source)) {
+        if (wanted.includes(normalized(key)) && value !== null && value !== undefined && text(value) !== '') return value;
+      }
+      const nested = source.source_rows || source.sourceRows;
+      if (Array.isArray(nested)) {
+        for (const row of nested) {
+          const value = field(row, names);
+          if (value !== '') return value;
+        }
+      }
+      return '';
+    }
+
+    function catalogCode(row) {
+      const digits = text(field(row, ['codigo', 'idart', 'id_art', 'IDArt'])).replace(/\D/g, '');
+      return digits ? digits.padStart(6, '0') : '';
+    }
+
+    function catalogProviderId(row) {
+      return text(field(row, ['id_proveedor', 'idProveedor', 'IDProveedor']));
+    }
+
+    function catalogProviderName(row) {
+      return text(field(row, ['proveedor', 'Proveedores_Proveedor']));
+    }
+
+    function catalogRubroId(row) {
+      const value = Number(String(field(row, ['id_rubro', 'idRubro', 'IDRubro'])).replace(/[^0-9-]/g, ''));
+      return Number.isInteger(value) && value > 0 ? value : 0;
+    }
+
+    function catalogRubroName(row) {
+      return text(field(row, ['rubro', 'Rubros_Descripción', 'rubro_descripcion']));
+    }
+
+    function providerMatches(row, provider) {
+      const providerId = text(provider?.id_proveedor || provider?.idProveedor);
+      const rowId = catalogProviderId(row);
+      if (providerId && rowId) return providerId === rowId;
+      return normalized(catalogProviderName(row)) === normalized(provider?.proveedor || provider?.nombre);
+    }
+
+    function formatId(value) {
+      return String(Math.max(0, Math.trunc(Number(value) || 0))).padStart(6, '0');
+    }
+
+    function rubros(catalog) {
+      const result = new Map();
+      catalog.forEach((row) => {
+        const id = catalogRubroId(row);
+        const name = catalogRubroName(row);
+        if (id && name && !result.has(id)) result.set(id, name);
+      });
+      return [...result].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity:'base' }));
+    }
+
+    function defaultRubro(catalog, provider) {
+      const counts = new Map();
+      catalog.forEach((row) => {
+        if (!providerMatches(row, provider)) return;
+        const id = catalogRubroId(row);
+        if (id) counts.set(id, (counts.get(id) || 0) + 1);
+      });
+      return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] || 0;
+    }
+
+    function rubroName(id) {
+      return state?.rubros?.find((item) => Number(item.id) === Number(id))?.name || '';
+    }
+
+    function rubroFromText(value) {
+      const wanted = normalized(value);
+      return state?.rubros?.find((item) => normalized(item.name) === wanted) || null;
+    }
+
+    function closeRubroMenus(except = null) {
+      document.querySelectorAll('#corralonNewArticlesBackdrop .corralon-new-rubro-menu.open').forEach((menu) => {
+        if (menu !== except) menu.classList.remove('open');
+      });
+    }
+
+    function showRubroMenu(input, showAll = false) {
+      const combo = input?.closest('.corralon-new-rubro-combo');
+      const menu = combo?.querySelector('.corralon-new-rubro-menu');
+      if (!menu || !state) return;
+      const query = normalized(input.value);
+      const matches = state.rubros.filter((item) => showAll || !query || normalized(item.name).includes(query)).slice(0, 100);
+      menu.innerHTML = matches.map((item, index) => `<div class="corralon-new-rubro-option${index === 0 ? ' active' : ''}" data-new-rubro-id="${item.id}">${escape(item.name)}</div>`).join('') || '<div class="corralon-new-rubro-option">Sin coincidencias</div>';
+      menu.dataset.activeIndex = matches.length ? '0' : '-1';
+      const rect = input.getBoundingClientRect();
+      menu.style.left = `${rect.left}px`;
+      menu.style.top = `${rect.bottom + 2}px`;
+      menu.style.width = `${Math.max(rect.width, 210)}px`;
+      closeRubroMenus(menu);
+      menu.classList.add('open');
+    }
+
+    function chooseRubro(input, option) {
+      const rowElement = input?.closest('[data-new-articles-index]');
+      const row = state?.rows?.[Number(rowElement?.dataset.newArticlesIndex)];
+      const id = Number(option?.dataset?.newRubroId || 0);
+      const selected = state?.rubros?.find((item) => item.id === id);
+      if (!row || !selected) return false;
+      row.idRubro = selected.id;
+      row.rubroText = selected.name;
+      input.value = selected.name;
+      closeRubroMenus();
+      state.serverError = '';
+      updateValidation();
+      return true;
+    }
+
+    function restoreFocusedRow(event) {
+      if (!state || state.activeRowIndex === null || !state.rowSnapshot) return false;
+      const index = state.activeRowIndex;
+      const fieldName = event.target?.dataset?.newArticlesField || 'descripcion';
+      state.rows[index] = { ...state.rowSnapshot, errors:[] };
+      state.rowSnapshot = { ...state.rows[index], errors:[] };
+      state.serverError = '';
+      render();
+      requestAnimationFrame(() => {
+        const field = ensureUi().querySelector(`[data-new-articles-index="${index}"] [data-new-articles-field="${fieldName}"]`);
+        field?.focus();
+        field?.select?.();
+      });
+      return true;
+    }
+
+    function bindFieldFunctions(backdrop) {
+      if (backdrop.dataset.functionsBound === '1') return;
+      backdrop.dataset.functionsBound = '1';
+      backdrop.addEventListener('focusin', (event) => {
+        const fieldControl = event.target.closest('[data-new-articles-field]');
+        const rowElement = fieldControl?.closest('[data-new-articles-index]');
+        const index = Number(rowElement?.dataset.newArticlesIndex);
+        if (!fieldControl || !Number.isInteger(index) || !state?.rows?.[index]) return;
+        if (state.activeRowIndex !== index) {
+          state.activeRowIndex = index;
+          state.rowSnapshot = { ...state.rows[index], errors:[...(state.rows[index].errors || [])] };
+        }
+      });
+      backdrop.addEventListener('focusout', (event) => {
+        const rowElement = event.target.closest('[data-new-articles-index]');
+        if (!rowElement) return;
+        const leavingIndex = Number(rowElement.dataset.newArticlesIndex);
+        setTimeout(() => {
+          const activeRow = document.activeElement?.closest?.('[data-new-articles-index]');
+          const activeIndex = Number(activeRow?.dataset?.newArticlesIndex);
+          if (activeIndex !== leavingIndex && state?.activeRowIndex === leavingIndex) {
+            state.activeRowIndex = null;
+            state.rowSnapshot = null;
+          }
+        }, 0);
+      });
+      backdrop.addEventListener('mousedown', (event) => {
+        const toggle = event.target.closest('[data-new-rubro-toggle]');
+        if (toggle) {
+          event.preventDefault();
+          event.stopPropagation();
+          const input = toggle.closest('.corralon-new-rubro-combo')?.querySelector('[data-new-articles-field="rubroText"]');
+          if (!input) return;
+          input.focus();
+          const menu = toggle.closest('.corralon-new-rubro-combo').querySelector('.corralon-new-rubro-menu');
+          if (menu.classList.contains('open')) closeRubroMenus(); else showRubroMenu(input, true);
+          return;
+        }
+        const option = event.target.closest('[data-new-rubro-id]');
+        if (option) {
+          event.preventDefault();
+          const input = option.closest('.corralon-new-rubro-combo')?.querySelector('[data-new-articles-field="rubroText"]');
+          chooseRubro(input, option);
+        }
+      });
+      backdrop.addEventListener('keydown', (event) => {
+        const input = event.target.closest('[data-new-articles-field="rubroText"]');
+        if (event.key === 'Escape' && event.target.closest('[data-new-articles-field]')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          closeRubroMenus();
+          restoreFocusedRow(event);
+          return;
+        }
+        if (!input) return;
+        const menu = input.closest('.corralon-new-rubro-combo')?.querySelector('.corralon-new-rubro-menu');
+        if (event.key === 'F4') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (menu.classList.contains('open')) closeRubroMenus(); else showRubroMenu(input, true);
+          return;
+        }
+        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && menu.classList.contains('open')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const options = [...menu.querySelectorAll('[data-new-rubro-id]')];
+          if (!options.length) return;
+          let index = Number(menu.dataset.activeIndex || 0) + (event.key === 'ArrowDown' ? 1 : -1);
+          index = Math.max(0, Math.min(options.length - 1, index));
+          menu.dataset.activeIndex = String(index);
+          options.forEach((option, optionIndex) => option.classList.toggle('active', optionIndex === index));
+          options[index].scrollIntoView({ block:'nearest' });
+          return;
+        }
+        if (event.key === 'Enter' && menu.classList.contains('open')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (!input.value.trim()) { closeRubroMenus(); return; }
+          const options = [...menu.querySelectorAll('[data-new-rubro-id]')];
+          chooseRubro(input, options[Math.max(0, Number(menu.dataset.activeIndex || 0))]);
+        }
+      });
+      backdrop.addEventListener('input', (event) => {
+        const input = event.target.closest('[data-new-articles-field="rubroText"]');
+        if (input) showRubroMenu(input, false);
+      });
+      document.addEventListener('mousedown', (event) => {
+        if (!event.target.closest('.corralon-new-rubro-combo')) closeRubroMenus();
+      }, true);
+      const fx = window.CorralonFunciones;
+      fx?.bindLinearNavigation?.({
+        root:backdrop,
+        selector:'[data-new-articles-field]',
+        selectOnFocus:true,
+        selectOnAnyFocus:true,
+        selectOnFirstPointerFocus:true,
+        smartCaret:true
+      });
+      fx?.bindLiveLocaleNumber?.({ root:backdrop, selector:'[data-new-articles-field="margen"]', decimals:2, suffix:' %' });
+    }
+
+    function ensureUi() {
+      let backdrop = document.getElementById('corralonNewArticlesBackdrop');
+      if (backdrop) return backdrop;
+      const style = document.createElement('style');
+      style.id = 'corralonNewArticlesStyle';
+      style.textContent = `
+        #corralonNewArticlesBackdrop{position:fixed;inset:0;z-index:10050;display:none;align-items:center;justify-content:center;padding:22px;background:rgba(17,17,17,.66);backdrop-filter:blur(3px);font-family:Barlow,Arial,sans-serif}
+        #corralonNewArticlesBackdrop.open{display:flex}
+        .corralon-new-articles-modal{width:min(1420px,97vw);max-height:92dvh;display:flex;flex-direction:column;background:var(--corralon-white);border:1px solid rgba(255,255,255,.75);border-radius:20px;box-shadow:0 28px 90px rgba(0,0,0,.38);overflow:hidden;color:var(--corralon-text)}
+        .corralon-new-articles-head{position:relative;display:flex;align-items:center;gap:14px;padding:17px 20px 15px;border-bottom:1px solid var(--corralon-line);background:linear-gradient(180deg,#fff 0%,#fbfbfa 100%)}.corralon-new-articles-head:before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--corralon-red)}.corralon-new-articles-title-copy{display:grid;gap:2px}.corralon-new-articles-head h2{margin:0;color:var(--corralon-black);font:900 30px/1 'Barlow Condensed',Barlow,sans-serif;letter-spacing:.1px}.corralon-new-articles-head span{color:var(--corralon-muted);font-size:14px;font-weight:700}.corralon-new-articles-head button{margin-left:auto;width:36px;height:36px;padding:0!important;border:1px solid var(--corralon-line)!important;border-radius:10px!important;background:var(--corralon-white)!important;color:var(--corralon-black)!important;box-shadow:0 2px 7px rgba(0,0,0,.07)!important;font:800 20px/1 Barlow!important}.corralon-new-articles-head button:hover{border-color:var(--corralon-red)!important;color:var(--corralon-red)!important;background:#fff5f5!important}
+        .corralon-new-articles-summary{display:grid;grid-template-columns:minmax(260px,2fr) repeat(3,minmax(140px,1fr));gap:9px;padding:11px 16px 12px;background:#f5f5f3;border-bottom:1px solid var(--corralon-line)}.corralon-new-articles-summary label{display:grid;gap:4px;padding:8px 10px 9px;border:1px solid #e1e1de;border-radius:10px;background:var(--corralon-white);color:var(--corralon-muted);font:800 11px/1 Barlow;text-transform:uppercase;letter-spacing:.45px}.corralon-new-articles-summary input{box-sizing:border-box;width:100%;height:22px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--corralon-black)!important;font:800 16px/1.1 Barlow,Arial}
+        .corralon-new-articles-table-wrap{min-height:68px;max-height:52dvh;overflow:auto;background:#fff}.corralon-new-articles-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}.corralon-new-articles-table th{position:sticky;top:0;z-index:2;height:34px;padding:6px 8px;border-right:1px solid #ddd;border-bottom:1px solid #c8c8c5;background:#e9e9e6;color:#292929;font:900 14px/1 'Barlow Condensed',Barlow;text-align:left;text-transform:uppercase;letter-spacing:.3px}.corralon-new-articles-table th:last-child,.corralon-new-articles-table td:last-child{border-right:0}.corralon-new-articles-table td{height:39px;padding:4px 6px;border-right:1px solid #e5e5e2;border-bottom:1px solid #e5e5e2;background:#fff;font:700 14px Barlow,Arial}.corralon-new-articles-table tbody tr:nth-child(even) td{background:#f8f8f6}.corralon-new-articles-table tbody tr:hover td{background:#f1f1ee}.corralon-new-articles-table tbody tr.has-error td{background:#fff0f2!important}.corralon-new-articles-table input,.corralon-new-articles-table select{box-sizing:border-box;width:100%;height:31px;padding:4px 8px;border:1px solid #c9c9c5;border-radius:7px;background:#fff;font:700 14px Barlow,Arial;transition:border-color .15s,box-shadow .15s}.corralon-new-articles-table input:focus,.corralon-new-articles-table select:focus{border-color:#777!important;box-shadow:0 0 0 3px rgba(17,17,17,.08)!important;outline:0}.corralon-new-articles-table input[readonly]{background:#f0f0ed!important;border-color:transparent!important;color:#4f4f4b!important;box-shadow:none!important}.corralon-new-articles-table .num{text-align:right;font-variant-numeric:tabular-nums}.corralon-new-articles-table .id{width:88px}.corralon-new-articles-table .code{width:135px}.corralon-new-articles-table .description{width:auto}.corralon-new-articles-table .rubro{width:225px}.corralon-new-articles-table .iva{width:95px}.corralon-new-articles-table .margin{width:100px}.corralon-new-articles-table .cost{width:125px}.corralon-new-articles-table .remove{width:46px}.corralon-new-articles-remove{display:grid!important;place-items:center;width:29px!important;height:29px!important;margin:auto;padding:0!important;border:1px solid transparent!important;border-radius:8px!important;background:transparent!important;color:#d10d13!important;font:900 21px/1 Barlow!important;box-shadow:none!important}.corralon-new-articles-remove:hover{border-color:#ffc8ca!important;background:#fff0f1!important}
+        .corralon-new-rubro-combo{position:relative}.corralon-new-rubro-input{padding-right:27px!important}.corralon-new-rubro-toggle{position:absolute;right:1px;top:1px;display:none;width:25px!important;height:25px!important;padding:0!important;border:0!important;border-radius:4px!important;background:var(--corralon-soft-2)!important;box-shadow:none!important;font-size:12px!important}.corralon-new-rubro-combo:hover .corralon-new-rubro-toggle,.corralon-new-rubro-combo:focus-within .corralon-new-rubro-toggle{display:block}.corralon-new-rubro-menu{position:fixed;z-index:10070;display:none;max-height:260px;overflow:auto;border:1px solid var(--corralon-line-strong);border-radius:7px;background:var(--corralon-white);box-shadow:var(--corralon-shadow)}.corralon-new-rubro-menu.open{display:block}.corralon-new-rubro-option{padding:6px 9px;cursor:pointer;white-space:nowrap;font-weight:700}.corralon-new-rubro-option:hover,.corralon-new-rubro-option.active{background:var(--corralon-selection)}
+        .corralon-new-articles-validation{min-height:42px;box-sizing:border-box;padding:11px 18px;border-top:1px solid var(--corralon-line);background:#fff8df;color:#705600;font-size:14px;font-weight:800}.corralon-new-articles-validation.ok{background:#e9f7ed;color:#08733a}.corralon-new-articles-validation.error{background:#fff0f2;color:#b10f31}.corralon-new-articles-actions{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--corralon-line);background:#fafaf8}.corralon-new-articles-count{margin-right:auto;color:var(--corralon-muted);font-size:14px;font-weight:800}.corralon-new-articles-actions button{min-height:36px;padding:7px 15px!important;border:1px solid var(--corralon-line-strong)!important;border-radius:9px!important;background:#fff!important;color:var(--corralon-black)!important;font:800 14px Barlow!important;box-shadow:0 2px 6px rgba(0,0,0,.06)!important}.corralon-new-articles-actions button:hover{background:#f1f1ef!important}.corralon-new-articles-primary{min-width:158px;background:linear-gradient(180deg,var(--corralon-red),var(--corralon-red-dark))!important;border-color:var(--corralon-red)!important;color:var(--corralon-white)!important;box-shadow:0 7px 16px rgba(201,0,6,.22)!important}.corralon-new-articles-primary:hover{background:linear-gradient(180deg,#ff2429,var(--corralon-red-deep))!important}
+        @media(max-width:900px){#corralonNewArticlesBackdrop{padding:0;backdrop-filter:none}.corralon-new-articles-modal{width:100vw;height:100dvh;max-height:100dvh;border-radius:0}.corralon-new-articles-head{padding:13px 14px}.corralon-new-articles-head h2{font-size:25px}.corralon-new-articles-head span{font-size:12px}.corralon-new-articles-summary{grid-template-columns:1fr 1fr;padding:8px}.corralon-new-articles-table-wrap{max-height:none;flex:1}.corralon-new-articles-table{min-width:1050px}.corralon-new-articles-actions{padding:9px}.corralon-new-articles-count{display:none}}
+      `;
+      document.head.appendChild(style);
+      backdrop = document.createElement('div');
+      backdrop.id = 'corralonNewArticlesBackdrop';
+      backdrop.innerHTML = `<section class="corralon-new-articles-modal" role="dialog" aria-modal="true" aria-labelledby="corralonNewArticlesTitle">
+        <div class="corralon-new-articles-head"><div class="corralon-new-articles-title-copy"><h2 id="corralonNewArticlesTitle">Importar artículos nuevos</h2><span>Revisá los datos antes de enviarlos a Access.</span></div><button type="button" data-new-articles-close title="Cerrar" aria-label="Cerrar">×</button></div>
+        <div class="corralon-new-articles-summary"><label>Proveedor<input data-new-articles-provider readonly></label><label>ID proveedor<input data-new-articles-provider-id readonly></label><label>Moneda<input value="1 · Pesos" readonly></label><label>Primer IDArt<input data-new-articles-first-id readonly></label></div>
+        <div class="corralon-new-articles-table-wrap"><table class="corralon-new-articles-table"><thead><tr><th class="id">IDArt</th><th class="code">Cód. proveedor</th><th class="description">Descripción</th><th class="rubro">Rubro</th><th class="iva">IVA</th><th class="margin">Margen</th><th class="cost num">Costo</th><th class="remove"></th></tr></thead><tbody data-new-articles-body></tbody></table></div>
+        <div class="corralon-new-articles-validation" data-new-articles-validation>Preparando artículos...</div>
+        <div class="corralon-new-articles-actions"><span class="corralon-new-articles-count" data-new-articles-count></span><button type="button" data-new-articles-close>Cancelar</button><button class="corralon-new-articles-primary" type="button" data-new-articles-import>Importar en Access</button></div>
+      </section>`;
+      document.body.appendChild(backdrop);
+      bindFieldFunctions(backdrop);
+      backdrop.addEventListener('mousedown', (event) => { if (event.target === backdrop) close(); });
+      backdrop.addEventListener('click', (event) => {
+        if (event.target.closest('[data-new-articles-close]')) close();
+        const remove = event.target.closest('[data-new-articles-remove]');
+        if (remove && state && !state.importing) {
+          state.rows.splice(Number(remove.dataset.newArticlesRemove), 1);
+          assignIds();
+          render();
+        }
+        if (event.target.closest('[data-new-articles-import]')) importToAccess();
+      });
+      backdrop.addEventListener('input', updateField);
+      backdrop.addEventListener('change', updateField);
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && backdrop.classList.contains('open')) {
+          if (event.target.closest?.('[data-new-articles-field]')) return;
+          event.preventDefault(); event.stopPropagation(); close();
+        }
+      }, true);
+      return backdrop;
+    }
+
+    function assignIds() {
+      if (!state) return;
+      state.rows.forEach((row, index) => { row.idArt = formatId(state.indexMax + index + 1); });
+    }
+
+    function validate() {
+      if (!state) return ['No hay una importación preparada.'];
+      const errors = [];
+      const batchCodes = new Map();
+      const batchDescriptions = new Map();
+      if (!text(state.provider.id_proveedor || state.provider.idProveedor)) errors.push('Falta el proveedor.');
+      if (!state.rows.length) errors.push('No quedan artículos para importar.');
+      if (!state.rubros.length) errors.push('La lista de Index todavía no contiene IDRubro. Actualizala antes de importar.');
+      state.rows.forEach((row, index) => {
+        const rowErrors = [];
+        const code = normalized(row.codigo);
+        const description = normalized(row.descripcion);
+        if (!/^\d{6}$/.test(row.idArt) || Number(row.idArt) <= state.indexMax) rowErrors.push('IDArt inválido');
+        if (!code) rowErrors.push('falta código de proveedor');
+        if (!description) rowErrors.push('falta descripción');
+        if (!(Number(row.costo) > 0)) rowErrors.push('costo inválido');
+        if (!(Number(row.idRubro) > 0)) rowErrors.push('elegí el rubro');
+        if (![0.21, 0.105].includes(Number(row.iva))) rowErrors.push('IVA inválido');
+        if (!Number.isFinite(Number(row.margen)) || Number(row.margen) < 0) rowErrors.push('margen inválido');
+        if (code) { if (batchCodes.has(code)) rowErrors.push(`código repetido con fila ${batchCodes.get(code) + 1}`); else batchCodes.set(code, index); }
+        if (description) { if (batchDescriptions.has(description)) rowErrors.push(`descripción repetida con fila ${batchDescriptions.get(description) + 1}`); else batchDescriptions.set(description, index); }
+        row.errors = rowErrors;
+        if (rowErrors.length) errors.push(`Fila ${index + 1}: ${rowErrors.join(', ')}.`);
+      });
+      if (state.serverError) errors.unshift(state.serverError);
+      return errors;
+    }
+
+    function render() {
+      const backdrop = ensureUi();
+      if (!state) return;
+      const body = backdrop.querySelector('[data-new-articles-body]');
+      body.innerHTML = state.rows.map((row, index) => {
+        const rubroText = row.rubroText || rubroName(row.idRubro);
+        return `<tr data-new-articles-index="${index}"><td><input value="${escape(row.idArt)}" readonly></td><td><input value="${escape(row.codigo)}" readonly></td><td><input data-new-articles-field="descripcion" value="${escape(row.descripcion)}" autocomplete="off"></td><td><div class="corralon-new-rubro-combo"><input class="corralon-new-rubro-input" data-new-articles-field="rubroText" value="${escape(rubroText)}" autocomplete="off"><button type="button" class="corralon-new-rubro-toggle" data-new-rubro-toggle tabindex="-1" aria-label="Abrir rubros">▼</button><div class="corralon-new-rubro-menu"></div></div></td><td><select data-new-articles-field="iva"><option value="0.21"${Number(row.iva) === .21 ? ' selected' : ''}>21 %</option><option value="0.105"${Number(row.iva) === .105 ? ' selected' : ''}>10,5 %</option></select></td><td><input class="num" data-new-articles-field="margen" inputmode="decimal" value="${Number(row.margen || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %"></td><td><input class="num" value="${escape(money(row.costo))}" readonly></td><td><button class="corralon-new-articles-remove" type="button" data-new-articles-remove="${index}" title="Quitar">×</button></td></tr>`;
+      }).join('');
+      backdrop.querySelector('[data-new-articles-first-id]').value = state.rows[0]?.idArt || '';
+      updateValidation();
+    }
+
+    function updateField(event) {
+      const control = event.target.closest('[data-new-articles-field]');
+      const rowElement = event.target.closest('[data-new-articles-index]');
+      const row = state?.rows?.[Number(rowElement?.dataset.newArticlesIndex)];
+      if (!control || !row) return;
+      const name = control.dataset.newArticlesField;
+      if (name === 'descripcion') row.descripcion = control.value;
+      if (name === 'rubroText') {
+        row.rubroText = control.value;
+        row.idRubro = rubroFromText(control.value)?.id || 0;
+      }
+      if (name === 'iva') row.iva = Number(control.value) || 0;
+      if (name === 'margen') {
+        row.margen = parseFlexibleNumber(control.value);
+        if (event.type === 'change') control.value = `${Number(row.margen || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %`;
+      }
+      state.serverError = '';
+      updateValidation();
+    }
+
+    function updateValidation() {
+      const backdrop = ensureUi();
+      const errors = validate();
+      backdrop.querySelectorAll('[data-new-articles-index]').forEach((tr) => {
+        const row = state?.rows?.[Number(tr.dataset.newArticlesIndex)];
+        tr.classList.toggle('has-error', Boolean(row?.errors?.length));
+        tr.title = row?.errors?.join(' · ') || '';
+      });
+      backdrop.querySelector('[data-new-articles-count]').textContent = `${state?.rows?.length || 0} artículo${state?.rows?.length === 1 ? '' : 's'} · IDArt máximo de Index: ${formatId(state?.indexMax || 0)}`;
+      const validation = backdrop.querySelector('[data-new-articles-validation]');
+      validation.className = `corralon-new-articles-validation ${errors.length ? 'error' : 'ok'}`;
+      validation.textContent = errors.length ? errors.slice(0, 4).join(' ') : 'Todo listo. La existencia del IDArt, código y descripción se validará directamente en Access al importar.';
+      const button = backdrop.querySelector('[data-new-articles-import]');
+      button.disabled = Boolean(errors.length) || Boolean(state?.importing);
+      return errors;
+    }
+
+    async function validateAccessMax() {
+      try {
+        const response = await fetch(`/api/articulos-nuevos/validate?maxIndex=${encodeURIComponent(state.indexMax)}`, { cache:'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.error || `Access respondió HTTP ${response.status}`);
+        state.serverError = '';
+        updateValidation();
+        return true;
+      } catch (error) {
+        state.serverError = `No se puede importar: ${error.message}`;
+        updateValidation();
+        return false;
+      }
+    }
+
+    function accessRows() {
+      const providerId = Number(state.provider.id_proveedor || state.provider.idProveedor);
+      return state.rows.map((row) => {
+        const iva = Number(row.iva);
+        const cost = Number(row.costo);
+        const margin = Number(row.margen || 0) / 100;
+        return { id_art:row.idArt, cod_proveedor:row.codigo, articulo:text(row.descripcion).toLocaleUpperCase('es-AR'), precio_costo:Number(cost.toFixed(2)), precio_lista:Number(cost.toFixed(2)), precio_venta:Number((cost * (1 + iva) * (1 + margin)).toFixed(2)), id_proveedor:providerId, id_rubro:Number(row.idRubro), id_moneda:1, nota:'', porc_iva:iva, porc_gan_min:margin, porc_gan_int:margin, porc_gan_may:margin };
+      });
+    }
+
+    async function importToAccess() {
+      if (!state || state.importing || updateValidation().length) return;
+      state.importing = true;
+      const backdrop = ensureUi();
+      const button = backdrop.querySelector('[data-new-articles-import]');
+      button.textContent = 'Importando...';
+      backdrop.querySelector('[data-new-articles-validation]').textContent = 'Verificando Access y preparando Articulos.xls...';
+      try {
+        if (!window.XLSX) throw new Error('No se pudo cargar el módulo XLSX');
+        const blob = buildNewArticlesXlsBlob(accessRows());
+        const response = await fetch(`/api/articulos-nuevos/import?maxIndex=${encodeURIComponent(state.indexMax)}`, { method:'POST', body:blob });
+        const payload = await response.json().catch(async () => ({ error:await response.text() }));
+        if (!response.ok || payload.ok === false) throw new Error(payload.error || `Access respondió HTTP ${response.status}`);
+        const completed = state;
+        completed.options?.showMessage?.('Artículos nuevos importados en Access');
+        completed.options?.onImported?.(payload, accessRows());
+        state.importing = false;
+        close();
+      } catch (error) {
+        state.serverError = `No se pudo importar: ${error.message}`;
+      } finally {
+        if (state) state.importing = false;
+        button.textContent = 'Importar en Access';
+        if (state) updateValidation();
+      }
+    }
+
+    async function open(options = {}) {
+      const provider = options.provider || {};
+      const sourceRows = Array.isArray(options.rows) ? options.rows : [];
+      if (!text(provider.id_proveedor || provider.idProveedor)) { options.showMessage?.('Primero elegí un proveedor'); return false; }
+      if (!sourceRows.length) { options.showMessage?.('No hay artículos para importar'); return false; }
+      returnFocus = options.returnFocus || document.activeElement;
+      let catalog = Array.isArray(options.catalogRows) && options.catalogRows.length ? options.catalogRows : null;
+      if (!catalog) {
+        const progressive = await CATALOG.loadProgressive({ fallback:true });
+        catalog = progressive.fromCache && progressive.initialRows.length
+          ? progressive.initialRows
+          : await progressive.complete;
+      }
+      // Algunas instalaciones conservaron una cache parcial con un unico
+      // rubro. No se usa para importar: se elimina y se baja el catalogo
+      // completo una sola vez.
+      if (rubros(catalog).length <= 1) {
+        await CATALOG.clearCache();
+        catalog = await CATALOG.load({ fallback:true });
+      }
+      const indexMax = catalog.reduce((max, row) => Math.max(max, Number(catalogCode(row)) || 0), 0);
+      const rubroList = rubros(catalog);
+      const initialRubro = defaultRubro(catalog, provider);
+      state = {
+        provider,
+        indexMax,
+        rubros:rubroList,
+        importing:false,
+        serverError:'',
+        activeRowIndex:null,
+        rowSnapshot:null,
+        options,
+        rows:sourceRows.map((row) => {
+          const selectedRubro = Number(row.idRubro || row.id_rubro || initialRubro || 0);
+          return { idArt:'', codigo:text(row.codigo || row.cod_proveedor || row.codProveedor), descripcion:text(row.descripcion || row.articulo), costo:Number(row.costo || row.precio_costo || row.precioFinal || 0), idRubro:selectedRubro, rubroText:rubroList.find((item) => item.id === selectedRubro)?.name || '', iva:Number(row.iva || .21), margen:Number(row.margen ?? 30), errors:[] };
+        })
+      };
+      assignIds();
+      const backdrop = ensureUi();
+      backdrop.querySelector('[data-new-articles-provider]').value = text(provider.proveedor || provider.nombre);
+      backdrop.querySelector('[data-new-articles-provider-id]').value = text(provider.id_proveedor || provider.idProveedor);
+      render();
+      backdrop.classList.add('open');
+      requestAnimationFrame(() => backdrop.querySelector('[data-new-articles-field="descripcion"]')?.focus());
+      return true;
+    }
+
+    function close() {
+      if (state?.importing) return;
+      document.getElementById('corralonNewArticlesBackdrop')?.classList.remove('open');
+      state = null;
+      const target = returnFocus;
+      returnFocus = null;
+      target?.focus?.({ preventScroll:true });
+    }
+
+    return { open, close, isOpen:() => document.getElementById('corralonNewArticlesBackdrop')?.classList.contains('open') || false };
+  })();
+
   const BUDGET_SEARCH = (() => {
     const TABLE = 'presupuestos_web';
     let budgets = [];
@@ -5920,6 +6473,7 @@
     publishProviderArticlesJson,
     replaceProviderArticles,
     buildArticlesXlsBlob,
+    buildNewArticlesXlsBlob,
     saveBlobAs,
     buildImageGeneratorPayload,
     setImageGeneratorCatalog,
@@ -5932,6 +6486,7 @@
       apply: applyProviderEditorLayout
     },
     numericCalculator: NUMERIC_CALCULATOR,
+    newArticlesImporter: NEW_ARTICLES_IMPORTER,
     budgetSearch: BUDGET_SEARCH,
     articleEditor: {
       configure: configureArticleEditor,

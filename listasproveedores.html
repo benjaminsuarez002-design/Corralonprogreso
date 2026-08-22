@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=20260812-cache-idb1"></script>
+<script src="corralon-system.js?v=20260822-new-articles-ui"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -893,6 +893,8 @@
     </div>
   </div>
   <div class="context-menu" id="rowContextMenu">
+    <button type="button" id="copyAccessPriceContextBtn">Copiar código, precio y proveedor</button>
+    <button type="button" id="importNewArticleContextBtn">Importar artículo nuevo</button>
     <button type="button" id="compareContextBtn">Comparar</button>
     <button type="button" id="sendRowMissingBtn">Enviar a faltantes</button>
     <button type="button" id="calcContextBtn">Dividir / multiplicar</button>
@@ -995,6 +997,8 @@
       activeInfo: document.getElementById('activeInfo'),
       slots: document.getElementById('slots'),
       rowContextMenu: document.getElementById('rowContextMenu'),
+      copyAccessPriceContextBtn: document.getElementById('copyAccessPriceContextBtn'),
+      importNewArticleContextBtn: document.getElementById('importNewArticleContextBtn'),
       compareContextBtn: document.getElementById('compareContextBtn'),
       sendRowMissingBtn: document.getElementById('sendRowMissingBtn'),
       calcContextBtn: document.getElementById('calcContextBtn'),
@@ -1273,6 +1277,42 @@
       clearTimeout(showToast.timer);
       showToast.timer = setTimeout(() => el.toast.classList.remove('visible'), 2300);
     }
+    function copyTextForAccess(text) {
+      const fallback = () => {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        area.remove();
+      };
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(fallback);
+      else fallback();
+    }
+    function copyProviderListPriceForAccess(row = state.selectedRow) {
+      if (!row) {
+        showToast('Seleccioná un artículo para copiar.');
+        return false;
+      }
+      const providerId = String(row.id_proveedor || row.idProveedor || '').trim();
+      const code = String(row.cod_proveedor || '').trim();
+      const price = Number(row.precio_costo || 0);
+      if (!providerId || !code || !Number.isFinite(price) || price <= 0) {
+        showToast('La fila no tiene código, precio o proveedor válido.');
+        return false;
+      }
+      copyTextForAccess([
+        'CORRALON_PRECIO_ARTICULO_V1',
+        'MODO=CODPROV',
+        `IDPROVEEDOR=${providerId}`,
+        `CODPROV=${code}`,
+        `PRECIO_FINAL=${price}`
+      ].join('\r\n'));
+      showToast(`Copiado ${code} · ${formatMoney(price)}`);
+      return true;
+    }
     function setStatus(message) {
       el.status.textContent = message;
       if (!document.getElementById('loadingOverlay')?.classList.contains('hidden')) setLoadingDetail(message);
@@ -1463,6 +1503,7 @@
       state.contextRow = row;
       state.contextRowId = row?.idorden ?? null;
       el.compareContextBtn.dataset.rowId = state.contextRowId ?? '';
+      el.importNewArticleContextBtn.dataset.rowId = state.contextRowId ?? '';
       el.sendRowMissingBtn.dataset.rowId = state.contextRowId ?? '';
       el.calcContextBtn.dataset.rowId = state.contextRowId ?? '';
       el.rowContextMenu.style.left = `${event.clientX}px`;
@@ -2964,6 +3005,41 @@
       hideRowContextMenu();
     }
     el.compareContextBtn.addEventListener('mousedown', compareContextRow);
+    el.copyAccessPriceContextBtn.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const row = rowById(event.currentTarget.dataset.rowId) || state.contextRow || state.selectedRow;
+      hideRowContextMenu();
+      copyProviderListPriceForAccess(row);
+    });
+    el.importNewArticleContextBtn.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const row = rowById(event.currentTarget.dataset.rowId) || state.contextRow || state.selectedRow;
+      hideRowContextMenu();
+      if (!row) {
+        showToast('Seleccioná un artículo para importar.');
+        return;
+      }
+      CorralonSystem.newArticlesImporter.open({
+        provider: {
+          id_proveedor: row.id_proveedor || row.idProveedor,
+          proveedor: row.proveedor
+        },
+        rows: [{
+          codigo: row.cod_proveedor,
+          descripcion: row.articulo,
+          costo: Number(row.precio_costo || 0)
+        }],
+        showMessage: showToast,
+        onImported(payload) {
+          showToast(`${payload.importados || 1} artículo nuevo importado en Access.`);
+        }
+      }).catch((error) => {
+        console.error(error);
+        showToast(`No se pudo abrir el importador: ${error.message}`);
+      });
+    });
     el.sendRowMissingBtn.addEventListener('mousedown', sendTableRowToMissing);
     el.calcContextBtn.addEventListener('mousedown', (event) => {
       event.preventDefault();
@@ -2998,6 +3074,13 @@
       if (!event.target.closest('#slotContextMenu')) hideSlotContextMenu();
     });
     document.addEventListener('keydown', (event) => {
+      const key = String(event.key || '').toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === 'c') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        copyProviderListPriceForAccess();
+        return;
+      }
       if (event.key === 'Escape') {
         hideRowContextMenu();
         hideSlotContextMenu();
