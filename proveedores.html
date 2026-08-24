@@ -58,10 +58,11 @@
     .access-cell.is-selected{background:#f2f2ef}
     .access-cell.is-active-cell{box-shadow:inset 0 0 0 2px #777;background:#fff}
     .provider-main,.contact-main,.update-main{display:flex!important;flex-direction:column;align-items:flex-start!important;justify-content:center;gap:3px}
-    .provider-name{max-width:100%;font-weight:800;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-id,.contact-phone,.update-date{color:#656562;font-size:13px;font-variant-numeric:tabular-nums}
+    .provider-name{max-width:100%;font-weight:800;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-name.has-page{color:#0969da;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}.provider-id,.contact-phone,.update-date{color:#656562;font-size:13px;font-variant-numeric:tabular-nums}
     .commercial{display:flex!important;flex-direction:column;align-items:flex-start!important;justify-content:center;gap:3px;font-variant-numeric:tabular-nums}.commercial-line{display:flex;align-items:center;gap:8px;white-space:nowrap}.commercial-secondary{color:#666;font-size:12px}.commercial-dot{color:#aaa}.contact-person{font-weight:700}
     .update-main{gap:5px}.status-badge{display:inline-flex;align-items:center;width:max-content;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:800;line-height:1.1}.status-badge.fresh{background:var(--green-soft);color:var(--green)}.status-badge.warn{background:var(--amber-soft);color:var(--amber)}.status-badge.old{background:var(--danger-soft);color:#c51f28}.status-badge.none{background:#ededeb;color:#666}
     .row-actions{display:grid!important;place-items:center;padding:0!important}.row-menu{height:34px;width:34px;padding:0;border:0!important;background:transparent!important;font:900 20px Barlow;box-shadow:none!important}
+    .provider-context-menu{position:fixed;z-index:80;display:none;min-width:190px;padding:5px;border:1px solid var(--line-strong);border-radius:9px;background:#fff;box-shadow:0 12px 34px #0003}.provider-context-menu.visible{display:grid}.provider-context-menu button{height:34px;border:0;border-radius:5px;padding:5px 10px;background:#fff;text-align:left;font:700 14px Barlow}.provider-context-menu button:hover{background:#f0f5ff;color:#0969da}.provider-context-menu button:disabled{color:#aaa;background:#fff;cursor:not-allowed}
     .head [data-col-select],.head [data-table-corner]{cursor:pointer;user-select:none}.head [data-sort-key]{position:relative;cursor:pointer;user-select:none;padding-right:25px}.head [data-sort-key]::after{content:"↕";position:absolute;right:8px;top:50%;transform:translateY(-50%);color:#777;font-size:13px}.head [data-sort-key].sort-asc::after{content:"↑"}.head [data-sort-key].sort-desc::after{content:"↓"}
     .col-resizer{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:3}.head [data-resize-col]{position:relative}body.resizing-columns{cursor:col-resize;user-select:none}
     .table-footer{display:flex;align-items:center;padding:0 14px;border-top:1px solid var(--line);color:#555;font-size:13px}.table-footer .status{margin-right:auto}.table-footer-note{color:#777}
@@ -131,6 +132,10 @@
     </section>
   </main>
 </div>
+<div class="provider-context-menu" id="providerContextMenu" role="menu" aria-label="Acciones del proveedor">
+  <button type="button" data-provider-menu-open-page>Abrir página web</button>
+  <button type="button" data-provider-menu-edit>Editar</button>
+</div>
 <div class="modal-backdrop" id="providerModal">
   <form class="modal" id="providerForm">
     <div class="modal-head"><span id="modalTitle">Proveedor</span><button type="button" id="closeModalBtn">×</button></div>
@@ -161,6 +166,7 @@ const SUPABASE_URL='https://tizyjenayrcdkcodsjnc.supabase.co';
 const REAL_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const TABLE='proveedores', META='proveedores_meta', DB='proveedores_cache_v1';
 let db, providerRows=[], filtered=[], editingProviderId=null, selectedProviderId=null, activeStatusFilter='all', sortState={key:'proveedor',dir:'asc'};
+let contextProviderId=null;
 const el={
   status:document.getElementById('status'),
   tableStatus:document.getElementById('tableStatus'),
@@ -185,6 +191,7 @@ function getAll(){return CorralonSystem.getProvidersCache()}
 function providerFrom(obj){return CorralonSystem.providerFromObject(obj)}
 function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function providerUrl(value){const text=String(value||'').trim();return text?/^https?:\/\//i.test(text)?text:`https://${text}`:''}
+function providerPage(provider){return providerUrl(provider?.pagina_link||provider?.pagina||provider?.reserva_texto_1)}
 function parsePercentInput(value){const n=CorralonFunciones.parseLocaleNumber(value);return Math.abs(n)>1?n/100:n}
 function percentInput(value){return CorralonFunciones.formatLocaleNumber(Number(value||0)*100,{decimals:2,suffix:' %'})}
 function boolInput(value){if(typeof value==='boolean')return value;const text=norm(value);return ['-1','1','true','si','sí','yes','x'].includes(text)}
@@ -210,7 +217,7 @@ function renderDetail(){
     return;
   }
   const status=providerDateStatus(provider);
-  const link=providerUrl(provider.pagina_link||provider.pagina);
+  const link=providerPage(provider);
   const note=String(provider.nota||'').trim();
   el.detail.innerHTML=`
     <div class="detail-head">
@@ -259,8 +266,9 @@ function render(){
   el.rows.innerHTML=filtered.map((p,row)=>{
     const status=providerDateStatus(p);
     const selected=String(p.id_proveedor)===String(selectedProviderId);
+    const hasPage=Boolean(providerPage(p));
     return `<div class="row ${selected?'is-current-provider':''}" data-id="${escapeHtml(p.id_proveedor)}">
-      ${providerCell(row,0,`<div class="provider-main"><span class="provider-name">${escapeHtml(p.proveedor)}</span><span class="provider-id">ID ${escapeHtml(p.id_proveedor)}</span></div>`,'provider-main')}
+      ${providerCell(row,0,`<div class="provider-main"><span class="provider-name${hasPage?' has-page':''}">${escapeHtml(p.proveedor)}</span><span class="provider-id">ID ${escapeHtml(p.id_proveedor)}</span></div>`,'provider-main')}
       ${providerCell(row,1,`<div class="commercial-line"><span>Precio unit. ${money(p.descuento_factura)}</span><span class="commercial-dot">•</span><span>Pronto pago ${money(p.descuento_total_fc)}</span><span class="commercial-dot">•</span><span>Lista ${money(p.descuento_lista)}</span></div><div class="commercial-secondary">Flete ${money(p.porc_flete)} · IVA incluido: ${boolInput(p.iva_incluido)?'Sí':'No'}</div>`,'commercial')}
       ${providerCell(row,2,`<div class="update-main"><span class="status-badge ${status}">${providerStatusLabel(status)}</span><span class="update-date">${escapeHtml(providerUpdatedDisplay(p)||'Sin fecha')}</span></div>`,'update-main')}
       ${providerCell(row,3,`<div class="contact-main"><span class="contact-person">${escapeHtml(p.vendedor||'Sin asignar')}</span><span class="contact-phone">${escapeHtml(p.telefono||'Sin teléfono')}</span></div>`,'contact-main')}
@@ -287,6 +295,17 @@ function initProviderColumnResize(){
 async function importCloud(){el.status.textContent='Actualizando proveedores...';providerRows=await CorralonSystem.importProvidersCloud();refreshSellerOptions();render()}
 function openProviderModal(provider=null){editingProviderId=provider?.id_proveedor||null;modalTitle.textContent=provider?'Editar proveedor':'Nuevo proveedor';providerEditorLayout?.setIdentity(provider?.proveedor,provider?.id_proveedor,!provider);deleteProviderBtn.classList.toggle('hidden',!provider);editId.value=provider?.id_proveedor||'';editId.disabled=false;editName.value=provider?.proveedor||'';editDiscountInvoice.value=percentInput(provider?.descuento_factura);editDiscountFinalInvoice.value=percentInput(provider?.descuento_total_fc);editDiscountList.value=percentInput(provider?.descuento_lista);editDate.value=provider?.ultima_actualizacion||'';editSeller.value=provider?.vendedor||'';editPhone.value=provider?.telefono||'';editPageLink.value=provider?.pagina_link||provider?.pagina||'';editFreightPercent.value=percentInput(provider?.porc_flete);editIvaPercent.value=percentInput(provider?.porc_iva);editIvaIncluded.checked=boolInput(provider?.iva_incluido);editNote.value=provider?.nota||'';providerModal.classList.add('visible');setTimeout(()=>provider?editName.focus():editId.focus(),0)}
 function closeProviderModal(){providerModal.classList.remove('visible');editingProviderId=null;providerForm.reset();editId.disabled=false}
+function closeProviderContextMenu(){providerContextMenu.classList.remove('visible');contextProviderId=null}
+function openProviderContextMenu(providerId,x,y){
+  const provider=providerRows.find(p=>String(p.id_proveedor)===String(providerId));
+  if(!provider)return;
+  contextProviderId=provider.id_proveedor;
+  providerContextMenu.querySelector('[data-provider-menu-open-page]').disabled=!providerPage(provider);
+  providerContextMenu.classList.add('visible');
+  const rect=providerContextMenu.getBoundingClientRect();
+  providerContextMenu.style.left=`${Math.max(6,Math.min(x,window.innerWidth-rect.width-6))}px`;
+  providerContextMenu.style.top=`${Math.max(6,Math.min(y,window.innerHeight-rect.height-6))}px`;
+}
 async function saveProvider(provider,originalId=null){const localProvider=CorralonSystem.normalizeProviderPageLink(provider);const idChanged=originalId!==null&&String(originalId)!==String(localProvider.id_proveedor);if(idChanged&&providerRows.some(p=>String(p.id_proveedor)===String(localProvider.id_proveedor)))throw new Error('El ID de proveedor ya existe');const url=idChanged?`${SUPABASE_URL}/rest/v1/${TABLE}?id_proveedor=eq.${encodeURIComponent(originalId)}`:`${SUPABASE_URL}/rest/v1/${TABLE}?on_conflict=id_proveedor`;const response=await fetch(url,{method:idChanged?'PATCH':'POST',headers:headers({Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(CorralonSystem.providerRemotePayload(localProvider))});if(!response.ok)throw new Error(await response.text());const index=providerRows.findIndex(p=>String(p.id_proveedor)===String(idChanged?originalId:localProvider.id_proveedor));if(index>=0)providerRows[index]=localProvider;else providerRows.push(localProvider);selectedProviderId=localProvider.id_proveedor;providerRows.sort((a,b)=>String(a.proveedor||'').localeCompare(String(b.proveedor||''),'es'));await CorralonSystem.setProvidersCache(providerRows.map(CorralonSystem.normalizeProviderPageLink));refreshSellerOptions();render()}
 providerForm.addEventListener('submit',async(event)=>{event.preventDefault();const originalId=editingProviderId;const current=providerRows.find(p=>String(p.id_proveedor)===String(originalId??editId.value).trim())||{};const pageLink=String(editPageLink.value).trim();const provider={...current,id_proveedor:String(editId.value).trim(),proveedor:String(editName.value).trim(),descuento_factura:parsePercentInput(editDiscountInvoice.value),descuento_total_fc:parsePercentInput(editDiscountFinalInvoice.value),descuento_lista:parsePercentInput(editDiscountList.value),ultima_actualizacion:editDate.value||null,vendedor:String(editSeller.value).trim(),telefono:String(editPhone.value).trim(),pagina_link:pageLink,reserva_texto_1:pageLink||null,nota:String(editNote.value).trim(),proveedor_norm:norm(editName.value),porc_flete:parsePercentInput(editFreightPercent.value),porc_iva:parsePercentInput(editIvaPercent.value),iva_incluido:editIvaIncluded.checked};if(!provider.id_proveedor||!provider.proveedor)return;try{el.status.textContent='Guardando proveedor...';await saveProvider(provider,originalId);closeProviderModal()}catch(error){console.error(error);el.status.textContent=error.message||'Error guardando proveedor'}});
 deleteProviderBtn.addEventListener('click',async()=>{const id=editingProviderId;if(id===null)return;const current=providerRows.find(p=>String(p.id_proveedor)===String(id));if(!confirm(`¿Eliminar el proveedor ${current?.proveedor||id}?`))return;try{el.status.textContent='Eliminando proveedor...';const response=await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id_proveedor=eq.${encodeURIComponent(id)}`,{method:'DELETE',headers:headers({Prefer:'return=minimal'})});if(!response.ok)throw new Error(await response.text());providerRows=providerRows.filter(p=>String(p.id_proveedor)!==String(id));if(String(selectedProviderId)===String(id))selectedProviderId=null;await CorralonSystem.setProvidersCache(providerRows.map(CorralonSystem.normalizeProviderPageLink));closeProviderModal();refreshSellerOptions();render();el.status.textContent='Proveedor eliminado'}catch(error){console.error(error);el.status.textContent=error.message||'Error eliminando proveedor'}});
@@ -307,19 +326,30 @@ newProviderBtn.onclick=()=>openProviderModal();
 closeModalBtn.onclick=closeProviderModal;cancelModalBtn.onclick=closeProviderModal;providerModal.addEventListener('click',(event)=>{if(event.target===providerModal)closeProviderModal()});
 el.rows.addEventListener('click',(event)=>{
   const btn=event.target.closest('[data-edit]');
-  if(btn){const provider=providerRows.find(p=>String(p.id_proveedor)===String(btn.dataset.edit));if(provider)openProviderModal(provider);return}
+  if(btn){const rect=btn.getBoundingClientRect();openProviderContextMenu(btn.dataset.edit,rect.right,rect.bottom);return}
   const row=event.target.closest('.row');
   if(!row)return;
   selectedProviderId=row.dataset.id;
   el.rows.querySelectorAll('.row').forEach(item=>item.classList.toggle('is-current-provider',item===row));
   renderDetail();
 });
-el.rows.addEventListener('dblclick',(event)=>{const row=event.target.closest('.row');if(!row)return;const provider=providerRows.find(p=>String(p.id_proveedor)===String(row.dataset.id));const url=providerUrl(provider?.pagina_link||provider?.pagina);if(url){event.preventDefault();window.open(url,'_blank','noopener')}});
+el.rows.addEventListener('contextmenu',(event)=>{const row=event.target.closest('.row');if(!row)return;event.preventDefault();selectedProviderId=row.dataset.id;el.rows.querySelectorAll('.row').forEach(item=>item.classList.toggle('is-current-provider',item===row));renderDetail();openProviderContextMenu(row.dataset.id,event.clientX,event.clientY)});
+el.rows.addEventListener('dblclick',(event)=>{const row=event.target.closest('.row');if(!row)return;const provider=providerRows.find(p=>String(p.id_proveedor)===String(row.dataset.id));const url=providerPage(provider);if(url){event.preventDefault();window.open(url,'_blank','noopener')}});
+providerContextMenu.addEventListener('click',(event)=>{
+  const provider=providerRows.find(p=>String(p.id_proveedor)===String(contextProviderId));
+  if(!provider)return;
+  if(event.target.closest('[data-provider-menu-open-page]')){const url=providerPage(provider);closeProviderContextMenu();if(url)window.open(url,'_blank','noopener');return}
+  if(event.target.closest('[data-provider-menu-edit]')){closeProviderContextMenu();openProviderModal(provider)}
+});
+document.addEventListener('pointerdown',(event)=>{if(!event.target.closest('#providerContextMenu')&&!event.target.closest('[data-edit]'))closeProviderContextMenu()});
+document.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&providerContextMenu.classList.contains('visible'))closeProviderContextMenu()});
+window.addEventListener('resize',closeProviderContextMenu);
+window.addEventListener('blur',closeProviderContextMenu);
 el.detail.addEventListener('click',(event)=>{
   const provider=providerRows.find(p=>String(p.id_proveedor)===String(selectedProviderId));
   if(event.target.closest('[data-detail-close]')){selectedProviderId=null;renderDetail();return}
   if(event.target.closest('[data-edit-detail]')&&provider){openProviderModal(provider);return}
-  if(event.target.closest('[data-open-page]')&&provider){const url=providerUrl(provider.pagina_link||provider.pagina);if(url)window.open(url,'_blank','noopener')}
+  if(event.target.closest('[data-open-page]')&&provider){const url=providerPage(provider);if(url)window.open(url,'_blank','noopener')}
 });
 document.querySelectorAll('.metric-card[data-status-filter]').forEach(button=>button.addEventListener('click',()=>{
   const requested=button.dataset.statusFilter||'all';

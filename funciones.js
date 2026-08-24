@@ -1041,6 +1041,25 @@
       setActive(cell);
     }
 
+    function removeCell(cell) {
+      if (!cell) return;
+      const position = getPosition(cell);
+      if (!position || !Number.isFinite(position.row) || !Number.isFinite(position.col)) return;
+      selected.delete(keyFromPosition(position));
+      cell.classList.remove(selectedClass);
+      if (activeCell === cell) setActive(null);
+    }
+
+    function toggleCells(cells) {
+      const targets = normalizeElementList(cells);
+      const allSelected = targets.length > 0 && targets.every((cell) => {
+        const position = getPosition(cell);
+        return position && selected.has(keyFromPosition(position));
+      });
+      targets.forEach((cell) => allSelected ? removeCell(cell) : addCell(cell));
+      if (afterSelect) afterSelect(Array.from(selected.values()));
+    }
+
     function selectCells(cells, append = false) {
       if (!append) clearSelection();
       normalizeElementList(cells).forEach(addCell);
@@ -1051,6 +1070,11 @@
       const targetCol = Number(col);
       const cells = allCells().filter((cell) => Number(getPosition(cell)?.col) === targetCol);
       selectCells(cells, append);
+    }
+
+    function toggleColumn(col) {
+      const targetCol = Number(col);
+      toggleCells(allCells().filter((cell) => Number(getPosition(cell)?.col) === targetCol));
     }
 
     function selectAll() {
@@ -1103,6 +1127,7 @@
     }
 
     function handleMouseDown(event) {
+      if (event.button !== 0) return;
       const corner = event.target.closest?.(cornerSelector);
       if (corner && root.contains(corner)) {
         event.preventDefault();
@@ -1122,7 +1147,8 @@
             const to = Math.max(columnAnchor, targetCol);
             for (let index = from; index <= to; index += 1) selectColumn(index, true);
           } else {
-            selectColumn(targetCol, event.ctrlKey || event.metaKey);
+            if (event.ctrlKey || event.metaKey) toggleColumn(targetCol);
+            else selectColumn(targetCol);
             columnAnchor = targetCol;
           }
         }
@@ -1130,7 +1156,10 @@
       }
 
       const cell = event.target.closest?.(cellSelector);
-      if (selectOnCellMouseDown && cell && root.contains(cell)) selectCells([cell], event.ctrlKey || event.metaKey);
+      if (selectOnCellMouseDown && cell && root.contains(cell)) {
+        if (event.ctrlKey || event.metaKey) toggleCells([cell]);
+        else selectCells([cell]);
+      }
     }
 
     function handlePaste(event) {

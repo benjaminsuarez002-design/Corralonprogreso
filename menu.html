@@ -694,7 +694,7 @@
         <a class="menu-btn" data-menu-id="faltantes" href="faltantes.html" target="_blank" rel="noopener"><strong>Faltantes</strong><span>Pedidos y reposición</span></a>
         <a class="menu-btn" data-menu-id="pedidos" href="pedidos.html" target="_blank" rel="noopener"><strong>Pedidos</strong><span>Ordenes a proveedores</span></a>
         <a class="menu-btn" data-menu-id="facturacion" href="facturacion.html" target="_blank" rel="noopener"><strong>Facturación</strong><span>Comprobantes electrónicos</span></a>
-        <a class="menu-btn" data-menu-id="actualizar_articulos" href="actualizar articulos.html" target="_blank" rel="noopener"><strong>Actualizar artículos</strong><span>Reemplazo por proveedor</span></a>
+        <a class="menu-btn" data-menu-id="actualizar_articulos" href="actualizar articulos.html" target="corralon_actualizar_articulos"><strong>Actualizar artículos</strong><span>Reemplazo por proveedor</span></a>
         <a class="menu-btn" data-menu-id="carga_stock" href="cargastock.html" target="_blank" rel="noopener"><strong>Carga stock</strong><span>Copiar códigos y cantidades</span></a>
         <a class="menu-btn" data-menu-id="proveedores" href="proveedores.html" target="_blank" rel="noopener"><strong>Proveedores</strong><span>Lista y descuentos</span></a>
         <a class="menu-btn" data-menu-id="listas_proveedores" href="listasproveedores.html" target="_blank" rel="noopener"><strong>Comparar listas</strong><span>Precios de proveedores</span></a>
@@ -1626,7 +1626,7 @@
           ignoredStaleProviderNotifications = new Map();
           console.warn('No se pudieron leer las listas ignoradas', error);
         }
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/proveedores?select=id_proveedor,proveedor,ultima_actualizacion,updated_at&order=proveedor.asc`, {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/proveedores?select=id_proveedor,proveedor,reserva_texto_1,ultima_actualizacion,updated_at&order=proveedor.asc`, {
           headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1641,6 +1641,7 @@
               providerId: String(provider.id_proveedor || ''),
               title: 'Actualizar lista',
               detail: String(provider.proveedor || `Proveedor ${provider.id_proveedor || ''}`).trim(),
+              providerPage: String(provider.reserva_texto_1 || '').trim(),
               date: lastUpdate,
               createdAt: lastUpdate,
               updatedAt: lastUpdate
@@ -1925,7 +1926,7 @@
             <button type="button" data-order-authorization="rechazar" data-review-doc="${escapeHtml(item.firestoreId || '')}">Rechazar</button>
           </span>
         </div>` : item.kind === 'lista_proveedor' ? `
-        <div class="review-item" data-kind="lista_proveedor" data-review-id="${escapeHtml(item.id)}" data-provider-id="${escapeHtml(item.providerId || item.id)}" data-tipo="pendiente_lista">
+        <div class="review-item" data-kind="lista_proveedor" data-review-id="${escapeHtml(item.id)}" data-provider-id="${escapeHtml(item.providerId || item.id)}" data-provider-page="${escapeHtml(item.providerPage || '')}" data-tipo="pendiente_lista">
           <strong>Actualizar lista</strong>
           <span>${escapeHtml(item.detail)}</span>
           <span>Última: ${escapeHtml(formatNotifDate(item.date))}</span>
@@ -2300,7 +2301,26 @@
         openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
         return;
       }
-      if (item.dataset.kind === 'lista_proveedor') window.open('actualizar articulos.html', '_blank', 'noopener');
+      if (item.dataset.kind === 'lista_proveedor') {
+        const updateTab = window.open('', 'corralon_actualizar_articulos');
+        if (updateTab) {
+          try {
+            const currentPath = decodeURIComponent(updateTab.location.pathname || '').toLowerCase();
+            if (!currentPath.endsWith('/actualizar articulos.html')) updateTab.location.href = 'actualizar articulos.html';
+            updateTab.focus();
+          } catch (_) {
+            updateTab.location.href = 'actualizar articulos.html';
+          }
+        }
+        const rawProviderPage = String(item.dataset.providerPage || '').trim();
+        if (rawProviderPage) {
+          const providerPage = /^https?:\/\//i.test(rawProviderPage) ? rawProviderPage : `https://${rawProviderPage}`;
+          try {
+            const parsed = new URL(providerPage);
+            if (['http:', 'https:'].includes(parsed.protocol)) window.open(parsed.href, '_blank', 'noopener');
+          } catch (_) {}
+        }
+      }
       else if (item.dataset.kind === 'historial') openHistorialNotification(item.dataset.tipo, item.dataset.reviewId, keepPopupOpen);
       else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
     });

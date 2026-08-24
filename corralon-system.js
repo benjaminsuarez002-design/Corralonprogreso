@@ -5707,8 +5707,34 @@
   }
 
   const NEW_ARTICLES_IMPORTER = (() => {
+    const ID_SEQUENCE_KEY = 'corralon_new_articles_access_max_v1';
     let state = null;
     let returnFocus = null;
+
+    function readImportedMax() {
+      try {
+        return Math.max(0, Number(localStorage.getItem(ID_SEQUENCE_KEY)) || 0);
+      } catch (_) {
+        return 0;
+      }
+    }
+
+    function saveImportedMax(value) {
+      const nextMax = Math.max(readImportedMax(), Number(value) || 0);
+      if (!nextMax) return;
+      try { localStorage.setItem(ID_SEQUENCE_KEY, String(nextMax)); }
+      catch (_) {}
+    }
+
+    function idBaseForIndex(indexMax) {
+      const importedMax = readImportedMax();
+      if (indexMax >= importedMax) {
+        try { localStorage.removeItem(ID_SEQUENCE_KEY); }
+        catch (_) {}
+        return indexMax;
+      }
+      return importedMax;
+    }
 
     function text(value) {
       return String(value ?? '').trim();
@@ -5988,7 +6014,6 @@
         const remove = event.target.closest('[data-new-articles-remove]');
         if (remove && state && !state.importing) {
           state.rows.splice(Number(remove.dataset.newArticlesRemove), 1);
-          assignIds();
           render();
         }
         if (event.target.closest('[data-new-articles-import]')) importToAccess();
@@ -6006,12 +6031,14 @@
 
     function assignIds() {
       if (!state) return;
-      state.rows.forEach((row, index) => { row.idArt = formatId(state.indexMax + index + 1); });
+      const base = Number(state.idBase ?? state.indexMax) || 0;
+      state.rows.forEach((row, index) => { row.idArt = formatId(base + index + 1); });
     }
 
     function validate() {
       if (!state) return ['No hay una importación preparada.'];
       const errors = [];
+      const batchIds = new Map();
       const batchCodes = new Map();
       const batchDescriptions = new Map();
       if (!text(state.provider.id_proveedor || state.provider.idProveedor)) errors.push('Falta el proveedor.');
@@ -6019,15 +6046,18 @@
       if (!state.rubros.length) errors.push('La lista de Index todavía no contiene IDRubro. Actualizala antes de importar.');
       state.rows.forEach((row, index) => {
         const rowErrors = [];
+        const idArt = formatId(row.idArt);
         const code = normalized(row.codigo);
         const description = normalized(row.descripcion);
-        if (!/^\d{6}$/.test(row.idArt) || Number(row.idArt) <= state.indexMax) rowErrors.push('IDArt inválido');
+        if (!/^\d{6}$/.test(text(row.idArt)) || Number(row.idArt) <= 0) rowErrors.push('IDArt inválido');
+        else if (state.catalogIds?.has(idArt)) rowErrors.push('IDArt ya existente en Index');
         if (!code) rowErrors.push('falta código de proveedor');
         if (!description) rowErrors.push('falta descripción');
         if (!(Number(row.costo) > 0)) rowErrors.push('costo inválido');
         if (!(Number(row.idRubro) > 0)) rowErrors.push('elegí el rubro');
         if (![0.21, 0.105].includes(Number(row.iva))) rowErrors.push('IVA inválido');
         if (!Number.isFinite(Number(row.margen)) || Number(row.margen) < 0) rowErrors.push('margen inválido');
+        if (/^\d{6}$/.test(idArt)) { if (batchIds.has(idArt)) rowErrors.push(`IDArt repetido con fila ${batchIds.get(idArt) + 1}`); else batchIds.set(idArt, index); }
         if (code) { if (batchCodes.has(code)) rowErrors.push(`código repetido con fila ${batchCodes.get(code) + 1}`); else batchCodes.set(code, index); }
         if (description) { if (batchDescriptions.has(description)) rowErrors.push(`descripción repetida con fila ${batchDescriptions.get(description) + 1}`); else batchDescriptions.set(description, index); }
         row.errors = rowErrors;
@@ -6043,7 +6073,7 @@
       const body = backdrop.querySelector('[data-new-articles-body]');
       body.innerHTML = state.rows.map((row, index) => {
         const rubroText = row.rubroText || rubroName(row.idRubro);
-        return `<tr data-new-articles-index="${index}"><td><input value="${escape(row.idArt)}" readonly></td><td><input value="${escape(row.codigo)}" readonly></td><td><input data-new-articles-field="descripcion" value="${escape(row.descripcion)}" autocomplete="off"></td><td><div class="corralon-new-rubro-combo"><input class="corralon-new-rubro-input" data-new-articles-field="rubroText" value="${escape(rubroText)}" autocomplete="off"><button type="button" class="corralon-new-rubro-toggle" data-new-rubro-toggle tabindex="-1" aria-label="Abrir rubros">▼</button><div class="corralon-new-rubro-menu"></div></div></td><td><select data-new-articles-field="iva"><option value="0.21"${Number(row.iva) === .21 ? ' selected' : ''}>21 %</option><option value="0.105"${Number(row.iva) === .105 ? ' selected' : ''}>10,5 %</option></select></td><td><input class="num" data-new-articles-field="margen" inputmode="decimal" value="${Number(row.margen || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %"></td><td><input class="num" value="${escape(money(row.costo))}" readonly></td><td><button class="corralon-new-articles-remove" type="button" data-new-articles-remove="${index}" title="Quitar">×</button></td></tr>`;
+        return `<tr data-new-articles-index="${index}"><td><input data-new-articles-field="idArt" inputmode="numeric" maxlength="6" value="${escape(row.idArt)}" autocomplete="off"></td><td><input value="${escape(row.codigo)}" readonly></td><td><input data-new-articles-field="descripcion" value="${escape(row.descripcion)}" autocomplete="off"></td><td><div class="corralon-new-rubro-combo"><input class="corralon-new-rubro-input" data-new-articles-field="rubroText" value="${escape(rubroText)}" autocomplete="off"><button type="button" class="corralon-new-rubro-toggle" data-new-rubro-toggle tabindex="-1" aria-label="Abrir rubros">▼</button><div class="corralon-new-rubro-menu"></div></div></td><td><select data-new-articles-field="iva"><option value="0.21"${Number(row.iva) === .21 ? ' selected' : ''}>21 %</option><option value="0.105"${Number(row.iva) === .105 ? ' selected' : ''}>10,5 %</option></select></td><td><input class="num" data-new-articles-field="margen" inputmode="decimal" value="${Number(row.margen || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %"></td><td><input class="num" value="${escape(money(row.costo))}" readonly></td><td><button class="corralon-new-articles-remove" type="button" data-new-articles-remove="${index}" title="Quitar">×</button></td></tr>`;
       }).join('');
       backdrop.querySelector('[data-new-articles-first-id]').value = state.rows[0]?.idArt || '';
       updateValidation();
@@ -6055,6 +6085,12 @@
       const row = state?.rows?.[Number(rowElement?.dataset.newArticlesIndex)];
       if (!control || !row) return;
       const name = control.dataset.newArticlesField;
+      if (name === 'idArt') {
+        const digits = String(control.value || '').replace(/\D/g, '').slice(0, 6);
+        row.idArt = event.type === 'change' && digits ? formatId(digits) : digits;
+        state.idsTouched = true;
+        if (event.type === 'change') control.value = row.idArt;
+      }
       if (name === 'descripcion') row.descripcion = control.value;
       if (name === 'rubroText') {
         row.rubroText = control.value;
@@ -6078,6 +6114,7 @@
         tr.title = row?.errors?.join(' · ') || '';
       });
       backdrop.querySelector('[data-new-articles-count]').textContent = `${state?.rows?.length || 0} artículo${state?.rows?.length === 1 ? '' : 's'} · IDArt máximo de Index: ${formatId(state?.indexMax || 0)}`;
+      backdrop.querySelector('[data-new-articles-first-id]').value = state?.rows?.[0]?.idArt || '';
       const validation = backdrop.querySelector('[data-new-articles-validation]');
       validation.className = `corralon-new-articles-validation ${errors.length ? 'error' : 'ok'}`;
       validation.textContent = errors.length ? errors.slice(0, 4).join(' ') : 'Todo listo. La existencia del IDArt, código y descripción se validará directamente en Access al importar.';
@@ -6113,32 +6150,63 @@
 
     async function importToAccess() {
       if (!state || state.importing || updateValidation().length) return;
+      const operationState = state;
       state.importing = true;
       const backdrop = ensureUi();
       const button = backdrop.querySelector('[data-new-articles-import]');
       button.textContent = 'Importando...';
       backdrop.querySelector('[data-new-articles-validation]').textContent = 'Verificando Access y preparando Articulos.xls...';
+      closeRubroMenus();
+      backdrop.classList.remove('open');
+      returnFocus?.focus?.({ preventScroll:true });
+      let succeeded = false;
       try {
         if (!window.XLSX) throw new Error('No se pudo cargar el módulo XLSX');
-        const blob = buildNewArticlesXlsBlob(accessRows());
-        const response = await fetch(`/api/articulos-nuevos/import?maxIndex=${encodeURIComponent(state.indexMax)}`, { method:'POST', body:blob });
+        const importedRows = accessRows();
+        const blob = buildNewArticlesXlsBlob(importedRows);
+        const response = await fetch(`/api/articulos-nuevos/import?maxIndex=${encodeURIComponent(operationState.indexMax)}`, { method:'POST', body:blob });
         const payload = await response.json().catch(async () => ({ error:await response.text() }));
         if (!response.ok || payload.ok === false) throw new Error(payload.error || `Access respondió HTTP ${response.status}`);
-        const completed = state;
-        completed.options?.showMessage?.('Artículos nuevos importados en Access');
-        completed.options?.onImported?.(payload, accessRows());
-        state.importing = false;
-        close();
+        const importedMax = importedRows.reduce((max, row) => Math.max(max, Number(row.id_art) || 0), 0);
+        saveImportedMax(Math.max(Number(payload.access_max_nuevo) || 0, importedMax));
+        succeeded = true;
+        operationState.options?.showMessage?.('Artículos nuevos importados en Access');
+        try { operationState.options?.onImported?.(payload, importedRows); }
+        catch (callbackError) { console.warn('La importación terminó, pero falló la actualización visual posterior.', callbackError); }
       } catch (error) {
-        state.serverError = `No se pudo importar: ${error.message}`;
+        const collision = String(error.message || '').match(/El IDArt\s+(\d{1,6})\s+ya existe/i);
+        if (collision) {
+          const existingId = Number(collision[1]);
+          saveImportedMax(existingId);
+          operationState.idBase = Math.max(Number(operationState.indexMax) || 0, existingId);
+          operationState.idsTouched = false;
+          operationState.serverError = '';
+          assignIds();
+          render();
+          operationState.options?.showMessage?.(`El IDArt ${formatId(existingId)} ya existía. Se ajustó desde ${operationState.rows[0]?.idArt || ''}.`);
+        } else {
+          operationState.serverError = `No se pudo importar: ${error.message}`;
+        }
       } finally {
-        if (state) state.importing = false;
+        operationState.importing = false;
         button.textContent = 'Importar en Access';
-        if (state) updateValidation();
+        if (state !== operationState) return;
+        if (succeeded) {
+          state = null;
+          returnFocus = null;
+        } else {
+          updateValidation();
+          backdrop.classList.add('open');
+          requestAnimationFrame(() => backdrop.querySelector('[data-new-articles-field="descripcion"]')?.focus());
+        }
       }
     }
 
     async function open(options = {}) {
+      if (state?.importing) {
+        options.showMessage?.('Ya hay una importación de artículos ejecutándose en segundo plano');
+        return false;
+      }
       const provider = options.provider || {};
       const sourceRows = Array.isArray(options.rows) ? options.rows : [];
       if (!text(provider.id_proveedor || provider.idProveedor)) { options.showMessage?.('Primero elegí un proveedor'); return false; }
@@ -6159,11 +6227,15 @@
         catalog = await CATALOG.load({ fallback:true });
       }
       const indexMax = catalog.reduce((max, row) => Math.max(max, Number(catalogCode(row)) || 0), 0);
+      const idBase = idBaseForIndex(indexMax);
       const rubroList = rubros(catalog);
       const initialRubro = defaultRubro(catalog, provider);
       state = {
         provider,
         indexMax,
+        idBase,
+        catalogIds:new Set(catalog.map(catalogCode).filter(Boolean)),
+        idsTouched:false,
         rubros:rubroList,
         importing:false,
         serverError:'',
