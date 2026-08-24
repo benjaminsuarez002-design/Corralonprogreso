@@ -3750,6 +3750,7 @@
       <div class="ceramico-budget-row" data-ceramico-only="1"><span id="ceramicoBudgetGluePriceLabel">Precio pegamento</span><strong id="ceramicoBudgetGluePrice">-</strong></div>
       <div class="ceramico-budget-row" data-ceramico-only="1"><span>Pastina estimada</span><strong id="ceramicoBudgetGrout">-</strong></div>
       <div class="ceramico-budget-row" data-ceramico-only="1"><span id="ceramicoBudgetGroutPriceLabel">Precio pastina</span><strong id="ceramicoBudgetGroutPrice">-</strong></div>
+      <div class="ceramico-budget-row"><span>Costo de los artículos</span><strong id="ceramicoBudgetCost">-</strong></div>
       <div class="ceramico-budget-total"><span>Total</span><strong id="ceramicoBudgetTotal">-</strong></div>
     </div>
     <div class="ceramico-budget-actions">
@@ -6322,7 +6323,9 @@ function calcularPresupuestoCeramico() {
     const bolsas = metrosNecesarios > 0 ? Math.round(metrosNecesarios / 3.5) : 0;
     const cantidad = Math.max(0, bolsas);
     const precioBolsa = precioActualParaCarrito(articulo);
+    const costoBolsa = Number(articulo.precioCostoConImpuestos || 0);
     const total = Math.round(cantidad * precioBolsa * 100) / 100;
+    const costo = Math.round(cantidad * costoBolsa * 100) / 100;
     ceramicoBudgetCajas = cantidad;
     ceramicoBudgetBolsas = cantidad;
     document.getElementById('ceramicoBudgetBoxM2').textContent = '3,50 m2';
@@ -6335,6 +6338,7 @@ function calcularPresupuestoCeramico() {
     document.getElementById('ceramicoBudgetGrout').textContent = '-';
     document.getElementById('ceramicoBudgetGroutPriceLabel').textContent = 'Precio pastina';
     document.getElementById('ceramicoBudgetGroutPrice').textContent = '-';
+    document.getElementById('ceramicoBudgetCost').textContent = costo ? fmtPrecio(costo) : '-';
     document.getElementById('ceramicoBudgetTotal').textContent = total ? fmtPrecio(total) : '-';
     document.getElementById('ceramicoBudgetAddCart').disabled = cantidad <= 0;
     return;
@@ -6350,6 +6354,10 @@ function calcularPresupuestoCeramico() {
   const includeGrout = document.getElementById('ceramicoBudgetIncludeGrout')?.checked;
   const gluePrice = includeGlue && ceramicoBudgetGlueArticulo ? precioActualParaCarrito(ceramicoBudgetGlueArticulo) : 0;
   const groutPrice = includeGrout && ceramicoBudgetGroutArticulo ? precioActualParaCarrito(ceramicoBudgetGroutArticulo) : 0;
+  const costoCeramico = cajas * Number(articulo.precioCostoConImpuestos || 0);
+  const costoPegamento = includeGlue && ceramicoBudgetGlueArticulo ? bolsasEstimadas * Number(ceramicoBudgetGlueArticulo.precioCostoConImpuestos || 0) : 0;
+  const costoPastina = includeGrout && ceramicoBudgetGroutArticulo ? bolsasEstimadas * Number(ceramicoBudgetGroutArticulo.precioCostoConImpuestos || 0) : 0;
+  const costoTotal = Math.round((costoCeramico + costoPegamento + costoPastina) * 100) / 100;
   const totalCeramico = Math.round((cajas * precioCaja) * 100) / 100;
   const totalPegamento = Math.round((bolsasEstimadas * gluePrice) * 100) / 100;
   const totalPastina = Math.round((bolsasEstimadas * groutPrice) * 100) / 100;
@@ -6366,6 +6374,7 @@ function calcularPresupuestoCeramico() {
   document.getElementById('ceramicoBudgetGrout').textContent = fmtBolsas(bolsasEstimadas);
   document.getElementById('ceramicoBudgetGroutPriceLabel').textContent = includeGrout && groutPrice ? `Precio pastina ${fmtPrecio(groutPrice)} c/u` : 'Precio pastina';
   document.getElementById('ceramicoBudgetGroutPrice').textContent = includeGrout && totalPastina ? fmtPrecio(totalPastina) : '-';
+  document.getElementById('ceramicoBudgetCost').textContent = costoTotal ? fmtPrecio(costoTotal) : '-';
   document.getElementById('ceramicoBudgetTotal').textContent = total ? fmtPrecio(total) : '-';
   document.getElementById('ceramicoBudgetAddCart').disabled = cajas <= 0;
   actualizarSeleccionesCeramico();
@@ -6373,6 +6382,7 @@ function calcularPresupuestoCeramico() {
 }
 
 function abrirPresupuestoCeramico(codigo = productDetailAdminCode) {
+  if (!window.CorralonFunciones?.isMenuSessionActive?.()) return;
   const articulo = buscarArticuloPorCodigo(codigo);
   const esPegamento = esArticuloPegamento(articulo);
   if (!articulo || (!(articulo.ceramico && sanitizeM2(articulo.ceramicoM2)) && !esPegamento)) return;
@@ -6693,7 +6703,9 @@ function abrirDetalleProducto(codigo) {
   qtyInput.placeholder = MODO_A_DESCONTAR ? 'Ej: 4p' : '';
   productDetailAdminCode = obtenerIdArticulo(articulo);
   budgetBtn.dataset.codigo = productDetailAdminCode;
-  budgetBtn.classList.toggle('hidden', !(articulo.arido || (articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0) || esArticuloPegamento(articulo)));
+  const admitePresupuesto = articulo.arido || (articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0) || esArticuloPegamento(articulo);
+  const presupuestoRequiereSesion = !!articulo.arido;
+  budgetBtn.classList.toggle('hidden', !admitePresupuesto || (presupuestoRequiereSesion && !sesionMenuActiva));
   const datosDescuento = datosDescuentoArticulo(articulo);
   discountBtn.classList.toggle('hidden', !sesionMenuActiva);
   editBtn.classList.toggle('hidden', !sesionMenuActiva);
@@ -9649,6 +9661,7 @@ document.getElementById('productDetailBudget').addEventListener('click', () => {
   const codigo = document.getElementById('productDetailBudget').dataset.codigo || productDetailAdminCode;
   const articulo = buscarArticuloPorCodigoFlexible(codigo);
   if (articulo?.arido) {
+    if (!window.CorralonFunciones?.isMenuSessionActive?.()) return;
     window.CorralonSystem?.aridos?.openBudget?.(codigo, {
       returnFocus: document.getElementById('productDetailBudget')
     });

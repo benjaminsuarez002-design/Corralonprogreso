@@ -20,6 +20,8 @@
   const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
   const FULL_PROVIDER_MANIFEST_PREFIX = 'provider_full_manifest:';
   const CLOUDINARY_JSON_MAX_BYTES = 8 * 1024 * 1024;
+  const IS_AUTOMATED_CRAWLER = /(?:bot|crawler|spider|slurp|bingpreview|facebookexternalhit|whatsapp|telegrambot|discordbot|linkedinbot|twitterbot)/i
+    .test(String(globalThis.navigator?.userAgent || ''));
   const IMAGE_GENERATOR_CATALOG_KEY = 'corralon_image_generator_catalog_v1';
   const IMAGE_GENERATOR_PAYLOAD_KEY = 'corralon_image_generator_payload_v1';
   const LARGE_CACHE_DB = 'corralon_cache_grande_v1';
@@ -1607,7 +1609,10 @@
             <table class="corralon-aridos-table">
               <thead><tr><th>Descripción</th><th>Cantidad</th><th>Precio</th></tr></thead>
               <tbody data-arid-table-body></tbody>
-              <tfoot><tr><td colspan="2">Total</td><td data-arid-total>$ 0,00</td></tr></tfoot>
+              <tfoot>
+                <tr><td colspan="2">Costo de los artículos</td><td data-arid-cost>$ 0,00</td></tr>
+                <tr><td colspan="2">Total</td><td data-arid-total>$ 0,00</td></tr>
+              </tfoot>
             </table>
           </div>
           <div class="corralon-aridos-warning" data-arid-warning hidden></div>
@@ -1870,6 +1875,8 @@
     }
     const total = aridosBudgetHost.querySelector('[data-arid-total]');
     if (total) total.textContent = money(budget.total);
+    const cost = aridosBudgetHost.querySelector('[data-arid-cost]');
+    if (cost) cost.textContent = money(Number(budget.materialCostTotal || 0) + Number(budget.freightCostTotal || 0));
     const missing = budget.materials.filter((item) => !((item.materialCostTotal ?? item.costTotal) > 0));
     const warning = aridosBudgetHost.querySelector('[data-arid-warning]');
     if (warning) {
@@ -4093,6 +4100,26 @@
     }
 
     async function loadProgressive(options = {}) {
+      if (IS_AUTOMATED_CRAWLER) {
+        const context = await catalogContext(null);
+        let initialRows = [];
+        try {
+          const directPriorityCodes = await fetchSupabasePriorityCodes();
+          const priorityCodes = priorityCodesFromMetadata([], [...(options.priorityCodes || []), ...directPriorityCodes]);
+          const baseRows = await fetchSupabaseInitialRows(priorityCodes, options.initialLimit);
+          initialRows = baseRows.map(fromSupabase);
+        } catch (error) {
+          console.warn('No se pudo preparar la portada reducida para el rastreador', error);
+        }
+        return {
+          initialRows,
+          complete: Promise.resolve(initialRows),
+          fromCache: false,
+          crawlerPreview: true,
+          version: context.version
+        };
+      }
+
       const force = Boolean(options.force);
       const storedCache = await readCache();
       // Una cache anterior a IDRubro no sirve para los selectores de rubros.
@@ -4390,6 +4417,10 @@
 
     function start() {
       if (started) return;
+      if (IS_AUTOMATED_CRAWLER) {
+        document.documentElement.dataset.catalogRealtimeLeader = 'crawler-disabled';
+        return;
+      }
       started = true;
       if ('BroadcastChannel' in window) {
         broadcast = new BroadcastChannel(CHANNEL_NAME);
@@ -4423,6 +4454,7 @@
     const SUGGESTIONS_KEY = 'corralon_faltantes_sugerencias_v1';
     const ROWS_DB = 'corralon_faltantes_cache_v1';
     const ROWS_CACHE_ID = 'filas';
+    const ROWS_SYNC_ID = 'sync';
     const COLLECTION = 'faltantes';
     const FIREBASE_CONFIG = {
       apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -4435,6 +4467,13 @@
     let firebaseDb = null;
     let localRowsMemory = null;
     let localRowsHydratePromise = null;
+    let lastGeneratedSyncId = 0;
+
+    function nextSyncId() {
+      const candidate = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+      lastGeneratedSyncId = Math.max(candidate, lastGeneratedSyncId + 1);
+      return lastGeneratedSyncId;
+    }
 
     function searchNorm(value) {
       return norm(value)
@@ -4599,11 +4638,13 @@
         precioCosto: Number(item.precio_costo || 0),
         precioFinal: Number(item.precio_final || 0),
         pedido: Boolean(item.pedido),
+        syncId: Number(item.sync_id || item.syncId || 0),
+        eliminado: Boolean(item.eliminado),
         source: item.origen || 'index'
       };
     }
 
-    function rowToRemote(row, orden = 0) {
+    function rowToRemote(row, orden = 0, syncId = 0) {
       if (!row.localUid) row.localUid = makeLocalUid();
       return {
         local_uid: row.localUid,
@@ -4619,6 +4660,8 @@
         precio_costo: Number(row.precioCosto || 0),
         precio_final: Number(row.precioFinal || 0),
         pedido: Boolean(row.pedido),
+        sync_id: Number(syncId || row.syncId || 0),
+        eliminado: false,
         origen: row.source || '',
         orden: Number.isFinite(Number(row.orden)) ? Number(row.orden) : orden,
         updatedAt: window.firebase?.firestore?.FieldValue?.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : Date.now()
@@ -4651,6 +4694,29 @@
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
       });
+    }
+
+    async function loadSyncCursor() {
+      try {
+        const database = await openRowsDb();
+        return await new Promise((resolve, reject) => {
+          const request = database.transaction('cache').objectStore('cache').get(ROWS_SYNC_ID);
+          request.onsuccess = () => resolve(Number(request.result?.cursor || 0));
+          request.onerror = () => reject(request.error);
+        });
+      } catch (_) { return 0; }
+    }
+
+    async function saveSyncCursor(cursor) {
+      const value = Number(cursor || 0);
+      const database = await openRowsDb();
+      await new Promise((resolve, reject) => {
+        const tx = database.transaction('cache', 'readwrite');
+        tx.objectStore('cache').put({ id: ROWS_SYNC_ID, cursor: value, savedAt: Date.now() });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      return value;
     }
 
     async function loadLocalRowsAsync() {
@@ -4763,6 +4829,16 @@
       const db = firebaseDatabase();
       if (!db) return [];
       const snap = await db.collection(COLLECTION).orderBy('orden', 'asc').get();
+      const rows = snap.docs.map(firebaseRowFromDoc).filter((row) => !row.eliminado);
+      const maxSyncId = rows.reduce((max, row) => Math.max(max, Number(row.syncId || 0)), 0);
+      await saveSyncCursor(maxSyncId || 1);
+      return rows;
+    }
+
+    async function loadRemoteChanges(afterSyncId = 0) {
+      const db = firebaseDatabase();
+      if (!db) return [];
+      const snap = await db.collection(COLLECTION).where('sync_id', '>', Number(afterSyncId || 0)).orderBy('sync_id', 'asc').get();
       return snap.docs.map(firebaseRowFromDoc);
     }
 
@@ -4775,6 +4851,15 @@
       );
     }
 
+    function subscribeChanges(afterSyncId, onRows, onError = console.warn) {
+      const db = firebaseDatabase();
+      if (!db) return null;
+      return db.collection(COLLECTION).where('sync_id', '>', Number(afterSyncId || 0)).orderBy('sync_id', 'asc').onSnapshot(
+        (snapshot) => onRows(snapshot.docChanges().filter((change) => change.type !== 'removed').map((change) => firebaseRowFromDoc(change.doc))),
+        onError
+      );
+    }
+
     async function saveRows(rows) {
       const db = firebaseDatabase();
       if (!db) return;
@@ -4783,9 +4868,29 @@
       const batch = db.batch();
       filled.forEach((row, index) => {
         if (!row.localUid) row.localUid = makeLocalUid();
-        batch.set(db.collection(COLLECTION).doc(row.localUid), rowToRemote(row, index), { merge: true });
+        row.syncId = nextSyncId();
+        batch.set(db.collection(COLLECTION).doc(row.localUid), rowToRemote(row, index, row.syncId), { merge: true });
       });
       await batch.commit();
+    }
+
+    async function saveChangedRows(rows, pendingUids) {
+      const db = firebaseDatabase();
+      if (!db) return;
+      const wanted = new Set([...(pendingUids || [])].map(String));
+      if (!wanted.size) return;
+      const changed = (rows || [])
+        .map((row, orden) => ({ row, orden }))
+        .filter(({ row }) => !isBlank(row) && wanted.has(String(row.localUid || '')));
+      for (let offset = 0; offset < changed.length; offset += 450) {
+        const batch = db.batch();
+        changed.slice(offset, offset + 450).forEach(({ row, orden }) => {
+          if (!row.localUid) row.localUid = makeLocalUid();
+          row.syncId = nextSyncId();
+          batch.set(db.collection(COLLECTION).doc(row.localUid), rowToRemote(row, orden, row.syncId), { merge: true });
+        });
+        await batch.commit();
+      }
     }
 
     async function addRow(row) {
@@ -4799,7 +4904,10 @@
       localRows.push(item);
       saveLocalRows(localRows, loadColumnFiltro());
       const db = firebaseDatabase();
-      if (db) await db.collection(COLLECTION).doc(item.localUid).set(rowToRemote(item, Date.now()), { merge: true });
+      if (db) {
+        item.syncId = nextSyncId();
+        await db.collection(COLLECTION).doc(item.localUid).set(rowToRemote(item, Date.now(), item.syncId), { merge: true });
+      }
       return item;
     }
 
@@ -4808,7 +4916,10 @@
       const valid = [...(uids || [])].filter(Boolean);
       if (!db || !valid.length) return;
       const batch = db.batch();
-      valid.forEach((uid) => batch.delete(db.collection(COLLECTION).doc(uid)));
+      valid.forEach((uid) => {
+        const syncId = nextSyncId();
+        batch.set(db.collection(COLLECTION).doc(uid), { local_uid: uid, eliminado: true, sync_id: syncId, updatedAt: window.firebase?.firestore?.FieldValue?.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : Date.now() }, { merge: true });
+      });
       await batch.commit();
     }
 
@@ -5527,8 +5638,13 @@
       saveLocalRows,
       loadColumnFiltro,
       loadRemoteRows,
+      loadRemoteChanges,
       subscribeRows,
+      subscribeChanges,
+      loadSyncCursor,
+      saveSyncCursor,
       saveRows,
+      saveChangedRows,
       addRow,
       deleteRowsByUid,
       loadProviderNames,
@@ -5710,6 +5826,7 @@
     const ID_SEQUENCE_KEY = 'corralon_new_articles_access_max_v1';
     let state = null;
     let returnFocus = null;
+    let pointerCell = null;
 
     function readImportedMax() {
       try {
@@ -5866,16 +5983,211 @@
     function restoreFocusedRow(event) {
       if (!state || state.activeRowIndex === null || !state.rowSnapshot) return false;
       const index = state.activeRowIndex;
-      const fieldName = event.target?.dataset?.newArticlesField || 'descripcion';
+      const col = Number(event.target?.dataset?.newArticlesCol);
       state.rows[index] = { ...state.rowSnapshot, errors:[] };
       state.rowSnapshot = { ...state.rows[index], errors:[] };
       state.serverError = '';
       render();
       requestAnimationFrame(() => {
-        const field = ensureUi().querySelector(`[data-new-articles-index="${index}"] [data-new-articles-field="${fieldName}"]`);
-        field?.focus();
-        field?.select?.();
+        focusImporterCell(importerCellAt(index, Number.isInteger(col) ? col : 2));
       });
+      return true;
+    }
+
+    function importerBackdrop() {
+      return document.getElementById('corralonNewArticlesBackdrop');
+    }
+
+    function importerRows() {
+      return [...(importerBackdrop()?.querySelectorAll('[data-new-articles-index]') || [])];
+    }
+
+    function importerCells(rowElement = null) {
+      const root = rowElement || importerBackdrop();
+      return [...(root?.querySelectorAll('[data-new-articles-cell]') || [])].filter((control) => {
+        if (control.disabled || control.hidden) return false;
+        const style = getComputedStyle(control);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+      });
+    }
+
+    function importerCellPosition(control) {
+      const rowElement = control?.closest('[data-new-articles-index]');
+      return {
+        row:Number(rowElement?.dataset.newArticlesIndex),
+        col:Number(control?.dataset.newArticlesCol)
+      };
+    }
+
+    function importerCellAt(row, col) {
+      return importerBackdrop()?.querySelector(`[data-new-articles-index="${row}"] [data-new-articles-cell][data-new-articles-col="${col}"]`) || null;
+    }
+
+    function selectedImporterRows() {
+      if (!state) return new Set();
+      if (!(state.selectedRows instanceof Set)) state.selectedRows = new Set();
+      return state.selectedRows;
+    }
+
+    function repaintImporterSelection() {
+      const selected = selectedImporterRows();
+      importerRows().forEach((rowElement) => {
+        rowElement.classList.toggle('selected-row', selected.has(Number(rowElement.dataset.newArticlesIndex)));
+      });
+    }
+
+    function selectImporterRow(index, options = {}) {
+      if (!state?.rows?.[index]) return false;
+      const selected = selectedImporterRows();
+      const multi = Boolean(options.ctrlKey || options.metaKey);
+      const range = Boolean(options.shiftKey);
+      if (range && Number.isInteger(state.rowAnchor)) {
+        if (!multi) selected.clear();
+        const from = Math.min(state.rowAnchor, index);
+        const to = Math.max(state.rowAnchor, index);
+        for (let row = from; row <= to; row += 1) selected.add(row);
+      } else if (multi) {
+        if (selected.has(index)) selected.delete(index); else selected.add(index);
+        state.rowAnchor = index;
+      } else {
+        selected.clear();
+        selected.add(index);
+        state.rowAnchor = index;
+      }
+      repaintImporterSelection();
+      return true;
+    }
+
+    function isImporterTextControl(control) {
+      return control?.matches?.('input:not([type="checkbox"]):not([type="radio"]),textarea') || false;
+    }
+
+    function importerTextFullySelected(control) {
+      if (!isImporterTextControl(control)) return true;
+      const length = String(control.value || '').length;
+      return control.selectionStart === 0 && control.selectionEnd === length;
+    }
+
+    function importerCanMoveHorizontally(control, direction) {
+      if (!isImporterTextControl(control) || control.readOnly || importerTextFullySelected(control)) return true;
+      const start = Number(control.selectionStart ?? 0);
+      const end = Number(control.selectionEnd ?? start);
+      if (start !== end) return false;
+      return direction < 0 ? start === 0 : end === String(control.value || '').length;
+    }
+
+    function focusImporterCell(control, options = {}) {
+      if (!control) return false;
+      const position = importerCellPosition(control);
+      if (Number.isInteger(position.row)) selectImporterRow(position.row);
+      importerBackdrop()?.querySelectorAll('.corralon-new-cell-editing').forEach((item) => item.classList.remove('corralon-new-cell-editing'));
+      control.focus({ preventScroll:true });
+      if (options.select !== false && isImporterTextControl(control)) control.select?.();
+      control.scrollIntoView({ block:'nearest', inline:'nearest' });
+      return true;
+    }
+
+    function commitImporterCell(control) {
+      if (!control?.dataset?.newArticlesField || control.readOnly || control.disabled) return;
+      control.dispatchEvent(new Event('change', { bubbles:true }));
+    }
+
+    function focusImporterFooter(direction = 1) {
+      const backdrop = importerBackdrop();
+      const controls = [
+        backdrop?.querySelector('[data-new-articles-head-close]'),
+        ...importerCells(),
+        backdrop?.querySelector('[data-new-articles-cancel]'),
+        backdrop?.querySelector('[data-new-articles-import]')
+      ].filter((control) => control && !control.disabled && control.offsetParent !== null);
+      if (!controls.length) return false;
+      const current = controls.indexOf(document.activeElement);
+      const next = current < 0
+        ? (direction < 0 ? controls.at(-1) : controls[0])
+        : controls[(current + direction + controls.length) % controls.length];
+      if (next?.matches?.('[data-new-articles-cell]')) return focusImporterCell(next);
+      next?.focus({ preventScroll:true });
+      return Boolean(next);
+    }
+
+    function moveImporterCell(control, key, backwards = false, ctrl = false) {
+      const position = importerCellPosition(control);
+      const rows = importerRows();
+      const rowElement = control?.closest('[data-new-articles-index]');
+      const rowCells = importerCells(rowElement);
+      if (!Number.isInteger(position.row) || !Number.isInteger(position.col) || !rowCells.length) return false;
+      let target = null;
+      if (key === 'Enter' || key === 'Tab') {
+        const all = importerCells();
+        const current = all.indexOf(control);
+        target = all[current + (backwards ? -1 : 1)] || null;
+        if (!target) return focusImporterFooter(backwards ? -1 : 1);
+      } else if (key === 'ArrowUp' || key === 'ArrowDown') {
+        const direction = key === 'ArrowUp' ? -1 : 1;
+        const targetRow = ctrl ? (direction < 0 ? 0 : rows.length - 1) : position.row + direction;
+        target = importerCellAt(targetRow, position.col);
+      } else if (key === 'ArrowLeft' || key === 'ArrowRight') {
+        const direction = key === 'ArrowLeft' ? -1 : 1;
+        if (!importerCanMoveHorizontally(control, direction)) return false;
+        const targetCol = ctrl
+          ? Number((direction < 0 ? rowCells[0] : rowCells.at(-1))?.dataset.newArticlesCol)
+          : position.col + direction;
+        target = importerCellAt(position.row, targetCol);
+      }
+      return focusImporterCell(target);
+    }
+
+    function deleteSelectedImporterRows() {
+      if (!state || state.importing) return false;
+      const selected = [...selectedImporterRows()].filter((index) => state.rows[index]).sort((a, b) => b - a);
+      if (!selected.length) return false;
+      const nextIndex = Math.min(selected.at(-1), Math.max(0, state.rows.length - selected.length - 1));
+      selected.forEach((index) => state.rows.splice(index, 1));
+      state.selectedRows.clear();
+      state.rowAnchor = null;
+      state.activeRowIndex = null;
+      state.rowSnapshot = null;
+      state.serverError = '';
+      render();
+      requestAnimationFrame(() => focusImporterCell(importerCellAt(nextIndex, 0)));
+      return true;
+    }
+
+    function handleImporterTableKey(event) {
+      const control = event.target.closest('[data-new-articles-cell]');
+      if (!control) return false;
+      if (event.key === 'Delete' && selectedImporterRows().size) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return deleteSelectedImporterRows();
+      }
+      if (event.key === 'F2' && isImporterTextControl(control)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (importerTextFullySelected(control)) {
+          const end = String(control.value || '').length;
+          control.setSelectionRange?.(end, end);
+          control.classList.add('corralon-new-cell-editing');
+        } else {
+          control.select?.();
+          control.classList.remove('corralon-new-cell-editing');
+        }
+        return true;
+      }
+      if (event.key === 'F4' && control.matches('select')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (typeof control.showPicker === 'function') control.showPicker(); else control.click();
+        return true;
+      }
+      const navigationKeys = ['Enter','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+      if (!navigationKeys.includes(event.key)) return false;
+      if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+          !importerCanMoveHorizontally(control, event.key === 'ArrowLeft' ? -1 : 1)) return false;
+      commitImporterCell(control);
+      moveImporterCell(control, event.key, event.shiftKey, event.ctrlKey || event.metaKey);
+      event.preventDefault();
+      event.stopImmediatePropagation();
       return true;
     }
 
@@ -5883,7 +6195,7 @@
       if (backdrop.dataset.functionsBound === '1') return;
       backdrop.dataset.functionsBound = '1';
       backdrop.addEventListener('focusin', (event) => {
-        const fieldControl = event.target.closest('[data-new-articles-field]');
+        const fieldControl = event.target.closest('[data-new-articles-cell]');
         const rowElement = fieldControl?.closest('[data-new-articles-index]');
         const index = Number(rowElement?.dataset.newArticlesIndex);
         if (!fieldControl || !Number.isInteger(index) || !state?.rows?.[index]) return;
@@ -5891,8 +6203,14 @@
           state.activeRowIndex = index;
           state.rowSnapshot = { ...state.rows[index], errors:[...(state.rows[index].errors || [])] };
         }
+        if (pointerCell !== fieldControl) {
+          selectImporterRow(index);
+          fieldControl.classList.remove('corralon-new-cell-editing');
+          if (isImporterTextControl(fieldControl)) fieldControl.select?.();
+        }
       });
       backdrop.addEventListener('focusout', (event) => {
+        event.target.closest?.('[data-new-articles-cell]')?.classList.remove('corralon-new-cell-editing');
         const rowElement = event.target.closest('[data-new-articles-index]');
         if (!rowElement) return;
         const leavingIndex = Number(rowElement.dataset.newArticlesIndex);
@@ -5906,6 +6224,12 @@
         }, 0);
       });
       backdrop.addEventListener('mousedown', (event) => {
+        if (event.button !== 0) return;
+        const rowElement = event.target.closest('[data-new-articles-index]');
+        const rowIndex = Number(rowElement?.dataset.newArticlesIndex);
+        if (Number.isInteger(rowIndex) && state?.rows?.[rowIndex]) {
+          selectImporterRow(rowIndex, event);
+        }
         const toggle = event.target.closest('[data-new-rubro-toggle]');
         if (toggle) {
           event.preventDefault();
@@ -5922,43 +6246,69 @@
           event.preventDefault();
           const input = option.closest('.corralon-new-rubro-combo')?.querySelector('[data-new-articles-field="rubroText"]');
           chooseRubro(input, option);
+          return;
+        }
+        const cell = event.target.closest('[data-new-articles-cell]');
+        if (cell && !cell.disabled) {
+          pointerCell = cell;
+          if (document.activeElement !== cell) {
+            event.preventDefault();
+            cell.classList.remove('corralon-new-cell-editing');
+            cell.focus({ preventScroll:true });
+            if (isImporterTextControl(cell)) cell.select?.();
+          } else if (isImporterTextControl(cell) && !cell.readOnly) {
+            cell.classList.add('corralon-new-cell-editing');
+          }
+          setTimeout(() => { if (pointerCell === cell) pointerCell = null; }, 0);
         }
       });
       backdrop.addEventListener('keydown', (event) => {
         const input = event.target.closest('[data-new-articles-field="rubroText"]');
-        if (event.key === 'Escape' && event.target.closest('[data-new-articles-field]')) {
+        if (event.key === 'Escape' && event.target.closest('[data-new-articles-cell]')) {
           event.preventDefault();
           event.stopImmediatePropagation();
           closeRubroMenus();
           restoreFocusedRow(event);
           return;
         }
-        if (!input) return;
-        const menu = input.closest('.corralon-new-rubro-combo')?.querySelector('.corralon-new-rubro-menu');
-        if (event.key === 'F4') {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          if (menu.classList.contains('open')) closeRubroMenus(); else showRubroMenu(input, true);
-          return;
+        if (input) {
+          const menu = input.closest('.corralon-new-rubro-combo')?.querySelector('.corralon-new-rubro-menu');
+          if (event.key === 'F4') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (menu.classList.contains('open')) closeRubroMenus(); else showRubroMenu(input, true);
+            return;
+          }
+          if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && menu.classList.contains('open')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const options = [...menu.querySelectorAll('[data-new-rubro-id]')];
+            if (!options.length) return;
+            let index = Number(menu.dataset.activeIndex || 0) + (event.key === 'ArrowDown' ? 1 : -1);
+            index = Math.max(0, Math.min(options.length - 1, index));
+            menu.dataset.activeIndex = String(index);
+            options.forEach((option, optionIndex) => option.classList.toggle('active', optionIndex === index));
+            options[index].scrollIntoView({ block:'nearest' });
+            return;
+          }
+          if (event.key === 'Enter' && menu.classList.contains('open')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (!input.value.trim()) closeRubroMenus();
+            else {
+              const options = [...menu.querySelectorAll('[data-new-rubro-id]')];
+              chooseRubro(input, options[Math.max(0, Number(menu.dataset.activeIndex || 0))]);
+            }
+            commitImporterCell(input);
+            moveImporterCell(input, 'Enter');
+            return;
+          }
         }
-        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && menu.classList.contains('open')) {
+        if (handleImporterTableKey(event)) return;
+        if (event.key === 'Tab' && event.target.closest('.corralon-new-articles-modal')) {
           event.preventDefault();
           event.stopImmediatePropagation();
-          const options = [...menu.querySelectorAll('[data-new-rubro-id]')];
-          if (!options.length) return;
-          let index = Number(menu.dataset.activeIndex || 0) + (event.key === 'ArrowDown' ? 1 : -1);
-          index = Math.max(0, Math.min(options.length - 1, index));
-          menu.dataset.activeIndex = String(index);
-          options.forEach((option, optionIndex) => option.classList.toggle('active', optionIndex === index));
-          options[index].scrollIntoView({ block:'nearest' });
-          return;
-        }
-        if (event.key === 'Enter' && menu.classList.contains('open')) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          if (!input.value.trim()) { closeRubroMenus(); return; }
-          const options = [...menu.querySelectorAll('[data-new-rubro-id]')];
-          chooseRubro(input, options[Math.max(0, Number(menu.dataset.activeIndex || 0))]);
+          focusImporterFooter(event.shiftKey ? -1 : 1);
         }
       });
       backdrop.addEventListener('input', (event) => {
@@ -5969,14 +6319,6 @@
         if (!event.target.closest('.corralon-new-rubro-combo')) closeRubroMenus();
       }, true);
       const fx = window.CorralonFunciones;
-      fx?.bindLinearNavigation?.({
-        root:backdrop,
-        selector:'[data-new-articles-field]',
-        selectOnFocus:true,
-        selectOnAnyFocus:true,
-        selectOnFirstPointerFocus:true,
-        smartCaret:true
-      });
       fx?.bindLiveLocaleNumber?.({ root:backdrop, selector:'[data-new-articles-field="margen"]', decimals:2, suffix:' %' });
     }
 
@@ -5992,6 +6334,7 @@
         .corralon-new-articles-head{position:relative;display:flex;align-items:center;gap:14px;padding:17px 20px 15px;border-bottom:1px solid var(--corralon-line);background:linear-gradient(180deg,#fff 0%,#fbfbfa 100%)}.corralon-new-articles-head:before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--corralon-red)}.corralon-new-articles-title-copy{display:grid;gap:2px}.corralon-new-articles-head h2{margin:0;color:var(--corralon-black);font:900 30px/1 'Barlow Condensed',Barlow,sans-serif;letter-spacing:.1px}.corralon-new-articles-head span{color:var(--corralon-muted);font-size:14px;font-weight:700}.corralon-new-articles-head button{margin-left:auto;width:36px;height:36px;padding:0!important;border:1px solid var(--corralon-line)!important;border-radius:10px!important;background:var(--corralon-white)!important;color:var(--corralon-black)!important;box-shadow:0 2px 7px rgba(0,0,0,.07)!important;font:800 20px/1 Barlow!important}.corralon-new-articles-head button:hover{border-color:var(--corralon-red)!important;color:var(--corralon-red)!important;background:#fff5f5!important}
         .corralon-new-articles-summary{display:grid;grid-template-columns:minmax(260px,2fr) repeat(3,minmax(140px,1fr));gap:9px;padding:11px 16px 12px;background:#f5f5f3;border-bottom:1px solid var(--corralon-line)}.corralon-new-articles-summary label{display:grid;gap:4px;padding:8px 10px 9px;border:1px solid #e1e1de;border-radius:10px;background:var(--corralon-white);color:var(--corralon-muted);font:800 11px/1 Barlow;text-transform:uppercase;letter-spacing:.45px}.corralon-new-articles-summary input{box-sizing:border-box;width:100%;height:22px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--corralon-black)!important;font:800 16px/1.1 Barlow,Arial}
         .corralon-new-articles-table-wrap{min-height:68px;max-height:52dvh;overflow:auto;background:#fff}.corralon-new-articles-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}.corralon-new-articles-table th{position:sticky;top:0;z-index:2;height:34px;padding:6px 8px;border-right:1px solid #ddd;border-bottom:1px solid #c8c8c5;background:#e9e9e6;color:#292929;font:900 14px/1 'Barlow Condensed',Barlow;text-align:left;text-transform:uppercase;letter-spacing:.3px}.corralon-new-articles-table th:last-child,.corralon-new-articles-table td:last-child{border-right:0}.corralon-new-articles-table td{height:39px;padding:4px 6px;border-right:1px solid #e5e5e2;border-bottom:1px solid #e5e5e2;background:#fff;font:700 14px Barlow,Arial}.corralon-new-articles-table tbody tr:nth-child(even) td{background:#f8f8f6}.corralon-new-articles-table tbody tr:hover td{background:#f1f1ee}.corralon-new-articles-table tbody tr.has-error td{background:#fff0f2!important}.corralon-new-articles-table input,.corralon-new-articles-table select{box-sizing:border-box;width:100%;height:31px;padding:4px 8px;border:1px solid #c9c9c5;border-radius:7px;background:#fff;font:700 14px Barlow,Arial;transition:border-color .15s,box-shadow .15s}.corralon-new-articles-table input:focus,.corralon-new-articles-table select:focus{border-color:#777!important;box-shadow:0 0 0 3px rgba(17,17,17,.08)!important;outline:0}.corralon-new-articles-table input[readonly]{background:#f0f0ed!important;border-color:transparent!important;color:#4f4f4b!important;box-shadow:none!important}.corralon-new-articles-table .num{text-align:right;font-variant-numeric:tabular-nums}.corralon-new-articles-table .id{width:88px}.corralon-new-articles-table .code{width:135px}.corralon-new-articles-table .description{width:auto}.corralon-new-articles-table .rubro{width:225px}.corralon-new-articles-table .iva{width:95px}.corralon-new-articles-table .margin{width:100px}.corralon-new-articles-table .cost{width:125px}.corralon-new-articles-table .remove{width:46px}.corralon-new-articles-remove{display:grid!important;place-items:center;width:29px!important;height:29px!important;margin:auto;padding:0!important;border:1px solid transparent!important;border-radius:8px!important;background:transparent!important;color:#d10d13!important;font:900 21px/1 Barlow!important;box-shadow:none!important}.corralon-new-articles-remove:hover{border-color:#ffc8ca!important;background:#fff0f1!important}
+        .corralon-new-articles-table tbody tr.selected-row td{background:var(--corralon-selection,#ded6fb)!important;box-shadow:inset 0 1px 0 rgba(108,79,199,.13),inset 0 -1px 0 rgba(108,79,199,.13)}.corralon-new-articles-table tbody tr.selected-row [data-new-articles-cell]:not(:focus){background:transparent!important}.corralon-new-articles-table [data-new-articles-cell]{cursor:default;caret-color:transparent}.corralon-new-articles-table [data-new-articles-cell].corralon-new-cell-editing{cursor:text;caret-color:auto}.corralon-new-articles-table tbody tr.selected-row [data-new-articles-cell]:focus{background:#fff!important}
         .corralon-new-rubro-combo{position:relative}.corralon-new-rubro-input{padding-right:27px!important}.corralon-new-rubro-toggle{position:absolute;right:1px;top:1px;display:none;width:25px!important;height:25px!important;padding:0!important;border:0!important;border-radius:4px!important;background:var(--corralon-soft-2)!important;box-shadow:none!important;font-size:12px!important}.corralon-new-rubro-combo:hover .corralon-new-rubro-toggle,.corralon-new-rubro-combo:focus-within .corralon-new-rubro-toggle{display:block}.corralon-new-rubro-menu{position:fixed;z-index:10070;display:none;max-height:260px;overflow:auto;border:1px solid var(--corralon-line-strong);border-radius:7px;background:var(--corralon-white);box-shadow:var(--corralon-shadow)}.corralon-new-rubro-menu.open{display:block}.corralon-new-rubro-option{padding:6px 9px;cursor:pointer;white-space:nowrap;font-weight:700}.corralon-new-rubro-option:hover,.corralon-new-rubro-option.active{background:var(--corralon-selection)}
         .corralon-new-articles-validation{min-height:42px;box-sizing:border-box;padding:11px 18px;border-top:1px solid var(--corralon-line);background:#fff8df;color:#705600;font-size:14px;font-weight:800}.corralon-new-articles-validation.ok{background:#e9f7ed;color:#08733a}.corralon-new-articles-validation.error{background:#fff0f2;color:#b10f31}.corralon-new-articles-actions{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--corralon-line);background:#fafaf8}.corralon-new-articles-count{margin-right:auto;color:var(--corralon-muted);font-size:14px;font-weight:800}.corralon-new-articles-actions button{min-height:36px;padding:7px 15px!important;border:1px solid var(--corralon-line-strong)!important;border-radius:9px!important;background:#fff!important;color:var(--corralon-black)!important;font:800 14px Barlow!important;box-shadow:0 2px 6px rgba(0,0,0,.06)!important}.corralon-new-articles-actions button:hover{background:#f1f1ef!important}.corralon-new-articles-primary{min-width:158px;background:linear-gradient(180deg,var(--corralon-red),var(--corralon-red-dark))!important;border-color:var(--corralon-red)!important;color:var(--corralon-white)!important;box-shadow:0 7px 16px rgba(201,0,6,.22)!important}.corralon-new-articles-primary:hover{background:linear-gradient(180deg,#ff2429,var(--corralon-red-deep))!important}
         @media(max-width:900px){#corralonNewArticlesBackdrop{padding:0;backdrop-filter:none}.corralon-new-articles-modal{width:100vw;height:100dvh;max-height:100dvh;border-radius:0}.corralon-new-articles-head{padding:13px 14px}.corralon-new-articles-head h2{font-size:25px}.corralon-new-articles-head span{font-size:12px}.corralon-new-articles-summary{grid-template-columns:1fr 1fr;padding:8px}.corralon-new-articles-table-wrap{max-height:none;flex:1}.corralon-new-articles-table{min-width:1050px}.corralon-new-articles-actions{padding:9px}.corralon-new-articles-count{display:none}}
@@ -6000,11 +6343,11 @@
       backdrop = document.createElement('div');
       backdrop.id = 'corralonNewArticlesBackdrop';
       backdrop.innerHTML = `<section class="corralon-new-articles-modal" role="dialog" aria-modal="true" aria-labelledby="corralonNewArticlesTitle">
-        <div class="corralon-new-articles-head"><div class="corralon-new-articles-title-copy"><h2 id="corralonNewArticlesTitle">Importar artículos nuevos</h2><span>Revisá los datos antes de enviarlos a Access.</span></div><button type="button" data-new-articles-close title="Cerrar" aria-label="Cerrar">×</button></div>
-        <div class="corralon-new-articles-summary"><label>Proveedor<input data-new-articles-provider readonly></label><label>ID proveedor<input data-new-articles-provider-id readonly></label><label>Moneda<input value="1 · Pesos" readonly></label><label>Primer IDArt<input data-new-articles-first-id readonly></label></div>
+        <div class="corralon-new-articles-head"><div class="corralon-new-articles-title-copy"><h2 id="corralonNewArticlesTitle">Importar artículos nuevos</h2><span>Revisá los datos antes de enviarlos a Access.</span></div><button type="button" data-new-articles-close data-new-articles-head-close title="Cerrar" aria-label="Cerrar">×</button></div>
+        <div class="corralon-new-articles-summary"><label>Proveedor<input data-new-articles-provider readonly tabindex="-1"></label><label>ID proveedor<input data-new-articles-provider-id readonly tabindex="-1"></label><label>Moneda<input value="1 · Pesos" readonly tabindex="-1"></label><label>Primer IDArt<input data-new-articles-first-id readonly tabindex="-1"></label></div>
         <div class="corralon-new-articles-table-wrap"><table class="corralon-new-articles-table"><thead><tr><th class="id">IDArt</th><th class="code">Cód. proveedor</th><th class="description">Descripción</th><th class="rubro">Rubro</th><th class="iva">IVA</th><th class="margin">Margen</th><th class="cost num">Costo</th><th class="remove"></th></tr></thead><tbody data-new-articles-body></tbody></table></div>
         <div class="corralon-new-articles-validation" data-new-articles-validation>Preparando artículos...</div>
-        <div class="corralon-new-articles-actions"><span class="corralon-new-articles-count" data-new-articles-count></span><button type="button" data-new-articles-close>Cancelar</button><button class="corralon-new-articles-primary" type="button" data-new-articles-import>Importar en Access</button></div>
+        <div class="corralon-new-articles-actions"><span class="corralon-new-articles-count" data-new-articles-count></span><button type="button" data-new-articles-close data-new-articles-cancel>Cancelar</button><button class="corralon-new-articles-primary" type="button" data-new-articles-import>Importar en Access</button></div>
       </section>`;
       document.body.appendChild(backdrop);
       bindFieldFunctions(backdrop);
@@ -6013,8 +6356,15 @@
         if (event.target.closest('[data-new-articles-close]')) close();
         const remove = event.target.closest('[data-new-articles-remove]');
         if (remove && state && !state.importing) {
-          state.rows.splice(Number(remove.dataset.newArticlesRemove), 1);
+          const index = Number(remove.dataset.newArticlesRemove);
+          state.rows.splice(index, 1);
+          state.selectedRows?.clear();
+          state.rowAnchor = null;
+          state.activeRowIndex = null;
+          state.rowSnapshot = null;
+          state.serverError = '';
           render();
+          requestAnimationFrame(() => focusImporterCell(importerCellAt(Math.min(index, state.rows.length - 1), 0)));
         }
         if (event.target.closest('[data-new-articles-import]')) importToAccess();
       });
@@ -6071,12 +6421,24 @@
       const backdrop = ensureUi();
       if (!state) return;
       const body = backdrop.querySelector('[data-new-articles-body]');
+      state.selectedRows = new Set([...selectedImporterRows()].filter((index) => state.rows[index]));
       body.innerHTML = state.rows.map((row, index) => {
         const rubroText = row.rubroText || rubroName(row.idRubro);
-        return `<tr data-new-articles-index="${index}"><td><input data-new-articles-field="idArt" inputmode="numeric" maxlength="6" value="${escape(row.idArt)}" autocomplete="off"></td><td><input value="${escape(row.codigo)}" readonly></td><td><input data-new-articles-field="descripcion" value="${escape(row.descripcion)}" autocomplete="off"></td><td><div class="corralon-new-rubro-combo"><input class="corralon-new-rubro-input" data-new-articles-field="rubroText" value="${escape(rubroText)}" autocomplete="off"><button type="button" class="corralon-new-rubro-toggle" data-new-rubro-toggle tabindex="-1" aria-label="Abrir rubros">▼</button><div class="corralon-new-rubro-menu"></div></div></td><td><select data-new-articles-field="iva"><option value="0.21"${Number(row.iva) === .21 ? ' selected' : ''}>21 %</option><option value="0.105"${Number(row.iva) === .105 ? ' selected' : ''}>10,5 %</option></select></td><td><input class="num" data-new-articles-field="margen" inputmode="decimal" value="${Number(row.margen || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %"></td><td><input class="num" value="${escape(money(row.costo))}" readonly></td><td><button class="corralon-new-articles-remove" type="button" data-new-articles-remove="${index}" title="Quitar">×</button></td></tr>`;
+        const selectedClass = state.selectedRows.has(index) ? ' class="selected-row"' : '';
+        return `<tr${selectedClass} data-new-articles-index="${index}">
+          <td><input data-new-articles-cell data-new-articles-col="0" data-row="${index}" data-col="0" data-new-articles-field="idArt" inputmode="numeric" maxlength="6" value="${escape(row.idArt)}" autocomplete="off"></td>
+          <td><input data-new-articles-cell data-new-articles-col="1" data-row="${index}" data-col="1" value="${escape(row.codigo)}" readonly></td>
+          <td><input data-new-articles-cell data-new-articles-col="2" data-row="${index}" data-col="2" data-new-articles-field="descripcion" value="${escape(row.descripcion)}" autocomplete="off"></td>
+          <td><div class="corralon-new-rubro-combo"><input class="corralon-new-rubro-input" data-new-articles-cell data-new-articles-col="3" data-row="${index}" data-col="3" data-new-articles-field="rubroText" value="${escape(rubroText)}" autocomplete="off"><button type="button" class="corralon-new-rubro-toggle" data-new-rubro-toggle tabindex="-1" aria-label="Abrir rubros">▼</button><div class="corralon-new-rubro-menu"></div></div></td>
+          <td><select data-new-articles-cell data-new-articles-col="4" data-row="${index}" data-col="4" data-new-articles-field="iva"><option value="0.21"${Number(row.iva) === .21 ? ' selected' : ''}>21 %</option><option value="0.105"${Number(row.iva) === .105 ? ' selected' : ''}>10,5 %</option></select></td>
+          <td><input class="num" data-new-articles-cell data-new-articles-col="5" data-row="${index}" data-col="5" data-new-articles-field="margen" inputmode="decimal" value="${Number(row.margen || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %"></td>
+          <td><input class="num" data-new-articles-cell data-new-articles-col="6" data-row="${index}" data-col="6" value="${escape(money(row.costo))}" readonly></td>
+          <td><button class="corralon-new-articles-remove" type="button" data-new-articles-remove="${index}" tabindex="-1" title="Quitar">×</button></td>
+        </tr>`;
       }).join('');
       backdrop.querySelector('[data-new-articles-first-id]').value = state.rows[0]?.idArt || '';
       updateValidation();
+      repaintImporterSelection();
     }
 
     function updateField(event) {
@@ -6197,7 +6559,7 @@
         } else {
           updateValidation();
           backdrop.classList.add('open');
-          requestAnimationFrame(() => backdrop.querySelector('[data-new-articles-field="descripcion"]')?.focus());
+          requestAnimationFrame(() => focusImporterCell(importerCellAt(0, 0)));
         }
       }
     }
@@ -6241,6 +6603,8 @@
         serverError:'',
         activeRowIndex:null,
         rowSnapshot:null,
+        selectedRows:new Set(),
+        rowAnchor:null,
         options,
         rows:sourceRows.map((row) => {
           const selectedRubro = Number(row.idRubro || row.id_rubro || initialRubro || 0);
@@ -6253,7 +6617,7 @@
       backdrop.querySelector('[data-new-articles-provider-id]').value = text(provider.id_proveedor || provider.idProveedor);
       render();
       backdrop.classList.add('open');
-      requestAnimationFrame(() => backdrop.querySelector('[data-new-articles-field="descripcion"]')?.focus());
+      requestAnimationFrame(() => focusImporterCell(importerCellAt(0, 0)));
       return true;
     }
 
