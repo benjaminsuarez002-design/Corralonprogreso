@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
@@ -1505,7 +1505,7 @@
     #diffModal .diff-modal{flex:0 0 auto;width:125vw;height:125dvh;min-width:0;min-height:0;max-width:none;max-height:none;zoom:1;transform:scale(.8);transform-origin:top left;resize:none;border:0;border-radius:0;box-shadow:none}
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
-<script src="corralon-system.js?v=1.0.5"></script>
+<script src="$11.0.7"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -3111,6 +3111,10 @@
     function formatMoneyWhileTyping(input) {
       if (!isCurrencyAmountInput(input) || hasMathExpression(input.value)) return false;
       const raw = String(input.value || '');
+      if (raw.replace(/\$/g, '').trim() === '-') {
+        input.value = '-';
+        return true;
+      }
       const oldCursor = input.selectionStart ?? raw.length;
       const cursorWasAtEnd = oldCursor >= raw.length;
       const digitsBeforeCursor = (raw.slice(0, oldCursor).match(/\d/g) || []).length;
@@ -6193,7 +6197,14 @@
 
     function appendOperatorToSelection(event) {
       const target = event.target;
-      if (!target.matches?.('.cell-input') || !isAmountCell(target) || !isOperatorKey(event.key) || !hasFullSelection(target)) return false;
+      if (!target.matches?.('.cell-input') || !isAmountCell(target) || !isOperatorKey(event.key)) return false;
+      if (event.key === '-' && (hasFullSelection(target) || parseNumber(target.value) === 0)) {
+        target.value = '-';
+        target.setSelectionRange(1, 1);
+        event.preventDefault();
+        return true;
+      }
+      if (!hasFullSelection(target)) return false;
       const operator = event.key === 'x' || event.key === 'X' ? '*' : event.key;
       target.value = `${target.value}${operator}`;
       const end = target.value.length;
