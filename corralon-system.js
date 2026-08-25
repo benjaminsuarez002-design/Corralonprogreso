@@ -5643,6 +5643,7 @@
       subscribeChanges,
       loadSyncCursor,
       saveSyncCursor,
+      nextSyncId,
       saveRows,
       saveChangedRows,
       addRow,
@@ -6873,6 +6874,90 @@
     };
   })();
 
+  const WEB_VERSION_NOTIFIER = (() => {
+    const MANIFEST_URL = 'https://raw.githubusercontent.com/benjaminsuarez002-design/Corralonprogreso/main/version-web.json';
+    const CHECK_MS = 60000;
+    const SHOW_MS = 10000;
+    let hideTimer = null;
+
+    function localVersion() {
+      const script = Array.from(document.scripts).find(item => /(?:^|\/)corralon-system\.js(?:\?|$)/i.test(item.src || ''));
+      if (!script) return '0.0.0';
+      try { return new URL(script.src, location.href).searchParams.get('v') || '0.0.0'; } catch (_) { return '0.0.0'; }
+    }
+    function versionParts(value) {
+      return String(value || '0').split('.').map(part => Number(String(part).replace(/\D.*$/, '')) || 0);
+    }
+    function newer(remote, local) {
+      const a = versionParts(remote), b = versionParts(local), length = Math.max(a.length, b.length);
+      for (let index = 0; index < length; index += 1) {
+        if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) > (b[index] || 0);
+      }
+      return false;
+    }
+    function priority(value) {
+      const key = String(value || '').trim().toLowerCase();
+      if (['importante', 'critica', 'critico', 'critical', 'alta', 'high'].includes(key)) return 'important';
+      if (['media', 'mediana', 'medium', 'amarilla', 'yellow'].includes(key)) return 'medium';
+      return 'normal';
+    }
+    function ensureStyle() {
+      if (document.getElementById('corralon-version-style')) return;
+      const style = document.createElement('style');
+      style.id = 'corralon-version-style';
+      style.textContent = `
+        #corralon-version-toast{position:fixed;left:50%;bottom:18px;z-index:2147483000;display:flex;align-items:center;gap:12px;width:min(660px,calc(100% - 24px));padding:13px 15px;border:1px solid rgba(0,0,0,.15);border-radius:14px;box-shadow:0 16px 45px rgba(0,0,0,.28);font-family:Barlow,Arial,sans-serif;font-weight:800;transform:translate(-50%,calc(100% + 45px));opacity:0;transition:transform .24s ease,opacity .24s ease}
+        #corralon-version-toast.visible{transform:translate(-50%,0);opacity:1}
+        #corralon-version-toast.normal{background:#e7f8ed;color:#075f2c;border-color:#6bc68e}
+        #corralon-version-toast.medium{background:#fff5cc;color:#664b00;border-color:#e8bd36}
+        #corralon-version-toast.important{background:#e71920;color:#fff;border-color:#9f0005}
+        #corralon-version-toast .version-copy{display:grid;gap:2px;min-width:0;flex:1}
+        #corralon-version-toast strong{font-size:15px;line-height:1.15}#corralon-version-toast small{font-size:12px;opacity:.86}
+        #corralon-version-toast button{flex:0 0 auto;border:1px solid currentColor;border-radius:9px;background:#fff;color:#151515;padding:8px 12px;font:900 13px Barlow,Arial,sans-serif;cursor:pointer}
+        @media(max-width:560px){#corralon-version-toast{align-items:stretch;flex-direction:column}#corralon-version-toast button{width:100%}}
+      `;
+      document.head.appendChild(style);
+    }
+    function updatePage(version) {
+      const url = new URL(location.href);
+      url.searchParams.set('_version', String(version || Date.now()));
+      location.replace(url.toString());
+    }
+    function show(manifest) {
+      if (!document.body) return;
+      ensureStyle();
+      const level = priority(manifest.prioridad || manifest.priority);
+      let toast = document.getElementById('corralon-version-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'corralon-version-toast';
+        toast.setAttribute('role', 'status');
+        document.body.appendChild(toast);
+      }
+      const label = level === 'important' ? 'Actualización importante' : level === 'medium' ? 'Actualización recomendada' : 'Ajuste disponible';
+      const detail = String(manifest.mensaje || manifest.message || label).trim();
+      toast.className = level;
+      toast.innerHTML = `<span class="version-copy"><strong>Nueva versión disponible: ${String(manifest.version || '')}</strong><small>${detail}. Actualizá la página.</small></span><button type="button">Actualizar página</button>`;
+      toast.querySelector('button').onclick = () => updatePage(manifest.version);
+      requestAnimationFrame(() => toast.classList.add('visible'));
+      clearTimeout(hideTimer);
+      if (level !== 'important') hideTimer = setTimeout(() => toast.classList.remove('visible'), SHOW_MS);
+    }
+    async function check() {
+      try {
+        const response = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const manifest = await response.json();
+        if (newer(manifest.version, localVersion())) show(manifest);
+      } catch (_) {}
+    }
+    function start() {
+      const begin = () => { check(); setInterval(check, CHECK_MS); };
+      if (document.body) begin(); else document.addEventListener('DOMContentLoaded', begin, { once: true });
+    }
+    return { start, check, localVersion };
+  })();
+
   window.CorralonSystem = {
     SUPABASE_URL,
     SUPABASE_KEY,
@@ -6944,9 +7029,11 @@
     catalogEditorSession: CATALOG_EDITOR_SESSION,
     catalog: CATALOG,
     catalogRealtime: CATALOG_REALTIME,
-    faltantes: FALTANTES
+    faltantes: FALTANTES,
+    versionNotifier: WEB_VERSION_NOTIFIER
   };
   CATALOG_REALTIME.start();
+  WEB_VERSION_NOTIFIER.start();
   const migrateLargeLocalCaches = async () => {
     try { await getImageGeneratorCatalogAsync(); } catch (_) {}
     try {

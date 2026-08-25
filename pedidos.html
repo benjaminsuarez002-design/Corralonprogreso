@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=20260812-cache-idb1"></script>
+<script src="corralon-system.js?v=1.0.0"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -1197,6 +1197,9 @@ function stopTopProgress(text=''){els.topProgress?.classList.remove('visible');i
 function money(v){return Core.money(v)}
 function parseMoney(v){return Core.parseMoney(v)}
 function today(){return new Date().toISOString().slice(0,10)}
+function historyDefaultFromIso(){const date=new Date();date.setDate(date.getDate()-15);return date.toISOString().slice(0,10)}
+function historyDateText(iso){const match=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return match?`${match[3]}/${match[2]}/${match[1]}`:''}
+function ensureDefaultHistoryDates(){if(!String(els.historyDateFrom.value||'').trim())els.historyDateFrom.value=historyDateText(historyDefaultFromIso());if(!String(els.historyDateTo.value||'').trim())els.historyDateTo.value=historyDateText(today())}
 function orderId(){return String(els.orderNumber.value||'').trim()||String(Date.now()).slice(-6)}
 function firebaseDb(){if(db)return db;if(!window.firebase?.firestore)return null;if(!window.firebase.apps.length)window.firebase.initializeApp(FIREBASE_CONFIG);db=window.firebase.firestore();return db}
 function orderUserKey(user=activeSessionUser()){return String(user?.id||user?.usuario||user?.nombre||'sin_usuario').trim()||'sin_usuario'}
@@ -1303,7 +1306,8 @@ async function writeOrderRemoteCache(remote,cursor){await Promise.all([window.Co
 function mergeRemoteOrderChanges(base,changes){const map=new Map((base||[]).map(order=>[orderListKey(order),order]));for(const order of changes||[]){const key=orderListKey(order);if(!key)continue;if(order.eliminado)map.delete(key);else map.set(key,{...(map.get(key)||{}),...order})}return[...map.values()]}
 async function tombstoneOrder(docId){const firestore=firebaseDb();if(!firestore||!docId)return;await firestore.collection('pedidos').doc(String(docId)).set({eliminado:true,confirmado:false,detalles:[],...orderSyncFields()},{merge:true})}
 async function startOrdersRealtime(){if(ordersRealtimeStarted)return;const firestore=firebaseDb();if(!firestore)return;const cursor=Number(await window.CorralonCacheDB.get(ORDER_SYNC_CURSOR_KEY)||0);if(!cursor){await refreshOrderList(true);return startOrdersRealtime()}ordersRealtimeStarted=true;ordersUnsubscribe=firestore.collection('pedidos').where('syncId','>',cursor).orderBy('syncId','asc').onSnapshot(async snap=>{const changes=snap.docChanges().filter(change=>change.type!=='removed').map(change=>normalizeOrderDoc(change.doc));if(!changes.length)return;const remote=mergeRemoteOrderChanges(allRemoteOrders,changes).filter(order=>!canceledOrderIds.has(String(order.id)));const max=changes.reduce((value,order)=>Math.max(value,Number(order.syncId||0)),cursor);await writeOrderRemoteCache(remote,max);applyRealtimeOrders(remote)},error=>{console.warn(error);ordersRealtimeStarted=false;ordersUnsubscribe=null;startOrdersPolling()})}
-async function refreshOrderList(forceFull=false){const firestore=firebaseDb();if(!firestore){updateOrderCounter();return[]}try{const cached=await readOrderRemoteCache();let cursor=Number(await window.CorralonCacheDB.get(ORDER_SYNC_CURSOR_KEY)||0),remote=[];if(forceFull||!cached||!cursor){const snap=await firestore.collection('pedidos').orderBy('id','asc').get();remote=snap.docs.map(normalizeOrderDoc);cursor=remote.reduce((value,order)=>Math.max(value,Number(order.syncId||0)),0)||1}else{const snap=await firestore.collection('pedidos').where('syncId','>',cursor).orderBy('syncId','asc').get();const changes=snap.docs.map(normalizeOrderDoc);remote=mergeRemoteOrderChanges(cached,changes);cursor=changes.reduce((value,order)=>Math.max(value,Number(order.syncId||0)),cursor)}remote=remote.filter(order=>!canceledOrderIds.has(String(order.id)));await writeOrderRemoteCache(remote,cursor);allRemoteOrders=remote;await deleteRemoteBlankOrders(remote);orderList=remote.filter(order=>order.confirmado||(orderHasContent(order)&&orderBelongsToActiveUser(order)));normalizeOrderList();const currentKey=currentOrderListKey();currentOrderIndex=orderList.findIndex(order=>orderListKey(order)===currentKey);updateOrderCounter();return orderList}catch(error){console.warn(error);updateOrderCounter();return orderList}}
+async function refreshOrderList(forceFull=false){const firestore=firebaseDb();if(!firestore){updateOrderCounter();return[]}try{const cached=await readOrderRemoteCache();let cursor=Number(await window.CorralonCacheDB.get(ORDER_SYNC_CURSOR_KEY)||0),remote=[];if(forceFull||!cached||!cursor){const snap=await firestore.collection('pedidos').where('fecha','>=',historyDefaultFromIso()).orderBy('fecha','asc').get();remote=snap.docs.map(normalizeOrderDoc);cursor=remote.reduce((value,order)=>Math.max(value,Number(order.syncId||0)),0)||1}else{const snap=await firestore.collection('pedidos').where('syncId','>',cursor).orderBy('syncId','asc').get();const changes=snap.docs.map(normalizeOrderDoc);remote=mergeRemoteOrderChanges(cached,changes);cursor=changes.reduce((value,order)=>Math.max(value,Number(order.syncId||0)),cursor)}remote=remote.filter(order=>!canceledOrderIds.has(String(order.id)));await writeOrderRemoteCache(remote,cursor);allRemoteOrders=remote;await deleteRemoteBlankOrders(remote);orderList=remote.filter(order=>order.confirmado||(orderHasContent(order)&&orderBelongsToActiveUser(order)));normalizeOrderList();const currentKey=currentOrderListKey();currentOrderIndex=orderList.findIndex(order=>orderListKey(order)===currentKey);updateOrderCounter();return orderList}catch(error){console.warn(error);updateOrderCounter();return orderList}}
+async function loadHistoryDateRange(){const firestore=firebaseDb();if(!firestore)return orderList;const from=parseHistoryFilterDate(els.historyDateFrom)?.date;const to=parseHistoryFilterDate(els.historyDateTo)?.date;if(!from||!to)return orderList;const fromIso=new Date(from.getFullYear(),from.getMonth(),from.getDate(),12).toISOString().slice(0,10);const toIso=new Date(to.getFullYear(),to.getMonth(),to.getDate(),12).toISOString().slice(0,10);const snap=await firestore.collection('pedidos').where('fecha','>=',fromIso).where('fecha','<=',toIso).orderBy('fecha','asc').get();const loaded=snap.docs.map(normalizeOrderDoc);allRemoteOrders=mergeRemoteOrderChanges(allRemoteOrders,loaded);orderList=allRemoteOrders.filter(order=>order.confirmado||(orderHasContent(order)&&orderBelongsToActiveUser(order)));normalizeOrderList();renderHistory(orderList);return orderList}
 function startOrdersPolling(){if(ordersPollTimer||ordersRealtimeStarted)return;ordersPollTimer=setInterval(async()=>{if(startupConflictActive||savingRemote||mergingProviderOrders)return;const latest=await refreshOrderList();if(els.historyModal.classList.contains('visible'))renderHistory(latest);if(shouldAutoResumePending()){const pending=pendingOrders();if(pending.length)loadOrder(pending[0],{focus:false})}},30000)}
 async function newBlankOrder(){manualBlankOrderMode=true;activeOrderDocId='';clearSelection();hideCombo();editingConfirmedDraftId='';editingConfirmedDraftDocId='';headerProviderId='';rows=[blankRow()];els.providerInput.value='';els.branchSelect.value='';els.orderNumber.value='';els.confirmedCheck.checked=false;els.confirmedCheck.dataset.pedido='false';els.dateInput.value=today();els.filterPriceList.checked=false;resetProviderCatalog();catalog=[];catalogCache.index=null;els.sourceInfo.textContent='Combo: lista de corralon';await ensureOrderNumber({force:true});currentOrderIndex=-1;saveLocal();paint();refreshMonthlyLimit();updateOrderCounter();scheduleCatalogLoad(false);focusCell(0,3,false)}
 async function openSuggestionsForNewOrder(){orderSuggestionsShown=false;closeOrderSuggestions();await prepareOrderSuggestions()}
@@ -1328,9 +1332,56 @@ function faltanteKey(item){return[String(item?.localUid||''),cleanProviderId(ite
 function orderRowFaltanteKey(row){return[String(row?.faltanteUid||''),cleanProviderId(row?.faltanteIdProveedor||row?.idProveedor||row?.id_proveedor||''),String(row?.faltanteCodProv||row?.codProv||'').trim().toLowerCase(),String(row?.faltanteDescripcion||row?.articulo||'').trim().toLowerCase(),String(row?.faltanteCantidad??row?.cantidad??'').trim()].join('|')}
 function orderRowsFromFaltantes(orderOrRows){return(Array.isArray(orderOrRows)?orderOrRows:orderOrRows?.detalles||[]).filter(row=>row?.faltanteUid||row?.faltanteKey||row?.importadoDeFaltantes)}
 function cacheFaltantesRows(nextRows){Catalog.saveLocalRows(nextRows,Catalog.loadColumnFiltro())}
-async function freshFaltantesRows(){try{const remote=await Catalog.loadRemoteRows();if(Array.isArray(remote)){cacheFaltantesRows(remote);return remote}}catch(error){console.warn(error)}return Catalog.loadLocalRowsAsync()}
+async function freshFaltantesRows(){
+  const local=await Catalog.loadLocalRowsAsync();
+  try{
+    const cursor=Number(await Catalog.loadSyncCursor()||0);
+    if(!cursor){
+      const remote=await Catalog.loadRemoteRows();
+      if(Array.isArray(remote)){cacheFaltantesRows(remote);return remote}
+      return local;
+    }
+    const changes=await Catalog.loadRemoteChanges(cursor);
+    if(!changes.length)return local;
+    const byUid=new Map((local||[]).filter(row=>row?.localUid).map(row=>[String(row.localUid),row]));
+    let maxSyncId=cursor;
+    for(const row of changes){
+      const uid=String(row?.localUid||'');
+      if(!uid)continue;
+      maxSyncId=Math.max(maxSyncId,Number(row.syncId||0));
+      if(row.eliminado)byUid.delete(uid);else byUid.set(uid,{...(byUid.get(uid)||{}),...row});
+    }
+    const merged=[...byUid.values()];
+    cacheFaltantesRows(merged);
+    if(maxSyncId>cursor)await Catalog.saveSyncCursor(maxSyncId);
+    return merged;
+  }catch(error){console.warn(error);return local}
+}
 function providerBranchMatches(faltante,order){const targetProviderId=cleanProviderId(order?.idProveedor||order?.id_proveedor||'');const rowProviderId=cleanProviderId(faltante?.idProveedor||faltante?.id_proveedor||'');const providerMatches=targetProviderId&&rowProviderId?targetProviderId===rowProviderId:normProv(faltante?.proveedor)===normProv(providerNameOnly(order?.proveedor||''));const targetBranch=branchSelectValue(order?.sucursalId||order?.sucursal||'');const rowBranch=branchSelectValue(faltante?.sucursalId||faltante?.sucursal||'');return Boolean(providerMatches&&targetBranch&&rowBranch===targetBranch)}
-async function writeFaltantesMode(targetRows,mode){const unique=[...new Map((targetRows||[]).filter(row=>row?.localUid).map(row=>[row.localUid,row])).values()];if(!unique.length)return 0;const firestore=firebaseDb();if(!firestore)throw new Error('Sin conexión a Firebase');for(let start=0;start<unique.length;start+=400){const batch=firestore.batch();for(const row of unique.slice(start,start+400)){const ref=firestore.collection('faltantes').doc(row.localUid);if(mode==='clear')batch.delete(ref);else batch.set(ref,{pedido:mode==='mark',updatedAt:window.firebase?.firestore?.FieldValue?.serverTimestamp?.()||Date.now()},{merge:true})}await batch.commit()}const ids=new Set(unique.map(row=>row.localUid));const local=Catalog.loadLocalRows();cacheFaltantesRows(mode==='clear'?local.filter(row=>!ids.has(row.localUid)):local.map(row=>ids.has(row.localUid)?{...row,pedido:mode==='mark'}:row));return unique.length}
+async function writeFaltantesMode(targetRows,mode){
+  const wanted=[...new Map((targetRows||[]).filter(row=>row?.localUid).map(row=>[row.localUid,row])).values()];
+  const unique=wanted.filter(row=>mode==='clear'||Boolean(row.pedido)!==(mode==='mark'));
+  if(!unique.length)return 0;
+  const firestore=firebaseDb();
+  if(!firestore)throw new Error('Sin conexión a Firebase');
+  for(let start=0;start<unique.length;start+=400){
+    const batch=firestore.batch();
+    for(const row of unique.slice(start,start+400)){
+      const ref=firestore.collection('faltantes').doc(row.localUid);
+      if(mode==='clear')batch.delete(ref);
+      else{
+        const syncId=Catalog.nextSyncId();
+        row.syncId=syncId;
+        batch.set(ref,{pedido:mode==='mark',sync_id:syncId,updatedAt:window.firebase?.firestore?.FieldValue?.serverTimestamp?.()||Date.now()},{merge:true});
+      }
+    }
+    await batch.commit();
+  }
+  const ids=new Set(unique.map(row=>row.localUid));
+  const local=Catalog.loadLocalRows();
+  cacheFaltantesRows(mode==='clear'?local.filter(row=>!ids.has(row.localUid)):local.map(row=>ids.has(row.localUid)?{...row,pedido:mode==='mark',syncId:unique.find(item=>item.localUid===row.localUid)?.syncId||row.syncId}:row));
+  return unique.length;
+}
 async function updateFaltantesForOrder(orderOrRows,mode){const order=Array.isArray(orderOrRows)?{...headerData(),detalles:orderOrRows}:orderOrRows||{};const allOrderRows=(Array.isArray(orderOrRows)?orderOrRows:order?.detalles||[]).filter(row=>!isBlank(row));const targetRows=orderRowsFromFaltantes(orderOrRows);if(!targetRows.length&&mode!=='unmark')return 0;const remote=await freshFaltantesRows();const uids=new Set(targetRows.map(row=>row.faltanteUid).filter(Boolean));const keys=new Set(targetRows.map(row=>row.faltanteKey||orderRowFaltanteKey(row)));const oldRowKeys=new Set(allOrderRows.map(row=>`${String(row.codProv||'').trim().toLowerCase()}|${normProv(row.articulo||row.descripcion)}`));const matches=remote.filter(row=>uids.has(row.localUid)||keys.has(faltanteKey(row))||(mode==='unmark'&&row.pedido&&providerBranchMatches(row,order)&&oldRowKeys.has(`${String(row.codProv||'').trim().toLowerCase()}|${normProv(row.descripcion)}`)));return writeFaltantesMode(matches,mode)}
 function markFaltantesForOrder(orderOrRows){return updateFaltantesForOrder(orderOrRows,'mark')}
 function unmarkFaltantesForOrder(orderOrRows){return updateFaltantesForOrder(orderOrRows,'unmark')}
@@ -1762,7 +1813,8 @@ function requestedReviewOrderId(){const params=new URLSearchParams(location.sear
 function clearRequestedReviewOrder(){localStorage.removeItem('corralon_open_review_order_id');if(location.search.includes('abrirPedido')){history.replaceState(null,'',location.pathname)}}
 function openRequestedReviewOrder(){const id=requestedReviewOrderId();if(!id)return false;const order=findOrderByKey(id);if(!order)return false;clearRequestedReviewOrder();els.historyModal.classList.remove('visible');openOrderDetail(orderListKey(order));return true}
 async function deleteOrder(key){if(!activeSessionIsAdmin()){els.status.textContent='Solo un administrador puede eliminar pedidos';return false}const firestore=firebaseDb();if(!firestore){els.status.textContent='Sin conexion a Firebase';return false}const order=findOrderByKey(key);try{await unmarkFaltantesForOrder(order);await tombstoneOrder(orderFirebaseDocId(order||{id:key}));orderList=orderList.filter(order=>orderListKey(order)!==String(key)&&String(order.id)!==String(key));if(String(orderId())===String(key)||order?.id&&String(orderId())===String(order.id))await newBlankOrder();updateOrderCounter();return true}catch(error){console.warn(error);els.status.textContent='No se pudo eliminar el pedido';return false}}
-els.historyBtn.addEventListener('click',async()=>{els.historyModal.classList.add('visible');renderHistory(await refreshOrderList())})
+els.historyBtn.addEventListener('click',async()=>{ensureDefaultHistoryDates();els.historyModal.classList.add('visible');els.historyList.innerHTML='<div style="padding:18px;font-weight:800;color:var(--muted)">Cargando los últimos 15 días...</div>';await loadHistoryDateRange()})
+;[els.historyDateFrom,els.historyDateTo].forEach(input=>input.addEventListener('change',()=>{formatHistoryFilterDate(input);loadHistoryDateRange().catch(console.warn)}))
 els.closeHistoryBtn.addEventListener('click',()=>els.historyModal.classList.remove('visible'))
 els.historyModal.addEventListener('mousedown',e=>{if(e.target===els.historyModal)els.historyModal.classList.remove('visible')})
 window.CorralonFunciones?.bindDropdownOnlyWhenTyping({root:els.historyFilterControls,inputSelector:'[data-history-combo]',buttonSelector:'[data-history-filter-drop]',show:showHistoryFilterCombo,hide:hideHistoryFilterCombo,isOpen:historyComboIsOpen,pickActive:pickHistoryFilterCombo,moveActive:moveHistoryFilterCombo,inputFromButton:button=>button.closest('.history-filter-control')?.querySelector('[data-history-combo]'),containerFromInput:input=>input.closest('.history-filter-control'),selectOnFocus:true,openOnTyping:true,openOnButton:true,openOnF4:true,enterPicksFirst:false,focusedClass:'focused'})

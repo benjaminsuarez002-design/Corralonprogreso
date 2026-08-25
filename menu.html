@@ -630,7 +630,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=20260812-cache-idb1"></script>
+<script src="corralon-system.js?v=1.0.0"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -1428,7 +1428,6 @@
         ocultarCargaMenu();
         Promise.all([
           preloadAliasObjectives(),
-          preloadReviewNotifications(usuario),
           preloadStaleProviderNotifications(usuario)
         ]).catch((error) => console.warn('No se pudo completar la precarga del menú', error));
       } else {
@@ -2066,11 +2065,11 @@
         return;
       }
       if (!reviewUnsubscribe) {
-        const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('confirmado', '==', true));
+        const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('fecha', '==', todayIso()));
         reviewUnsubscribe = onSnapshot(pedidosRevisionQuery, (snap) => {
           const previous = knownReviewIds;
           reviewOrders = snap.docs.map((docSnap) => ({ ...docSnap.data(), firestoreId: docSnap.id }))
-            .filter((order) => !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
+            .filter((order) => order.confirmado && !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
             .sort((a, b) => Number(b.id) - Number(a.id));
           const current = new Set(reviewOrders.map(reviewOrderDocId));
           const fresh = reviewOrders.find((order) => !previous.has(reviewOrderDocId(order)));
@@ -2080,11 +2079,11 @@
         }, (error) => console.warn('No se pudieron escuchar pedidos en revisión', error));
       }
       if (!historialUnsubscribe) {
-        const historialPendienteQuery = query(collection(db, 'historialNotificaciones'), where('resuelta', '==', false));
+        const historialPendienteQuery = query(collection(db, 'historialNotificaciones'), where('fecha', '==', todayIso()));
         historialUnsubscribe = onSnapshot(historialPendienteQuery, (snap) => {
           const previous = knownHistorialIds;
           historialNotifications = snap.docs.map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
-            .filter((item) => notifDesdeHoy(item))
+            .filter((item) => !item.resuelta && notifDesdeHoy(item))
             .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
           const current = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
           const fresh = historialNotifications.find((item) => !previous.has(`${item.tipo}:${item.id}`));
@@ -2380,7 +2379,6 @@
         mostrarCargaMenu('Cargando comprobantes y notificaciones...');
         await Promise.all([
           preloadAliasObjectives(),
-          preloadReviewNotifications(usuarioActivo),
           preloadStaleProviderNotifications(usuarioActivo)
         ]);
         await mostrarMenu(usuarioActivo);
