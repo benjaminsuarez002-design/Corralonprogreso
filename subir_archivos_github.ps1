@@ -258,20 +258,16 @@ try {
         throw "No encontre el repositorio Git en:`r`n$repoRoot"
     }
 
-    Run-Git -Arguments @('fetch', 'origin', 'main') | Out-Null
-    $trackedOutput = Run-Git -Arguments @('-c', 'core.quotepath=false', 'diff', '--name-only', 'origin/main', '--') -SuppressWarnings
-    $untrackedOutput = Run-Git -Arguments @('-c', 'core.quotepath=false', 'ls-files', '--others', '--exclude-standard') -SuppressWarnings
-    $relativeFiles = @($trackedOutput.Output -split "`r?`n") + @($untrackedOutput.Output -split "`r?`n") |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Where-Object { $_ -notmatch '^(\.codex|\.git|tmp/|node_modules/|supabase/\.temp/|vendor/)' } |
-        Where-Object { $_ -notmatch '(\.log$|\.bak(\.|$)|backup.*\.exe$|\.test\.exe$)' } |
-        Sort-Object -Unique
-    if (-not $relativeFiles.Count) {
-        Show-Message -Text 'No hay archivos modificados desde la ultima subida.'
-        return
-    }
-
-    $confirmationText = "Se detectaron $($relativeFiles.Count) archivos modificados desde la ultima subida.`r`n`r`n¿Subir automaticamente todos los archivos modificados?"
+    $baselinePath = Join-Path $repoRoot 'actualizacion-version.json'
+    if (-not (Test-Path -LiteralPath $baselinePath -PathType Leaf)) { throw 'No encontre actualizacion-version.json.' }
+    $lastUploadTime = (Get-Item -LiteralPath $baselinePath).LastWriteTime
+    $automaticFiles = @(Get-ChildItem -LiteralPath $repoRoot -File | Where-Object {
+        $_.FullName -ne $baselinePath -and
+        $_.LastWriteTime -gt $lastUploadTime -and
+        $_.Extension -ne '.log' -and
+        $_.Name -notmatch '\.bak(\.|$)|backup.*\.exe$|\.test\.exe$'
+    } | Sort-Object LastWriteTime, Name)
+    $confirmationText = "Se detectaron $($automaticFiles.Count) archivos con fecha posterior a la ultima actualizacion ($($lastUploadTime.ToString('dd/MM/yyyy HH:mm:ss'))).`r`n`r`n¿Subir automaticamente esos archivos?"
     $answer = [System.Windows.Forms.MessageBox]::Show(
         $dialogOwner,
         $confirmationText,
@@ -279,10 +275,31 @@ try {
         [System.Windows.Forms.MessageBoxButtons]::YesNo,
         [System.Windows.Forms.MessageBoxIcon]::Question
     )
-    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
-        return
+    if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
+        if (-not $automaticFiles.Count) {
+            Show-Message -Text 'No hay archivos mas recientes que actualizacion-version.json.'
+            return
+        }
+        $selectedFiles = @($automaticFiles | ForEach-Object FullName)
+    } else {
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        $dialog.Title = 'Elegir archivos para subir a Corralonprogreso'
+        $dialog.InitialDirectory = $repoRoot
+        $dialog.Filter = 'Archivos del sistema (*.html;*.js;*.css;*.json;*.txt)|*.html;*.js;*.css;*.json;*.txt|Todos los archivos (*.*)|*.*'
+        $dialog.Multiselect = $true
+        $dialog.CheckFileExists = $true
+        $dialog.RestoreDirectory = $true
+        if ($dialog.ShowDialog($dialogOwner) -ne [System.Windows.Forms.DialogResult]::OK) { return }
+        $selectedFiles = @($dialog.FileNames)
     }
 
+    $relativeFiles = @($selectedFiles | ForEach-Object {
+        $fullPath = [IO.Path]::GetFullPath($_)
+        if (-not $fullPath.StartsWith($repoRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "El archivo debe estar dentro de Corralonprogreso-main:`r`n$fullPath"
+        }
+        $fullPath.Substring($repoRoot.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
+    } | Sort-Object -Unique)
     $htmlFiles = @($relativeFiles | Where-Object { $_ -match '\.html$' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
     if ($htmlFiles.Count) {
         $manifestSource = Join-Path $repoRoot 'version-web.json'
@@ -297,8 +314,8 @@ try {
         if ($relativeFiles -notcontains 'version-web.json') { $relativeFiles += 'version-web.json' }
     }
 
-    $selectedFiles = @($relativeFiles | ForEach-Object { Join-Path $repoRoot $_ })
     $fileNames = @($relativeFiles)
+    Run-Git -Arguments @('fetch', 'origin', 'main') | Out-Null
     $uploadWorktree = Join-Path ([System.IO.Path]::GetTempPath()) ("corralon-github-upload-" + [System.Guid]::NewGuid().ToString('N'))
     Run-Git -Arguments @('worktree', 'add', '--detach', $uploadWorktree, 'origin/main') | Out-Null
 
@@ -364,7 +381,10 @@ try {
     foreach ($relativePath in $changedFiles) {
         $normalizedPath = ([string]$relativePath).Replace('\', '/')
         $fullChangedPath = Join-Path $uploadWorktree $relativePath
-        if (-not (Test-Path -LiteralPath $fullChangedPath -PathType Leaf)) { continue }
+        if (-not (Test-Path -LiteralPath $fullChangedPath -PathType Leaf)) {
+            [void]$fileMap.Remove($normalizedPath)
+            continue
+        }
         $info = Get-Item -LiteralPath $fullChangedPath
         $fileMap[$normalizedPath] = [ordered]@{
             path = $normalizedPath
