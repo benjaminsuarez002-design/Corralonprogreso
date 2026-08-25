@@ -6,6 +6,7 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -57,6 +58,10 @@ internal sealed class ServerForm : Form
     private Process catalogSyncProcess;
     private string catalogSyncMessage = "Listo para sincronizar.";
     private int? catalogSyncExitCode;
+    private FileSystemWatcher htmlWatcher;
+    private System.Windows.Forms.Timer versionDebounceTimer;
+    private readonly HashSet<string> pendingVersionFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> ignoredVersionFiles = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
 
     public ServerForm(bool startInTray)
     {
@@ -73,6 +78,114 @@ internal sealed class ServerForm : Form
         BuildTrayIcon();
         StartServer();
         if (startInTray) Shown += (s, e) => HideToTray();
+    }
+
+    private void StartHtmlVersionWatcher()
+    {
+        htmlWatcher = new FileSystemWatcher(root, "*.html");
+        htmlWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName;
+        htmlWatcher.Changed += HtmlFileChanged;
+        htmlWatcher.Created += HtmlFileChanged;
+        htmlWatcher.Renamed += (s, e) => QueueHtmlVersion(e.FullPath);
+        htmlWatcher.EnableRaisingEvents = true;
+        versionDebounceTimer = new System.Windows.Forms.Timer { Interval = 1800 };
+        versionDebounceTimer.Tick += (s, e) => ShowPendingVersionDialog();
+    }
+
+    private void HtmlFileChanged(object sender, FileSystemEventArgs e) { QueueHtmlVersion(e.FullPath); }
+
+    private void QueueHtmlVersion(string path)
+    {
+        BeginInvoke((MethodInvoker)delegate
+        {
+            DateTime until;
+            if (ignoredVersionFiles.TryGetValue(path, out until) && until > DateTime.UtcNow) return;
+            pendingVersionFiles.Add(path);
+            versionDebounceTimer.Stop();
+            versionDebounceTimer.Start();
+        });
+    }
+
+    private void ShowPendingVersionDialog()
+    {
+        versionDebounceTimer.Stop();
+        var files = new List<string>(pendingVersionFiles);
+        pendingVersionFiles.Clear();
+        files.RemoveAll(path => !File.Exists(path));
+        if (files.Count == 0) return;
+
+        using (var dialog = new Form())
+        {
+            dialog.Text = "Actualizar versiones";
+            dialog.Width = 520;
+            dialog.Height = 285;
+            dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+            dialog.MaximizeBox = false;
+            dialog.MinimizeBox = false;
+            dialog.StartPosition = FormStartPosition.CenterScreen;
+            dialog.TopMost = true;
+            var pages = new Label { Left = 16, Top = 14, Width = 470, Height = 42, Text = "Paginas modificadas: " + String.Join(", ", files.ConvertAll(Path.GetFileName).ToArray()) };
+            var prompt = new Label { Left = 16, Top = 62, Width = 470, Text = "¿Que se actualizo?" };
+            var description = new TextBox { Left = 16, Top = 84, Width = 470, Height = 62, Multiline = true };
+            var importanceLabel = new Label { Left = 16, Top = 154, Width = 90, Text = "Importancia:" };
+            var importance = new ComboBox { Left = 108, Top = 150, Width = 160, DropDownStyle = ComboBoxStyle.DropDownList };
+            importance.Items.AddRange(new object[] { "Normal", "Recomendada", "Importante" });
+            importance.SelectedIndex = 0;
+            var accept = new Button { Text = "Actualizar", Left = 294, Top = 194, Width = 92, DialogResult = DialogResult.OK };
+            var cancel = new Button { Text = "Cancelar", Left = 394, Top = 194, Width = 92, DialogResult = DialogResult.Cancel };
+            dialog.Controls.AddRange(new Control[] { pages, prompt, description, importanceLabel, importance, accept, cancel });
+            dialog.AcceptButton = accept;
+            dialog.CancelButton = cancel;
+            dialog.Shown += (s, e) => { dialog.Activate(); description.Focus(); };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            if (String.IsNullOrWhiteSpace(description.Text))
+            {
+                MessageBox.Show("Escribi que se actualizo.", "Actualizar versiones", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                foreach (string file in files) pendingVersionFiles.Add(file);
+                versionDebounceTimer.Start();
+                return;
+            }
+            UpdateHtmlVersions(files, description.Text.Trim(), importance.SelectedItem.ToString().ToLowerInvariant());
+        }
+    }
+
+    private void UpdateHtmlVersions(List<string> files, string change, string priority)
+    {
+        string manifestPath = Path.Combine(root, "version-web.json");
+        if (!File.Exists(manifestPath)) return;
+        string json = File.ReadAllText(manifestPath, Encoding.UTF8);
+        var history = new StringBuilder();
+        foreach (string file in files)
+        {
+            string key = PageKeyFromFile(file);
+            string pattern = "(\\\"" + Regex.Escape(key) + "\\\"\\s*:\\s*\\{[\\s\\S]*?\\\"version\\\"\\s*:\\s*\\\")(\\d+)\\.(\\d+)\\.(\\d+)(\\\"[\\s\\S]*?\\\"ultimo_cambio\\\"\\s*:\\s*\\\")[^\\\"]*(\\\")";
+            Match match = Regex.Match(json, pattern);
+            if (!match.Success) continue;
+            string next = match.Groups[2].Value + "." + match.Groups[3].Value + "." + (Int32.Parse(match.Groups[4].Value) + 1);
+            json = new Regex(pattern).Replace(json, m => m.Groups[1].Value + next + m.Groups[5].Value + VersionJsonEscape(change) + m.Groups[6].Value, 1);
+            string html = File.ReadAllText(file, Encoding.UTF8);
+            html = new Regex("(corralon-system\\.js\\?v=)\\d+\\.\\d+\\.\\d+").Replace(html, "$1" + next, 1);
+            ignoredVersionFiles[file] = DateTime.UtcNow.AddSeconds(5);
+            File.WriteAllText(file, html, new UTF8Encoding(true));
+            history.Append("    {\r\n      \"version\": \"" + next + "\",\r\n      \"pagina\": \"" + VersionJsonEscape(Path.GetFileNameWithoutExtension(file)) + "\",\r\n      \"cambio\": \"" + VersionJsonEscape(change) + "\",\r\n      \"prioridad\": \"" + priority + "\",\r\n      \"publicado\": \"" + DateTime.Now.ToString("dd/MM/yyyy HH:mm") + "\"\r\n    },\r\n");
+        }
+        if (history.Length > 0) json = new Regex("(\\\"historial\\\"\\s*:\\s*\\[\\s*)").Replace(json, m => m.Groups[1].Value + history.ToString(), 1);
+        File.WriteAllText(manifestPath, json, new UTF8Encoding(false));
+        trayIcon.ShowBalloonTip(2500, "Versiones actualizadas", "Se actualizaron " + files.Count + " pagina(s). No se subio ningun archivo.", ToolTipIcon.Info);
+    }
+
+    private static string PageKeyFromFile(string file)
+    {
+        string value = Path.GetFileNameWithoutExtension(file).ToLowerInvariant().Replace(' ', '-');
+        string normalized = value.Normalize(NormalizationForm.FormD);
+        var result = new StringBuilder();
+        foreach (char c in normalized) if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark) result.Append(c);
+        return result.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static string VersionJsonEscape(string value)
+    {
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
     }
 
     private void BuildUi()
