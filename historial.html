@@ -538,7 +538,7 @@ function historyDateInput(id){return document.getElementById(id)}
 function parseHistoryHeaderDate(input){return window.CorralonFunciones?.parseFechaFlexible?.(String(input?.value||'').trim())||null}
 function historyDateRangeIso(){const from=parseHistoryHeaderDate(historyDateInput('historyDateFrom'));const to=parseHistoryHeaderDate(historyDateInput('historyDateTo'));return{from:from?from.date.toISOString().slice(0,10):historyDefaultFromIso(),to:to?to.date.toISOString().slice(0,10):historyTodayIso()}}
 function initializeHistoryDateInputs(){const from=historyDateInput('historyDateFrom'),to=historyDateInput('historyDateTo');if(from&&!from.value)from.value=historyIsoToText(historyDefaultFromIso());if(to&&!to.value)to.value=historyIsoToText(historyTodayIso())}
-function reloadActiveHistoryRange(){if(document.getElementById('tabRemitos')?.classList.contains('active'))return cargarHistorial();if(document.getElementById('tabPresupuestos')?.classList.contains('active'))return cargarPresupuestos();if(document.getElementById('tabGarantias')?.classList.contains('active'))return cargarGarantias()}
+function reloadActiveHistoryRange(){if(document.getElementById('tabRemitos')?.classList.contains('active'))return _remitosBusquedaAplicada?buscarRemitosConfirmado():cargarHistorial();if(document.getElementById('tabPresupuestos')?.classList.contains('active'))return cargarPresupuestos();if(document.getElementById('tabGarantias')?.classList.contains('active'))return cargarGarantias()}
 function normalizeHistoryDateInput(input,reload=true){const parsed=parseHistoryHeaderDate(input);input.classList.toggle('invalid-date',Boolean(String(input.value||'').trim()&&!parsed));if(!parsed)return false;input.value=parsed.text;if(reload&&input.dataset.appliedValue!==parsed.text){input.dataset.appliedValue=parsed.text;reloadActiveHistoryRange()}return true}
 function setupHistoryDateFunctions(){const root=document.getElementById('historyDateRange');if(!root||root.dataset.bound)return;root.dataset.bound='1';const fields=[historyDateInput('historyDateFrom'),historyDateInput('historyDateTo')].filter(Boolean);window.CorralonFunciones?.bindLinearNavigation?.({root,selector:'.header-date-input',selectOnFocus:true,smartCaret:true,selectOnFirstPointerFocus:true});window.CorralonFunciones?.bindLabelSelect?.({root,labelSelector:'.header-date-label',controlSelector:'.header-date-input'});const originals=new WeakMap();fields.forEach(input=>{input.addEventListener('focus',()=>{originals.set(input,input.value)});input.addEventListener('change',()=>normalizeHistoryDateInput(input,true));input.addEventListener('blur',()=>normalizeHistoryDateInput(input,true));input.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();input.value=originals.get(input)??input.value;input.classList.remove('invalid-date');input.blur()}else if(event.key==='Enter'||event.key==='Tab'){normalizeHistoryDateInput(input,false)}})})}
 
@@ -733,7 +733,7 @@ function activarTabHistorial(tab) {
   if (garantiasPanel) garantiasPanel.classList.toggle('active', isGarantias);
 
   if (isRemitos) {
-    return cargarHistorial();
+    return _remitosBusquedaAplicada ? buscarRemitosConfirmado() : cargarHistorial();
   } else if (isPresupuestos) {
     return cargarPresupuestos();
   } else if (isGarantias) {
@@ -1465,9 +1465,10 @@ async function cargarHistorial() {
   body.innerHTML = '<div class="h-empty">Cargando...</div>';
   try {
     const {from,to}=historyDateRangeIso();
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=*&fecha=gte.${encodeURIComponent(from)}&fecha=lte.${encodeURIComponent(to)}&order=id.desc&limit=100`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=*&fecha_iso=gte.${encodeURIComponent(from)}&fecha_iso=lte.${encodeURIComponent(to)}&order=fecha_iso.desc,id.desc&limit=100`, {
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
     });
+    if (!res.ok) throw new Error(await res.text() || 'No se pudieron cargar los remitos');
     const data = await res.json();
     _remitosCache = Array.isArray(data) ? data : [];
     renderRemitosHistorial();
@@ -1477,19 +1478,45 @@ async function cargarHistorial() {
   }
 }
 
+let _remitosBusquedaAplicada = '';
+
+async function buscarRemitosConfirmado() {
+  const input = document.getElementById('remitosSearch');
+  const busqueda = String(input?.value || '').trim();
+  if (!busqueda) {
+    _remitosBusquedaAplicada = '';
+    await cargarHistorial();
+    return;
+  }
+
+  const body = document.getElementById('historialBody');
+  body.innerHTML = '<div class="h-empty">Buscando...</div>';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/buscar_remitos`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_busqueda: busqueda, p_limite: 100 })
+    });
+    if (!res.ok) throw new Error(await res.text() || 'No se pudieron buscar los remitos');
+    const data = await res.json();
+    _remitosBusquedaAplicada = busqueda;
+    _remitosCache = Array.isArray(data) ? data : [];
+    renderRemitosHistorial();
+  } catch (error) {
+    console.error('Error buscando remitos:', error);
+    body.innerHTML = '<div class="h-empty">Error buscando remitos</div>';
+  }
+}
+
 function renderRemitosHistorial() {
   const body = document.getElementById('historialBody');
-  const search = String(document.getElementById('remitosSearch')?.value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-  let rows = _remitosCache;
-  if(search) {
-    rows = rows.filter((r) => {
-      const text = `${r.nro ? remitoFull(r.nro) : ''} ${r.nro || ''} ${r.cliente || ''} ${r.sucursal || ''} ${usuarioRegistroNombre(r)} ${r.fecha || ''} ${fmt(r.total || 0)} ${r.total || ''}`
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      return text.includes(search);
-    });
-  }
+  const rows = _remitosCache;
   if(!_remitosCache.length) {
-    body.innerHTML = '<div class="h-empty">Sin remitos todavía</div>';
+    body.innerHTML = `<div class="h-empty">${_remitosBusquedaAplicada ? 'Sin coincidencias' : 'Sin remitos todavía'}</div>`;
     return;
   }
   if(!rows.length) {
@@ -2245,7 +2272,18 @@ async function guardarEdicionRemota(remito) {
   await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${remito.id}`, {
     method: 'PATCH',
     headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-    body: JSON.stringify({ nro: remitoFull(nroCorto), cliente: remito.cliente, fecha: remito.fecha, total: remito.total })
+    body: JSON.stringify({
+      nro: remitoFull(nroCorto),
+      cliente: remito.cliente,
+      fecha: remito.fecha,
+      fecha_iso: (() => {
+        const partes = String(remito.fecha || '').trim().split('/');
+        return partes.length === 3
+          ? `${partes[2]}-${String(partes[1]).padStart(2, '0')}-${String(partes[0]).padStart(2, '0')}`
+          : null;
+      })(),
+      total: remito.total
+    })
   });
   await fetch(`${SUPABASE_URL}/rest/v1/items_remito?remito_id=eq.${remito.id}`, {
     method: 'DELETE',
@@ -2536,7 +2574,16 @@ function generarPDFPresupuestoDoc(p) {
 }
 // Estado inicial
 inicializarHistorial();
-document.getElementById('remitosSearch')?.addEventListener('input', renderRemitosHistorial);
+document.getElementById('remitosSearch')?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    buscarRemitosConfirmado();
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    event.currentTarget.value = _remitosBusquedaAplicada;
+    event.currentTarget.select();
+  }
+});
 document.getElementById('openBudgetSearchBtn')?.addEventListener('click', () => abrirBusquedaPresupuestos());
 let _budgetContextItem = null;
 
