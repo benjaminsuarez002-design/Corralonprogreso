@@ -6875,7 +6875,10 @@
   })();
 
   const WEB_VERSION_NOTIFIER = (() => {
-    const MANIFEST_URL = 'https://raw.githubusercontent.com/benjaminsuarez002-design/Corralonprogreso/main/version-web.json';
+    const RAW_MANIFEST_URL = 'https://raw.githubusercontent.com/benjaminsuarez002-design/Corralonprogreso/main/version-web.json';
+    const MANIFEST_URL = /^(https?:)$/i.test(location.protocol)
+      ? new URL('/version-web.json', location.origin).toString()
+      : RAW_MANIFEST_URL;
     const EXECUTED_VERSIONS_KEY = 'corralon_versiones_ejecutadas_v1';
     const FIREBASE_CONFIG = {
       apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -6885,7 +6888,7 @@
       messagingSenderId: '466583614632',
       appId: '1:466583614632:web:42cb839f83e97475fabe9d'
     };
-    const FALLBACK_CHECK_MS = 5 * 60 * 1000;
+    const FALLBACK_CHECK_MS = 60 * 1000;
 
     function localVersion() {
       const script = Array.from(document.scripts).find(item => /(?:^|\/)corralon-system\.js(?:\?|$)/i.test(item.src || ''));
@@ -6966,7 +6969,10 @@
     }
     async function check(realtimeConfig = null) {
       try {
-        const response = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
+        let response = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok && MANIFEST_URL !== RAW_MANIFEST_URL) {
+          response = await fetch(`${RAW_MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
+        }
         if (!response.ok) return;
         const manifest = await response.json();
         const currentPageKey = pageKey();
@@ -6987,14 +6993,15 @@
       return firestoreModule.onSnapshot(
         firestoreModule.doc(firestore, 'configuracion', 'version_web'),
         (snapshot) => check(snapshot.exists() ? snapshot.data() : null),
-        () => setInterval(check, FALLBACK_CHECK_MS)
+        () => {}
       );
     }
     function start() {
       const begin = () => {
         recordExecutedVersion();
         check();
-        startRealtime().catch(() => setInterval(check, FALLBACK_CHECK_MS));
+        setInterval(check, FALLBACK_CHECK_MS);
+        startRealtime().catch(() => {});
       };
       if (document.body) begin(); else document.addEventListener('DOMContentLoaded', begin, { once: true });
     }
