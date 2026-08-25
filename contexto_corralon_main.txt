@@ -1,7 +1,7 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia: 10/08/2026
+Fecha de referencia: 25/08/2026
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -1318,7 +1318,202 @@ Resultado esperado:
   cambiar RLS o Storage.
 
 
-18. NOTA FINAL PARA UN CHAT NUEVO
+18. ACTUALIZACION FUNCIONAL AL 25/08/2026
+=========================================
+
+Esta seccion complementa el estado del 10/08/2026. Ante cualquier diferencia,
+el codigo actual sigue siendo la fuente definitiva.
+
+
+Sincronizacion incremental y consumo
+------------------------------------
+
+- La prioridad general es conservar una copia local util en IndexedDB y consultar
+  remotamente versiones, cursores o filas nuevas, no descargar colecciones
+  completas cada vez que se abre una pantalla.
+- catalogo_articulos utiliza version global y version por articulo. Una version
+  igual reutiliza IndexedDB; una superior descarga solamente los cambios.
+- Una sincronizacion completa sigue siendo valida como recuperacion, importacion
+  masiva o reconstruccion de cache, pero no debe convertirse en el recorrido
+  habitual de cada apertura.
+- faltantes.html guarda inmediatamente el estado local, mantiene pendingSync y
+  envia en segundo plano solamente las filas modificadas. Las filas remotas se
+  comparan mediante syncId; una eliminacion se representa como cambio remoto y no
+  obliga a reescribir toda la tabla.
+- pedidos.html arma el pedido localmente y publica el pedido completo cuando se
+  envia a revision. Para recibir cambios usa Firestore Realtime, consulta solo
+  documentos con syncId mayor al cursor guardado en IndexedDB y combina esos
+  cambios con la cache local.
+- Firestore tiene limites diarios de lecturas y escrituras. No agregar listeners
+  por fila, guardados en cada pulsacion ni reescrituras de colecciones completas.
+- Los errores resource-exhausted indican cuota de Firestore agotada. Los errores
+  ERR_BLOCKED_BY_CLIENT suelen provenir de bloqueadores/extensiones y deben
+  distinguirse de una cuota agotada.
+- El egress de Supabase debe vigilarse por tipo. PostgREST Egress alto suele
+  significar consultas REST que devuelven muchas filas; no es lo mismo que
+  Storage Egress ni Realtime Egress.
+- Forzar repetidamente la actualizacion completa del catalogo desde Administrar
+  pagina puede producir picos grandes de PostgREST Egress aunque el flujo
+  incremental normal este funcionando.
+
+
+Carrito y presupuestos de index
+-------------------------------
+
+- El carrito publico no autenticado sigue funcionando localmente. La
+  sincronizacion por usuario se aplica solamente a usuarios internos logueados.
+- Cada renglon del carrito posee idMov. La visualizacion, la sincronizacion y el
+  presupuesto imprimible deben respetar siempre el orden ascendente de idMov.
+- Las altas conservan un idMov estable. Eliminar un articulo debe producir una
+  modificacion/tombstone mas reciente para que otro dispositivo no vuelva a
+  insertar una copia vieja.
+- Los clientes descargan solamente movimientos posteriores a su cursor local y
+  combinan el resultado con IndexedDB.
+- El presupuestador de aridos es exclusivo para usuarios internos logueados. El
+  calculo/presupuestador de ceramicos continua siendo de acceso publico.
+- Las herramientas internas del carrito, como Buscar en presupuestos y Aplicar
+  descuento, aparecen desde el menu contextual solamente cuando la sesion y el
+  permiso correspondiente son validos.
+
+
+Historiales
+-----------
+
+- pedidos.html e historial.html usan por defecto el rango desde hoy menos 15
+  dias hasta hoy. Los registros fuera de ese rango no deben descargarse ni
+  renderizarse hasta que el usuario amplie la busqueda.
+- En historial.html los rangos de fecha estan en la barra superior y utilizan las
+  reglas compartidas de campos de fecha de aplica funciones.txt/funciones.js.
+- En Remitos, la busqueda general se ejecuta recien con Enter. Cuando existe un
+  texto de busqueda confirmado, busca numero, cliente, fecha u otros campos sin
+  quedar limitada por el rango de fechas visible.
+- Al limpiar esa busqueda vuelve a regir el rango de fechas seleccionado.
+
+
+Importador de articulos nuevos
+------------------------------
+
+- El popup compartido vive en corralon-system.js y puede abrirse desde
+  cargastock.html y listasproveedores.html, mediante seleccion o menu contextual.
+- Solo carga las filas elegidas. Un segundo clic sobre una unica fila puede abrir
+  el importador para esa fila aunque no exista seleccion multiple previa.
+- Los campos por fila incluyen IDArt, codigo de proveedor, descripcion editable,
+  rubro, IVA, margen y costo. La descripcion exportada debe quedar en mayusculas.
+- IVA y margen pueden cambiarse por articulo. El margen debe alimentar los tres
+  porcentajes de ganancia que espera Access.
+- Los rubros se identifican por IDRubro aunque el usuario vea/escriba la
+  descripcion. La lista debe provenir del catalogo actualizado que incluye ambos
+  datos.
+- El archivo que consume Access sigue siendo C:\Update\Articulos.xls.
+- Los auxiliares nuevos viven en
+  C:\Update\actualizaciones\importar articulos nuevos y no reemplazan el flujo
+  normal de actualizacion de precios.
+- La existencia real de IDArt, codigo y descripcion se valida directamente en
+  Access al importar. Si Access informa un maximo superior al de Index, se propone
+  el siguiente ID disponible; no se debe rechazar un ID nuevo solo porque Index
+  todavia no fue actualizado.
+- Al iniciar la importacion el popup se oculta y el proceso continua en segundo
+  plano. Si falla, reaparece con el error; si termina, se muestra una notificacion
+  emergente inferior.
+
+
+Facturacion web en preparacion
+------------------------------
+
+- facturacion.html replica el flujo general de FFacturasAFP con el estilo web del
+  sistema. Todavia esta en modo preparacion mientras faltan datos fiscales,
+  puntos de venta, certificados y conexion definitiva de emision.
+- La configuracion de Empresa se encuentra separada de la configuracion de
+  Pedidos dentro de menu.html.
+- El borrador de facturacion se conserva en IndexedDB.
+- La tabla de articulos permite buscar por IDArt, codigo de proveedor o
+  descripcion; los campos estan limitados a articulos existentes.
+- IDArt se normaliza a seis digitos. Al elegir por IDArt o CodProv se completa la
+  fila y el foco avanza a Cantidad.
+- Stock es visible pero no editable; IVA no se muestra en la grilla principal.
+- Cantidad debe ser mayor que cero. Cantidad e Importe se recalculan mutuamente y
+  una fila incompleta no puede generar otra fila valida.
+- Los valores recibidos crean una nueva fila despues de actualizar un importe
+  parcial y la nueva fila propone la diferencia pendiente.
+
+
+19. VERSIONES WEB Y PUBLICACION
+===============================
+
+Manifesto y convencion
+----------------------
+
+- version-web.json es el manifiesto y el historial de versiones del sistema.
+- Al 25/08/2026 la version global y la de menu.html son 1.0.11. Este numero es
+  historico y cambiara con las siguientes publicaciones.
+- Cada cambio, por pequeno que sea, debe incrementar la version de la pagina
+  afectada y agregar/actualizar su entrada en version-web.json.
+- Cada entrada tiene una prioridad elegida explicitamente:
+  Normal, Recomendada o Importante.
+- Normal se anuncia en verde; Recomendada en amarillo; Importante en rojo y su
+  aviso no se puede ocultar hasta actualizar.
+- Cambiar solamente la prioridad de una version que la pagina ya esta ejecutando
+  no constituye una version nueva y no debe disparar un aviso falso.
+
+
+Deteccion en las paginas
+------------------------
+
+- corralon-system.js instala el notificador compartido en los HTML que lo cargan.
+- La version ejecutada se obtiene de la version declarada/cargada por esa pagina,
+  no de la version remota disponible.
+- Primero consulta /version-web.json en el origen actual. Asi localhost compara
+  contra su manifiesto local y corralonprogreso.com contra el manifiesto realmente
+  desplegado en Cloudflare.
+- Como respaldo puede consultar el manifiesto Raw de GitHub.
+- Existe un listener de Firestore sobre configuracion/version_web para el aviso
+  inmediato y una comprobacion cada 60 segundos como respaldo.
+- El documento configuracion/version_web usa los campos version, prioridad,
+  mensaje, publicado, actualizado_en y el mapa prioridades.
+- El boton Actualizar agrega ?_version=<version> a la URL. Es un cache-buster
+  intencional para obligar al navegador/Cloudflare a entregar los archivos de la
+  nueva version.
+
+
+Visor de versiones en menu.html
+-------------------------------
+
+- En la esquina inferior derecha se muestra discretamente solo la version que
+  menu.html esta ejecutando.
+- Al abrir el visor, la mitad superior muestra Historial de cambios y la mitad
+  inferior Version de cada pagina; ambas zonas tienen scroll independiente.
+- El historial aparece primero. Las paginas y cambios se ordenan desde la version
+  mas reciente hacia la mas antigua.
+- Cada entrada del historial permite cambiar su prioridad. La seleccion se guarda
+  en el mapa prioridades de Firestore y se refleja en tiempo real.
+
+
+Subida a GitHub y despliegue directo
+------------------------------------
+
+- subir_archivos_github.ps1 conserva el flujo de seleccion de archivos y worktree
+  temporal, siempre incluye version-web.json y sube el commit a main.
+- Despues del push ejecuta directamente:
+  npx.cmd --yes wrangler@4.125.0 deploy
+  desde el worktree temporal.
+- Cloudflare Workers Static Assets publica corralonprogreso.com segun
+  wrangler.jsonc; el proyecto se llama corralonprogreso.
+- La autenticacion de Wrangler vigente en esta PC corresponde a
+  benjaminsuarez002@gmail.com, cuenta
+  e960a2cd064b8a16fdde5b2dd0ecab2f.
+- El build automatico GitHub -> Cloudflare queda como respaldo si el despliegue
+  directo falla. El directo evita esperar la cola del webhook/build.
+- El aviso realtime de version se envia solamente cuando el despliegue directo
+  termina correctamente. Antes de avisar se espera brevemente que GitHub Raw
+  exponga el manifiesto nuevo; si no ocurre, se envia igual y el sondeo periodico
+  queda como respaldo.
+- El PATCH de Firestore usa updateMask para no borrar accidentalmente el mapa
+  prioridades.
+- .assetsignore excluye contenido local como .codex, adjuntos remotos, staging,
+  temporales y archivos grandes que no deben formar parte de Static Assets.
+
+
+20. NOTA FINAL PARA UN CHAT NUEVO
 ================================
 
 Este proyecto tiene muchas funciones conectadas entre páginas. Un cambio visual
