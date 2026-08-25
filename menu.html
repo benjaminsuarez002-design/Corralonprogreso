@@ -642,7 +642,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.12"></script>
+<script src="corralon-system.js?v=1.0.13"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -797,6 +797,7 @@
     const loginUserInput = document.getElementById('loginUserInput');
     const loginUsersList = document.getElementById('loginUsersList');
     const loginInput = document.getElementById('loginInput');
+    const loginBtn = document.getElementById('loginBtn');
     const loginError = document.getElementById('loginError');
     const rememberLogin = document.getElementById('rememberLogin');
     const activeUserLabel = document.getElementById('activeUserLabel');
@@ -1428,40 +1429,52 @@
       return localStorage.getItem(HISTORIAL_LOGIN_STORAGE_KEY) === '1';
     }
 
+    let loginInProgress = false;
     async function verificarPass() {
-      if (!usuariosMenu.length) await cargarUsuariosMenu();
-      const usuarioIngresado = String(loginUserInput.value || '').trim().toLowerCase();
-      const passIngresada = String(loginInput.value || '');
-      const usuario = usuariosMenu.find((u) => String(u.usuario || u.nombre || '').trim().toLowerCase() === usuarioIngresado);
-      const loginOk = usuario && passIngresada === String(usuario.password || '');
-      if (usuario && loginOk) {
-        try {
-          const editorSession = window.CorralonSystem?.catalogEditorSession;
-          if (!editorSession?.login) {
-            throw new Error('El módulo de edición no terminó de cargar. Actualizá esta página e intentá nuevamente.');
+      if (loginInProgress) return;
+      loginInProgress = true;
+      loginBtn.disabled = true;
+      loginBg.setAttribute('aria-busy', 'true');
+      mostrarCargaMenu('Ingresando al sistema...');
+      try {
+        if (!usuariosMenu.length) await cargarUsuariosMenu();
+        const usuarioIngresado = String(loginUserInput.value || '').trim().toLowerCase();
+        const passIngresada = String(loginInput.value || '');
+        const usuario = usuariosMenu.find((u) => String(u.usuario || u.nombre || '').trim().toLowerCase() === usuarioIngresado);
+        const loginOk = usuario && passIngresada === String(usuario.password || '');
+        if (usuario && loginOk) {
+          try {
+            const editorSession = window.CorralonSystem?.catalogEditorSession;
+            if (!editorSession?.login) {
+              throw new Error('El módulo de edición no terminó de cargar. Actualizá esta página e intentá nuevamente.');
+            }
+            await editorSession.login(usuario.id, passIngresada, rememberLogin.checked, usuario);
+          } catch (error) {
+            console.error('No se pudo habilitar el editor de artículos', error);
+            loginError.textContent = `❌ ${error?.message || 'No se pudo habilitar el editor de artículos'}`;
+            loginInput.value = '';
+            loginInput.focus();
+            return;
           }
-          await editorSession.login(usuario.id, passIngresada, rememberLogin.checked, usuario);
-        } catch (error) {
-          console.error('No se pudo habilitar el editor de artículos', error);
-          loginError.textContent = `❌ ${error?.message || 'No se pudo habilitar el editor de artículos'}`;
+          guardarUsuarioActivo(usuario);
+          recordarSesion(usuario, rememberLogin.checked);
+          accesoManualEnPagina = true;
+          loginError.textContent = '';
+          await mostrarMenu(usuario);
+          Promise.all([
+            preloadAliasObjectives(),
+            preloadStaleProviderNotifications(usuario)
+          ]).catch((error) => console.warn('No se pudo completar la precarga del menú', error));
+        } else {
+          loginError.textContent = '❌ Usuario o contraseña incorrectos';
           loginInput.value = '';
-          loginInput.focus();
-          return;
+          loginUserInput.focus();
         }
-        guardarUsuarioActivo(usuario);
-        recordarSesion(usuario, rememberLogin.checked);
-        accesoManualEnPagina = true;
-        loginError.textContent = '';
-        await mostrarMenu(usuario);
+      } finally {
+        loginInProgress = false;
+        loginBtn.disabled = false;
+        loginBg.removeAttribute('aria-busy');
         ocultarCargaMenu();
-        Promise.all([
-          preloadAliasObjectives(),
-          preloadStaleProviderNotifications(usuario)
-        ]).catch((error) => console.warn('No se pudo completar la precarga del menú', error));
-      } else {
-        loginError.textContent = '❌ Usuario o contraseña incorrectos';
-        loginInput.value = '';
-        loginUserInput.focus();
       }
     }
 
@@ -2354,7 +2367,7 @@
       else if (item.dataset.kind === 'pedido') openReviewOrder(item.dataset.reviewId, item.dataset.reviewDoc, keepPopupOpen);
     });
 
-    document.getElementById('loginBtn').addEventListener('click', verificarPass);
+    loginBtn.addEventListener('click', verificarPass);
     document.getElementById('loginExitBtn').addEventListener('click', (event) => { corralonNavigate(event, 'index.html'); });
     document.getElementById('logoutBtn').addEventListener('click', cerrarSesion);
     loginUsersList.addEventListener('click', (event) => {
