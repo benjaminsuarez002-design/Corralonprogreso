@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.4"></script>
+<script src="corralon-system.js?v=1.0.5"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -119,6 +119,9 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .h-mini-btn { border: 1px solid var(--borde); background: #fff; color: var(--violeta); border-radius: 8px; padding: 6px 9px; font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 900; cursor: pointer; }
 .h-mini-btn.photo { color: #0077c8; border-color: #9bdcff; background: #f0fbff; }
 .h-mini-btn.danger { color: var(--rojo); border-color: #ffcaca; background: #fff6f6; }
+.history-more-wrap { display:flex; justify-content:center; padding:16px; }
+.history-more-btn { border:1px solid var(--violeta); border-radius:10px; padding:9px 20px; background:#fff; color:var(--violeta); font:900 15px 'Barlow Condensed',sans-serif; cursor:pointer; }
+.history-more-btn:hover { background:#f1edff; }
 .photo-preview { max-width: 100%; max-height: 70vh; border-radius: 12px; display: block; margin: 0 auto; cursor: zoom-in; }
 .foto-close {
   position: fixed;
@@ -503,10 +506,14 @@ const histDb = firebase.firestore();
 let _remitoDetalleActual = null;
 let _presupuestoDetalleActual = null;
 let _presupuestosCache = [];
+let _presupuestosRemoteOffset = 0;
+let _presupuestosHasMore = false;
 // Compatibilidad interna: la búsqueda activa vive en CorralonSystem.budgetSearch.
 let _budgetSearchGroups = [];
 let _budgetSearchSelectedKey = '';
 let _remitosCache = [];
+let _remitosRemoteOffset = 0;
+let _remitosHasMore = false;
 let _garantiasCache = [];
 let _garantiaFotoActual = null;
 let _garantiaFotoFile = null;
@@ -961,16 +968,26 @@ async function abrirBusquedaPresupuestos(consultaInicial = '') {
   const search = window.CorralonSystem?.budgetSearch;
   if (!search) return;
   await search.open(consultaInicial, {
-    budgets: _presupuestosCache.length ? _presupuestosCache : undefined,
-    loadBudgets: async () => {
-      if (!_presupuestosCache.length) await cargarPresupuestos();
-      return _presupuestosCache;
+    searchBudgets: async (consulta, desde, hasta) => {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/buscar_presupuestos_web`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type':'application/json' },
+        body: JSON.stringify({ p_consulta:consulta, p_limite:100, p_desde:desde || null, p_hasta:hasta || null })
+      });
+      if (!response.ok) throw new Error(await response.text() || 'No se pudieron buscar los presupuestos');
+      const data = await response.json();
+      const ocultos = presupuestosOcultos();
+      return (Array.isArray(data) ? data : []).filter((item) => !ocultos.has(String(item?.id || '')));
     },
     onOpenBudget: (presupuesto) => {
       const index = _presupuestosCache.findIndex((item) => (
         String(item?.id || item?.numero || '') === String(presupuesto?.id || presupuesto?.numero || '')
       ));
-      if (index >= 0) abrirDetallePresupuesto(index);
+      if (index < 0) {
+        _presupuestosCache.push(presupuesto);
+        index = _presupuestosCache.length - 1;
+      }
+      abrirDetallePresupuesto(index);
     }
   });
 }
@@ -979,23 +996,32 @@ function cerrarBusquedaPresupuestos() {
   window.CorralonSystem?.budgetSearch?.close();
 }
 
-async function cargarPresupuestos() {
+async function cargarPresupuestos(append = false) {
   const body = document.getElementById('presupuestosBody');
   if (!body) return;
-  body.innerHTML = '<div class="h-empty">Cargando...</div>';
+  if (!append) body.innerHTML = '<div class="h-empty">Cargando...</div>';
   try {
     const {from,to}=historyDateRangeIso();
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${PRESUPUESTOS_TABLE}?select=*&fecha_iso=gte.${encodeURIComponent(from+'T00:00:00')}&fecha_iso=lte.${encodeURIComponent(to+'T23:59:59')}&order=fecha_iso.desc.nullslast,id.desc&limit=100`, {
+    const offset = append ? _presupuestosRemoteOffset : 0;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${PRESUPUESTOS_TABLE}?select=*&fecha_iso=gte.${encodeURIComponent(from+'T00:00:00')}&fecha_iso=lte.${encodeURIComponent(to+'T23:59:59')}&order=fecha_iso.desc.nullslast,id.desc&limit=100&offset=${offset}`, {
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
     });
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(errText || 'No se pudieron cargar los presupuestos');
     }
-    const presupuestos = await res.json();
+    const data = await res.json();
+    const lote = Array.isArray(data) ? data : [];
+    if (!append) {
+      _presupuestosCache = [];
+      _presupuestosRemoteOffset = 0;
+    }
+    _presupuestosRemoteOffset += lote.length;
+    _presupuestosHasMore = lote.length === 100;
     const ocultos = presupuestosOcultos();
-    _presupuestosCache = (Array.isArray(presupuestos) ? presupuestos : [])
-      .filter((item) => !ocultos.has(String(item?.id || '')));
+    const visibles = lote.filter((item) => !ocultos.has(String(item?.id || '')));
+    const ids = new Set(_presupuestosCache.map((item) => String(item?.id || '')));
+    _presupuestosCache.push(...visibles.filter((item) => !ids.has(String(item?.id || ''))));
     window.CorralonSystem?.budgetSearch?.setBudgets(_presupuestosCache);
     if (!_presupuestosCache.length) {
       body.innerHTML = '<div class="h-empty">Sin presupuestos todavia</div>';
@@ -1020,11 +1046,13 @@ async function cargarPresupuestos() {
           </div>
           <span style="color:#ccc;font-size:18px;">›</span>
         </div>`;
-    }).join('');
+    }).join('') + (_presupuestosHasMore ? '<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarPresupuestos(true)">Cargar anteriores</button></div>' : '');
   } catch (e) {
-    _presupuestosCache = [];
-    window.CorralonSystem?.budgetSearch?.setBudgets([]);
-    body.innerHTML = '<div class="h-empty">Error cargando presupuestos</div>';
+    if (!append) {
+      _presupuestosCache = [];
+      window.CorralonSystem?.budgetSearch?.setBudgets([]);
+      body.innerHTML = '<div class="h-empty">Error cargando presupuestos</div>';
+    } else toast('No se pudieron cargar más presupuestos');
     console.error('Error cargando presupuestos desde Supabase:', e);
   }
 }
@@ -1460,21 +1488,32 @@ async function abrirHistorialSolicitadoDesdeMenu() {
   }
 }
 
-async function cargarHistorial() {
+async function cargarHistorial(append = false) {
   const body = document.getElementById('historialBody');
-  body.innerHTML = '<div class="h-empty">Cargando...</div>';
+  if (!append) body.innerHTML = '<div class="h-empty">Cargando...</div>';
   try {
     const {from,to}=historyDateRangeIso();
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=*&fecha_iso=gte.${encodeURIComponent(from)}&fecha_iso=lte.${encodeURIComponent(to)}&order=fecha_iso.desc,id.desc&limit=100`, {
+    const offset = append ? _remitosRemoteOffset : 0;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=*&fecha_iso=gte.${encodeURIComponent(from)}&fecha_iso=lte.${encodeURIComponent(to)}&order=fecha_iso.desc,id.desc&limit=100&offset=${offset}`, {
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
     });
     if (!res.ok) throw new Error(await res.text() || 'No se pudieron cargar los remitos');
     const data = await res.json();
-    _remitosCache = Array.isArray(data) ? data : [];
+    const lote = Array.isArray(data) ? data : [];
+    if (!append) {
+      _remitosCache = [];
+      _remitosRemoteOffset = 0;
+    }
+    _remitosRemoteOffset += lote.length;
+    _remitosHasMore = lote.length === 100;
+    const ids = new Set(_remitosCache.map((item) => String(item?.id || '')));
+    _remitosCache.push(...lote.filter((item) => !ids.has(String(item?.id || ''))));
     renderRemitosHistorial();
   } catch(e) {
-    _remitosCache = [];
-    body.innerHTML = '<div class="h-empty">Error cargando historial</div>';
+    if (!append) {
+      _remitosCache = [];
+      body.innerHTML = '<div class="h-empty">Error cargando historial</div>';
+    } else toast('No se pudieron cargar más remitos');
   }
 }
 
@@ -1505,6 +1544,7 @@ async function buscarRemitosConfirmado() {
     const data = await res.json();
     _remitosBusquedaAplicada = busqueda;
     _remitosCache = Array.isArray(data) ? data : [];
+    _remitosHasMore = false;
     renderRemitosHistorial();
   } catch (error) {
     console.error('Error buscando remitos:', error);
@@ -1532,7 +1572,7 @@ function renderRemitosHistorial() {
       </div>
       <div class="h-total">${fmt(r.total||0)}</div>
       <span style="color:#ccc;font-size:18px;">›</span>
-    </div>`).join('');
+    </div>`).join('') + (!_remitosBusquedaAplicada && _remitosHasMore ? '<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarHistorial(true)">Cargar anteriores</button></div>' : '');
 }
 
 // ── DETALLE ──

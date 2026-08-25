@@ -6696,11 +6696,16 @@
           .corralon-budget-search-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #dededb;background:linear-gradient(90deg,#f1f1ef,#fff)}
           .corralon-budget-search-head h2{margin:0;color:#ef1015;font:900 29px 'Barlow Condensed',Arial,sans-serif}
           .corralon-budget-search-close{margin-left:auto;border:1px solid #c9c9c6;border-radius:12px;background:#fff;color:#171717;padding:9px 18px;font:900 18px 'Barlow Condensed',Arial,sans-serif;cursor:pointer}
-          .corralon-budget-search-body{min-height:0;display:grid;grid-template-rows:auto auto minmax(130px,.8fr) minmax(220px,1.2fr);gap:10px;padding:14px;overflow:hidden}
+          .corralon-budget-search-body{min-height:0;display:grid;grid-template-rows:auto auto auto minmax(130px,.8fr) minmax(220px,1.2fr);gap:10px;padding:14px;overflow:hidden}
           .corralon-budget-search-field{overflow:hidden;border:1px solid #c9c9c6;border-radius:14px;background:#fff;box-shadow:0 5px 15px rgba(0,0,0,.08)}
           .corralon-budget-search-field label{display:block;padding:7px 11px 0;color:#666;font:900 16px 'Barlow Condensed',Arial,sans-serif;cursor:pointer}
           .corralon-budget-search-field input{width:100%;height:44px;border:0;outline:0;padding:4px 11px 9px;color:#171717;background:#fff;font:700 23px 'Barlow Condensed',Arial,sans-serif}
           .corralon-budget-search-field:focus-within{border-color:#ef1015;box-shadow:0 0 0 3px rgba(239,16,21,.14)}
+          .corralon-budget-search-dates{display:flex;align-items:center;gap:10px}
+          .corralon-budget-search-dates>div{display:flex;align-items:center;gap:7px}
+          .corralon-budget-search-dates label{color:#555;font:900 16px 'Barlow Condensed',Arial,sans-serif;cursor:pointer}
+          .corralon-budget-search-dates input{height:34px;border:1px solid #c9c9c6;border-radius:9px;padding:3px 8px;background:#fff;color:#171717;font:700 14px Arial,sans-serif;outline:0}
+          .corralon-budget-search-dates input:focus{border-color:#ef1015;box-shadow:0 0 0 2px rgba(239,16,21,.12)}
           .corralon-budget-search-count{color:#666;font:900 17px 'Barlow Condensed',Arial,sans-serif}
           .corralon-budget-search-results{display:grid;gap:8px;align-content:start;overflow:auto;padding-right:4px}
           .corralon-budget-search-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;min-height:60px;padding:10px 13px;border:1px solid #dededb;border-radius:14px;background:linear-gradient(90deg,#f5f5f3,#fff);cursor:pointer;outline:none}
@@ -6721,7 +6726,7 @@
           .corralon-budget-search-detail-row div{overflow:hidden;padding:8px 10px;border-right:1px solid #dededb;text-overflow:ellipsis;white-space:nowrap}
           .corralon-budget-search-detail-row .num{text-align:right;font-variant-numeric:tabular-nums}
           .corralon-budget-search-empty{display:flex;min-height:90px;align-items:center;justify-content:center;padding:18px;color:#888;font-weight:800;text-align:center}
-          @media(max-width:720px){.corralon-budget-search-bg{padding:8px}.corralon-budget-search-modal{width:100%;height:94vh;border-radius:14px}.corralon-budget-search-head{padding:10px 12px}.corralon-budget-search-head h2{font-size:23px}.corralon-budget-search-body{padding:9px;grid-template-rows:auto auto minmax(120px,.75fr) minmax(210px,1.25fr)}.corralon-budget-search-meta{grid-template-columns:1fr}.corralon-budget-search-meta>div{border-right:0;border-bottom:1px solid #dededb}.corralon-budget-search-detail-row{min-width:700px}.corralon-budget-search-card{grid-template-columns:1fr}.corralon-budget-search-card b{white-space:normal}}
+          @media(max-width:720px){.corralon-budget-search-bg{padding:8px}.corralon-budget-search-modal{width:100%;height:94vh;border-radius:14px}.corralon-budget-search-head{padding:10px 12px}.corralon-budget-search-head h2{font-size:23px}.corralon-budget-search-body{padding:9px;grid-template-rows:auto auto auto minmax(120px,.75fr) minmax(210px,1.25fr)}.corralon-budget-search-dates{flex-wrap:wrap}.corralon-budget-search-meta{grid-template-columns:1fr}.corralon-budget-search-meta>div{border-right:0;border-bottom:1px solid #dededb}.corralon-budget-search-detail-row{min-width:700px}.corralon-budget-search-card{grid-template-columns:1fr}.corralon-budget-search-card b{white-space:normal}}
         `;
         document.head.appendChild(style);
       }
@@ -6735,6 +6740,7 @@
             <div class="corralon-budget-search-head"><h2 id="corralonBudgetSearchTitle">Buscar en presupuestos</h2><button class="corralon-budget-search-close" type="button">Cerrar</button></div>
             <div class="corralon-budget-search-body">
               <div class="corralon-budget-search-field"><label>Buscar artículo presupuestado</label><input type="text" autocomplete="off" placeholder="Ej: cemento, grifería, código..."></div>
+              <div class="corralon-budget-search-dates"><div><label for="corralonBudgetSearchFrom">Desde</label><input id="corralonBudgetSearchFrom" class="corralon-budget-search-date corralon-budget-search-from" type="text" autocomplete="off" placeholder="dd/mm/aaaa"></div><div><label for="corralonBudgetSearchTo">Hasta</label><input id="corralonBudgetSearchTo" class="corralon-budget-search-date corralon-budget-search-to" type="text" autocomplete="off" placeholder="dd/mm/aaaa"></div></div>
               <div class="corralon-budget-search-count">Escribí para buscar en presupuestos.</div>
               <div class="corralon-budget-search-results"></div>
               <div class="corralon-budget-search-detail"><div class="corralon-budget-search-empty">Elegí un presupuesto para ver el detalle.</div></div>
@@ -6746,7 +6752,52 @@
         uiBound = true;
         const input = bg.querySelector('input');
         const results = bg.querySelector('.corralon-budget-search-results');
-        input.addEventListener('input', render);
+        const dates = bg.querySelector('.corralon-budget-search-dates');
+        const dateFields = [...dates.querySelectorAll('.corralon-budget-search-date')];
+        const originalDateValues = new WeakMap();
+        const normalizeDateField = (field) => {
+          const value = String(field?.value || '').trim();
+          if (!value) return null;
+          const parsed = window.CorralonFunciones?.parseFechaFlexible?.(value);
+          if (parsed) field.value = parsed.text;
+          return parsed || null;
+        };
+        window.CorralonFunciones?.bindLinearNavigation?.({
+          root: dates,
+          selector: '.corralon-budget-search-date',
+          selectOnFocus: true,
+          navigateLeftRight: true,
+          smartCaret: true,
+          selectOnFirstPointerFocus: true
+        });
+        window.CorralonFunciones?.bindLabelSelect?.({
+          root: dates,
+          labelSelector: 'label',
+          controlSelector: '.corralon-budget-search-date'
+        });
+        dateFields.forEach((field) => {
+          field.addEventListener('focus', () => originalDateValues.set(field, field.value));
+          field.addEventListener('blur', () => normalizeDateField(field));
+          field.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              field.value = originalDateValues.get(field) ?? field.value;
+              field.select();
+              return;
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') normalizeDateField(field);
+          });
+        });
+        input.addEventListener('input', () => {
+          const count = bg.querySelector('.corralon-budget-search-count');
+          count.textContent = input.value.trim() ? 'Presioná Enter para buscar.' : 'Escribí para buscar en presupuestos.';
+        });
+        input.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          search(input.value);
+        });
         bg.querySelector('label').addEventListener('click', () => input.select());
         bg.querySelector('.corralon-budget-search-close').addEventListener('click', close);
         bg.addEventListener('mousedown', (event) => { if (event.target === bg) close(); });
@@ -6785,7 +6836,6 @@
       const words = normalizeSearch(queryText).split(' ').filter(Boolean);
       if (!words.length) return [];
       return budgets.map((budget, index) => {
-        if (!isRecentBudget(budget)) return null;
         const lines = (Array.isArray(budget.items) ? budget.items : []).filter((item) => {
           const text = normalizeSearch(`${item.codigo || item.idart || item.idArt || ''} ${item.nombre || item.descripcion || ''}`);
           return words.every((word) => text.includes(word));
@@ -6823,17 +6873,62 @@
         detail.innerHTML = '<div class="corralon-budget-search-empty">Elegí un presupuesto para ver el detalle.</div>'; return;
       }
       groups = collect(queryText);
-      count.textContent = `${groups.length} presupuesto${groups.length === 1 ? '' : 's'} encontrado${groups.length === 1 ? '' : 's'} en los últimos 30 días para "${queryText}"`;
-      results.innerHTML = groups.map((group) => `<div class="corralon-budget-search-card" tabindex="0" role="button" data-budget-search-key="${escapeHtml(group.key)}"><div><strong>${budgetDate(group.budget) ? `${escapeHtml(budgetDate(group.budget))} - ` : ''}${escapeHtml(budgetTitle(group.budget))}</strong><span>${group.lines.length} línea${group.lines.length === 1 ? '' : 's'} encontrada${group.lines.length === 1 ? '' : 's'}</span></div><b>Presupuesto ${escapeHtml(group.budget.numero || group.budget.id || '-')} · ${escapeHtml(formatMoney(group.budget.total || 0))}</b></div>`).join('') || '<div class="corralon-budget-search-empty">No encontré presupuestos con ese artículo en los últimos 30 días.</div>';
+      count.textContent = `${groups.length} presupuesto${groups.length === 1 ? '' : 's'} encontrado${groups.length === 1 ? '' : 's'} para "${queryText}"`;
+      results.innerHTML = groups.map((group) => `<div class="corralon-budget-search-card" tabindex="0" role="button" data-budget-search-key="${escapeHtml(group.key)}"><div><strong>${budgetDate(group.budget) ? `${escapeHtml(budgetDate(group.budget))} - ` : ''}${escapeHtml(budgetTitle(group.budget))}</strong><span>${group.lines.length} línea${group.lines.length === 1 ? '' : 's'} encontrada${group.lines.length === 1 ? '' : 's'}</span></div><b>Presupuesto ${escapeHtml(group.budget.numero || group.budget.id || '-')} · ${escapeHtml(formatMoney(group.budget.total || 0))}</b></div>`).join('') || '<div class="corralon-budget-search-empty">No encontré presupuestos con ese artículo.</div>';
       if (groups.length) renderDetail(groups[0].key);
       else { selectedKey = ''; detail.innerHTML = '<div class="corralon-budget-search-empty">Sin resultados para mostrar.</div>'; }
     }
 
-    async function fetchBudgets() {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?select=*&order=fecha_iso.desc.nullslast,id.desc&limit=100`, { headers:headers() });
+    async function fetchBudgets(queryText, fromDate = '', toDate = '') {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/buscar_presupuestos_web`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type':'application/json' },
+        body: JSON.stringify({ p_consulta:queryText, p_limite:100, p_desde:fromDate || null, p_hasta:toDate || null })
+      });
       if (!response.ok) throw new Error(await response.text() || 'No se pudieron cargar los presupuestos');
       const data = await response.json();
       return Array.isArray(data) ? data : [];
+    }
+
+    async function search(queryText) {
+      const bg = ensureUi();
+      const query = String(queryText || '').trim();
+      if (!query) { budgets = []; render(); return; }
+      const parseSearchDate = (selector, label) => {
+        const field = bg.querySelector(selector);
+        const value = String(field?.value || '').trim();
+        if (!value) return { iso:'', valid:true };
+        const parsed = window.CorralonFunciones?.parseFechaFlexible?.(value);
+        if (!parsed) return { iso:'', valid:false, label };
+        field.value = parsed.text;
+        return {
+          iso:`${parsed.year}-${String(parsed.month).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`,
+          valid:true
+        };
+      };
+      const from = parseSearchDate('.corralon-budget-search-from', 'Desde');
+      const to = parseSearchDate('.corralon-budget-search-to', 'Hasta');
+      if (!from.valid || !to.valid) {
+        bg.querySelector('.corralon-budget-search-count').textContent = `La fecha ${!from.valid ? from.label : to.label} no es válida.`;
+        return;
+      }
+      const fromDate = from.iso;
+      const toDate = to.iso;
+      if (fromDate && toDate && fromDate > toDate) {
+        bg.querySelector('.corralon-budget-search-count').textContent = 'La fecha Desde no puede ser posterior a Hasta.';
+        return;
+      }
+      bg.querySelector('.corralon-budget-search-count').textContent = 'Buscando presupuestos...';
+      try {
+        const loaded = typeof openOptions.searchBudgets === 'function'
+          ? await openOptions.searchBudgets(query, fromDate, toDate)
+          : await fetchBudgets(query, fromDate, toDate);
+        budgets = Array.isArray(loaded) ? loaded.slice() : [];
+        render();
+      } catch (error) {
+        bg.querySelector('.corralon-budget-search-count').textContent = 'No se pudieron buscar los presupuestos.';
+        console.error('No se pudo buscar en presupuestos', error);
+      }
     }
 
     async function open(initialQuery = '', options = {}) {
@@ -6843,19 +6938,17 @@
       bg.classList.add('open');
       const input = bg.querySelector('input');
       input.value = String(initialQuery || '').trim();
-      if (Array.isArray(options.budgets)) budgets = options.budgets.slice();
-      render();
-      if (!budgets.length) {
-        bg.querySelector('.corralon-budget-search-count').textContent = 'Cargando presupuestos...';
-        try {
-          const loaded = typeof options.loadBudgets === 'function' ? await options.loadBudgets() : await fetchBudgets();
-          budgets = Array.isArray(loaded) ? loaded.slice() : [];
-          render();
-        } catch (error) {
-          bg.querySelector('.corralon-budget-search-count').textContent = 'No se pudieron cargar los presupuestos.';
-          console.error('No se pudo abrir la búsqueda de presupuestos', error);
-        }
-      }
+      const today = new Date();
+      const thirtyDaysAgo = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 30);
+      const formatDefaultDate = (date) => `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+      bg.querySelector('.corralon-budget-search-from').value = formatDefaultDate(thirtyDaysAgo);
+      bg.querySelector('.corralon-budget-search-to').value = formatDefaultDate(today);
+      budgets = [];
+      groups = [];
+      selectedKey = '';
+      bg.querySelector('.corralon-budget-search-count').textContent = input.value ? 'Presioná Enter para buscar.' : 'Escribí para buscar en presupuestos.';
+      bg.querySelector('.corralon-budget-search-results').innerHTML = '';
+      bg.querySelector('.corralon-budget-search-detail').innerHTML = '<div class="corralon-budget-search-empty">Elegí un presupuesto para ver el detalle.</div>';
       requestAnimationFrame(() => { input.focus(); input.select(); });
     }
 
