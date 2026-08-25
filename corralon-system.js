@@ -6964,13 +6964,17 @@
       toast.querySelector('button').onclick = () => updatePage(manifest.version);
       requestAnimationFrame(() => toast.classList.add('visible'));
     }
-    async function check() {
+    async function check(realtimeConfig = null) {
       try {
         const response = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) return;
         const manifest = await response.json();
-        const page = manifest.paginas?.[pageKey()] || manifest;
-        if (newer(page.version, localVersion())) show({ ...manifest, ...page });
+        const currentPageKey = pageKey();
+        const page = manifest.paginas?.[currentPageKey] || manifest;
+        const overrideKey = `${currentPageKey}__${page.version || ''}`;
+        const globalOverrideKey = `__global____${page.version || ''}`;
+        const overridePriority = realtimeConfig?.prioridades?.[overrideKey] || realtimeConfig?.prioridades?.[globalOverrideKey];
+        if (newer(page.version, localVersion())) show({ ...manifest, ...page, ...(overridePriority ? { prioridad: overridePriority } : {}) });
       } catch (_) {}
     }
     async function startRealtime() {
@@ -6982,7 +6986,7 @@
       const firestore = firestoreModule.getFirestore(app);
       return firestoreModule.onSnapshot(
         firestoreModule.doc(firestore, 'configuracion', 'version_web'),
-        () => check(),
+        (snapshot) => check(snapshot.exists() ? snapshot.data() : null),
         () => setInterval(check, FALLBACK_CHECK_MS)
       );
     }
