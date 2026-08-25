@@ -7015,10 +7015,13 @@
       return false;
     }
     function priority(value) {
-      const key = String(value || '').trim().toLowerCase();
+      const key = String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       if (['importante', 'critica', 'critico', 'critical', 'alta', 'high'].includes(key)) return 'important';
-      if (['media', 'mediana', 'medium', 'amarilla', 'yellow'].includes(key)) return 'medium';
+      if (['recomendada', 'recomendado', 'recommended', 'media', 'mediana', 'medium', 'amarilla', 'yellow'].includes(key)) return 'medium';
       return 'normal';
+    }
+    function normalizedPageName(value) {
+      return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '-');
     }
     function ensureStyle() {
       if (document.getElementById('corralon-version-style')) return;
@@ -7073,7 +7076,18 @@
         const overrideKey = `${currentPageKey}__${page.version || ''}`;
         const globalOverrideKey = `__global____${page.version || ''}`;
         const overridePriority = realtimeConfig?.prioridades?.[overrideKey] || realtimeConfig?.prioridades?.[globalOverrideKey];
-        if (newer(page.version, localVersion())) show({ ...manifest, ...page, ...(overridePriority ? { prioridad: overridePriority } : {}) });
+        const pageName = normalizedPageName(page.nombre || currentPageKey);
+        const historyEntry = Array.isArray(manifest.historial) ? manifest.historial.find((entry) => (
+          String(entry?.version || '') === String(page.version || '')
+          && [currentPageKey, pageName].includes(normalizedPageName(entry?.pagina))
+        )) : null;
+        const resolvedPriority = overridePriority || page.prioridad || historyEntry?.prioridad || manifest.prioridad;
+        if (newer(page.version, localVersion())) show({
+          ...manifest,
+          ...page,
+          prioridad: resolvedPriority,
+          mensaje: page.ultimo_cambio || historyEntry?.cambio || manifest.mensaje
+        });
       } catch (_) {}
     }
     async function startRealtime() {

@@ -226,6 +226,7 @@ function Update-PageVersions {
         $page.version = $next
         $page.ultimo_cambio = $Change
         $page.actualizado = Get-Date -Format 'dd/MM/yyyy'
+        $page | Add-Member -NotePropertyName prioridad -NotePropertyValue $Priority -Force
         $html = [IO.File]::ReadAllText($file)
         $html = [Text.RegularExpressions.Regex]::Replace($html, '(corralon-system\.js\?v=)\d+\.\d+\.\d+', "`${1}$next", 1)
         $sourceBytes = [IO.File]::ReadAllBytes($file)

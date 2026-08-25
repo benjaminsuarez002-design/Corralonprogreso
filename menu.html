@@ -642,7 +642,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.11"></script>
+<script src="corralon-system.js?v=1.0.12"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -2398,20 +2398,31 @@
       const list = document.getElementById('menuVersionList');
       const history = document.getElementById('menuVersionHistory');
       if (!trigger || !modal || !close || !list || !history) return;
-      try {
+      let priorityOverrides = {};
+      const compareVersions = (a, b) => {
+        const pa = String(a || '').split('.').map((part) => Number(part) || 0);
+        const pb = String(b || '').split('.').map((part) => Number(part) || 0);
+        for (let index = 0; index < Math.max(pa.length, pb.length); index += 1) {
+          const difference = (pb[index] || 0) - (pa[index] || 0);
+          if (difference) return difference;
+        }
+        return 0;
+      };
+      const publishedTimestamp = (value) => {
+        const text = String(value || '').trim();
+        const local = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (local) {
+          const date = new Date(Number(local[3]), Number(local[2]) - 1, Number(local[1]), Number(local[4] || 0), Number(local[5] || 0), Number(local[6] || 0));
+          return Number.isFinite(date.getTime()) ? date.getTime() : 0;
+        }
+        const timestamp = Date.parse(text);
+        return Number.isFinite(timestamp) ? timestamp : 0;
+      };
+      const renderVersionViewer = async (realtimeData = null) => {
         const response = await fetch(`version-web.json?t=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const manifest = await response.json();
         const executed = JSON.parse(localStorage.getItem('corralon_versiones_ejecutadas_v1') || '{}');
-        const compareVersions = (a, b) => {
-          const pa = String(a || '').split('.').map((part) => Number(part) || 0);
-          const pb = String(b || '').split('.').map((part) => Number(part) || 0);
-          for (let index = 0; index < Math.max(pa.length, pb.length); index += 1) {
-            const difference = (pb[index] || 0) - (pa[index] || 0);
-            if (difference) return difference;
-          }
-          return 0;
-        };
         const pages = Object.entries(manifest.paginas || {}).map(([id, page]) => ({ id, ...page })).sort((a, b) => compareVersions(a.version, b.version) || String(b.actualizado || '').localeCompare(String(a.actualizado || ''), 'es') || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
         const runningMenu = executed.menu?.version || CorralonSystem?.versionNotifier?.localVersion?.() || '-';
         trigger.textContent = `v${runningMenu}`;
@@ -2430,13 +2441,18 @@
             <span class="menu-version-date">${escapeHtml(page.actualizado || '')}</span>
           </div>`;
         }).join('') : '<div class="menu-version-row">No hay versiones registradas.</div>';
-        let priorityOverrides = {};
-        try {
-          const versionConfig = await getDocFromServer(doc(db, 'configuracion', 'version_web'));
-          priorityOverrides = versionConfig.exists() && versionConfig.data()?.prioridades ? { ...versionConfig.data().prioridades } : {};
-        } catch (_) {}
+        if (realtimeData) priorityOverrides = realtimeData?.prioridades ? { ...realtimeData.prioridades } : {};
+        else {
+          try {
+            const versionConfig = await getDocFromServer(doc(db, 'configuracion', 'version_web'));
+            priorityOverrides = versionConfig.exists() && versionConfig.data()?.prioridades ? { ...versionConfig.data().prioridades } : {};
+          } catch (_) {}
+        }
         const pageIdByName = new Map(pages.map((page) => [String(page.nombre || '').trim().toLowerCase(), page.id]));
-        const entries = Array.isArray(manifest.historial) ? [...manifest.historial].sort((a, b) => new Date(b.publicado || 0) - new Date(a.publicado || 0) || compareVersions(a.version, b.version)) : [];
+        const entries = Array.isArray(manifest.historial) ? manifest.historial
+          .map((entry, order) => ({ entry, order }))
+          .sort((a, b) => publishedTimestamp(b.entry.publicado) - publishedTimestamp(a.entry.publicado) || a.order - b.order)
+          .map(({ entry }) => entry) : [];
         history.innerHTML = entries.length ? entries.map((entry) => `
           <div class="menu-version-row" data-version-key="${escapeHtml(`${pageIdByName.get(String(entry.pagina || '').trim().toLowerCase()) || '__global__'}__${entry.version || ''}`)}">
             <span class="menu-version-number">${escapeHtml(entry.version || '-')}</span>
@@ -2474,21 +2490,17 @@
             }
           });
         });
-        onSnapshot(doc(db, 'configuracion', 'version_web'), (snapshot) => {
-          const syncedPriorities = snapshot.exists() && snapshot.data()?.prioridades ? snapshot.data().prioridades : {};
-          history.querySelectorAll('.menu-version-priority').forEach((select) => {
-            const key = select.closest('[data-version-key]')?.dataset.versionKey || '';
-            const level = syncedPriorities[key] || select.dataset.level || 'normal';
-            priorityOverrides[key] = level;
-            select.value = level;
-            select.dataset.level = level;
-          });
-        }, () => {});
+      };
+      try {
+        await renderVersionViewer();
       } catch (error) {
         trigger.textContent = 'Últ. vers. sin conexión';
         list.innerHTML = '<div class="menu-version-row">No se pudo consultar el archivo de versiones.</div>';
         history.innerHTML = '';
       }
+      onSnapshot(doc(db, 'configuracion', 'version_web'), (snapshot) => {
+        renderVersionViewer(snapshot.exists() ? snapshot.data() : {}).catch(() => {});
+      }, () => {});
       const open = () => { modal.classList.add('visible'); modal.setAttribute('aria-hidden', 'false'); close.focus(); };
       const hide = () => { modal.classList.remove('visible'); modal.setAttribute('aria-hidden', 'true'); trigger.focus(); };
       trigger.addEventListener('click', open);
