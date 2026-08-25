@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -615,6 +615,15 @@
   .menu-loader-ring{border-color:#dededb;border-top-color:#ef1015}
   .menu-loader-text{color:#171717}
   input[type="checkbox"]{accent-color:#ef1015}
+  .menu-version-trigger{position:fixed;right:8px;bottom:6px;z-index:70;border:0;background:rgba(255,255,255,.72);color:#888;padding:2px 5px;font:700 9px Barlow,Arial,sans-serif;cursor:pointer;box-shadow:none}
+  .menu-version-trigger:hover{border-color:#ef1015;color:#171717}
+  .menu-version-modal{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.56)}
+  .menu-version-modal.visible{display:flex}
+  .menu-version-card{width:min(780px,96vw);max-height:min(720px,90vh);display:flex;flex-direction:column;overflow:hidden;border-radius:18px;background:#fff;box-shadow:0 26px 80px rgba(0,0,0,.34)}
+  .menu-version-head{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid #dededb}.menu-version-head h2{flex:1;font:900 27px 'Barlow Condensed',sans-serif}.menu-version-head button{border:1px solid #ccc;border-radius:9px;background:#fff;padding:8px 12px;font-weight:800;cursor:pointer}
+  .menu-version-list{overflow:auto;padding:10px}.menu-version-row{display:grid;grid-template-columns:minmax(145px,1fr) 105px 105px minmax(190px,2fr) 135px;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid #ececea}.menu-version-name{font-weight:900}.menu-version-number{color:#ef1015;font-weight:900}.menu-version-running{color:#087d3c;font-weight:900}.menu-version-change{color:#555;font-size:13px}.menu-version-date{color:#777;font-size:12px;text-align:right}
+  .menu-version-history-title{padding:13px 18px 5px;font:900 20px 'Barlow Condensed',sans-serif}.menu-version-history{padding:0 10px 12px;overflow:auto}.menu-version-history .menu-version-row{grid-template-columns:110px 120px 1fr 145px}
+  @media(max-width:680px){.menu-version-row,.menu-version-history .menu-version-row{grid-template-columns:1fr auto}.menu-version-change,.menu-version-date{grid-column:1/-1;text-align:left}.menu-version-trigger{right:8px;bottom:8px}}
 </style>
   <script>
     /*
@@ -630,7 +639,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.0"></script>
+<script src="corralon-system.js?v=1.0.4"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -705,6 +714,15 @@
         <a class="menu-btn" data-menu-id="calculadoras" href="calculadoras.html" target="_blank" rel="noopener"><strong>Calculadoras</strong><span>Herramientas de cálculo</span></a>
         <a class="menu-btn" data-menu-id="configuracion" href="configuracion.html" target="_blank" rel="noopener"><strong>Configuración</strong><span>Reglas generales del sistema</span></a>
       </div>
+    </section>
+  </div>
+  <button class="menu-version-trigger" id="menuVersionTrigger" type="button">Últ. vers. cargando...</button>
+  <div class="menu-version-modal" id="menuVersionModal" aria-hidden="true">
+    <section class="menu-version-card" role="dialog" aria-modal="true" aria-labelledby="menuVersionTitle">
+      <div class="menu-version-head"><h2 id="menuVersionTitle">Versiones del sistema</h2><button id="menuVersionClose" type="button">Cerrar</button></div>
+      <div class="menu-version-list" id="menuVersionList"></div>
+      <div class="menu-version-history-title">Historial de cambios</div>
+      <div class="menu-version-history" id="menuVersionHistory"></div>
     </section>
   </div>
   <div class="review-toast" id="reviewToast"></div>
@@ -2363,7 +2381,52 @@
       await mostrarMenu(usuarioValidado);
     }
 
+    async function cargarVisorVersiones() {
+      const trigger = document.getElementById('menuVersionTrigger');
+      const modal = document.getElementById('menuVersionModal');
+      const close = document.getElementById('menuVersionClose');
+      const list = document.getElementById('menuVersionList');
+      const history = document.getElementById('menuVersionHistory');
+      if (!trigger || !modal || !close || !list || !history) return;
+      try {
+        const response = await fetch(`version-web.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const manifest = await response.json();
+        const executed = JSON.parse(localStorage.getItem('corralon_versiones_ejecutadas_v1') || '{}');
+        const pages = Object.entries(manifest.paginas || {}).map(([id, page]) => ({ id, ...page })).sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
+        const runningMenu = executed.menu?.version || CorralonSystem?.versionNotifier?.localVersion?.() || '-';
+        trigger.textContent = `v${runningMenu}`;
+        list.innerHTML = pages.length ? pages.map((page) => `
+          <div class="menu-version-row">
+            <span class="menu-version-name">${escapeHtml(page.nombre || page.id || '')}</span>
+            <span class="menu-version-running">Ejecutando ${escapeHtml(executed[page.id]?.version || '—')}</span>
+            <span class="menu-version-number">Disponible ${escapeHtml(page.version || '-')}</span>
+            <span class="menu-version-change">${escapeHtml(page.ultimo_cambio || 'Sin cambios registrados')}</span>
+            <span class="menu-version-date">${escapeHtml(page.actualizado || '')}</span>
+          </div>`).join('') : '<div class="menu-version-row">No hay versiones registradas.</div>';
+        const entries = Array.isArray(manifest.historial) ? manifest.historial : [];
+        history.innerHTML = entries.length ? entries.map((entry) => `
+          <div class="menu-version-row">
+            <span class="menu-version-number">${escapeHtml(entry.version || '-')}</span>
+            <span class="menu-version-name">${escapeHtml(entry.pagina || '')}</span>
+            <span class="menu-version-change">${escapeHtml(entry.cambio || '')}</span>
+            <span class="menu-version-date">${escapeHtml(entry.publicado || '')}</span>
+          </div>`).join('') : '<div class="menu-version-row">Todavía no hay cambios registrados.</div>';
+      } catch (error) {
+        trigger.textContent = 'Últ. vers. sin conexión';
+        list.innerHTML = '<div class="menu-version-row">No se pudo consultar el archivo de versiones.</div>';
+        history.innerHTML = '';
+      }
+      const open = () => { modal.classList.add('visible'); modal.setAttribute('aria-hidden', 'false'); close.focus(); };
+      const hide = () => { modal.classList.remove('visible'); modal.setAttribute('aria-hidden', 'true'); trigger.focus(); };
+      trigger.addEventListener('click', open);
+      close.addEventListener('click', hide);
+      modal.addEventListener('click', (event) => { if (event.target === modal) hide(); });
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && modal.classList.contains('visible')) hide(); });
+    }
+
     async function inicializarMenu() {
+      cargarVisorVersiones();
       setupProviderListUpdatesListener();
       iniciarActualizacionDolar();
       if (!usuariosMenu.length && !cargarUsuariosMenuDesdeCache()) {

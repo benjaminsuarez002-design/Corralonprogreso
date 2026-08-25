@@ -6876,14 +6876,37 @@
 
   const WEB_VERSION_NOTIFIER = (() => {
     const MANIFEST_URL = 'https://raw.githubusercontent.com/benjaminsuarez002-design/Corralonprogreso/main/version-web.json';
-    const CHECK_MS = 60000;
-    const SHOW_MS = 10000;
-    let hideTimer = null;
+    const EXECUTED_VERSIONS_KEY = 'corralon_versiones_ejecutadas_v1';
+    const FIREBASE_CONFIG = {
+      apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
+      authDomain: 'corralon-progreso.firebaseapp.com',
+      projectId: 'corralon-progreso',
+      storageBucket: 'corralon-progreso.firebasestorage.app',
+      messagingSenderId: '466583614632',
+      appId: '1:466583614632:web:42cb839f83e97475fabe9d'
+    };
+    const FALLBACK_CHECK_MS = 5 * 60 * 1000;
 
     function localVersion() {
       const script = Array.from(document.scripts).find(item => /(?:^|\/)corralon-system\.js(?:\?|$)/i.test(item.src || ''));
       if (!script) return '0.0.0';
       try { return new URL(script.src, location.href).searchParams.get('v') || '0.0.0'; } catch (_) { return '0.0.0'; }
+    }
+    function pageKey() {
+      let name = String(location.pathname.split('/').pop() || 'index').replace(/\.html?$/i, '').trim().toLowerCase();
+      name = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '-');
+      return name || 'index';
+    }
+    function recordExecutedVersion() {
+      try {
+        const versions = JSON.parse(localStorage.getItem(EXECUTED_VERSIONS_KEY) || '{}');
+        versions[pageKey()] = {
+          version: localVersion(),
+          ejecutado_en: new Date().toISOString(),
+          entorno: /^(localhost|127\.0\.0\.1)$/i.test(location.hostname) ? 'localhost' : location.hostname
+        };
+        localStorage.setItem(EXECUTED_VERSIONS_KEY, JSON.stringify(versions));
+      } catch (_) {}
     }
     function versionParts(value) {
       return String(value || '0').split('.').map(part => Number(String(part).replace(/\D.*$/, '')) || 0);
@@ -6940,22 +6963,38 @@
       toast.innerHTML = `<span class="version-copy"><strong>Nueva versión disponible: ${String(manifest.version || '')}</strong><small>${detail}. Actualizá la página.</small></span><button type="button">Actualizar página</button>`;
       toast.querySelector('button').onclick = () => updatePage(manifest.version);
       requestAnimationFrame(() => toast.classList.add('visible'));
-      clearTimeout(hideTimer);
-      if (level !== 'important') hideTimer = setTimeout(() => toast.classList.remove('visible'), SHOW_MS);
     }
     async function check() {
       try {
         const response = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) return;
         const manifest = await response.json();
-        if (newer(manifest.version, localVersion())) show(manifest);
+        const page = manifest.paginas?.[pageKey()] || manifest;
+        if (newer(page.version, localVersion())) show({ ...manifest, ...page });
       } catch (_) {}
     }
+    async function startRealtime() {
+      const [appModule, firestoreModule] = await Promise.all([
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')
+      ]);
+      const app = appModule.getApps().length ? appModule.getApp() : appModule.initializeApp(FIREBASE_CONFIG);
+      const firestore = firestoreModule.getFirestore(app);
+      return firestoreModule.onSnapshot(
+        firestoreModule.doc(firestore, 'configuracion', 'version_web'),
+        () => check(),
+        () => setInterval(check, FALLBACK_CHECK_MS)
+      );
+    }
     function start() {
-      const begin = () => { check(); setInterval(check, CHECK_MS); };
+      const begin = () => {
+        recordExecutedVersion();
+        check();
+        startRealtime().catch(() => setInterval(check, FALLBACK_CHECK_MS));
+      };
       if (document.body) begin(); else document.addEventListener('DOMContentLoaded', begin, { once: true });
     }
-    return { start, check, localVersion };
+    return { start, check, localVersion, pageKey, recordExecutedVersion };
   })();
 
   window.CorralonSystem = {

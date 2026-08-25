@@ -1,4 +1,4 @@
-﻿
+
 
 <html lang="es"><head>
 <meta charset="UTF-8">
@@ -3856,10 +3856,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.0"></script>
+<script src="corralon-system.js?v=1.0.4"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -6245,7 +6245,7 @@ function agregarArticuloCarritoDesdeArticulo(articulo, cantidad) {
       precio: precioActual,
       foto: imagenPrincipalArticulo(articulo) || '',
       cantidad: qty,
-      orden: nuevoOrdenCarrito(),
+      idMov: nuevoIdMovimientoCarrito(),
       tipoPrecio: chipPrecio.tipo,
       porcentajePrecio: chipPrecio.porcentaje
     };
@@ -9222,7 +9222,7 @@ function agregarPresupuestoAridosAlCarrito(payload) {
       precio: cantidadNueva > 0 ? (totalPrevio + Number(material.total || 0)) / cantidadNueva : Number(material.unitPrice || 0),
       foto: previo?.foto || imagenPrincipalArticulo(articulo) || '',
       cantidad: cantidadNueva,
-      orden: previo?.orden || nuevoOrdenCarrito(),
+      idMov: previo?.idMov || previo?.orden || nuevoIdMovimientoCarrito(),
       tipoPrecio: '',
       porcentajePrecio: 0
     };
@@ -9300,21 +9300,40 @@ setTimeout(() => {
 let carrito = {};
 let carritoFirebaseUsuario = null;
 let carritoFirebaseRef = null;
+let carritoFirebaseMovimientosRef = null;
 let carritoFirebaseUnsubscribe = null;
 let carritoFirebaseTimer = null;
-let carritoFirebaseCambioLocalPendiente = false;
-let carritoFirebasePrimeraLectura = true;
+let carritoFirebaseMovimientosPendientes = [];
+let carritoSnapshotPersistido = {};
+let carritoFirebaseUltimoIdSync = 0;
 let carritoOrdenSecuencia = 0;
+let carritoSyncSecuencia = Math.floor(Math.random() * 1000);
+let carritoUltimoIdSyncGenerado = 0;
 
-function nuevoOrdenCarrito() {
+function nuevoIdMovimientoCarrito() {
   carritoOrdenSecuencia = (carritoOrdenSecuencia + 1) % 1000;
   return (Date.now() * 1000) + carritoOrdenSecuencia;
 }
 
+function nuevoOrdenCarrito() {
+  return nuevoIdMovimientoCarrito();
+}
+
+function nuevoIdSyncCarrito() {
+  carritoSyncSecuencia = (carritoSyncSecuencia + 1) % 1000;
+  const candidato = (Date.now() * 1000) + carritoSyncSecuencia;
+  carritoUltimoIdSyncGenerado = Math.max(
+    carritoFirebaseUltimoIdSync + 1,
+    carritoUltimoIdSyncGenerado + 1,
+    candidato
+  );
+  return carritoUltimoIdSyncGenerado;
+}
+
 function itemsCarritoOrdenados(valor = carrito) {
   return Object.entries(valor || {}).sort(([claveA, itemA], [claveB, itemB]) => {
-    const ordenA = Number(itemA?.orden);
-    const ordenB = Number(itemB?.orden);
+    const ordenA = Number(itemA?.idMov ?? itemA?.orden);
+    const ordenB = Number(itemB?.idMov ?? itemB?.orden);
     if (Number.isFinite(ordenA) && Number.isFinite(ordenB) && ordenA !== ordenB) return ordenA - ordenB;
     if (Number.isFinite(ordenA) !== Number.isFinite(ordenB)) return Number.isFinite(ordenA) ? -1 : 1;
     return String(itemA?.codigo || claveA).localeCompare(String(itemB?.codigo || claveB), 'es', { numeric: true });
@@ -9324,14 +9343,20 @@ function itemsCarritoOrdenados(valor = carrito) {
 function normalizarCarritoPersistido(valor) {
   if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return {};
   const limpio = {};
-  let ordenLegacy = 0;
+  let ordenLegacy = Date.now() * 1000;
   Object.entries(valor).forEach(([clave, item]) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return;
     const codigo = String(item.codigo || clave || '').trim();
     const cantidad = Number(item.cantidad);
     if (!codigo || !Number.isFinite(cantidad) || cantidad === 0) return;
-    const ordenGuardado = Number(item.orden);
-    limpio[codigo] = { ...item, codigo, cantidad, orden: Number.isFinite(ordenGuardado) && ordenGuardado > 0 ? ordenGuardado : ++ordenLegacy };
+    const idMovGuardado = Number(item.idMov ?? item.orden);
+    limpio[codigo] = {
+      ...item,
+      codigo,
+      cantidad,
+      idMov: Number.isFinite(idMovGuardado) && idMovGuardado > 0 ? idMovGuardado : ++ordenLegacy
+    };
+    delete limpio[codigo].orden;
   });
   return limpio;
 }
@@ -9347,31 +9372,72 @@ function claveStorageCarritoActual() {
     : CARRITO_STORAGE_KEY;
 }
 
-async function publicarCarritoFirebase() {
-  if (!carritoFirebaseRef || !carritoFirebaseUsuario?.id) return;
-  const carritoAEnviar = JSON.parse(JSON.stringify(normalizarCarritoPersistido(carrito)));
-  const firmaEnviada = firmaCarrito(carritoAEnviar);
-  const campoActualizado = `${CARRITO_FIREBASE_FIELD}_actualizado`;
-  const datosCarrito = {
-    usuario_id: carritoFirebaseUsuario.id,
-    usuario_nombre: carritoFirebaseUsuario.nombre || carritoFirebaseUsuario.id,
-    [CARRITO_FIREBASE_FIELD]: carritoAEnviar,
-    [campoActualizado]: serverTimestamp()
-  };
-  try {
-    await setDoc(carritoFirebaseRef, datosCarrito, {
-      mergeFields: ['usuario_id', 'usuario_nombre', CARRITO_FIREBASE_FIELD, campoActualizado]
-    });
-    if (firmaCarrito(carrito) === firmaEnviada) {
-      carritoFirebaseCambioLocalPendiente = false;
-    } else {
-      carritoFirebaseCambioLocalPendiente = true;
-      programarPublicacionCarritoFirebase();
+function claveUltimoIdSyncCarrito() {
+  const usuario = usuarioMenuPresupuestoActual();
+  return `${CARRITO_STORAGE_KEY}_ultimo_id_sync_${encodeURIComponent(usuario.id || 'publico')}`;
+}
+
+function registrarMovimientosLocalesCarrito() {
+  const anterior = normalizarCarritoPersistido(carritoSnapshotPersistido);
+  const actual = normalizarCarritoPersistido(carrito);
+  const sincronizar = Boolean(carritoFirebaseUsuario?.id || usuarioMenuPresupuestoActual().id);
+  const codigos = new Set([...Object.keys(anterior), ...Object.keys(actual)]);
+  codigos.forEach((codigo) => {
+    const previo = anterior[codigo];
+    const siguiente = actual[codigo];
+    if (!siguiente) {
+      if (!sincronizar) return;
+      const idSync = nuevoIdSyncCarrito();
+      carritoFirebaseMovimientosPendientes.push({
+        idSync,
+        idMov: Number(previo?.idMov || 0),
+        codigo,
+        eliminado: true
+      });
+      return;
     }
+    const comparablePrevio = previo ? { ...previo, idSync: undefined } : null;
+    const comparableSiguiente = { ...siguiente, idSync: undefined };
+    if (previo && JSON.stringify(comparablePrevio) === JSON.stringify(comparableSiguiente)) return;
+    if (!Number(siguiente.idMov)) siguiente.idMov = nuevoIdMovimientoCarrito();
+    if (!sincronizar) {
+      actual[codigo] = siguiente;
+      return;
+    }
+    const idSync = nuevoIdSyncCarrito();
+    siguiente.idSync = idSync;
+    actual[codigo] = siguiente;
+    carritoFirebaseMovimientosPendientes.push({
+      idSync,
+      idMov: siguiente.idMov,
+      codigo,
+      eliminado: false,
+      item: JSON.parse(JSON.stringify(siguiente))
+    });
+  });
+  carrito = actual;
+}
+
+async function publicarCarritoFirebase() {
+  if (!carritoFirebaseMovimientosRef || !carritoFirebaseUsuario?.id || !carritoFirebaseMovimientosPendientes.length) return;
+  const movimientos = carritoFirebaseMovimientosPendientes.splice(0);
+  try {
+    const batch = writeBatch(db);
+    movimientos.forEach((movimiento) => {
+      const movimientoRef = doc(carritoFirebaseMovimientosRef, `${movimiento.idSync}_${Math.random().toString(36).slice(2, 8)}`);
+      batch.set(movimientoRef, {
+        ...movimiento,
+        usuario_id: carritoFirebaseUsuario.id,
+        usuario_nombre: carritoFirebaseUsuario.nombre || carritoFirebaseUsuario.id,
+        creado_en: serverTimestamp()
+      });
+    });
+    await batch.commit();
   } catch (error) {
-    carritoFirebaseCambioLocalPendiente = true;
+    carritoFirebaseMovimientosPendientes.unshift(...movimientos);
     console.warn('No se pudo sincronizar el carrito con Firebase', error);
   }
+  if (carritoFirebaseMovimientosPendientes.length) programarPublicacionCarritoFirebase();
 }
 
 function programarPublicacionCarritoFirebase() {
@@ -9381,52 +9447,85 @@ function programarPublicacionCarritoFirebase() {
 }
 
 function guardarCarrito({ desdeFirebase = false } = {}) {
+  if (!desdeFirebase) registrarMovimientosLocalesCarrito();
   try { localStorage.setItem(claveStorageCarritoActual(), JSON.stringify(carrito)); } catch (_) {}
+  carritoSnapshotPersistido = JSON.parse(JSON.stringify(normalizarCarritoPersistido(carrito)));
   if (desdeFirebase) return;
-  carritoFirebaseCambioLocalPendiente = true;
   programarPublicacionCarritoFirebase();
 }
 
-function iniciarSincronizacionCarritoFirebase() {
+function aplicarMovimientosRemotosCarrito(snapshot) {
+  let cambio = false;
+  snapshot.docChanges().forEach((change) => {
+    if (change.type === 'removed') return;
+    const movimiento = change.doc.data() || {};
+    const idSync = Number(movimiento.idSync || 0);
+    if (!idSync || idSync <= carritoFirebaseUltimoIdSync) return;
+    carritoFirebaseUltimoIdSync = idSync;
+    const codigo = String(movimiento.codigo || '').trim();
+    if (!codigo) return;
+    if (movimiento.eliminado) {
+      if (carrito[codigo]) {
+        delete carrito[codigo];
+        cambio = true;
+      }
+    } else if (movimiento.item) {
+      const actualIdSync = Number(carrito[codigo]?.idSync || 0);
+      if (idSync >= actualIdSync) {
+        carrito[codigo] = normalizarCarritoPersistido({ [codigo]: { ...movimiento.item, idSync } })[codigo];
+        cambio = true;
+      }
+    }
+  });
+  try { localStorage.setItem(claveUltimoIdSyncCarrito(), String(carritoFirebaseUltimoIdSync)); } catch (_) {}
+  if (!cambio) return;
+  guardarCarrito({ desdeFirebase: true });
+  actualizarVistaCarrito();
+}
+
+async function iniciarSincronizacionCarritoFirebase() {
   const usuario = usuarioMenuPresupuestoActual();
   if (!usuario.id) return;
 
   carritoFirebaseUsuario = usuario;
   carritoFirebaseRef = doc(db, CARRITOS_USUARIOS_COLLECTION, encodeURIComponent(usuario.id));
+  carritoFirebaseMovimientosRef = collection(carritoFirebaseRef, 'movimientos');
+  carritoFirebaseUltimoIdSync = Number(localStorage.getItem(claveUltimoIdSyncCarrito()) || 0);
   carritoFirebaseUnsubscribe?.();
-  carritoFirebaseUnsubscribe = onSnapshot(carritoFirebaseRef, (snapshot) => {
-    const remoto = snapshot.exists()
-      ? normalizarCarritoPersistido(snapshot.data()?.[CARRITO_FIREBASE_FIELD])
-      : {};
+  const consultaMovimientos = query(
+    carritoFirebaseMovimientosRef,
+    where('idSync', '>', carritoFirebaseUltimoIdSync),
+    orderBy('idSync', 'asc')
+  );
+  carritoFirebaseUnsubscribe = onSnapshot(consultaMovimientos, aplicarMovimientosRemotosCarrito, (error) => {
+    console.warn('No se pudieron escuchar los movimientos del carrito', error);
+  });
 
-    if (carritoFirebasePrimeraLectura) {
-      carritoFirebasePrimeraLectura = false;
-      if (snapshot.exists() && !carritoFirebaseCambioLocalPendiente) {
-        carrito = remoto;
-        guardarCarrito({ desdeFirebase: true });
-        actualizarVistaCarrito();
-      } else if (!snapshot.exists() || carritoFirebaseCambioLocalPendiente) {
-        programarPublicacionCarritoFirebase();
-      }
-      return;
+  if (carritoFirebaseUltimoIdSync === 0) {
+    try {
+      const legacySnapshot = await getDoc(carritoFirebaseRef);
+      const remotoLegacy = legacySnapshot.exists()
+        ? normalizarCarritoPersistido(legacySnapshot.data()?.[CARRITO_FIREBASE_FIELD])
+        : {};
+      if (!Object.keys(carrito).length && Object.keys(remotoLegacy).length) carrito = remotoLegacy;
+      carritoSnapshotPersistido = {};
+      guardarCarrito();
+      actualizarVistaCarrito();
+    } catch (error) {
+      console.warn('No se pudo migrar el carrito anterior', error);
     }
-
-    if (snapshot.metadata.hasPendingWrites || carritoFirebaseCambioLocalPendiente) return;
-    if (firmaCarrito(remoto) === firmaCarrito(carrito)) return;
-    carrito = remoto;
-    guardarCarrito({ desdeFirebase: true });
-    actualizarVistaCarrito();
-  }, (error) => console.warn('No se pudo escuchar el carrito de Firebase', error));
+  }
 }
 
 function cargarCarrito() {
   try { carrito = normalizarCarritoPersistido(JSON.parse(localStorage.getItem(claveStorageCarritoActual())) || {}); }
   catch(e) { carrito = {}; }
+  carritoSnapshotPersistido = JSON.parse(JSON.stringify(carrito));
   actualizarVistaCarrito();
-  iniciarSincronizacionCarritoFirebase();
+  iniciarSincronizacionCarritoFirebase().catch((error) => console.warn('No se pudo iniciar la sincronización del carrito', error));
 }
 async function copiarCarritoParaAccess() {
-  const items = Object.values(carrito).filter((item) => String(item?.codigo || '').trim() && Number(item?.cantidad));
+  const items = itemsCarritoOrdenados().map(([, item]) => item).filter((item) => String(item?.codigo || '').trim() && Number(item?.cantidad));
   if (!items.length) {
     mostrarAvisoCarrito('El carrito esta vacio');
     return false;
@@ -9633,7 +9732,7 @@ document.getElementById('productDetailAddCart').addEventListener('click', () => 
       precio: parseFloat(btn.dataset.precio) || 0,
       foto: btn.dataset.foto || '',
       cantidad,
-      orden: nuevoOrdenCarrito(),
+      idMov: nuevoIdMovimientoCarrito(),
       tipoPrecio: chipPrecio.tipo,
       porcentajePrecio: chipPrecio.porcentaje
     };
@@ -9722,7 +9821,7 @@ document.getElementById('modalAddCart').addEventListener('click', () => {
     mostrarErrorSinPlacas(cantidadInput);
     return;
   }
-  if(!carrito[codigo]) { carrito[codigo] = { codigo, nombre: btn.dataset.nombre, precio: parseFloat(btn.dataset.precio)||0, foto: btn.dataset.foto, cantidad: cant, orden: nuevoOrdenCarrito(), tipoPrecio: chipPrecio.tipo, porcentajePrecio: chipPrecio.porcentaje }; }
+  if(!carrito[codigo]) { carrito[codigo] = { codigo, nombre: btn.dataset.nombre, precio: parseFloat(btn.dataset.precio)||0, foto: btn.dataset.foto, cantidad: cant, idMov: nuevoIdMovimientoCarrito(), tipoPrecio: chipPrecio.tipo, porcentajePrecio: chipPrecio.porcentaje }; }
   else { carrito[codigo].tipoPrecio = chipPrecio.tipo; carrito[codigo].porcentajePrecio = chipPrecio.porcentaje; carrito[codigo].cantidad += cant; }
   registrarAgregadoCarrito(articulo || codigo);
   guardarCarrito(); actualizarVistaCarrito();
@@ -9985,7 +10084,7 @@ function abrirModalDatosPresupuesto() {
 }
 
 async function crearPresupuesto() {
-  const items = Object.values(carrito);
+  const items = itemsCarritoOrdenados().map(([, item]) => item);
   if (!items.length) return;
   const datosPresupuesto = await abrirModalDatosPresupuesto();
   if (datosPresupuesto === null) return;
@@ -10022,6 +10121,7 @@ async function crearPresupuesto() {
     footerNote: extrasPresupuesto.length ? `${extrasPresupuesto.join(' | ')}\n${leyendaImpuestos}` : undefined,
     total,
     items: items.map(it => ({
+      idMov: Number(it.idMov) || 0,
       codigo: it.codigo || '',
       nombre: it.nombre || '',
       cantidad: Number(it.cantidad) || 0,
@@ -10042,6 +10142,7 @@ async function crearPresupuesto() {
     usuario_id: usuarioPresupuesto.id || null,
     usuario_nombre: usuarioPresupuesto.nombre || null,
     items: items.map(it => ({
+      idMov: Number(it.idMov) || 0,
       codigo: it.codigo || '',
       nombre: it.nombre || '',
       cantidad: Number(it.cantidad) || 0,
