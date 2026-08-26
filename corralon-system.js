@@ -6989,7 +6989,9 @@
       try { return new URL(script.src, location.href).searchParams.get('v') || '0.0.0'; } catch (_) { return '0.0.0'; }
     }
     function pageKey() {
-      let name = String(location.pathname.split('/').pop() || 'index').replace(/\.html?$/i, '').trim().toLowerCase();
+      let name = String(location.pathname.split('/').pop() || 'index');
+      try { name = decodeURIComponent(name); } catch (_) {}
+      name = name.replace(/\.html?$/i, '').trim().toLowerCase();
       name = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '-');
       return name || 'index';
     }
