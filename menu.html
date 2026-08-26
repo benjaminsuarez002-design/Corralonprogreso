@@ -668,7 +668,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.14"></script>
+<script src="corralon-system.js?v=1.0.15"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -2139,7 +2139,9 @@
         return;
       }
       if (!reviewUnsubscribe) {
-        const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('fecha', '==', todayIso()));
+        // Escuchar todos los pedidos confirmados evita que el snapshot de hoy
+        // reemplace y oculte notificaciones pendientes de días anteriores.
+        const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('confirmado', '==', true));
         reviewUnsubscribe = onSnapshot(pedidosRevisionQuery, (snap) => {
           const previous = knownReviewIds;
           reviewOrders = snap.docs.map((docSnap) => ({ ...docSnap.data(), firestoreId: docSnap.id }))
@@ -2153,7 +2155,8 @@
         }, (error) => console.warn('No se pudieron escuchar pedidos en revisión', error));
       }
       if (!historialUnsubscribe) {
-        const historialPendienteQuery = query(collection(db, 'historialNotificaciones'), where('fecha', '==', todayIso()));
+        // No limitar por fecha: los avisos de ayer siguen visibles hasta resolverlos.
+        const historialPendienteQuery = query(collection(db, 'historialNotificaciones'));
         historialUnsubscribe = onSnapshot(historialPendienteQuery, (snap) => {
           const previous = knownHistorialIds;
           historialNotifications = snap.docs.map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
