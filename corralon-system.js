@@ -4862,16 +4862,18 @@
 
     async function saveRows(rows) {
       const db = firebaseDatabase();
-      if (!db) return;
+      if (!db) throw new Error('Sin conexión a Firebase');
       const filled = (rows || []).filter((row) => !isBlank(row));
       if (!filled.length) return;
-      const batch = db.batch();
-      filled.forEach((row, index) => {
-        if (!row.localUid) row.localUid = makeLocalUid();
-        row.syncId = nextSyncId();
-        batch.set(db.collection(COLLECTION).doc(row.localUid), rowToRemote(row, index, row.syncId), { merge: true });
-      });
-      await batch.commit();
+      for (let offset = 0; offset < filled.length; offset += 450) {
+        const batch = db.batch();
+        filled.slice(offset, offset + 450).forEach((row, index) => {
+          if (!row.localUid) row.localUid = makeLocalUid();
+          row.syncId = nextSyncId();
+          batch.set(db.collection(COLLECTION).doc(row.localUid), rowToRemote(row, offset + index, row.syncId), { merge: true });
+        });
+        await batch.commit();
+      }
     }
 
     async function saveChangedRows(rows, pendingUids) {
@@ -5070,6 +5072,10 @@
         console.warn(error);
         return [];
       }
+    }
+
+    async function loadSingleProviderCached(provider = '', providerId = '') {
+      return sortCatalogByDescription(await readProviderArticlesCacheByProvider(providerId, provider));
     }
 
     async function remoteProviderListMeta() {
@@ -5656,6 +5662,7 @@
       loadCorralonCatalog,
       loadProviderCatalog,
       loadProviderCatalogWithProgress,
+      loadSingleProviderCached,
       syncSingleProviderJson,
       loadCatalog,
       syncCatalogInBackground,
