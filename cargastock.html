@@ -7,7 +7,7 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.4"></script>
+<script src="corralon-system.js?v=1.0.5"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -893,10 +893,23 @@ function openArticleProviderList(cell) {
   articleProviderActive = 0;
   renderArticleProviderList();
   const rect = cell.getBoundingClientRect();
-  el.articleProviderMenu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - Math.max(520, rect.width) - 8))}px`;
-  el.articleProviderMenu.style.top = `${Math.min(rect.bottom + 3, window.innerHeight - 288)}px`;
-  el.articleProviderMenu.style.width = `${Math.max(520, rect.width)}px`;
+  const viewportMargin = 8;
+  const gap = 4;
+  const width = Math.min(Math.max(520, rect.width), window.innerWidth - viewportMargin * 2);
+  el.articleProviderMenu.style.left = `${Math.max(viewportMargin, Math.min(rect.left, window.innerWidth - width - viewportMargin))}px`;
+  el.articleProviderMenu.style.width = `${width}px`;
+  el.articleProviderMenu.style.maxHeight = '280px';
   el.articleProviderMenu.classList.add('open');
+  const naturalHeight = Math.min(280, el.articleProviderMenu.scrollHeight + 2);
+  const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - gap - viewportMargin);
+  const spaceAbove = Math.max(0, rect.top - gap - viewportMargin);
+  const openAbove = spaceBelow < naturalHeight && spaceAbove > spaceBelow;
+  const availableHeight = Math.max(40, Math.min(280, openAbove ? spaceAbove : spaceBelow));
+  el.articleProviderMenu.style.maxHeight = `${availableHeight}px`;
+  const renderedHeight = Math.min(el.articleProviderMenu.scrollHeight + 2, availableHeight);
+  el.articleProviderMenu.style.top = openAbove
+    ? `${Math.max(viewportMargin, rect.top - gap - renderedHeight)}px`
+    : `${rect.bottom + gap}px`;
 }
 function pickArticleProviderOption(index = articleProviderActive) {
   const item = articleProviderOptions[index];
@@ -1726,7 +1739,11 @@ function handleRuleNavigation(event) {
   if (key === 'Tab') {
     moved = moveNavigation(target, event.shiftKey ? -1 : 1);
   } else if (key === 'Enter') {
-    moved = isTable ? moveTableNavigation(target, 0, event.shiftKey ? -1 : 1) : moveNavigation(target, event.shiftKey ? -1 : 1);
+    moved = isTable
+      ? (target.dataset.field === 'precio' && !event.shiftKey
+        ? focusNavigationTarget(editableCellAt(editableCellPosition(target).row + 1, 0))
+        : moveTableNavigation(target, 0, event.shiftKey ? -1 : 1))
+      : moveNavigation(target, event.shiftKey ? -1 : 1);
   } else if (key === 'ArrowDown') {
     moved = isTable ? moveTableNavigation(target, 1, 0) : moveNavigation(target, 1);
   } else if (key === 'ArrowUp') {
