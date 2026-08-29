@@ -7,7 +7,7 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.4"></script>
+<script src="corralon-system.js?v=1.0.5"></script>
   <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -71,6 +71,7 @@
   <script>window.name = 'corralon_actualizar_articulos';</script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="actualizar_articulos"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-17">
+  <link rel="stylesheet" href="dark-mode.css">
 </head>
 <body data-page-theme="actualizar-articulos">
 <div class="app">
@@ -167,7 +168,7 @@ const SUPABASE_URL='https://tizyjenayrcdkcodsjnc.supabase.co';
 const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
 const P_TABLE='proveedores', A_TABLE='lista_precios', DB='actualizar_articulos_v1', PROVIDERS_DB='proveedores_cache_v1';
 const PROVIDER_LIST_UPDATES_CHANNEL='corralon_provider_list_updates_v1';
-let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, paintedCount=0, selectionMode={type:null,cols:[]}, comboMatches=[], comboActive=0, tablePasteReady=false, contextArticle=null, calcArticle=null;
+let db, providers=[], provider=null, articles=[], view=[], renderedCount=100, paintedCount=0, selectionMode={type:null,cols:[]}, comboMatches=[], comboActive=0, tablePasteReady=false, contextArticle=null, calcArticle=null, calcReturnFocus=null;
 const statusEl = document.getElementById('status');
 const syncProgress = document.getElementById('syncProgress');
 const syncProgressFill = document.getElementById('syncProgressFill');
@@ -348,8 +349,8 @@ function parseFactor(v,fallback=1){const text=String(v??'').trim();const n=windo
 function calcBasePrice(a){if(!a)return 0;if(a.precio_costo_original)return Number(a.precio_costo_original||0);const cost=Number(a.precio_costo||0);const list=Number(a.precio_lista||0);const desc=Number(provider?.descuento_lista||a.descuento_lista||0)||0;if(desc>0&&list>0&&Math.abs(cost-list)<=0.009)return netListPrice(list,desc);return cost}
 function calcCurrentPrice(){return calcBasePrice(calcArticle)/parseFactor(calcDivide.value,1)*parseFactor(calcMultiply.value,1)}
 function updateCalcResult(){calcTotal.value=money(calcCurrentPrice())}
-function openCalcModal(article){if(!article)return;calcArticle=article;calcOriginalPrice.value=money(calcBasePrice(article));calcDivide.value=article.precio_costo_divisor||'';calcMultiply.value=article.precio_costo_multiplicador||'';updateCalcResult();calcBackdrop.classList.add('visible');setTimeout(()=>{calcDivide.focus();calcDivide.select()},0)}
-function closeCalcModal(){calcArticle=null;calcBackdrop.classList.remove('visible')}
+function openCalcModal(article,initialField='divide',returnCol=3){if(!article)return;calcArticle=article;calcReturnFocus={article,col:returnCol};calcOriginalPrice.value=money(calcBasePrice(article));calcDivide.value=article.precio_costo_divisor||'';calcMultiply.value=article.precio_costo_multiplicador||'';updateCalcResult();calcBackdrop.classList.add('visible');setTimeout(()=>{const target=initialField==='multiply'?calcMultiply:calcDivide;target.focus();target.select()},0)}
+function closeCalcModal(){const wasVisible=calcBackdrop.classList.contains('visible');const returnState=calcReturnFocus;calcArticle=null;calcReturnFocus=null;calcBackdrop.classList.remove('visible');if(wasVisible&&returnState?.article)requestAnimationFrame(()=>{const row=view.indexOf(returnState.article);if(row>=0)focusTableCell(row,returnState.col)})}
 async function applyCalculatedPrice(){if(!calcArticle)return;const original=calcBasePrice(calcArticle);const calculated=Number(calcCurrentPrice().toFixed(2));calcArticle.precio_costo=calculated;calcArticle.precio_costo_original=original;calcArticle.precio_costo_divisor=calcDivide.value.trim();calcArticle.precio_costo_multiplicador=calcMultiply.value.trim();if(Math.abs(calculated-original)<=0.009){delete calcArticle.precio_costo_original;delete calcArticle.precio_costo_divisor;delete calcArticle.precio_costo_multiplicador}await saveArticlesCache();render();closeCalcModal();show('Precio guardado')}
 async function undoCalculatedPrice(){if(!calcArticle)return;calcArticle.precio_costo=calcBasePrice(calcArticle);delete calcArticle.precio_costo_original;delete calcArticle.precio_costo_divisor;delete calcArticle.precio_costo_multiplicador;await saveArticlesCache();render();closeCalcModal();show('Precio original restaurado')}
 function calcItems(){return [calcOriginalPrice,calcDivide,calcMultiply,calcTotal,calcApplyBtn,calcUndoBtn,calcCancelBtn]}
@@ -372,7 +373,7 @@ providerDropdown.addEventListener('mousedown',(event)=>{event.preventDefault();c
 document.addEventListener('mousedown',(event)=>{if(!providerCombo.contains(event.target))closeProviderCombo();if(!event.target.closest('.table'))clearTableSelection();if(!event.target.closest('#rowContextMenu'))hideRowContext();if(!event.target.closest('#providerContextMenu'))providerContextMenu.classList.remove('visible')});
 document.querySelector('.body').addEventListener('scroll',(event)=>{const box=event.currentTarget;if(box.scrollTop+box.clientHeight>=box.scrollHeight-80)loadMoreRows()});
 rows.addEventListener('focusin',(event)=>{const cell=event.target.closest('.nav-cell');if(cell)selectCellText(cell)});
-rows.addEventListener('keydown',(event)=>{const cell=event.target.closest('.nav-cell');if(!cell)return;let moved=false;if(event.key==='Enter')moved=moveTableCell(cell,event.shiftKey?-1:1,0);else if(event.key==='Tab')moved=moveTableCell(cell,0,event.shiftKey?-1:1);else if(event.key==='ArrowDown')moved=moveTableCell(cell,1,0);else if(event.key==='ArrowUp')moved=moveTableCell(cell,-1,0);else if(event.key==='ArrowRight')moved=moveTableCell(cell,0,1);else if(event.key==='ArrowLeft')moved=moveTableCell(cell,0,-1);if(moved){event.preventDefault();event.stopPropagation()}});
+rows.addEventListener('keydown',(event)=>{const cell=event.target.closest('.nav-cell');if(!cell)return;const opensDivide=event.key==='/'||event.code==='NumpadDivide';const opensMultiply=event.key==='*'||event.code==='NumpadMultiply';if(Number(cell.dataset.col)===3&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&(opensDivide||opensMultiply)){event.preventDefault();event.stopImmediatePropagation();const article=view[Number(cell.dataset.row)];openCalcModal(article,opensMultiply?'multiply':'divide',3);return}let moved=false;if(event.key==='Enter')moved=moveTableCell(cell,event.shiftKey?-1:1,0);else if(event.key==='Tab')moved=moveTableCell(cell,0,event.shiftKey?-1:1);else if(event.key==='ArrowDown')moved=moveTableCell(cell,1,0);else if(event.key==='ArrowUp')moved=moveTableCell(cell,-1,0);else if(event.key==='ArrowRight')moved=moveTableCell(cell,0,1);else if(event.key==='ArrowLeft')moved=moveTableCell(cell,0,-1);if(moved){event.preventDefault();event.stopPropagation()}});
 rows.addEventListener('contextmenu',(event)=>{const row=event.target.closest('.row');if(!row)return;event.preventDefault();const article=view[Number(row.dataset.i)];if(!article)return;showRowContext(event,article)});
 tableSelector.addEventListener('click',()=>focusTablePasteCorner());
 tableSelector.addEventListener('dblclick',(event)=>{event.preventDefault();if(!articles.length)pasteArticlesFromClipboard().catch(e=>{console.error(e);show('No pude pegar')})});
