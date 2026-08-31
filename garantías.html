@@ -335,7 +335,7 @@
 </main>
 
 <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
-<script src="corralon-system.js?v=1.0.5"></script>
+<script src="corralon-system.js?v=1.0.6"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, onSnapshot, collection, addDoc, setDoc, serverTimestamp, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -734,8 +734,34 @@ function aplicarBusqueda() {
   actualizarBoton();
 }
 
+function textoSeguroPdf(text, font) {
+  const replacements = {
+    '✔': '[OK]',
+    '✓': '[OK]',
+    '☑': '[OK]',
+    '☐': '[ ]',
+    '✕': '[X]',
+    '✖': '[X]',
+    '•': '-',
+    '→': '->',
+    '←': '<-'
+  };
+  let safe = '';
+  for (const character of String(text ?? '-').normalize('NFC').replace(/\u00a0/g, ' ')) {
+    if (/[\u200b-\u200d\ufeff\ufe0e\ufe0f]/u.test(character)) continue;
+    const candidate = replacements[character] || character;
+    try {
+      font.widthOfTextAtSize(candidate, 10);
+      safe += candidate;
+    } catch (_) {
+      safe += '?';
+    }
+  }
+  return safe || '-';
+}
+
 function dividirLineasPdf(text, font, size, maxWidth) {
-  const words = String(text || '-').split(/\s+/).filter(Boolean);
+  const words = textoSeguroPdf(text, font).split(/\s+/).filter(Boolean);
   const lines = [];
   let current = '';
   words.forEach((word) => {
