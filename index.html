@@ -4143,7 +4143,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.12"></script>
+<script src="corralon-system.js?v=1.0.13"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4168,8 +4168,9 @@ const DEFAULT_STOCK_NOTICE = 'Si no hay suficiente stock de la cantidad que uste
 const STOCK_LABEL_PROGRESO_RUTA = 'Stock Progreso y Ruta';
 const STOCK_LABEL_CALLE5_ESPANA = 'Stock Calle 5 y España';
 
-// POPUP AL ABRIR
-onSnapshot(doc(db, 'config', 'popup'), snap => {
+// Los clientes públicos leen estas configuraciones una sola vez. Solo las
+// sesiones internas mantienen listeners Realtime.
+function aplicarPopupConfig(snap) {
   const params = new URLSearchParams(location.search);
   if (params.has('articulo') || params.has('prodeRef') || location.hash === '#prode' || location.hash === '#adescontar' || obtenerChipCatalogoDesdeHash()) return;
   if (window.CorralonFunciones?.isMenuSessionActive?.()) {
@@ -4182,16 +4183,16 @@ onSnapshot(doc(db, 'config', 'popup'), snap => {
     document.getElementById('popupZoomImg').src = url;
     document.getElementById('popupBg').classList.remove('hidden');
   }
-}, () => {});
+}
 
-onSnapshot(doc(db, 'config', STOCK_NOTICE_DOC_ID), snap => {
+function aplicarAvisoStockConfig(snap) {
   const el = document.getElementById('stockNoticeText');
   if (!el) return;
   const texto = snap.exists() ? String(snap.data()?.text || '').trim() : '';
   el.textContent = texto || DEFAULT_STOCK_NOTICE;
-}, () => {});
+}
 
-onSnapshot(doc(db, 'config', HOME_LANDING_DOC_ID), snap => {
+function aplicarPortadaConfig(snap) {
   const nextConfig = sanitizarConfigPortada(snap.exists() ? snap.data() : null);
   const nextFingerprint = fingerprintConfigPortada(nextConfig);
   guardarJsonCache(HOME_LANDING_CACHE_KEY, {
@@ -4201,10 +4202,21 @@ onSnapshot(doc(db, 'config', HOME_LANDING_DOC_ID), snap => {
   if (homeLandingFingerprintActiva === nextFingerprint) return;
   homeLandingConfig = nextConfig;
   homeLandingFingerprintActiva = nextFingerprint;
-  if (window.CORRALON_INDEX_MENU_SESSION_ACTIVE === false && !terminoBaseBusquedaPublica) {
+  if (window.CORRALON_INDEX_MENU_SESSION_ACTIVE === false && !terminoBaseBusquedaPublica && articulosPortadaPublica.length) {
     cargarPortadaCatalogoPublico().catch((error) => console.warn('No se pudo actualizar la portada pública', error));
   }
-}, () => {});
+}
+
+const configInicialRefs = [
+  [doc(db, 'config', 'popup'), aplicarPopupConfig],
+  [doc(db, 'config', STOCK_NOTICE_DOC_ID), aplicarAvisoStockConfig],
+  [doc(db, 'config', HOME_LANDING_DOC_ID), aplicarPortadaConfig]
+];
+if (window.CORRALON_INDEX_MENU_SESSION_ACTIVE) {
+  configInicialRefs.forEach(([reference, apply]) => onSnapshot(reference, apply, () => {}));
+} else {
+  configInicialRefs.forEach(([reference, apply]) => getDocFromServer(reference).then(apply).catch(() => {}));
+}
 
 const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
@@ -4348,6 +4360,10 @@ let articulosPortadaPublica = [];
 let terminoBaseBusquedaPublica = '';
 let solicitudBusquedaPublica = 0;
 const cacheBusquedaPublica = new Map();
+const PUBLIC_CATALOG_VERSION_POLL_MS = 60000;
+let publicCatalogVersion = null;
+let publicCatalogVersionTimer = null;
+let publicCatalogVersionChecking = false;
 try {
   vistaActiva = localStorage.getItem('vistaArticulos') === 'lista' ? 'lista' : 'cards';
 } catch (e) {}
@@ -4675,6 +4691,54 @@ async function cargarPortadaCatalogoPublico() {
   if (requestId !== solicitudBusquedaPublica || terminoBaseBusquedaPublica) return;
   articulosPortadaPublica = rows;
   reemplazarCatalogoPublico(rows, 'portada');
+}
+
+async function consultarVersionCatalogoPublico() {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/catalogo_articulos_meta?id=eq.principal&select=version&limit=1`, {
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'apikey': SUPABASE_ANON_KEY
+    },
+    cache: 'no-store'
+  });
+  if (!response.ok) throw new Error(`No se pudo consultar la versión del catálogo (${response.status})`);
+  const rows = await response.json();
+  return Number(Array.isArray(rows) && rows[0] ? rows[0].version : 0);
+}
+
+async function comprobarVersionCatalogoPublico() {
+  if (INDEX_MENU_SESSION_ACTIVE || document.hidden || publicCatalogVersionChecking) return;
+  publicCatalogVersionChecking = true;
+  try {
+    const nextVersion = await consultarVersionCatalogoPublico();
+    if (publicCatalogVersion === null) {
+      publicCatalogVersion = nextVersion;
+      return;
+    }
+    if (!nextVersion || nextVersion === publicCatalogVersion) return;
+    publicCatalogVersion = nextVersion;
+    cacheBusquedaPublica.clear();
+    const rows = await consultarCatalogoPublicoReducido({
+      codigos: codigosPrioritariosCatalogoInicio(),
+      portada: true,
+      limite: 240
+    });
+    articulosPortadaPublica = rows;
+    if (!terminoBaseBusquedaPublica) reemplazarCatalogoPublico(rows, `portada|${nextVersion}`);
+  } catch (error) {
+    console.warn('No se pudo comprobar la versión pública del catálogo', error);
+  } finally {
+    publicCatalogVersionChecking = false;
+  }
+}
+
+function iniciarConsultaVersionCatalogoPublico() {
+  if (INDEX_MENU_SESSION_ACTIVE || publicCatalogVersionTimer) return;
+  comprobarVersionCatalogoPublico();
+  publicCatalogVersionTimer = setInterval(comprobarVersionCatalogoPublico, PUBLIC_CATALOG_VERSION_POLL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) comprobarVersionCatalogoPublico();
+  });
 }
 
 function primeraPalabraBusquedaPublica(value) {
@@ -6407,6 +6471,8 @@ async function iniciarCargaListaArticulos() {
       console.error(error);
       document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No se pudo cargar la portada</p></div>`;
       if (loader) loader.style.display = 'none';
+    } finally {
+      iniciarConsultaVersionCatalogoPublico();
     }
     return;
   }
@@ -9341,12 +9407,14 @@ document.getElementById('prodeModal')?.addEventListener('pointerdown', (e) => {
   }
 });
 document.getElementById('prodeModal')?.addEventListener('click', (e) => { if(e.target.id === 'prodeModal') cerrarProde(); });
-onSnapshot(doc(db, 'config', PRODE_CONFIG_DOC_ID), snap => {
-  if(snap.exists()) prodeConfig = { ...prodeConfig, ...(snap.data() || {}) };
-  prodeAplicarFixtureDinamico(prodeConfig.fixtureDinamico || {});
-  if(!document.getElementById('prodeModal')?.classList.contains('hidden')) renderProde();
-  prodeAutoActualizarResultados().catch(() => {});
-});
+if (INDEX_MENU_SESSION_ACTIVE) {
+  onSnapshot(doc(db, 'config', PRODE_CONFIG_DOC_ID), snap => {
+    if(snap.exists()) prodeConfig = { ...prodeConfig, ...(snap.data() || {}) };
+    prodeAplicarFixtureDinamico(prodeConfig.fixtureDinamico || {});
+    if(!document.getElementById('prodeModal')?.classList.contains('hidden')) renderProde();
+    prodeAutoActualizarResultados().catch(() => {});
+  });
+}
 setInterval(prodeActualizarBloqueosEnVivo, 15000);
 window.addEventListener('focus', () => {
   prodeActualizarBloqueosEnVivo();
@@ -9485,9 +9553,8 @@ if (!INDEX_ENLACE_COMPARTIDO) {
   restaurarConfigPortadaCache();
 }
 
-onSnapshot(
-  query(collection(db, CART_POPULARITY_COLLECTION), orderBy('agregados', 'desc'), limit(10)),
-  (snapshot) => {
+const rankingVentasQuery = query(collection(db, CART_POPULARITY_COLLECTION), orderBy('agregados', 'desc'), limit(10));
+function aplicarRankingVentasSnapshot(snapshot) {
     const siguienteRanking = new Map();
     snapshot.docs.forEach((item) => {
       const data = item.data() || {};
@@ -9507,12 +9574,15 @@ onSnapshot(
     if (esPrimeraCargaRanking) return;
     actualizarVistaEtiqueta();
     aplicarBusquedaActual();
-  },
-  (error) => console.warn('No se pudo cargar el ranking de artículos', error)
-);
+}
+if (INDEX_MENU_SESSION_ACTIVE) {
+  onSnapshot(rankingVentasQuery, aplicarRankingVentasSnapshot, (error) => console.warn('No se pudo cargar el ranking de artículos', error));
+} else {
+  getDocsFromServer(rankingVentasQuery).then(aplicarRankingVentasSnapshot).catch((error) => console.warn('No se pudo cargar el ranking de artículos', error));
+}
 
 function iniciarEscuchaListaArticulos() {
-  if (unsubscribeListaActual) return;
+  if (!INDEX_MENU_SESSION_ACTIVE || unsubscribeListaActual) return;
   unsubscribeListaActual = onSnapshot(doc(db, 'config', 'catalogoArticulosCambios'), async snap => {
     if (snap.metadata?.fromCache) return;
     const data = snap.exists() ? (snap.data() || {}) : {};
@@ -9731,7 +9801,8 @@ window.CorralonSystem?.aridos?.configure({
   }, { merge: true })
 });
 
-onSnapshot(collection(db, ARIDOS_ARTICULOS_COLLECTION), (snapshot) => {
+const aridosArticulosRef = collection(db, ARIDOS_ARTICULOS_COLLECTION);
+function aplicarConfiguracionAridosSnapshot(snapshot) {
   const configs = new Map();
   snapshot.forEach((entry) => {
     const data = entry.data() || {};
@@ -9740,11 +9811,19 @@ onSnapshot(collection(db, ARIDOS_ARTICULOS_COLLECTION), (snapshot) => {
   });
   window.CorralonSystem?.aridos?.setConfigMap?.(configs);
   refrescarConfiguracionAridosEnIndex();
-}, (error) => console.warn('No se pudo cargar la configuración de áridos', error));
+}
 
-onSnapshot(ARIDOS_FLETES_DOC, (snapshot) => {
+function aplicarConfiguracionFletesSnapshot(snapshot) {
   window.CorralonSystem?.aridos?.setFreightConfig?.(snapshot.exists() ? snapshot.data() : {});
-}, (error) => console.warn('No se pudo cargar la configuración de fletes', error));
+}
+
+if (INDEX_MENU_SESSION_ACTIVE) {
+  onSnapshot(aridosArticulosRef, aplicarConfiguracionAridosSnapshot, (error) => console.warn('No se pudo cargar la configuración de áridos', error));
+  onSnapshot(ARIDOS_FLETES_DOC, aplicarConfiguracionFletesSnapshot, (error) => console.warn('No se pudo cargar la configuración de fletes', error));
+} else {
+  getDocsFromServer(aridosArticulosRef).then(aplicarConfiguracionAridosSnapshot).catch((error) => console.warn('No se pudo cargar la configuración de áridos', error));
+  getDocFromServer(ARIDOS_FLETES_DOC).then(aplicarConfiguracionFletesSnapshot).catch((error) => console.warn('No se pudo cargar la configuración de fletes', error));
+}
 
 setTimeout(() => {
   iniciarCargaListaArticulos();

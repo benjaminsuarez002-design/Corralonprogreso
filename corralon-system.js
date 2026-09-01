@@ -7131,7 +7131,7 @@
         recordExecutedVersion();
         check();
         setInterval(check, FALLBACK_CHECK_MS);
-        startRealtime().catch(() => {});
+        if (!globalThis.CORRALON_DISABLE_CATALOG_REALTIME) startRealtime().catch(() => {});
         window.addEventListener('focus', () => check());
         window.addEventListener('online', () => check());
         window.addEventListener('pageshow', () => check());
