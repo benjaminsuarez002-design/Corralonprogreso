@@ -9,7 +9,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.6"></script>
+<script src="corralon-system.js?v=1.0.7"></script>
   <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -1356,6 +1356,16 @@
       min-width: 0;
     }
 
+    .viewer-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .viewer-original-btn[hidden] {
+      display: none;
+    }
+
     .viewer-modal .modal-title,
     .viewer-modal .viewer-hint {
       overflow-wrap: anywhere;
@@ -2217,7 +2227,10 @@
           <h3 class="modal-title" id="viewer-title">Comprobante</h3>
           <div class="viewer-hint" id="viewer-hint">Vista previa dentro de la página</div>
         </div>
-        <button class="danger-btn" id="viewer-close" type="button">X</button>
+        <div class="viewer-head-actions">
+          <button class="ghost-btn viewer-original-btn" id="viewer-original" type="button" hidden>Ver original</button>
+          <button class="danger-btn" id="viewer-close" type="button">X</button>
+        </div>
       </div>
       <div class="viewer-body">
         <div class="viewer-loading" id="viewer-loading">
@@ -2260,6 +2273,9 @@
       const SUPABASE_URL = "https://tizyjenayrcdkcodsjnc.supabase.co";
       const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI";
       const SUPABASE_BUCKET = "Archivos";
+      const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/do0i2da7h/image/upload";
+      const CLOUDINARY_UPLOAD_PRESET = "Corralon";
+      const CLOUDINARY_PREVIEW_TRANSFORMATION = "f_auto,q_auto:best,c_limit,w_2400";
       const ALIASES_COLLECTION = "aliases";
       const COMPROBANTES_COLLECTION = "comprobantes";
       const SHARED_SUMMARIES_COLLECTION = "comprobantesResumenesCompartidos";
@@ -2393,8 +2409,11 @@
           dateText: String(item.dateText || formatDate(dateIso)),
           timeText: String(item.timeText || ""),
           attachmentUrl: String(item.attachmentUrl || ""),
+          attachmentOriginalUrl: String(item.attachmentOriginalUrl || ""),
           attachmentName: String(item.attachmentName || ""),
           attachmentType: String(item.attachmentType || ""),
+          attachmentStorage: String(item.attachmentStorage || ""),
+          attachmentPublicId: String(item.attachmentPublicId || ""),
           createdClientMs: Number(item.createdClientMs || 0)
         };
       }
@@ -2491,6 +2510,7 @@
         viewerModalBg: $("#viewer-modal-bg"),
         viewerModal: $("#viewer-modal"),
         viewerClose: $("#viewer-close"),
+        viewerOriginal: $("#viewer-original"),
         viewerTitle: $("#viewer-title"),
         viewerHint: $("#viewer-hint"),
         viewerLoading: $("#viewer-loading"),
@@ -2539,8 +2559,8 @@
         unsubRecords: null,
         allRecords: [],
         attachmentPreviewCache: new Map(),
-        attachmentPreloading: new Set(),
         viewerUrl: "",
+        viewerOriginalUrl: "",
         viewerFullZoom: 1,
         viewerPinchBaseZoom: 1,
         viewerPinchStartDistance: 0,
@@ -2587,8 +2607,11 @@
               timeText: String(state.draft.timeText || currentTime()),
               attachment: (state.draft.attachment && isUsableRemoteUrl(state.draft.attachment.url)) ? {
                 url: String(state.draft.attachment.url || ""),
+                originalUrl: String(state.draft.attachment.originalUrl || ""),
                 name: String(state.draft.attachment.name || "Comprobante"),
-                type: String(state.draft.attachment.type || "")
+                type: String(state.draft.attachment.type || ""),
+                storage: String(state.draft.attachment.storage || ""),
+                publicId: String(state.draft.attachment.publicId || "")
               } : null
             }
           };
@@ -2636,8 +2659,11 @@
             ? {
                 file: null,
                 url: String(draft.attachment.url || ""),
+                originalUrl: String(draft.attachment.originalUrl || ""),
                 name: String(draft.attachment.name || "Comprobante"),
-                type: String(draft.attachment.type || "")
+                type: String(draft.attachment.type || ""),
+                storage: String(draft.attachment.storage || ""),
+                publicId: String(draft.attachment.publicId || "")
               }
             : null;
         } catch (error) {
@@ -3366,7 +3392,6 @@
           state.summaryDateIso = state.summaryDates[state.summaryDates.length - 1] || today;
         }
         state.summaryRecords = all.filter((item) => item.dateIso === state.summaryDateIso);
-        preloadTodayAttachments();
         renderTodayRecords();
         renderSummaryDate();
         renderSummary();
@@ -3817,8 +3842,11 @@
           dateText: String(item.dateText || formatDate(item.dateIso || state.summaryDateIso)),
           timeText: String(item.timeText || ""),
           attachmentUrl: String(item.attachmentUrl || ""),
+          attachmentOriginalUrl: String(item.attachmentOriginalUrl || ""),
           attachmentName: String(item.attachmentName || ""),
           attachmentType: String(item.attachmentType || ""),
+          attachmentStorage: String(item.attachmentStorage || ""),
+          attachmentPublicId: String(item.attachmentPublicId || ""),
           createdClientMs: Number(item.createdClientMs || 0)
         };
       }
@@ -4257,9 +4285,11 @@
         if (!url) return null;
         return {
           url,
+          originalUrl: sanitizeAttachmentUrl(source.attachmentOriginalUrl || source.originalUrl || url),
           name: firstText(source.attachmentName, source.name, source.machine, "Comprobante"),
           kind: getAttachmentKind(source),
-          type: String(source.attachmentType || source.type || "")
+          type: String(source.attachmentType || source.type || ""),
+          storage: String(source.attachmentStorage || source.storage || "")
         };
       }
 
@@ -4295,6 +4325,8 @@
 
       function resetAttachmentViewer() {
         state.viewerUrl = "";
+        state.viewerOriginalUrl = "";
+        el.viewerOriginal.hidden = true;
         el.viewerModal.classList.remove("image-mode", "pdf-mode");
         el.viewerModal.style.width = "";
         el.viewerStage.style.width = "";
@@ -4311,29 +4343,6 @@
         closeViewerFullscreen();
         resetAttachmentViewer();
         el.viewerModalBg.classList.remove("open");
-      }
-
-      function primeAttachmentPreview(source) {
-        const payload = getAttachmentPayload(source);
-        if (!payload || payload.kind !== "image") return;
-        if (state.attachmentPreviewCache.has(payload.url) || state.attachmentPreloading.has(payload.url)) return;
-        state.attachmentPreloading.add(payload.url);
-        const img = new Image();
-        img.decoding = "async";
-        img.onload = () => {
-          state.attachmentPreviewCache.set(payload.url, { kind: "image", image: img });
-          state.attachmentPreloading.delete(payload.url);
-        };
-        img.onerror = () => {
-          state.attachmentPreloading.delete(payload.url);
-        };
-        img.src = payload.url;
-      }
-
-      function preloadTodayAttachments() {
-        state.todayRecords.forEach((item) => {
-          if (item && item.attachmentUrl) primeAttachmentPreview(item);
-        });
       }
 
       function mapDoc(doc) {
@@ -4373,9 +4382,41 @@
             createdAtMs ? new Date(createdAtMs).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false }) : ""
           ),
           attachmentUrl: pickAttachmentUrl(data),
+          attachmentOriginalUrl: sanitizeAttachmentUrl(firstText(data.attachmentOriginalUrl, data.attachment_original_url)),
           attachmentName: firstText(data.attachmentName, data.comprobante_nombre, data.comprobanteNombre),
           attachmentType: firstText(data.attachmentType, data.comprobante_tipo, data.comprobanteTipo),
+          attachmentStorage: firstText(data.attachmentStorage, data.attachment_storage),
+          attachmentPublicId: firstText(data.attachmentPublicId, data.attachment_public_id),
           createdClientMs: Number(data.createdClientMs || data.created_client_ms || data.timestamp || createdAtMs || 0)
+        };
+      }
+
+      function cloudinaryPreviewUrl(originalUrl) {
+        const url = sanitizeAttachmentUrl(originalUrl);
+        if (!url || !url.includes("/image/upload/")) return url;
+        return url.replace("/image/upload/", `/image/upload/${CLOUDINARY_PREVIEW_TRANSFORMATION}/`);
+      }
+
+      async function uploadImageToCloudinary(file, keyPart) {
+        const safeKey = String(keyPart || "comprobante").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "comprobante";
+        const form = new FormData();
+        form.append("file", file);
+        form.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+        form.append("public_id", `comprobantes/${todayIso()}/${safeKey}_${Date.now()}`);
+        form.append("tags", "comprobante,corralonprogreso");
+        const response = await fetch(CLOUDINARY_UPLOAD_URL, { method: "POST", body: form });
+        let payload = null;
+        try { payload = await response.json(); } catch (_) {}
+        if (!response.ok) throw new Error(payload?.error?.message || `Cloudinary respondió ${response.status}`);
+        if (!payload?.secure_url || !payload?.public_id) throw new Error("Cloudinary no devolvió la imagen subida");
+        const originalUrl = String(payload.secure_url);
+        return {
+          url: cloudinaryPreviewUrl(originalUrl),
+          originalUrl,
+          name: file.name || `comprobante_${safeKey}`,
+          type: file.type || `image/${payload.format || "jpeg"}`,
+          storage: "cloudinary",
+          publicId: String(payload.public_id)
         };
       }
 
@@ -4397,9 +4438,17 @@
         if (!response.ok) throw new Error(text || `Error ${response.status}`);
         return {
           url: `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${encodedPath}`,
+          originalUrl: `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${encodedPath}`,
           name: file.name || cleanName,
-          type: file.type || ""
+          type: file.type || "",
+          storage: "supabase",
+          publicId: ""
         };
+      }
+
+      function uploadAttachment(file, keyPart) {
+        const isPdf = String(file?.type || "").toLowerCase().includes("pdf") || /\.pdf$/i.test(String(file?.name || ""));
+        return isPdf ? uploadFileToSupabase(file, keyPart) : uploadImageToCloudinary(file, keyPart);
       }
 
       function buildDraftPayload() {
@@ -4698,18 +4747,27 @@
         try {
           const payload = buildDraftPayload();
           if (state.draft.attachment && state.draft.attachment.file) {
-            const uploaded = await uploadFileToSupabase(state.draft.attachment.file, state.draft.machine || "draft");
+            const uploaded = await uploadAttachment(state.draft.attachment.file, state.draft.machine || "draft");
             payload.attachmentUrl = uploaded.url;
+            payload.attachmentOriginalUrl = uploaded.originalUrl || uploaded.url;
             payload.attachmentName = uploaded.name;
             payload.attachmentType = uploaded.type;
+            payload.attachmentStorage = uploaded.storage || "";
+            payload.attachmentPublicId = uploaded.publicId || "";
           } else if (state.draft.attachment && isUsableRemoteUrl(state.draft.attachment.url)) {
             payload.attachmentUrl = state.draft.attachment.url;
+            payload.attachmentOriginalUrl = state.draft.attachment.originalUrl || "";
             payload.attachmentName = state.draft.attachment.name || "";
             payload.attachmentType = state.draft.attachment.type || "";
+            payload.attachmentStorage = state.draft.attachment.storage || "";
+            payload.attachmentPublicId = state.draft.attachment.publicId || "";
           } else {
             payload.attachmentUrl = "";
+            payload.attachmentOriginalUrl = "";
             payload.attachmentName = "";
             payload.attachmentType = "";
+            payload.attachmentStorage = "";
+            payload.attachmentPublicId = "";
           }
           if (state.editingId) {
             await recordRef(state.editingId).update(payload);
@@ -4748,11 +4806,14 @@
       }
 
       async function updateRecordAttachment(id, file) {
-        const uploaded = await uploadFileToSupabase(file, id);
+        const uploaded = await uploadAttachment(file, id);
         await recordRef(id).update({
           attachmentUrl: uploaded.url,
+          attachmentOriginalUrl: uploaded.originalUrl || uploaded.url,
           attachmentName: uploaded.name,
           attachmentType: uploaded.type,
+          attachmentStorage: uploaded.storage || "",
+          attachmentPublicId: uploaded.publicId || "",
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
       }
@@ -4782,8 +4843,11 @@
         state.draft.attachment = record.attachmentUrl ? {
           file: null,
           url: record.attachmentUrl,
+          originalUrl: record.attachmentOriginalUrl || "",
           name: record.attachmentName || "Comprobante",
-          type: record.attachmentType || ""
+          type: record.attachmentType || "",
+          storage: record.attachmentStorage || "",
+          publicId: record.attachmentPublicId || ""
         } : null;
         syncDraftToInputs();
         activateTab("comp");
@@ -4888,9 +4952,11 @@
         }
         resetAttachmentViewer();
         state.viewerUrl = payload.url;
+        state.viewerOriginalUrl = payload.originalUrl || payload.url;
         el.viewerModal.classList.add("image-mode");
         el.viewerTitle.textContent = "Comprobante";
-        el.viewerHint.textContent = "Imagen abierta dentro de la página";
+        el.viewerHint.textContent = payload.storage === "cloudinary" ? "Vista optimizada para ahorrar datos" : "Imagen abierta dentro de la página";
+        el.viewerOriginal.hidden = !payload.originalUrl || payload.originalUrl === payload.url;
         el.viewerModalBg.classList.add("open");
 
         const cached = state.attachmentPreviewCache.get(payload.url);
@@ -4955,12 +5021,15 @@
         if (target.type === "draft") {
           state.isUploadingDraftAttachment = true;
           syncDraftToInputs();
-          return uploadFileToSupabase(file, state.draft.machine || "draft").then((uploaded) => {
+          return uploadAttachment(file, state.draft.machine || "draft").then((uploaded) => {
             state.draft.attachment = {
               file: null,
               url: uploaded.url,
+              originalUrl: uploaded.originalUrl || uploaded.url,
               name: uploaded.name || file.name || "Comprobante",
-              type: uploaded.type || file.type || ""
+              type: uploaded.type || file.type || "",
+              storage: uploaded.storage || "",
+              publicId: uploaded.publicId || ""
             };
             el.draftAdd.focus();
           }).finally(() => {
@@ -5420,6 +5489,16 @@
           if (event.target === el.aliasModalBg) closeAliasModal();
         });
         el.viewerClose.addEventListener("click", closeAttachmentViewer);
+        el.viewerOriginal.addEventListener("click", () => {
+          if (!state.viewerOriginalUrl) return;
+          const anchor = document.createElement("a");
+          anchor.href = state.viewerOriginalUrl;
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+        });
         el.viewerModalBg.addEventListener("click", (event) => {
           if (event.target === el.viewerModalBg) closeAttachmentViewer();
         });
