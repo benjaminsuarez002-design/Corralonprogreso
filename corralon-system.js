@@ -7081,11 +7081,13 @@
       toast.querySelector('button').onclick = () => updatePage(manifest.version);
       requestAnimationFrame(() => toast.classList.add('visible'));
     }
-    async function check(realtimeConfig = null) {
+    async function check(realtimeConfig = null, { preferRaw = false } = {}) {
       try {
-        let response = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
-        if (!response.ok && MANIFEST_URL !== RAW_MANIFEST_URL) {
-          response = await fetch(`${RAW_MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
+        const primaryUrl = preferRaw ? RAW_MANIFEST_URL : MANIFEST_URL;
+        const fallbackUrl = preferRaw ? MANIFEST_URL : RAW_MANIFEST_URL;
+        let response = await fetch(`${primaryUrl}?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok && fallbackUrl !== primaryUrl) {
+          response = await fetch(`${fallbackUrl}?t=${Date.now()}`, { cache: 'no-store' });
         }
         if (!response.ok) return;
         const manifest = await response.json();
@@ -7117,16 +7119,25 @@
       const firestore = firestoreModule.getFirestore(app);
       return firestoreModule.onSnapshot(
         firestoreModule.doc(firestore, 'configuracion', 'version_web'),
-        (snapshot) => check(snapshot.exists() ? snapshot.data() : null),
+        (snapshot) => check(snapshot.exists() ? snapshot.data() : null, { preferRaw: true }),
         () => {}
       );
     }
+    let started = false;
     function start() {
+      if (started) return;
+      started = true;
       const begin = () => {
         recordExecutedVersion();
         check();
         setInterval(check, FALLBACK_CHECK_MS);
         startRealtime().catch(() => {});
+        window.addEventListener('focus', () => check());
+        window.addEventListener('online', () => check());
+        window.addEventListener('pageshow', () => check());
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') check();
+        });
       };
       if (document.body) begin(); else document.addEventListener('DOMContentLoaded', begin, { once: true });
     }
