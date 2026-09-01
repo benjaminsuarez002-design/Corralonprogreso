@@ -4143,7 +4143,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.13"></script>
+<script src="corralon-system.js?v=1.0.14"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -6010,6 +6010,22 @@ function normalizarFiltroDescripcionFlexible(texto) {
     .trim();
 }
 
+function cumplenTerminosEnPalabrasDistintas(palabras, terminos, tipoCoincidencia) {
+  const usadas = new Set();
+  const ordenados = terminos
+    .map((termino, index) => ({ termino, index }))
+    .sort((a, b) => b.termino.length - a.termino.length || a.index - b.index);
+  return ordenados.every(({ termino }) => {
+    const indice = palabras.findIndex((palabra, palabraIndex) => {
+      if (usadas.has(palabraIndex)) return false;
+      return tipoCoincidencia === 'inicio' ? palabra.startsWith(termino) : palabra.includes(termino);
+    });
+    if (indice < 0) return false;
+    usadas.add(indice);
+    return true;
+  });
+}
+
 function procesarFiltroDescripcionFlexible(parsed) {
   if (!parsed?.hasText) return [];
   const consulta = normalizarFiltroDescripcionFlexible(parsed.freeText);
@@ -6020,21 +6036,13 @@ function procesarFiltroDescripcionFlexible(parsed) {
   todosArticulos.forEach((articulo) => {
     if (!cumpleFiltrosBusqueda(articulo, parsed)) return;
     const descripcion = normalizarFiltroDescripcionFlexible(obtenerDescripcionArticulo(articulo).principal);
-    const codigos = [
-      obtenerIdArticulo(articulo),
-      articulo.idartprov,
-      articulo.idArtProv,
-      articulo.codprov,
-      articulo.codProv
-    ].map(normalizarFiltroDescripcionFlexible).filter(Boolean);
     const palabras = descripcion.split(/\s+/).filter(Boolean);
-    const textoCompleto = `${codigos.join(' ')} ${descripcion}`.trim();
     let score = null;
 
-    if (codigos.includes(consulta)) score = 0;
+    if (descripcion === consulta) score = 0;
     else if (descripcion.startsWith(consulta)) score = 1;
-    else if (terminos.every((termino) => palabras.some((palabra) => palabra.startsWith(termino)))) score = 2;
-    else if (terminos.every((termino) => textoCompleto.includes(termino))) score = 3;
+    else if (cumplenTerminosEnPalabrasDistintas(palabras, terminos, 'inicio')) score = 2;
+    else if (cumplenTerminosEnPalabrasDistintas(palabras, terminos, 'contenido')) score = 3;
     if (score === null) return;
 
     resultados.push({
@@ -6043,7 +6051,7 @@ function procesarFiltroDescripcionFlexible(parsed) {
       meta: {
         score,
         highlightTerms: terminos.filter((termino) => termino.length > 1),
-        matchedFields: score === 0 ? ['code'] : ['principal']
+        matchedFields: ['principal']
       }
     });
   });

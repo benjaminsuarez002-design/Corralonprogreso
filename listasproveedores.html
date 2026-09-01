@@ -7,9 +7,10 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.6"></script>
+<script src="corralon-system.js?v=1.0.7"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -453,9 +454,15 @@
     .side {
       min-width: 0;
       display: grid;
-      grid-template-rows: 1fr;
-      gap: 0;
+      grid-template-rows: 1fr auto;
+      gap: 12px;
       align-content: start;
+    }
+    .comparison-workbench-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding-right: 8px;
     }
     .side-actions {
       display: none;
@@ -594,9 +601,168 @@
       z-index: 45;
       display: none;
       place-items: center;
-      background: rgba(20, 32, 51, .28);
+      background: rgba(10, 10, 12, .58);
+      backdrop-filter: blur(5px);
     }
     .modal-backdrop.visible { display: grid; }
+    .comparison-register-modal {
+      width: 100vw;
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      border: 0;
+      border-radius: 0;
+      background: var(--panel);
+      box-shadow: none;
+      overflow: hidden;
+    }
+    .comparison-register-head {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 8px 14px 8px 18px;
+      border-bottom: 1px solid var(--corralon-line, var(--borde));
+      background: linear-gradient(105deg, var(--corralon-soft-2, var(--header)), var(--corralon-white, var(--panel)) 72%);
+    }
+    .comparison-register-head::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--corralon-red, var(--acento)); }
+    .comparison-register-title { margin: 0; font: 900 25px/1 'Barlow Condensed', Arial, sans-serif; color: var(--texto); letter-spacing: .2px; }
+    .comparison-register-list { min-height: 0; overflow: auto; padding: 8px 10px; background: var(--corralon-bg, var(--fondo)); }
+    .comparison-register-footer {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 50px;
+      padding: 7px 14px;
+      border-top: 1px solid var(--corralon-line, var(--borde));
+      background: var(--corralon-white, var(--panel));
+    }
+    .comparison-export-modal {
+      width: min(460px, calc(100vw - 28px));
+      border: 1px solid var(--corralon-line, var(--borde));
+      border-radius: 16px;
+      background: var(--corralon-white, var(--panel));
+      box-shadow: var(--corralon-shadow, 0 22px 54px rgba(0,0,0,.34));
+      overflow: hidden;
+    }
+    .comparison-export-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 18px; }
+    .comparison-export-option { height: 58px; font-size: 20px; }
+    .comparison-export-cancel { display: flex; justify-content: flex-end; padding: 0 18px 18px; }
+    .comparison-register-empty {
+      min-height: 180px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font: 800 20px 'Barlow Condensed', Arial, sans-serif;
+      text-align: center;
+    }
+    .comparison-record {
+      display: grid;
+      grid-template-columns: 260px repeat(var(--provider-count), 180px);
+      min-width: max-content;
+      border: 1px solid var(--corralon-line, var(--borde));
+      border-radius: 13px;
+      background: var(--panel);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, .08);
+      margin-bottom: 6px;
+      overflow: hidden;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .comparison-record:hover { border-color: var(--corralon-line-strong, var(--borde-fuerte)); box-shadow: 0 9px 24px rgba(0, 0, 0, .12); }
+    .comparison-record-article {
+      width: auto;
+      min-width: 0;
+      min-height: 63px;
+      display: flex;
+      align-items: center;
+      padding: 6px 10px 6px 14px;
+      border-right: 1px solid var(--corralon-line, var(--borde));
+      border-left: 5px solid var(--corralon-red, var(--acento));
+      background: linear-gradient(135deg, var(--corralon-soft-2, var(--header)), var(--corralon-soft, var(--panel)));
+      font-size: 13.75px;
+      font-weight: 900;
+      overflow-wrap: anywhere;
+      gap: 8px;
+    }
+    .comparison-record-article-text { min-width: 0; flex: 1; }
+    .comparison-record-delete {
+      flex: 0 0 auto;
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--corralon-line-strong, var(--borde-fuerte));
+      border-radius: 7px;
+      background: var(--corralon-white, var(--panel));
+      color: var(--corralon-red, var(--acento));
+      font: 900 18px/1 Arial, sans-serif;
+      padding: 0;
+      cursor: pointer;
+    }
+    .comparison-record-delete:hover { color: #fff; background: var(--corralon-red, var(--acento)); border-color: var(--corralon-red, var(--acento)); }
+    .comparison-provider-cell {
+      width: auto;
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 21px 21px 21px;
+      border-right: 1px solid var(--corralon-line, var(--borde));
+      cursor: context-menu;
+      background: var(--corralon-white, var(--panel));
+      transition: background .14s ease;
+    }
+    .comparison-provider-cell:hover { background: var(--corralon-selection, var(--seleccion)); }
+    .comparison-provider-cell:last-child { border-right: 0; }
+    .comparison-provider-cell.is-empty {
+      min-height: 63px;
+      background: var(--corralon-soft, var(--panel));
+      cursor: default;
+    }
+    .comparison-provider-cell.is-empty:hover { background: var(--corralon-soft, var(--panel)); }
+    .comparison-provider-name, .comparison-provider-price, .comparison-provider-diff {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .comparison-provider-name { border-bottom: 1px solid var(--corralon-line, var(--borde)); background: var(--corralon-soft-2, var(--header)); font: 900 13.75px 'Barlow Condensed', Arial, sans-serif; }
+    .comparison-provider-price { border-bottom: 1px solid var(--corralon-line, var(--borde)); font-variant-numeric: tabular-nums; font-size: 13.75px; font-weight: 800; }
+    .comparison-provider-diff { background: var(--corralon-soft, var(--panel)); font-size: 13.75px; font-weight: 900; }
+    .comparison-provider-diff.positive { color: #df1118; }
+    .comparison-provider-diff.negative { color: #07844d; }
+    .comparison-provider-cell.is-base .comparison-provider-diff { color: var(--muted); }
+    .comparison-detail-modal {
+      width: min(610px, calc(100vw - 30px));
+      border: 1px solid var(--corralon-line, var(--borde));
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: var(--corralon-shadow, 0 22px 54px rgba(20, 32, 51, .38));
+      overflow: hidden;
+    }
+    .comparison-detail-grid {
+      display: grid;
+      grid-template-columns: 165px 1fr;
+      margin: 14px;
+      border: 1px solid var(--corralon-line, var(--borde));
+      border-radius: 11px;
+      overflow: hidden;
+    }
+    .comparison-detail-label, .comparison-detail-value { min-height: 38px; padding: 8px 10px; border-bottom: 1px solid var(--corralon-line, var(--borde)); }
+    .comparison-detail-label {
+      border-right: 1px solid var(--corralon-line, var(--borde));
+      background: var(--corralon-soft-2, var(--header));
+      color: var(--muted);
+      font: 800 17px 'Barlow Condensed', Arial, sans-serif;
+    }
+    .comparison-detail-label.last, .comparison-detail-value.last { border-bottom: 0; }
+    .comparison-detail-value { font-weight: 700; overflow-wrap: anywhere; }
+    .comparison-detail-provider.has-link { color: #0876d8; text-decoration: underline; cursor: pointer; }
+    .comparison-detail-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 0 14px 14px; }
+    #comparisonRegisterContextMenu { z-index: 60; }
     .calc-modal {
       width: 430px;
       border: 1px solid var(--borde-fuerte);
@@ -872,6 +1038,10 @@
 
       <aside class="side">
         <div class="slots" id="slots"></div>
+        <div class="comparison-workbench-actions">
+          <button class="btn primary" id="commitComparisonBtn" type="button">Enviar al comparador</button>
+          <button class="btn" id="openComparisonRegisterBtn" type="button">Ver comparador</button>
+        </div>
       </aside>
     </main>
 
@@ -903,6 +1073,54 @@
   <div class="context-menu" id="slotContextMenu">
     <button type="button" id="sendSlotMissingBtn">Enviar a faltantes</button>
     <button type="button" id="clearComparisonsContextBtn">Limpiar comparaciones</button>
+  </div>
+  <div class="context-menu" id="comparisonRegisterContextMenu">
+    <button type="button" id="expandSavedComparisonBtn">Expandir</button>
+    <button type="button" id="resumeSavedComparisonBtn">Retomar comparación</button>
+  </div>
+  <div class="modal-backdrop" id="comparisonRegisterBackdrop">
+    <div class="comparison-register-modal" role="dialog" aria-modal="true" aria-labelledby="comparisonRegisterTitle">
+      <div class="comparison-register-head">
+        <h2 class="comparison-register-title" id="comparisonRegisterTitle">Comparador de precios</h2>
+        <button class="btn" type="button" id="closeComparisonRegisterBtn">Cerrar</button>
+      </div>
+      <div class="comparison-register-list" id="comparisonRegisterList"></div>
+      <div class="comparison-register-footer">
+        <button class="btn primary" type="button" id="exportComparisonBtn">Exportar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="comparisonExportBackdrop" style="z-index:65">
+    <div class="comparison-export-modal" role="dialog" aria-modal="true" aria-labelledby="comparisonExportTitle">
+      <div class="comparison-register-head">
+        <h2 class="comparison-register-title" id="comparisonExportTitle">Exportar comparador</h2>
+      </div>
+      <div class="comparison-export-options">
+        <button class="btn primary comparison-export-option" type="button" id="exportComparisonExcelBtn">Excel</button>
+        <button class="btn primary comparison-export-option" type="button" id="exportComparisonPdfBtn">PDF</button>
+      </div>
+      <div class="comparison-export-cancel">
+        <button class="btn" type="button" id="closeComparisonExportBtn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="comparisonDetailBackdrop" style="z-index:55">
+    <div class="comparison-detail-modal" role="dialog" aria-modal="true" aria-labelledby="comparisonDetailTitle">
+      <div class="comparison-register-head">
+        <h2 class="comparison-register-title" id="comparisonDetailTitle">Detalle de comparación</h2>
+        <button class="btn" type="button" id="closeComparisonDetailBtn">Cerrar</button>
+      </div>
+      <div class="comparison-detail-grid">
+        <div class="comparison-detail-label">Proveedor</div><div class="comparison-detail-value comparison-detail-provider" id="comparisonDetailProvider"></div>
+        <div class="comparison-detail-label">Código proveedor</div><div class="comparison-detail-value" id="comparisonDetailCode"></div>
+        <div class="comparison-detail-label">Descripción proveedor</div><div class="comparison-detail-value" id="comparisonDetailArticle"></div>
+        <div class="comparison-detail-label">Precio</div><div class="comparison-detail-value money" id="comparisonDetailPrice"></div>
+        <div class="comparison-detail-label last">% diferencia</div><div class="comparison-detail-value last" id="comparisonDetailDiff"></div>
+      </div>
+      <div class="comparison-detail-actions">
+        <button class="btn primary" type="button" id="sendSavedComparisonMissingBtn">Enviar a faltantes</button>
+      </div>
+    </div>
   </div>
   <div class="modal-backdrop" id="calcBackdrop">
     <div class="calc-modal" role="dialog" aria-modal="true" aria-labelledby="calcTitle">
@@ -973,6 +1191,10 @@
       currentRows: [],
       lastSyncAt: '',
       latestUpdates: [],
+      savedComparisons: [],
+      editingComparisonId: '',
+      savedComparisonContext: null,
+      savedComparisonDetail: null,
       loadResolver: null
     };
     const el = {
@@ -1022,6 +1244,27 @@
       updatesList: document.getElementById('updatesList'),
       updatesSearch: document.getElementById('updatesSearch'),
       updatesCloseBtn: document.getElementById('updatesCloseBtn'),
+      commitComparisonBtn: document.getElementById('commitComparisonBtn'),
+      openComparisonRegisterBtn: document.getElementById('openComparisonRegisterBtn'),
+      comparisonRegisterBackdrop: document.getElementById('comparisonRegisterBackdrop'),
+      comparisonRegisterList: document.getElementById('comparisonRegisterList'),
+      closeComparisonRegisterBtn: document.getElementById('closeComparisonRegisterBtn'),
+      exportComparisonBtn: document.getElementById('exportComparisonBtn'),
+      comparisonExportBackdrop: document.getElementById('comparisonExportBackdrop'),
+      exportComparisonExcelBtn: document.getElementById('exportComparisonExcelBtn'),
+      exportComparisonPdfBtn: document.getElementById('exportComparisonPdfBtn'),
+      closeComparisonExportBtn: document.getElementById('closeComparisonExportBtn'),
+      comparisonRegisterContextMenu: document.getElementById('comparisonRegisterContextMenu'),
+      expandSavedComparisonBtn: document.getElementById('expandSavedComparisonBtn'),
+      resumeSavedComparisonBtn: document.getElementById('resumeSavedComparisonBtn'),
+      comparisonDetailBackdrop: document.getElementById('comparisonDetailBackdrop'),
+      comparisonDetailProvider: document.getElementById('comparisonDetailProvider'),
+      comparisonDetailCode: document.getElementById('comparisonDetailCode'),
+      comparisonDetailArticle: document.getElementById('comparisonDetailArticle'),
+      comparisonDetailPrice: document.getElementById('comparisonDetailPrice'),
+      comparisonDetailDiff: document.getElementById('comparisonDetailDiff'),
+      closeComparisonDetailBtn: document.getElementById('closeComparisonDetailBtn'),
+      sendSavedComparisonMissingBtn: document.getElementById('sendSavedComparisonMissingBtn'),
       fileInput: document.getElementById('fileInput')
     };
     function setLoadingDetail(text) {
@@ -1175,7 +1418,8 @@
     function syncComparisonHeight() {
       if (!el.slots) return;
       const rect = el.slots.getBoundingClientRect();
-      const bottomGap = 14;
+      const actionsHeight = document.querySelector('.comparison-workbench-actions')?.getBoundingClientRect().height || 0;
+      const bottomGap = actionsHeight + 26;
       const scale = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
       const height = (window.innerHeight - rect.top - bottomGap) / scale;
       el.slots.style.maxHeight = `${Math.max(160, height)}px`;
@@ -1938,8 +2182,12 @@
       if (!first) return;
       focusTableCell(first.index, 0);
     }
-    function setBase(row) {
+    function setBase(row, preserveEditing = false) {
       if (!row) return;
+      if (!preserveEditing) {
+        state.editingComparisonId = '';
+        updateCommitComparisonButton();
+      }
       state.base = row;
       el.baseCode.value = row.cod_proveedor || '';
       el.baseArticle.value = row.articulo || '';
@@ -1982,8 +2230,392 @@
     }
     function copyToSlot(row) {
       if (!row) return;
-      state.slots.push({ ...row, pickedAt: Date.now() });
+      const providerId = String(row.id_proveedor || row.idProveedor || '').trim();
+      const providerName = normalize(row.proveedor || '');
+      const sameProvider = (item) => {
+        const itemId = String(item?.id_proveedor || item?.idProveedor || '').trim();
+        return providerId && itemId ? providerId === itemId : providerName && providerName === normalize(item?.proveedor || '');
+      };
+      if (state.base && sameProvider(state.base)) {
+        showToast('Ese proveedor ya es el precio inicial.');
+        return;
+      }
+      const existingIndex = state.slots.findIndex(sameProvider);
+      if (existingIndex >= 0) {
+        state.slots[existingIndex] = { ...row, pickedAt: Date.now() };
+        showToast('Se actualizó la comparación de ese proveedor.');
+      } else {
+        state.slots.push({ ...row, pickedAt: Date.now() });
+      }
       renderSlots();
+    }
+
+    const SAVED_COMPARISONS_META_ID = 'comparaciones_guardadas';
+    function comparisonId() {
+      return globalThis.crypto?.randomUUID?.() || `comparacion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    function comparisonDifference(row, basePrice) {
+      const price = Number(row?.precio_costo || 0);
+      return basePrice ? ((price - basePrice) / basePrice) * 100 : 0;
+    }
+    function comparisonProviderLink(row) {
+      return providerLinkForRow(row) || String(row?.pagina_link || row?.pagina || row?.web || '').trim();
+    }
+    function savedComparisonEntry(row, basePrice, isBase = false) {
+      const source = { ...(row || {}) };
+      source.precio_costo = Number(source.precio_costo || 0);
+      return {
+        isBase,
+        provider: String(source.proveedor || '').trim(),
+        providerId: String(source.id_proveedor || source.idProveedor || '').trim(),
+        providerCode: String(source.cod_proveedor || '').trim(),
+        providerArticle: String(source.articulo || '').trim(),
+        price: source.precio_costo,
+        differencePct: isBase ? 0 : comparisonDifference(source, basePrice),
+        providerLink: comparisonProviderLink(source),
+        row: source
+      };
+    }
+    async function persistSavedComparisons() {
+      await idbSet('meta', {
+        id: SAVED_COMPARISONS_META_ID,
+        records: state.savedComparisons,
+        editingId: state.editingComparisonId || '',
+        updatedAt: new Date().toISOString()
+      });
+    }
+    async function loadSavedComparisons() {
+      const saved = await idbGet('meta', SAVED_COMPARISONS_META_ID).catch(() => null);
+      state.savedComparisons = Array.isArray(saved?.records) ? saved.records : [];
+      state.editingComparisonId = String(saved?.editingId || '');
+      renderComparisonRegister();
+      updateCommitComparisonButton();
+    }
+    function updateCommitComparisonButton() {
+      el.commitComparisonBtn.textContent = state.editingComparisonId ? 'Actualizar comparación' : 'Enviar al comparador';
+    }
+    function clearComparisonWorkbench() {
+      state.base = null;
+      state.slots = [];
+      state.editingComparisonId = '';
+      el.baseCode.value = '';
+      el.baseArticle.value = '';
+      el.basePrice.value = '';
+      el.baseProvider.value = '';
+      renderSlots();
+      updateCommitComparisonButton();
+    }
+    async function commitComparison() {
+      if (!state.base || !String(el.baseArticle.value || '').trim()) {
+        showToast('Elegí primero el artículo base.');
+        return;
+      }
+      if (!state.slots.length) {
+        showToast('Agregá al menos un proveedor para comparar.');
+        return;
+      }
+      const basePrice = parseMoney(el.basePrice.value) || Number(state.base.precio_costo || 0);
+      if (!basePrice) {
+        showToast('El precio inicial no puede estar vacío.');
+        return;
+      }
+      const now = new Date().toISOString();
+      const prior = state.savedComparisons.find((item) => item.id === state.editingComparisonId);
+      const baseRow = {
+        ...state.base,
+        cod_proveedor: el.baseCode.value,
+        articulo: el.baseArticle.value,
+        precio_costo: basePrice,
+        proveedor: el.baseProvider.value
+      };
+      const record = {
+        id: prior?.id || comparisonId(),
+        article: String(el.baseArticle.value || state.base.articulo || '').trim(),
+        base: savedComparisonEntry(baseRow, basePrice, true),
+        comparisons: state.slots.map((row) => savedComparisonEntry(row, basePrice, false)),
+        createdAt: prior?.createdAt || now,
+        updatedAt: now
+      };
+      const index = state.savedComparisons.findIndex((item) => item.id === record.id);
+      if (index >= 0) state.savedComparisons[index] = record;
+      else state.savedComparisons.unshift(record);
+      clearComparisonWorkbench();
+      await persistSavedComparisons();
+      renderComparisonRegister();
+      openComparisonRegister();
+      showToast(index >= 0 ? 'Comparación actualizada.' : 'Comparación guardada.');
+    }
+    function formatComparisonDiff(value) {
+      const number = Number(value || 0);
+      const prefix = number > 0 ? '+' : '';
+      return `${prefix}${number.toFixed(2).replace('.', ',')} %`;
+    }
+    function savedProviderKey(entry) {
+      const name = normalize(entry?.provider || entry?.row?.proveedor || '');
+      if (name) return `name:${name}`;
+      const id = String(entry?.providerId || entry?.row?.id_proveedor || entry?.row?.idProveedor || '').trim();
+      return id ? `id:${id}` : '';
+    }
+    function savedProviderColumns() {
+      const columns = [];
+      const knownProviders = new Set();
+      state.savedComparisons.forEach((record) => {
+        (record.comparisons || []).filter(Boolean).forEach((entry) => {
+          const key = savedProviderKey(entry);
+          if (!key || knownProviders.has(key)) return;
+          knownProviders.add(key);
+          columns.push({ key, label: String(entry.provider || entry.row?.proveedor || 'Sin proveedor').trim() });
+        });
+      });
+      return columns;
+    }
+    function savedEntriesByProvider(record) {
+      return new Map((record.comparisons || []).filter(Boolean).map((entry, entryIndex) => [savedProviderKey(entry), { entry, entryIndex: entryIndex + 1 }]));
+    }
+    function savedComparisonCellHtml(record, entry, entryIndex) {
+      if (!entry) return '<div class="comparison-provider-cell is-empty" aria-hidden="true"></div>';
+      const diff = Number(entry.differencePct || 0);
+      return `<div class="comparison-provider-cell ${entry.isBase ? 'is-base' : ''}" data-saved-record="${escapeHtml(record.id)}" data-saved-entry="${entryIndex}" title="Clic derecho para ver opciones">
+        <div class="comparison-provider-name" title="${escapeHtml(entry.provider || '')}">${escapeHtml(entry.provider || 'Sin proveedor')}</div>
+        <div class="comparison-provider-price">${formatMoney(entry.price)}</div>
+        <div class="comparison-provider-diff ${diff >= 0 ? 'positive' : 'negative'}">${entry.isBase ? 'Precio inicial' : formatComparisonDiff(diff)}</div>
+      </div>`;
+    }
+    function renderComparisonRegister() {
+      if (!state.savedComparisons.length) {
+        el.comparisonRegisterList.innerHTML = '<div class="comparison-register-empty">Todavía no hay comparaciones guardadas.</div>';
+        return;
+      }
+      const providerColumns = savedProviderColumns();
+      el.comparisonRegisterList.innerHTML = state.savedComparisons.map((record) => {
+        const entriesByProvider = savedEntriesByProvider(record);
+        const baseCell = savedComparisonCellHtml(record, record.base, 0);
+        const cells = providerColumns.map((providerColumn) => {
+          const match = entriesByProvider.get(providerColumn.key);
+          if (!match) return '<div class="comparison-provider-cell is-empty" aria-hidden="true"></div>';
+          const { entry, entryIndex } = match;
+          return savedComparisonCellHtml(record, entry, entryIndex);
+        }).join('');
+        return `<div class="comparison-record" style="--provider-count:${providerColumns.length + 1}">
+          <div class="comparison-record-article" title="${escapeHtml(record.article || '')}">
+            <span class="comparison-record-article-text">${escapeHtml(record.article || '')}</span>
+            <button class="comparison-record-delete" type="button" data-delete-saved-record="${escapeHtml(record.id)}" title="Eliminar comparación" aria-label="Eliminar comparación">×</button>
+          </div>${baseCell}${cells}
+        </div>`;
+      }).join('');
+    }
+    async function deleteSavedComparison(recordId) {
+      const record = state.savedComparisons.find((item) => item.id === recordId);
+      if (!record) return;
+      if (!window.confirm(`¿Eliminar la comparación de "${record.article || 'este artículo'}"?`)) return;
+      state.savedComparisons = state.savedComparisons.filter((item) => item.id !== recordId);
+      if (state.editingComparisonId === recordId) {
+        state.editingComparisonId = '';
+        updateCommitComparisonButton();
+      }
+      await persistSavedComparisons();
+      renderComparisonRegister();
+      showToast('Comparación eliminada.');
+    }
+    function openComparisonExport() {
+      if (!state.savedComparisons.length) {
+        showToast('No hay comparaciones para exportar.');
+        return;
+      }
+      el.comparisonExportBackdrop.classList.add('visible');
+    }
+    function closeComparisonExport() {
+      el.comparisonExportBackdrop.classList.remove('visible');
+    }
+    function comparisonExportFilename(extension) {
+      const date = new Date().toISOString().slice(0, 10);
+      return `comparador-precios-${date}.${extension}`;
+    }
+    function exportSavedComparisonsExcel() {
+      if (!window.XLSX) throw new Error('No se pudo cargar el exportador de Excel.');
+      const providers = savedProviderColumns();
+      const rows = [];
+      const merges = [];
+      state.savedComparisons.forEach((record) => {
+        const start = rows.length;
+        const entries = savedEntriesByProvider(record);
+        rows.push([record.article || '', record.base?.provider || '', ...providers.map((provider) => entries.get(provider.key)?.entry?.provider || '')]);
+        rows.push(['', Number(record.base?.price || 0), ...providers.map((provider) => {
+          const entry = entries.get(provider.key)?.entry;
+          return entry ? Number(entry.price || 0) : '';
+        })]);
+        rows.push(['', 'Precio inicial', ...providers.map((provider) => {
+          const entry = entries.get(provider.key)?.entry;
+          if (!entry) return '';
+          return Number(entry.differencePct || 0) / 100;
+        })]);
+        merges.push({ s: { r: start, c: 0 }, e: { r: start + 2, c: 0 } });
+      });
+      const sheet = XLSX.utils.aoa_to_sheet(rows);
+      sheet['!merges'] = merges;
+      sheet['!cols'] = [{ wch: 38 }, { wch: 24 }, ...providers.map(() => ({ wch: 24 }))];
+      state.savedComparisons.forEach((record, recordIndex) => {
+        const priceRow = recordIndex * 3 + 1;
+        const diffRow = recordIndex * 3 + 2;
+        Array.from({ length: providers.length + 1 }).forEach((unused, providerIndex) => {
+          const column = providerIndex + 1;
+          const priceCell = sheet[XLSX.utils.encode_cell({ r: priceRow, c: column })];
+          if (priceCell && priceCell.t === 'n') priceCell.z = '$ #,##0.00';
+          const diffCell = sheet[XLSX.utils.encode_cell({ r: diffRow, c: column })];
+          if (diffCell && diffCell.t === 'n') diffCell.z = '+0.00%;-0.00%;0.00%';
+        });
+      });
+      const book = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(book, sheet, 'Comparador');
+      XLSX.writeFile(book, comparisonExportFilename('xlsx'));
+      closeComparisonExport();
+      showToast('Comparador exportado a Excel.');
+    }
+    function pdfFitText(doc, text, maxWidth) {
+      const value = String(text || '');
+      if (doc.getTextWidth(value) <= maxWidth) return value;
+      let shortened = value;
+      while (shortened.length > 2 && doc.getTextWidth(`${shortened}…`) > maxWidth) shortened = shortened.slice(0, -1);
+      return `${shortened}…`;
+    }
+    function exportSavedComparisonsPdf() {
+      const JsPdf = window.jspdf?.jsPDF;
+      if (!JsPdf) throw new Error('No se pudo cargar el exportador de PDF.');
+      const providers = savedProviderColumns();
+      const doc = new JsPdf({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 8;
+      const articleWidth = 48;
+      const minProviderWidth = 28;
+      const maxProviders = Math.max(1, Math.floor((pageWidth - margin * 2 - articleWidth) / minProviderWidth) - 1);
+      const groups = [];
+      for (let i = 0; i < providers.length; i += maxProviders) groups.push(providers.slice(i, i + maxProviders));
+      if (!groups.length) groups.push([]);
+      const rowHeight = 7;
+      const blockHeight = rowHeight * 3;
+      const drawHeader = (groupIndex) => {
+        doc.setTextColor(20, 20, 20);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(15);
+        doc.text('Comparador de precios', margin, 10);
+        if (groups.length > 1) {
+          doc.setFontSize(8);
+          doc.setTextColor(105, 105, 105);
+          doc.text(`Proveedores ${groupIndex + 1} de ${groups.length}`, pageWidth - margin, 10, { align: 'right' });
+        }
+        return 15;
+      };
+      groups.forEach((providerGroup, groupIndex) => {
+        if (groupIndex > 0) doc.addPage('a4', 'landscape');
+        let y = drawHeader(groupIndex);
+        const providerWidth = (pageWidth - margin * 2 - articleWidth) / (providerGroup.length + 1);
+        state.savedComparisons.forEach((record) => {
+          if (y + blockHeight > pageHeight - margin) {
+            doc.addPage('a4', 'landscape');
+            y = drawHeader(groupIndex);
+          }
+          const entries = savedEntriesByProvider(record);
+          doc.setDrawColor(205, 205, 205);
+          doc.setFillColor(242, 242, 240);
+          doc.rect(margin, y, articleWidth, blockHeight, 'FD');
+          doc.setTextColor(20, 20, 20);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          const articleLines = doc.splitTextToSize(String(record.article || ''), articleWidth - 5).slice(0, 3);
+          doc.text(articleLines, margin + 2.5, y + blockHeight / 2 - ((articleLines.length - 1) * 2), { baseline: 'middle' });
+          const exportEntries = [{ entry: record.base, provider: { label: record.base?.provider || 'Sin proveedor' } }, ...providerGroup.map((provider) => ({ entry: entries.get(provider.key)?.entry, provider }))];
+          exportEntries.forEach(({ entry, provider }, providerIndex) => {
+            const x = margin + articleWidth + providerIndex * providerWidth;
+            if (!entry) {
+              doc.setFillColor(247, 247, 245);
+              doc.rect(x, y, providerWidth, blockHeight, 'FD');
+              return;
+            }
+            const values = [entry.provider || provider.label, formatMoney(entry.price), entry.isBase ? 'Precio inicial' : formatComparisonDiff(entry.differencePct)];
+            values.forEach((value, rowIndex) => {
+              doc.setFillColor(rowIndex === 0 ? 236 : rowIndex === 2 ? 248 : 255, rowIndex === 0 ? 236 : rowIndex === 2 ? 248 : 255, rowIndex === 0 ? 234 : rowIndex === 2 ? 246 : 255);
+              doc.rect(x, y + rowIndex * rowHeight, providerWidth, rowHeight, 'FD');
+              if (rowIndex === 2 && !entry.isBase) {
+                const positive = Number(entry.differencePct || 0) >= 0;
+                doc.setTextColor(...(positive ? [220, 20, 28] : [0, 125, 70]));
+              } else {
+                doc.setTextColor(rowIndex === 2 ? 100 : 20, rowIndex === 2 ? 100 : 20, rowIndex === 2 ? 100 : 20);
+              }
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(rowIndex === 0 ? 6.5 : 7.5);
+              doc.text(pdfFitText(doc, value, providerWidth - 3), x + providerWidth / 2, y + rowIndex * rowHeight + 4.6, { align: 'center' });
+            });
+          });
+          y += blockHeight + 2;
+        });
+      });
+      doc.save(comparisonExportFilename('pdf'));
+      closeComparisonExport();
+      showToast('Comparador exportado a PDF.');
+    }
+    function openComparisonRegister() {
+      hideSavedComparisonContextMenu();
+      renderComparisonRegister();
+      el.comparisonRegisterBackdrop.classList.add('visible');
+    }
+    function closeComparisonRegister() {
+      hideSavedComparisonContextMenu();
+      el.comparisonRegisterBackdrop.classList.remove('visible');
+    }
+    function savedComparisonSelection() {
+      const context = state.savedComparisonContext;
+      const record = state.savedComparisons.find((item) => item.id === context?.recordId);
+      if (!record) return null;
+      const entries = [record.base, ...(record.comparisons || [])].filter(Boolean);
+      const entry = entries[Number(context.entryIndex)];
+      return entry ? { record, entry } : null;
+    }
+    function showSavedComparisonContextMenu(event, cell) {
+      state.savedComparisonContext = { recordId: cell.dataset.savedRecord, entryIndex: Number(cell.dataset.savedEntry) };
+      const menu = el.comparisonRegisterContextMenu;
+      menu.classList.add('visible');
+      const width = menu.offsetWidth || 180;
+      const height = menu.offsetHeight || 70;
+      menu.style.left = `${Math.min(event.clientX, window.innerWidth - width - 8)}px`;
+      menu.style.top = `${Math.min(event.clientY, window.innerHeight - height - 8)}px`;
+    }
+    function hideSavedComparisonContextMenu() {
+      el.comparisonRegisterContextMenu.classList.remove('visible');
+    }
+    function openSavedComparisonDetail() {
+      const selected = savedComparisonSelection();
+      hideSavedComparisonContextMenu();
+      if (!selected) return;
+      const { entry } = selected;
+      state.savedComparisonDetail = entry;
+      el.comparisonDetailProvider.textContent = entry.provider || 'Sin proveedor';
+      el.comparisonDetailProvider.classList.toggle('has-link', Boolean(entry.providerLink));
+      el.comparisonDetailProvider.title = entry.providerLink ? 'Doble clic para abrir la página' : '';
+      el.comparisonDetailCode.textContent = entry.providerCode || '—';
+      el.comparisonDetailArticle.textContent = entry.providerArticle || '—';
+      el.comparisonDetailPrice.textContent = formatMoney(entry.price);
+      el.comparisonDetailDiff.textContent = entry.isBase ? 'Precio inicial' : formatComparisonDiff(entry.differencePct);
+      el.comparisonDetailBackdrop.classList.add('visible');
+    }
+    function closeSavedComparisonDetail() {
+      state.savedComparisonDetail = null;
+      el.comparisonDetailBackdrop.classList.remove('visible');
+    }
+    async function resumeSavedComparison() {
+      const selected = savedComparisonSelection();
+      hideSavedComparisonContextMenu();
+      if (!selected) return;
+      const { record } = selected;
+      const baseRow = { ...(record.base?.row || {}), precio_costo: Number(record.base?.price || 0) };
+      state.slots = (record.comparisons || []).map((entry) => ({ ...(entry.row || {}), precio_costo: Number(entry.price || 0) }));
+      state.editingComparisonId = record.id;
+      setBase(baseRow, true);
+      updateCommitComparisonButton();
+      await persistSavedComparisons();
+      closeComparisonRegister();
+      document.querySelector('.base-row')?.scrollIntoView({ block: 'nearest' });
+      showToast('Comparación lista para continuar.');
     }
     function calcOriginalPrice(row) {
       return Number(row?.precio_costo_original || row?.precio_costo || 0);
@@ -2878,6 +3510,68 @@
     el.updatesBackdrop.addEventListener('click', (event) => {
       if (event.target === el.updatesBackdrop) closeUpdatesModal();
     });
+    el.commitComparisonBtn.addEventListener('click', () => {
+      commitComparison().catch((error) => {
+        console.error(error);
+        showToast('No pude guardar la comparación.');
+      });
+    });
+    el.openComparisonRegisterBtn.addEventListener('click', openComparisonRegister);
+    el.closeComparisonRegisterBtn.addEventListener('click', closeComparisonRegister);
+    el.exportComparisonBtn.addEventListener('click', openComparisonExport);
+    el.closeComparisonExportBtn.addEventListener('click', closeComparisonExport);
+    el.exportComparisonExcelBtn.addEventListener('click', () => {
+      try {
+        exportSavedComparisonsExcel();
+      } catch (error) {
+        console.error(error);
+        showToast(error.message || 'No pude exportar a Excel.');
+      }
+    });
+    el.exportComparisonPdfBtn.addEventListener('click', () => {
+      try {
+        exportSavedComparisonsPdf();
+      } catch (error) {
+        console.error(error);
+        showToast(error.message || 'No pude exportar a PDF.');
+      }
+    });
+    el.comparisonRegisterList.addEventListener('click', (event) => {
+      const deleteButton = event.target.closest('[data-delete-saved-record]');
+      if (!deleteButton) return;
+      event.preventDefault();
+      event.stopPropagation();
+      deleteSavedComparison(deleteButton.dataset.deleteSavedRecord).catch((error) => {
+        console.error(error);
+        showToast('No pude eliminar la comparación.');
+      });
+    });
+    el.comparisonRegisterList.addEventListener('contextmenu', (event) => {
+      const cell = event.target.closest('[data-saved-record][data-saved-entry]');
+      if (!cell) return;
+      event.preventDefault();
+      event.stopPropagation();
+      showSavedComparisonContextMenu(event, cell);
+    });
+    el.comparisonRegisterContextMenu.addEventListener('mousedown', (event) => event.stopPropagation());
+    el.expandSavedComparisonBtn.addEventListener('click', openSavedComparisonDetail);
+    el.resumeSavedComparisonBtn.addEventListener('click', () => {
+      resumeSavedComparison().catch((error) => {
+        console.error(error);
+        showToast('No pude retomar la comparación.');
+      });
+    });
+    el.closeComparisonDetailBtn.addEventListener('click', closeSavedComparisonDetail);
+    el.comparisonDetailProvider.addEventListener('dblclick', () => {
+      const url = providerUrl(state.savedComparisonDetail?.providerLink);
+      if (url) window.open(url, '_blank', 'noopener');
+    });
+    el.sendSavedComparisonMissingBtn.addEventListener('click', () => {
+      const entry = state.savedComparisonDetail;
+      if (!entry?.row) return;
+      closeSavedComparisonDetail();
+      openMissingBranchPicker(priceListRowToMissing({ ...entry.row, precio_costo: Number(entry.price || 0) }));
+    });
     document.getElementById('importBtn').addEventListener('click', () => importFromCloud().catch((error) => showToast(error.message)));
     window.addEventListener('message', (event) => {
       if (event.origin !== window.location.origin && event.origin !== 'null') return;
@@ -3073,6 +3767,7 @@
     document.addEventListener('click', (event) => {
       if (!event.target.closest('#rowContextMenu')) hideRowContextMenu();
       if (!event.target.closest('#slotContextMenu')) hideSlotContextMenu();
+      if (!event.target.closest('#comparisonRegisterContextMenu')) hideSavedComparisonContextMenu();
     });
     document.addEventListener('keydown', (event) => {
       const key = String(event.key || '').toLowerCase();
@@ -3085,6 +3780,10 @@
       if (event.key === 'Escape') {
         hideRowContextMenu();
         hideSlotContextMenu();
+        hideSavedComparisonContextMenu();
+        if (el.comparisonExportBackdrop.classList.contains('visible')) closeComparisonExport();
+        else if (el.comparisonDetailBackdrop.classList.contains('visible')) closeSavedComparisonDetail();
+        else if (el.comparisonRegisterBackdrop.classList.contains('visible')) closeComparisonRegister();
         closeUpdatesModal();
       }
     });
@@ -3197,6 +3896,7 @@
         setLoadingProgress(3);
         setLoadingDetail('Abriendo base local');
         state.db = await openDb();
+        await loadSavedComparisons();
         initListasColumnResize();
         initListasTableNavigation();
         syncResponsiveScale();
