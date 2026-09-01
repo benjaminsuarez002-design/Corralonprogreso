@@ -1505,7 +1505,7 @@
     #diffModal .diff-modal{flex:0 0 auto;width:125vw;height:125dvh;min-width:0;min-height:0;max-width:none;max-height:none;zoom:1;transform:scale(.8);transform-origin:top left;resize:none;border:0;border-radius:0;box-shadow:none}
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
-<script src="corralon-system.js?v=1.0.12"></script>
+<script src="corralon-system.js?v=1.0.13"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -2873,7 +2873,9 @@
       const usesTable = usesSupabaseCaja();
       return {
         cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
-        transfers: (source.transfers || []).map((row) => JSON.parse(JSON.stringify(row))),
+        transfers: (source.transfers || [])
+          .filter((row) => !isBlankManualTransfer(row))
+          .map((row) => JSON.parse(JSON.stringify(row))),
         systemRows: usesTable ? [] : manualSystemRows(source.system || []).map((row) => JSON.parse(JSON.stringify(row))),
         systemMergeGroups: usesTable ? [] : normalizeSystemMergeGroups(systemMergeGroups),
         cashMovementBranches: cashMovementBranchOverrides(source),
@@ -3183,7 +3185,7 @@
       rememberBranchMovements();
       return {
         cash: state.cash,
-        transfers: state.transfers,
+        transfers: state.transfers.filter((row) => !isBlankManualTransfer(row)),
         system: state.system.filter((row) => !isBlankManualSystemRow(row)),
         systemMergeGroups,
         summaryManual: state.summaryManual,
@@ -3199,7 +3201,7 @@
       rememberBranchMovements();
       return {
         cash: state.cash,
-        transfers: state.transfers,
+        transfers: state.transfers.filter((row) => !isBlankManualTransfer(row)),
         system: state.system.filter((row) => !isBlankManualSystemRow(row)),
         systemMergeGroups,
         movements: state.movements,
@@ -3671,7 +3673,10 @@
       const branchId = selectedCajaBranchId();
       return state.system
         .map((row, index) => ({ row, index }))
-        .filter(({ row }) => !branchId || branchId === CAJA_ALL_BRANCHES_ID || systemInvoiceBranchId(row) === branchId);
+        .filter(({ row }) => {
+          const rowBranchId = systemInvoiceBranchId(row);
+          return !branchId || branchId === CAJA_ALL_BRANCHES_ID || !rowBranchId || rowBranchId === branchId;
+        });
     }
 
     function visibleSystemRows() {
@@ -4944,9 +4949,17 @@
       return false;
     }
 
-    function handleSystemQuickAdd(event) {
-      if (event.key !== '+') return false;
+    function handleTransferQuickAdd(event) {
+      const isQuickAdd = (event.ctrlKey || event.metaKey)
+        && (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd');
+      if (!isQuickAdd || el.diffModal.classList.contains('open')) return false;
+      const transferSubform = el.transferRows.closest('.subform');
       const systemSubform = el.systemRows.closest('.subform');
+      if (transferSubform?.contains(event.target)) {
+        event.preventDefault();
+        addManualTransferRow();
+        return true;
+      }
       if (!systemSubform?.contains(event.target)) return false;
       event.preventDefault();
       addManualSystemRow();
@@ -7024,7 +7037,7 @@
       }
       if (event.key === 'Escape' && el.movementSeparateModal.classList.contains('open')) closeMovementSeparateModal();
       if (handleDiffModalKey(event)) return;
-      if (handleSystemQuickAdd(event)) return;
+      if (handleTransferQuickAdd(event)) return;
       if ((event.key === 'Delete' || event.key === 'Del' || event.key === 'Supr') && selectedSystemRows.size && el.systemRows.contains(event.target)) {
         event.preventDefault();
         deleteSelectedSystemRows();

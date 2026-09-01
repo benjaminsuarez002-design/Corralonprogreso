@@ -4129,7 +4129,21 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.9"></script>
+<script>
+window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
+  try {
+    const sessionUser = JSON.parse(sessionStorage.getItem('corralon_menu_active_user_session_v1') || 'null');
+    if (sessionUser?.id) return true;
+    const keepLogged = localStorage.getItem('historial_keep_logged_v1') === '1';
+    const activeId = String(localStorage.getItem('corralon_menu_active_user_v1') || '').trim();
+    return keepLogged && !!activeId;
+  } catch (_) {
+    return false;
+  }
+})();
+window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
+</script>
+<script src="corralon-system.js?v=1.0.10"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4187,6 +4201,9 @@ onSnapshot(doc(db, 'config', HOME_LANDING_DOC_ID), snap => {
   if (homeLandingFingerprintActiva === nextFingerprint) return;
   homeLandingConfig = nextConfig;
   homeLandingFingerprintActiva = nextFingerprint;
+  if (window.CORRALON_INDEX_MENU_SESSION_ACTIVE === false && !terminoBaseBusquedaPublica) {
+    cargarPortadaCatalogoPublico().catch((error) => console.warn('No se pudo actualizar la portada pública', error));
+  }
 }, () => {});
 
 const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
@@ -4196,6 +4213,7 @@ const NUMERACION_SUCURSAL = '0001';
 const PRESUPUESTOS_TABLE = 'presupuestos_web';
 const HISTORIAL_NOTIFS_COLLECTION = 'historialNotificaciones';
 const LISTA_ARTICULOS_CACHE_KEY = 'corralon_index_lista_articulos_cache_v1';
+const INDEX_MENU_SESSION_ACTIVE = window.CORRALON_INDEX_MENU_SESSION_ACTIVE === true;
 const INDEX_ENLACE_COMPARTIDO = (() => {
   const params = new URLSearchParams(location.search);
   return params.has('articulo') || params.has('prodeRef') || location.hash === '#prode' || location.hash === '#adescontar';
@@ -4326,6 +4344,10 @@ let listaCacheUrlActiva = '';
 let listaCacheServerSignatureActiva = '';
 let unsubscribeListaActual = null;
 let catalogoCambioVersionEscuchada = null;
+let articulosPortadaPublica = [];
+let terminoBaseBusquedaPublica = '';
+let solicitudBusquedaPublica = 0;
+const cacheBusquedaPublica = new Map();
 try {
   vistaActiva = localStorage.getItem('vistaArticulos') === 'lista' ? 'lista' : 'cards';
 } catch (e) {}
@@ -4599,6 +4621,104 @@ function codigosPrioritariosCatalogoInicio() {
     ...(sections.masVendido || []),
     ...(sections.oferta || [])
   ].map((codigo) => String(codigo || '').trim()).filter(Boolean))];
+}
+
+async function consultarCatalogoPublicoReducido({ termino = '', codigos = [], portada = false, limite = 400 } = {}) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/buscar_catalogo_publico_reducido`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'apikey': SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      p_termino: String(termino || '').trim(),
+      p_codigos: [...new Set((codigos || []).map((codigo) => String(codigo || '').trim()).filter(Boolean))],
+      p_portada: !!portada,
+      p_limite: Number(limite || 400)
+    })
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || 'No se pudo consultar el catálogo público');
+  }
+  const rows = await response.json();
+  const fromSupabase = window.CorralonSystem?.catalog?.fromSupabase;
+  return (Array.isArray(rows) ? rows : []).map((row) => typeof fromSupabase === 'function' ? fromSupabase(row) : row);
+}
+
+function reemplazarCatalogoPublico(rows, firma = '') {
+  const loader = document.getElementById('loadingOverlay');
+  todosArticulos = prepararArticulosParaVista(Array.isArray(rows) ? rows : []);
+  listaCacheUrlActiva = 'supabase://buscar_catalogo_publico_reducido';
+  listaCacheFingerprintActiva = `publico|${firma}`;
+  listaCacheServerSignatureActiva = `publico|${firma}`;
+  actualizarVistaEtiqueta();
+  const debeMantenerPortada = !terminoBaseBusquedaPublica
+    && !!document.getElementById('searchInput')?.value.trim()
+    && !MODO_ACCESO_RAPIDO
+    && !MODO_A_DESCONTAR
+    && !chipActivo;
+  if (debeMantenerPortada) renderHomeLanding();
+  else aplicarBusquedaActual();
+  abrirArticuloCompartidoSiCorresponde();
+  if (loader) loader.style.display = 'none';
+}
+
+async function cargarPortadaCatalogoPublico() {
+  const requestId = ++solicitudBusquedaPublica;
+  const rows = await consultarCatalogoPublicoReducido({
+    codigos: codigosPrioritariosCatalogoInicio(),
+    portada: true,
+    limite: 240
+  });
+  if (requestId !== solicitudBusquedaPublica || terminoBaseBusquedaPublica) return;
+  articulosPortadaPublica = rows;
+  reemplazarCatalogoPublico(rows, 'portada');
+}
+
+function primeraPalabraBusquedaPublica(value) {
+  return String(value || '').trim().split(/\s+/)[0] || '';
+}
+
+function restaurarPortadaCatalogoPublico() {
+  ++solicitudBusquedaPublica;
+  terminoBaseBusquedaPublica = '';
+  reemplazarCatalogoPublico(articulosPortadaPublica, 'portada');
+}
+
+async function confirmarPrimeraPalabraPublica({ enfocarResultado = false } = {}) {
+  const termino = primeraPalabraBusquedaPublica(searchInput.value);
+  if (!termino) {
+    restaurarPortadaCatalogoPublico();
+    return;
+  }
+  const clave = normalizarTexto(termino);
+  if (!clave) return;
+  if (terminoBaseBusquedaPublica === clave) {
+    aplicarBusquedaActual();
+    if (enfocarResultado) enfocarPrimerResultado();
+    return;
+  }
+
+  const requestId = ++solicitudBusquedaPublica;
+  terminoBaseBusquedaPublica = clave;
+  try {
+    let rows = cacheBusquedaPublica.get(clave);
+    if (!rows) {
+      rows = await consultarCatalogoPublicoReducido({ termino, limite: 600 });
+      cacheBusquedaPublica.set(clave, rows);
+    }
+    if (requestId !== solicitudBusquedaPublica || terminoBaseBusquedaPublica !== clave) return;
+    reemplazarCatalogoPublico(rows, `busqueda|${clave}`);
+    if (searchInput.value.trim()) guardarBusquedaReciente(searchInput.value);
+    if (enfocarResultado) enfocarPrimerResultado();
+  } catch (error) {
+    if (requestId !== solicitudBusquedaPublica) return;
+    terminoBaseBusquedaPublica = '';
+    console.error(error);
+    restaurarPortadaCatalogoPublico();
+  }
 }
 
 async function cargarListaConMetadatos(baseUrl, metaSnapPreparado = null, options = {}) {
@@ -6280,6 +6400,16 @@ async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false, c
 async function iniciarCargaListaArticulos() {
   const loader = document.getElementById('loadingOverlay');
   if (loader) loader.style.display = 'flex';
+  if (!INDEX_MENU_SESSION_ACTIVE) {
+    try {
+      await cargarPortadaCatalogoPublico();
+    } catch (error) {
+      console.error(error);
+      document.getElementById('scrollBody').innerHTML = `<div class="empty-state"><div class="icon">!</div><p style="font-size:13px;color:#e50000">No se pudo cargar la portada</p></div>`;
+      if (loader) loader.style.display = 'none';
+    }
+    return;
+  }
   try {
     const cargaPreparada = await cargarListaConMetadatos('', null, { progressive: true });
     const initialRows = Array.isArray(cargaPreparada?.initialRows) ? cargaPreparada.initialRows : [];
@@ -7293,7 +7423,8 @@ function aplicarValorBusqueda(valor, guardar = true) {
   input.value = valor;
   if (guardar) guardarBusquedaReciente(valor);
   rubroActivo = '';
-  aplicarBusquedaActual();
+  if (INDEX_MENU_SESSION_ACTIVE) aplicarBusquedaActual();
+  else confirmarPrimeraPalabraPublica();
   scrollMainToTop();
   ocultarAsistenteBusqueda();
 }
@@ -7612,7 +7743,7 @@ searchWrap.addEventListener('focusout', () => {
     }
   });
 });
-searchInput.addEventListener('keydown', (e) => {
+searchInput.addEventListener('keydown', async (e) => {
   if (e.key === 'ArrowDown') {
     if (obtenerElementosResultado().length) {
       e.preventDefault();
@@ -7627,10 +7758,14 @@ searchInput.addEventListener('keydown', (e) => {
     }
   } else if (e.key === 'Enter') {
     e.preventDefault();
-    if (searchInput.value.trim()) guardarBusquedaReciente(searchInput.value);
-    aplicarBusquedaActual();
+    if (INDEX_MENU_SESSION_ACTIVE) {
+      if (searchInput.value.trim()) guardarBusquedaReciente(searchInput.value);
+      aplicarBusquedaActual();
+    } else {
+      await confirmarPrimeraPalabraPublica({ enfocarResultado: true });
+    }
     ocultarAsistenteBusqueda();
-    enfocarPrimerResultado();
+    if (INDEX_MENU_SESSION_ACTIVE) enfocarPrimerResultado();
   } else if (e.key === 'Escape') {
     ocultarAsistenteBusqueda();
   }
@@ -7639,6 +7774,23 @@ searchInput.addEventListener('input', e => {
   clearTimeout(debounce);
   debounce = setTimeout(() => {
     rubroActivo = '';
+    if (!INDEX_MENU_SESSION_ACTIVE) {
+      const valor = searchInput.value;
+      const terminoActual = normalizarTexto(primeraPalabraBusquedaPublica(valor));
+      if (!valor.trim()) {
+        restaurarPortadaCatalogoPublico();
+      } else if (terminoBaseBusquedaPublica && terminoActual === terminoBaseBusquedaPublica) {
+        aplicarBusquedaActual();
+      } else {
+        if (terminoBaseBusquedaPublica) restaurarPortadaCatalogoPublico();
+        if (/^\s*\S+\s/.test(valor)) confirmarPrimeraPalabraPublica();
+        else renderHomeLanding();
+      }
+      if (document.activeElement === searchInput && searchInput.value.trim()) mostrarAsistenteBusqueda();
+      else ocultarAsistenteBusqueda();
+      scrollMainToTop();
+      return;
+    }
     aplicarBusquedaActual();
     if (document.activeElement === searchInput && searchInput.value.trim()) mostrarAsistenteBusqueda();
     else ocultarAsistenteBusqueda();
@@ -9429,6 +9581,7 @@ window.addEventListener('corralon:catalog-delta', aplicarDeltaCatalogoEnPantalla
 window.addEventListener('corralon:catalog-ready', aplicarCatalogoCompletoEnPantalla);
 
 function iniciarActualizacionIncrementalCatalogo() {
+  if (!INDEX_MENU_SESSION_ACTIVE) return;
   window.CorralonSystem?.catalogRealtime?.start?.();
 }
 

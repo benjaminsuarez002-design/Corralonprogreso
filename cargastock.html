@@ -7,7 +7,7 @@
   <link rel="icon" type="image/x-icon" href="https://tizyjenayrcdkcodsjnc.supabase.co/storage/v1/object/public/Archivos/icono-corralon-Photoroom.ico">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.8"></script>
+<script src="corralon-system.js?v=1.0.9"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -522,7 +522,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const CACHE_KEY = 'corralon_carga_stock_rows_v1';
 const PROVIDER_KEY = 'corralon_carga_stock_provider_v1';
-const INDEX_CODES_CACHE_KEY = 'corralon_carga_stock_index_code_providers_v2';
+const INDEX_CODES_CACHE_KEY = 'corralon_carga_stock_index_code_providers_v3';
 const PRICE_COMPARATOR_CACHE_KEY = 'corralon_carga_stock_price_comparator_v1';
 const PRICE_COMPARATOR_LAST_PROVIDER_KEY = 'corralon_carga_stock_price_comparator_last_provider_v1';
 
@@ -544,6 +544,12 @@ let indexCodeProviders = new Map();
 let indexCodeMatchCounts = new Map();
 let indexCodeDescriptions = new Map();
 let indexCatalogRows = [];
+let indexArticleContributions = new Map();
+let indexCodeProviderRefCounts = new Map();
+let indexCatalogRowPositions = new Map();
+let indexCodesLoading = false;
+let indexCodesCacheVersion = 0;
+let indexCodesCachePatchVersion = 0;
 const indexCodeRepairsAttempted = new Set();
 let compareSystemRows = [];
 let comparePairs = [];
@@ -2934,14 +2940,166 @@ function yieldIndexCodesWork() {
     else setTimeout(resolve, 0);
   });
 }
-async function loadIndexCodes(providedList = null) {
+function indexArticleKey(article = {}) {
+  return codeKey(catalogArticleCode(article));
+}
+function indexArticleContribution(article = {}) {
+  const articleKey = indexArticleKey(article);
+  const providerCodes = [...new Set(articleProviderCodes(article))];
+  const providerKeys = [...new Set(articleProviderIdentityKeys(article))];
+  const description = String(readField(article, [
+    'nombre', 'descripcion', 'descripción', 'detalle',
+    'AArtículos_Descripción', 'articulo', 'Artículo'
+  ]) || '').trim() || '(Sin descripción)';
+  return { articleKey, providerCodes, providerKeys, description };
+}
+function addIndexArticleContribution(article) {
+  const contribution = indexArticleContribution(article);
+  if (!contribution.articleKey) return;
+  indexArticleContributions.set(contribution.articleKey, contribution);
+  contribution.providerCodes.forEach((providerCode) => {
+    indexCodeMatchCounts.set(providerCode, (indexCodeMatchCounts.get(providerCode) || 0) + 1);
+    if (!indexCodeDescriptions.has(providerCode)) indexCodeDescriptions.set(providerCode, []);
+    indexCodeDescriptions.get(providerCode).push(contribution.description);
+    if (!indexCodeProviders.has(providerCode)) indexCodeProviders.set(providerCode, new Set());
+    if (!indexCodeProviderRefCounts.has(providerCode)) indexCodeProviderRefCounts.set(providerCode, new Map());
+    const refs = indexCodeProviderRefCounts.get(providerCode);
+    contribution.providerKeys.forEach((providerKey) => {
+      refs.set(providerKey, (refs.get(providerKey) || 0) + 1);
+      indexCodeProviders.get(providerCode).add(providerKey);
+    });
+  });
+}
+function removeIndexArticleContribution(articleKey) {
+  const contribution = indexArticleContributions.get(codeKey(articleKey));
+  if (!contribution) return;
+  contribution.providerCodes.forEach((providerCode) => {
+    const nextCount = (indexCodeMatchCounts.get(providerCode) || 0) - 1;
+    if (nextCount > 0) indexCodeMatchCounts.set(providerCode, nextCount);
+    else indexCodeMatchCounts.delete(providerCode);
+    const descriptions = indexCodeDescriptions.get(providerCode) || [];
+    const descriptionIndex = descriptions.indexOf(contribution.description);
+    if (descriptionIndex >= 0) descriptions.splice(descriptionIndex, 1);
+    if (descriptions.length) indexCodeDescriptions.set(providerCode, descriptions);
+    else indexCodeDescriptions.delete(providerCode);
+    const refs = indexCodeProviderRefCounts.get(providerCode);
+    const providersForCode = indexCodeProviders.get(providerCode);
+    contribution.providerKeys.forEach((providerKey) => {
+      const nextRefCount = (refs?.get(providerKey) || 0) - 1;
+      if (nextRefCount > 0) refs.set(providerKey, nextRefCount);
+      else {
+        refs?.delete(providerKey);
+        providersForCode?.delete(providerKey);
+      }
+    });
+    if (!refs?.size) indexCodeProviderRefCounts.delete(providerCode);
+    if (!providersForCode?.size) indexCodeProviders.delete(providerCode);
+  });
+  indexArticleContributions.delete(contribution.articleKey);
+}
+function replaceIndexCatalogRow(article) {
+  const articleKey = indexArticleKey(article);
+  if (!articleKey) return;
+  const existingPosition = indexCatalogRowPositions.get(articleKey);
+  if (Number.isInteger(existingPosition)) indexCatalogRows[existingPosition] = article;
+  else {
+    indexCatalogRowPositions.set(articleKey, indexCatalogRows.length);
+    indexCatalogRows.push(article);
+  }
+}
+function removeIndexCatalogRow(articleKey) {
+  const key = codeKey(articleKey);
+  const position = indexCatalogRowPositions.get(key);
+  if (!Number.isInteger(position)) return;
+  const lastPosition = indexCatalogRows.length - 1;
+  const lastRow = indexCatalogRows[lastPosition];
+  if (position !== lastPosition) {
+    indexCatalogRows[position] = lastRow;
+    indexCatalogRowPositions.set(indexArticleKey(lastRow), position);
+  }
+  indexCatalogRows.pop();
+  indexCatalogRowPositions.delete(key);
+}
+function saveIndexCodesCache(generation = indexCodesLoadGeneration) {
+  const save = () => {
+    if (generation !== indexCodesLoadGeneration) return;
+    const payload = {
+      format: 3,
+      version: indexCodesCacheVersion,
+      patchVersion: indexCodesCachePatchVersion,
+      providers: [...indexCodeProviders].map(([key, providerKeys]) => [key, [...providerKeys]]),
+      counts: [...indexCodeMatchCounts],
+      descriptions: [...indexCodeDescriptions],
+      contributions: [...indexArticleContributions],
+      providerRefs: [...indexCodeProviderRefCounts].map(([key, refs]) => [key, [...refs]])
+    };
+    window.CorralonCacheDB.set(INDEX_CODES_CACHE_KEY, payload).then(() => {
+      try { localStorage.removeItem(INDEX_CODES_CACHE_KEY); } catch (_) {}
+    }).catch((error) => console.warn('No se pudo guardar el índice de códigos en IndexedDB', error));
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(save, { timeout: 1500 });
+  else setTimeout(save, 0);
+}
+async function loadIndexCodesCache() {
+  try {
+    const cached = await window.CorralonCacheDB.migrateLocalStorage(INDEX_CODES_CACHE_KEY);
+    if (!cached || cached.format !== 3 || !Array.isArray(cached.providers) || !Array.isArray(cached.contributions)) return false;
+    indexCodeProviders = new Map(cached.providers.map(([key, providerKeys]) => [key, new Set(providerKeys)]));
+    indexCodeMatchCounts = new Map(cached.counts || []);
+    indexCodeDescriptions = new Map(cached.descriptions || []);
+    indexArticleContributions = new Map(cached.contributions || []);
+    indexCodeProviderRefCounts = new Map((cached.providerRefs || []).map(([key, refs]) => [key, new Map(refs)]));
+    indexCodesCacheVersion = Number(cached.version || 0);
+    indexCodesCachePatchVersion = Number(cached.patchVersion || 0);
+    return indexCodeProviders.size > 0 && indexArticleContributions.size > 0;
+  } catch (error) {
+    console.warn('No se pudo abrir el índice local de códigos', error);
+    return false;
+  }
+}
+function applyIndexCodesDelta(changedRows = [], removedCodes = [], meta = {}) {
+  const changed = Array.isArray(changedRows) ? changedRows : [];
+  const removed = Array.isArray(removedCodes) ? removedCodes : [];
+  removed.forEach((articleKey) => {
+    removeIndexArticleContribution(articleKey);
+    removeIndexCatalogRow(articleKey);
+  });
+  changed.forEach((article) => {
+    const articleKey = indexArticleKey(article);
+    if (!articleKey) return;
+    removeIndexArticleContribution(articleKey);
+    replaceIndexCatalogRow(article);
+    addIndexArticleContribution(article);
+  });
+  if (Number(meta.version || 0) > 0) indexCodesCacheVersion = Number(meta.version);
+  if (Number(meta.patchVersion || meta.patch_version || 0) > 0) indexCodesCachePatchVersion = Number(meta.patchVersion || meta.patch_version);
+  saveIndexCodesCache();
+  el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos listos · ${changed.length + removed.length} cambios aplicados`;
+  render();
+}
+async function loadIndexCodes(providedList = null, providedMeta = {}) {
   const generation = ++indexCodesLoadGeneration;
+  indexCodesLoading = true;
   el.status.textContent = 'Cargando lista de index...';
   try {
     let list = Array.isArray(providedList) ? providedList : [];
+    let progressive = null;
+    let cachedIndexReady = false;
+    if (!list.length) {
+      cachedIndexReady = await loadIndexCodesCache();
+      if (cachedIndexReady) {
+        el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos listos · buscando cambios`;
+        render();
+      }
+    }
     const codeIndexLoader = window.CorralonSystem?.catalog?.fetchCodeIndexRows;
+    const progressiveLoader = window.CorralonSystem?.catalog?.loadProgressive;
     const sharedLoader = window.CorralonSystem?.catalog?.load;
-    if (!list.length && typeof sharedLoader === 'function') list = await sharedLoader({ fallback: true });
+    if (!list.length && typeof progressiveLoader === 'function') {
+      progressive = await progressiveLoader({ fallback: true });
+      list = await progressive.complete;
+    }
+    else if (!list.length && typeof sharedLoader === 'function') list = await sharedLoader({ fallback: true });
     else if (!list.length && typeof codeIndexLoader === 'function') list = await codeIndexLoader();
     if (!Array.isArray(list) || !list.length) {
       const snap = await getDocFromServer(doc(db, 'config', 'listaActual')).catch(() => getDoc(doc(db, 'config', 'listaActual')));
@@ -2949,50 +3107,50 @@ async function loadIndexCodes(providedList = null) {
       if (!url) throw new Error('No hay lista publicada');
       list = await fetchJson(url);
     }
+    const cachedVersionMatches = cachedIndexReady
+      && progressive?.fromCache
+      && Number(progressive.version || 0) > 0
+      && Number(progressive.version) === Number(indexCodesCacheVersion);
     indexCatalogRows = list.slice();
-    const codeProviders = new Map();
-    const codeMatchCounts = new Map();
-    const codeDescriptions = new Map();
+    indexCatalogRowPositions = new Map(indexCatalogRows.map((article, index) => [indexArticleKey(article), index]).filter(([key]) => key));
+    if (cachedVersionMatches && !pendingIndexFullRows) {
+      const changedRows = [...pendingIndexChangedRows.values()];
+      const removedCodes = [...pendingIndexRemovedCodes];
+      pendingIndexChangedRows.clear();
+      pendingIndexRemovedCodes.clear();
+      if (changedRows.length || removedCodes.length) applyIndexCodesDelta(changedRows, removedCodes, pendingIndexEventMeta);
+      else {
+        el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos de proveedor listos`;
+        render();
+      }
+      pendingIndexEventMeta = {};
+      return;
+    }
+    indexCodeProviders = new Map();
+    indexCodeMatchCounts = new Map();
+    indexCodeDescriptions = new Map();
+    indexArticleContributions = new Map();
+    indexCodeProviderRefCounts = new Map();
     for (let articleIndex = 0; articleIndex < list.length; articleIndex += 1) {
       if (generation !== indexCodesLoadGeneration) return;
       const article = list[articleIndex];
-      const providerKeys = articleProviderIdentityKeys(article);
-      const description = String(readField(article, [
-        'nombre', 'descripcion', 'descripción', 'detalle',
-        'AArtículos_Descripción', 'articulo', 'Artículo'
-      ]) || '').trim() || '(Sin descripción)';
-      articleProviderCodes(article).forEach((key) => {
-        codeMatchCounts.set(key, (codeMatchCounts.get(key) || 0) + 1);
-        if (!codeDescriptions.has(key)) codeDescriptions.set(key, []);
-        codeDescriptions.get(key).push(description);
-        if (!codeProviders.has(key)) codeProviders.set(key, new Set());
-        providerKeys.forEach((providerKey) => codeProviders.get(key).add(providerKey));
-      });
+      addIndexArticleContribution(article);
       if (articleIndex > 0 && articleIndex % 150 === 0) await yieldIndexCodesWork();
     }
     if (generation !== indexCodesLoadGeneration) return;
-    indexCodeProviders = codeProviders;
-    indexCodeMatchCounts = codeMatchCounts;
-    indexCodeDescriptions = codeDescriptions;
-    const saveIndexCodesCache = () => {
-      if (generation !== indexCodesLoadGeneration) return;
-      window.CorralonCacheDB.set(INDEX_CODES_CACHE_KEY,
-        [...codeProviders].map(([key, providerKeys]) => [key, [...providerKeys]])
-      ).then(() => {
-        try { localStorage.removeItem(INDEX_CODES_CACHE_KEY); } catch (_) {}
-      }).catch((error) => console.warn('No se pudo guardar el índice de códigos en IndexedDB', error));
-    };
-    if ('requestIdleCallback' in window) requestIdleCallback(saveIndexCodesCache, { timeout: 1500 });
-    else setTimeout(saveIndexCodesCache, 0);
-    el.status.textContent = `${codeProviders.size.toLocaleString('es-AR')} codigos de proveedor listos`;
-    queueMicrotask(() => repairUnmatchedIndexRows().catch(console.warn));
+    const cacheMeta = { ...providedMeta, ...pendingIndexEventMeta };
+    indexCodesCacheVersion = Number(cacheMeta.version || progressive?.version || indexCodesCacheVersion || 0);
+    indexCodesCachePatchVersion = Number(cacheMeta.patchVersion || cacheMeta.patch_version || indexCodesCachePatchVersion || 0);
+    pendingIndexChangedRows.clear();
+    pendingIndexRemovedCodes.clear();
+    pendingIndexFullRows = null;
+    pendingIndexEventMeta = {};
+    saveIndexCodesCache(generation);
+    el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos de proveedor listos`;
   } catch (error) {
     console.warn(error);
     try {
-      const cached = await window.CorralonCacheDB.migrateLocalStorage(INDEX_CODES_CACHE_KEY) || [];
-      indexCodeProviders = new Map(cached.map(([key, providerKeys]) => [key, new Set(providerKeys)]));
-      indexCodeMatchCounts = new Map();
-      indexCodeDescriptions = new Map();
+      if (!indexCodeProviders.size) await loadIndexCodesCache();
       el.status.textContent = `Usando cache: ${indexCodeProviders.size.toLocaleString('es-AR')} codigos`;
     } catch (_) {
       indexCodeProviders = new Map();
@@ -3000,6 +3158,8 @@ async function loadIndexCodes(providedList = null) {
       indexCodeDescriptions = new Map();
       el.status.textContent = 'No pude cargar codigos de index';
     }
+  } finally {
+    if (generation === indexCodesLoadGeneration) indexCodesLoading = false;
   }
   render();
 }
@@ -3596,10 +3756,31 @@ document.getElementById('closePriceComparatorBtn').addEventListener('click', clo
 document.getElementById('cancelPriceComparatorEntryBtn').addEventListener('click', clearPriceComparatorDraft);
 document.getElementById('savePriceComparatorEntryBtn').addEventListener('click', addPriceComparison);
 el.priceComparatorCompare.addEventListener('input', updatePriceComparatorPreview);
-el.priceComparatorCompare.addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter') return;
+el.priceComparatorEntry.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented) return;
+  const field = event.target.closest('#priceComparatorCode,#priceComparatorArticle,#priceComparatorFinal,#priceComparatorCompare,#priceComparatorProvider,#savePriceComparatorEntryBtn');
+  if (!field || (field.id === 'priceComparatorProvider' && priceComparatorProviderListIsOpen(field))) return;
+  const fields = [...el.priceComparatorEntry.querySelectorAll('#priceComparatorCode,#priceComparatorArticle,#priceComparatorFinal,#priceComparatorCompare,#priceComparatorProvider,#savePriceComparatorEntryBtn')]
+    .filter((item) => !item.hidden && !item.closest('[hidden]'));
+  const index = fields.indexOf(field);
+  if (index < 0) return;
+  let direction = 0;
+  if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowRight') direction = 1;
+  else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') direction = -1;
+  if (!direction) return;
+  if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && field.matches('input')) {
+    const start = Number(field.selectionStart ?? 0);
+    const end = Number(field.selectionEnd ?? start);
+    const length = String(field.value || '').length;
+    const canMove = start === 0 && end === length || (start === end && (direction > 0 ? end >= length : start <= 0));
+    if (!canMove) return;
+  }
+  const next = fields[index + direction];
+  if (!next) return;
   event.preventDefault();
-  addPriceComparison();
+  event.stopPropagation();
+  next.focus({ preventScroll: true });
+  if (typeof next.select === 'function') next.select();
 });
 el.priceComparatorBackdrop.addEventListener('focusin', (event) => {
   const input = event.target.closest('.price-comparator-provider-input');
@@ -3658,7 +3839,7 @@ el.priceComparatorBackdrop.addEventListener('keydown', (event) => {
     commitPriceComparatorProviderInput(input);
     closePriceComparatorProviderList();
     const next = input.id === 'priceComparatorProvider'
-      ? document.getElementById('cancelPriceComparatorEntryBtn')
+      ? document.getElementById('savePriceComparatorEntryBtn')
       : input.closest('.price-comparator-row')?.querySelector('[data-remove-price-comparison]');
     next?.focus({ preventScroll: true });
   }
@@ -3994,12 +4175,16 @@ el.copyAccessPriceContextBtn.addEventListener('click', () => {
   closeTableContextMenu();
   copySelectedStockPriceForAccess(row);
 });
-el.sendToComparatorContextBtn.addEventListener('click', () => {
-  const rowIndex = contextMenuRowIndex;
+function sendStockRowToComparator(rowIndex) {
   const row = Number.isFinite(rowIndex) ? rowsData[rowIndex] : null;
-  const returnFocus = Number.isFinite(rowIndex) ? editableCellAt(rowIndex, 0) : null;
+  if (!row || isBlankStockRow(row) || !(calcPrecioFinal(row) > 0)) return false;
+  const returnFocus = editableCellAt(rowIndex, 0);
   closeTableContextMenu();
-  if (row) openPriceComparator(row, returnFocus);
+  openPriceComparator(row, returnFocus);
+  return true;
+}
+el.sendToComparatorContextBtn.addEventListener('click', () => {
+  sendStockRowToComparator(contextMenuRowIndex);
 });
 el.importNewArticlesContextBtn.addEventListener('click', () => {
   closeTableContextMenu();
@@ -4028,6 +4213,7 @@ el.recalculateContextBtn.addEventListener('click', async () => {
   el.recalculateContextBtn.disabled = true;
   try {
     await loadIndexCodes();
+    await repairUnmatchedIndexRows();
     show('Codigos de index recalculados');
   } finally {
     el.recalculateContextBtn.disabled = false;
@@ -4291,6 +4477,15 @@ el.rows.addEventListener('keydown', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
+  if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && key === 'c') {
+    const activeCell = event.target.closest?.('#rows [data-field][data-row][data-col]');
+    const rowIndex = Number(activeCell?.dataset.row);
+    if (Number.isFinite(rowIndex) && sendStockRowToComparator(rowIndex)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+  }
   if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && key === 'c') {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -4340,11 +4535,52 @@ document.querySelector('.table-wrap').addEventListener('keydown', (event) => {
 
 initFuncionesJsBindings();
 let refreshIndexCodesTimer = null;
+const pendingIndexChangedRows = new Map();
+const pendingIndexRemovedCodes = new Set();
+let pendingIndexFullRows = null;
+let pendingIndexEventMeta = {};
+function queueIndexDelta(changedRows, removedCodes) {
+  removedCodes.forEach((articleKey) => {
+    const key = codeKey(articleKey);
+    pendingIndexChangedRows.delete(key);
+    pendingIndexRemovedCodes.add(key);
+  });
+  changedRows.forEach((article) => {
+    const key = indexArticleKey(article);
+    if (!key) return;
+    pendingIndexRemovedCodes.delete(key);
+    pendingIndexChangedRows.set(key, article);
+  });
+}
 const refreshIndexCodesFromCatalog = (event) => {
-  const list = event?.detail?.rows;
+  const detail = event?.detail || {};
+  const list = detail.rows;
   if (!Array.isArray(list) || !list.length) return;
+  const changedRows = Array.isArray(detail.changedRows) ? detail.changedRows : [];
+  const removedCodes = Array.isArray(detail.removedCodes) ? detail.removedCodes : [];
+  if (indexCodesLoading) {
+    pendingIndexEventMeta = { ...pendingIndexEventMeta, ...detail, rows: undefined, changedRows: undefined, removedCodes: undefined };
+    if (changedRows.length || removedCodes.length) queueIndexDelta(changedRows, removedCodes);
+    else pendingIndexFullRows = list;
+    return;
+  }
+  if ((changedRows.length || removedCodes.length) && indexArticleContributions.size) {
+    queueIndexDelta(changedRows, removedCodes);
+    pendingIndexEventMeta = { ...pendingIndexEventMeta, ...detail, rows: undefined, changedRows: undefined, removedCodes: undefined };
+    clearTimeout(refreshIndexCodesTimer);
+    refreshIndexCodesTimer = setTimeout(() => {
+      const pendingChanges = [...pendingIndexChangedRows.values()];
+      const pendingRemovals = [...pendingIndexRemovedCodes];
+      pendingIndexChangedRows.clear();
+      pendingIndexRemovedCodes.clear();
+      const meta = pendingIndexEventMeta;
+      pendingIndexEventMeta = {};
+      applyIndexCodesDelta(pendingChanges, pendingRemovals, meta);
+    }, 120);
+    return;
+  }
   clearTimeout(refreshIndexCodesTimer);
-  refreshIndexCodesTimer = setTimeout(() => loadIndexCodes(list).catch(console.warn), 120);
+  refreshIndexCodesTimer = setTimeout(() => loadIndexCodes(list, detail).catch(console.warn), 120);
 };
 window.addEventListener('corralon:catalog-delta', refreshIndexCodesFromCatalog);
 window.addEventListener('corralon:catalog-ready', refreshIndexCodesFromCatalog);

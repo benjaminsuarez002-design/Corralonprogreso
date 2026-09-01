@@ -49,6 +49,7 @@ internal sealed class ServerForm : Form
     private Thread listenThread;
     private Label status;
     private TextBox urlBox;
+    private TextBox networkUrlBox;
     private Button startStopButton;
     private CheckBox startWithWindows;
     private NotifyIcon trayIcon;
@@ -68,7 +69,7 @@ internal sealed class ServerForm : Form
         root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         Text = "Corralon Web";
         Width = 440;
-        Height = 220;
+        Height = 258;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -192,13 +193,15 @@ internal sealed class ServerForm : Form
     {
         var title = new Label { Text = "Servidor local Corralon", Left = 18, Top = 16, Width = 380, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
         status = new Label { Text = "Estado: detenido", Left = 18, Top = 48, Width = 380, Font = new Font("Segoe UI", 9) };
-        urlBox = new TextBox { Left = 18, Top = 76, Width = 390, ReadOnly = true, Text = "http://localhost:8080/actualizar%20articulos.html" };
-        startWithWindows = new CheckBox { Text = "Iniciar con Windows", Left = 18, Top = 108, Width = 200, Checked = IsStartWithWindowsEnabled() };
-        var openButton = new Button { Text = "Abrir HTML", Left = 18, Top = 112, Width = 92 };
-        openButton.Top = 140;
-        startStopButton = new Button { Text = "Detener", Left = 116, Top = 140, Width = 92 };
-        var hideButton = new Button { Text = "Minimizar", Left = 214, Top = 140, Width = 92 };
-        var uploadButton = new Button { Text = "Subir GitHub", Left = 312, Top = 140, Width = 92 };
+        var localLabel = new Label { Text = "Este equipo", Left = 18, Top = 79, Width = 72, Font = new Font("Segoe UI", 8) };
+        urlBox = new TextBox { Left = 92, Top = 75, Width = 316, ReadOnly = true, Text = "http://localhost:8080/menu.html" };
+        var networkLabel = new Label { Text = "Red local", Left = 18, Top = 107, Width = 72, Font = new Font("Segoe UI", 8) };
+        networkUrlBox = new TextBox { Left = 92, Top = 103, Width = 316, ReadOnly = true, Text = GetLocalNetworkUrl() };
+        startWithWindows = new CheckBox { Text = "Iniciar con Windows", Left = 18, Top = 136, Width = 200, Checked = IsStartWithWindowsEnabled() };
+        var openButton = new Button { Text = "Abrir menú", Left = 18, Top = 168, Width = 92 };
+        startStopButton = new Button { Text = "Detener", Left = 116, Top = 168, Width = 92 };
+        var hideButton = new Button { Text = "Minimizar", Left = 214, Top = 168, Width = 92 };
+        var uploadButton = new Button { Text = "Subir GitHub", Left = 312, Top = 168, Width = 92 };
 
         openButton.Click += (s, e) => Process.Start(urlBox.Text);
         startStopButton.Click += (s, e) => { if (listener != null && listener.IsListening) StopServer(); else StartServer(); };
@@ -208,12 +211,37 @@ internal sealed class ServerForm : Form
 
         Controls.Add(title);
         Controls.Add(status);
+        Controls.Add(localLabel);
         Controls.Add(urlBox);
+        Controls.Add(networkLabel);
+        Controls.Add(networkUrlBox);
         Controls.Add(startWithWindows);
         Controls.Add(openButton);
         Controls.Add(startStopButton);
         Controls.Add(hideButton);
         Controls.Add(uploadButton);
+    }
+
+    private static string GetLocalNetworkUrl()
+    {
+        try
+        {
+            IPAddress best = null;
+            int bestRank = Int32.MaxValue;
+            foreach (IPAddress address in Dns.GetHostEntry(Dns.GetHostName()).AddressList)
+            {
+                if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || IPAddress.IsLoopback(address)) continue;
+                byte[] bytes = address.GetAddressBytes();
+                int rank = bytes[0] == 192 && bytes[1] == 168 ? 0
+                    : bytes[0] == 10 ? 1
+                    : bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31 ? 2
+                    : 3;
+                if (rank < bestRank) { best = address; bestRank = rank; }
+            }
+            if (best != null) return "http://" + best + ":" + Port + "/menu.html";
+        }
+        catch { }
+        return "No se detecto una direccion de red local";
     }
 
     private void BuildTrayIcon()

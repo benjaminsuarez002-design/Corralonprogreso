@@ -1542,7 +1542,10 @@
   }
 
   function isLocalAridExportAvailable() {
-    return ['localhost', '127.0.0.1', '::1'].includes(String(location.hostname || '').toLowerCase());
+    const hostname = String(location.hostname || '').toLowerCase();
+    if (['localhost', '127.0.0.1', '::1'].includes(hostname)) return true;
+    if (location.protocol !== 'http:' || location.port !== '8080') return false;
+    return /^(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})$/.test(hostname);
   }
 
   function ensureAridosBudgetHost() {
@@ -7204,7 +7207,7 @@
     faltantes: FALTANTES,
     versionNotifier: WEB_VERSION_NOTIFIER
   };
-  CATALOG_REALTIME.start();
+  if (!globalThis.CORRALON_DISABLE_CATALOG_REALTIME) CATALOG_REALTIME.start();
   WEB_VERSION_NOTIFIER.start();
   const migrateLargeLocalCaches = async () => {
     try { await getImageGeneratorCatalogAsync(); } catch (_) {}
