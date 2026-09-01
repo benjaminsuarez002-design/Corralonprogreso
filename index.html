@@ -4143,7 +4143,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.10"></script>
+<script src="corralon-system.js?v=1.0.11"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -7773,24 +7773,32 @@ searchInput.addEventListener('keydown', async (e) => {
 searchInput.addEventListener('input', e => {
   clearTimeout(debounce);
   debounce = setTimeout(() => {
-    rubroActivo = '';
     if (!INDEX_MENU_SESSION_ACTIVE) {
       const valor = searchInput.value;
       const terminoActual = normalizarTexto(primeraPalabraBusquedaPublica(valor));
       if (!valor.trim()) {
-        restaurarPortadaCatalogoPublico();
+        rubroActivo = '';
+        if (terminoBaseBusquedaPublica) restaurarPortadaCatalogoPublico();
+        ocultarAsistenteBusqueda();
+        return;
       } else if (terminoBaseBusquedaPublica && terminoActual === terminoBaseBusquedaPublica) {
+        rubroActivo = '';
         aplicarBusquedaActual();
       } else {
         if (terminoBaseBusquedaPublica) restaurarPortadaCatalogoPublico();
-        if (/^\s*\S+\s/.test(valor)) confirmarPrimeraPalabraPublica();
-        else renderHomeLanding();
+        if (!/^\s*\S+\s/.test(valor)) {
+          ocultarAsistenteBusqueda();
+          return;
+        }
+        rubroActivo = '';
+        confirmarPrimeraPalabraPublica();
       }
       if (document.activeElement === searchInput && searchInput.value.trim()) mostrarAsistenteBusqueda();
       else ocultarAsistenteBusqueda();
       scrollMainToTop();
       return;
     }
+    rubroActivo = '';
     aplicarBusquedaActual();
     if (document.activeElement === searchInput && searchInput.value.trim()) mostrarAsistenteBusqueda();
     else ocultarAsistenteBusqueda();
