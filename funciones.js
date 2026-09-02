@@ -799,6 +799,14 @@
     const root = options.root || document;
     const labelSelector = options.labelSelector || 'label';
     const controlSelector = options.controlSelector || 'input, textarea, select';
+    let controlFocusedBeforePointer = null;
+
+    root.addEventListener('pointerdown', (event) => {
+      const control = event.target?.closest?.(controlSelector);
+      controlFocusedBeforePointer = control && root.contains(control) && document.activeElement === control
+        ? control
+        : null;
+    }, true);
 
     root.addEventListener('click', (event) => {
       const label = event.target?.closest?.(labelSelector);
@@ -807,6 +815,12 @@
         ? root.querySelector(`#${CSS.escape(label.htmlFor)}`)
         : label.querySelector(controlSelector) || label.nextElementSibling?.matches?.(controlSelector) && label.nextElementSibling;
       if (!control || control.disabled) return;
+      const directControl = event.target?.closest?.(controlSelector);
+      if (directControl === control && controlFocusedBeforePointer === control) {
+        controlFocusedBeforePointer = null;
+        return;
+      }
+      controlFocusedBeforePointer = null;
       control.focus?.();
       if (typeof control.select === 'function' && control.type !== 'checkbox' && control.type !== 'radio') control.select();
     });
