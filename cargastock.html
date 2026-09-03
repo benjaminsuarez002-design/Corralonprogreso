@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.11"></script>
+<script src="corralon-system.js?v=1.0.12"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -39,7 +39,7 @@
     .combo-option{padding:8px 10px;font:800 17px 'Barlow Condensed';cursor:pointer;border-bottom:1px solid #e6f1fb}
     .combo-option:hover,.combo-option.active{background:#e4f7ff;color:#0075ca}
     .provider-hidden{display:none}
-    .modal-backdrop{position:fixed;inset:0;background:#0005;display:none;align-items:center;justify-content:center;padding:20px;z-index:60}
+    .modal-backdrop{position:fixed;inset:0;background:#0005;display:none;align-items:center;justify-content:center;padding:20px;z-index:10000}
     .modal-backdrop.visible{display:flex}
     .modal-backdrop.visible{pointer-events:auto;isolation:isolate}
     .app[inert]{pointer-events:none!important;user-select:none!important}
@@ -148,10 +148,11 @@
     .actions-bottom{display:flex;align-items:center;justify-content:center;gap:14px;padding:0 22px 18px}
     .summary-pill{height:38px;min-width:150px;padding:6px 14px;border:1px solid #bde4ff;border-radius:9px;background:#f7fcff;font:900 18px 'Barlow Condensed';color:#17315f}
     .empty{padding:34px;text-align:center;font:900 24px 'Barlow Condensed';color:#6d7190}
-    .toast{position:fixed;left:50%;bottom:24px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none;transition:.15s}
+    .toast{position:fixed;z-index:20000;left:50%;bottom:24px;translate:-50% 0;background:#172033;color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;opacity:0;pointer-events:none;transition:.15s}
     .toast.visible{opacity:1}
     .table-context-menu{position:fixed;z-index:120;display:none;min-width:180px;padding:6px;border:1px solid #bde4ff;border-radius:10px;background:#fff;box-shadow:0 14px 34px rgba(30,48,76,.24)}
     .table-context-menu.visible{display:block}
+    .compare-context-menu.visible{z-index:10020}
     .table-context-menu button{width:100%;height:34px;border:0;box-shadow:none;text-align:left;color:#24315f;background:#fff}
     .table-context-menu button:hover{background:#eef8ff}
     .table-context-menu button:disabled{color:#9aa4b8;background:#f5f7fb;cursor:not-allowed}
@@ -226,7 +227,7 @@
     .compare-position-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:20px}
     .compare-position-actions button{height:48px}
     .compare-position-cancel{padding:0 20px 18px;display:flex;justify-content:flex-end}
-    #newArticlesBackdrop{z-index:180;background:#1119}
+    #newArticlesBackdrop{z-index:10050;background:#1119}
     .new-articles-modal{width:min(1440px,97vw);max-height:92dvh;display:grid;grid-template-rows:auto auto minmax(240px,1fr) auto auto;background:#fff;border:1px solid #cfd5dc;border-radius:17px;box-shadow:0 26px 85px #0007;overflow:hidden}
     .new-articles-head{display:flex;align-items:center;gap:14px;padding:13px 17px;border-bottom:1px solid #ddd;background:#fff}
     .new-articles-head h2{margin:0;color:#e8183a;font:900 29px 'Barlow Condensed'}
@@ -383,10 +384,10 @@
       </div>
     </div>
   </section>
-</div>
-<div class="table-context-menu compare-context-menu" id="compareContextMenu">
-  <button type="button" id="unifyCompareRowsBtn">Unificar</button>
-  <button type="button" id="addCompareRowBtn">Agregar fila...</button>
+  <div class="table-context-menu compare-context-menu" id="compareContextMenu">
+    <button type="button" id="unifyCompareRowsBtn">Unificar</button>
+    <button type="button" id="addCompareRowBtn">Agregar fila...</button>
+  </div>
 </div>
 <div class="modal-backdrop" id="comparePositionBackdrop">
   <div class="compare-position-modal" role="dialog" aria-modal="true" aria-labelledby="comparePositionTitle">
@@ -723,8 +724,25 @@ function show(message) {
   clearTimeout(show.timer);
   show.timer = setTimeout(() => el.toast.classList.remove('visible'), 1800);
 }
+function isModalSurfaceVisible(surface) {
+  if (!surface?.isConnected) return false;
+  const style = getComputedStyle(surface);
+  return style.display !== 'none'
+    && style.visibility !== 'hidden'
+    && style.pointerEvents !== 'none'
+    && surface.getClientRects().length > 0;
+}
+function modalSurfaceForDialog(dialog) {
+  return dialog.closest('.modal-backdrop,[id$="Backdrop"],[class*="backdrop"]') || dialog.parentElement || dialog;
+}
 function visibleModalBackdrops() {
-  return [...document.querySelectorAll('.modal-backdrop.visible')];
+  const surfaces = new Set([...document.querySelectorAll('.modal-backdrop.visible')]);
+  document.querySelectorAll('[role="dialog"][aria-modal="true"]').forEach((dialog) => {
+    if (!isModalSurfaceVisible(dialog)) return;
+    const surface = modalSurfaceForDialog(dialog);
+    if (isModalSurfaceVisible(surface)) surfaces.add(surface);
+  });
+  return [...surfaces].filter(isModalSurfaceVisible);
 }
 function modalFocusableElements(backdrop) {
   return [...backdrop.querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), [href], [tabindex]:not([tabindex="-1"])')]
@@ -742,22 +760,39 @@ function topVisibleModalBackdrop() {
 }
 function refreshModalPriority() {
   const visible = visibleModalBackdrops();
+  const active = visible.length ? topVisibleModalBackdrop() : null;
   const appRoot = document.querySelector('.app');
   appRoot?.toggleAttribute('inert', visible.length > 0);
   appRoot?.setAttribute('aria-hidden', visible.length > 0 ? 'true' : 'false');
-  document.querySelectorAll('.modal-backdrop').forEach((backdrop) => {
-    backdrop.setAttribute('aria-hidden', backdrop.classList.contains('visible') ? 'false' : 'true');
+  document.body.classList.toggle('modal-priority-open', visible.length > 0);
+  document.querySelectorAll('.modal-backdrop,[role="dialog"][aria-modal="true"]').forEach((element) => {
+    const surface = element.matches('[role="dialog"]') ? modalSurfaceForDialog(element) : element;
+    const isActive = surface === active;
+    surface.toggleAttribute('inert', visible.length > 0 && !isActive);
+    surface.setAttribute('aria-hidden', isActive ? 'false' : 'true');
   });
   if (!visible.length) return;
-  const active = topVisibleModalBackdrop();
+  closeTableContextMenu();
+  el.providerContextMenu?.classList.remove('visible');
+  closeArticleProviderList();
+  closeProviderList();
   if (!active?.contains(document.activeElement)) {
     const first = modalFocusableElements(active)[0];
     first?.focus?.({ preventScroll: true });
   }
 }
 const modalPriorityObserver = new MutationObserver(refreshModalPriority);
-modalPriorityObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden', 'disabled'] });
+modalPriorityObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden', 'disabled'] });
 refreshModalPriority();
+['pointerdown', 'mousedown', 'click', 'dblclick', 'contextmenu', 'touchstart', 'wheel'].forEach((eventName) => {
+  document.addEventListener(eventName, (event) => {
+    const active = topVisibleModalBackdrop();
+    if (!active || active.contains(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    modalFocusableElements(active)[0]?.focus?.({ preventScroll: true });
+  }, { capture: true, passive: false });
+});
 document.addEventListener('keydown', (event) => {
   const active = topVisibleModalBackdrop();
   if (!active || active.contains(event.target)) {
@@ -2147,6 +2182,7 @@ function moveTableToEdge(cell, key) {
   return focusNavigationTarget(editableCellAt(row, col));
 }
 function handleRuleNavigation(event) {
+  if (topVisibleModalBackdrop()) return;
   if (event.defaultPrevented || event.altKey || event.metaKey) return;
   const target = event.target?.closest?.('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerPrintedInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva,#copyBtn,[data-field][data-row][data-col]');
   if (!target) return;
@@ -3703,6 +3739,7 @@ function initFuncionesJsBindings() {
   });
 
   document.addEventListener('keydown', (event) => {
+    if (topVisibleModalBackdrop()) return;
     if (FX.isUndoShortcut ? FX.isUndoShortcut(event) : (event.ctrlKey && !event.shiftKey && String(event.key || '').toLowerCase() === 'z')) {
       if (undoStack?.undo()) event.preventDefault();
     }
@@ -4532,6 +4569,7 @@ el.rows.addEventListener('keydown', (event) => {
   }
 });
 document.addEventListener('keydown', (event) => {
+  if (topVisibleModalBackdrop()) return;
   const key = event.key.toLowerCase();
   if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && key === 'c') {
     const activeCell = event.target.closest?.('#rows [data-field][data-row][data-col]');
