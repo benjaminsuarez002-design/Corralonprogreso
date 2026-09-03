@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.12"></script>
+<script src="corralon-system.js?v=1.0.13"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -42,7 +42,6 @@
     .modal-backdrop{position:fixed;inset:0;background:#0005;display:none;align-items:center;justify-content:center;padding:20px;z-index:10000}
     .modal-backdrop.visible{display:flex}
     .modal-backdrop.visible{pointer-events:auto;isolation:isolate}
-    .app[inert]{pointer-events:none!important;user-select:none!important}
     .provider-modal{width:min(760px,100%);background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 70px #0004;overflow:hidden}
     .provider-modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--soft);border-bottom:1px solid #cfe8ff;color:#4350c8;font:900 22px 'Barlow Condensed'}
     .provider-modal-title{display:flex;align-items:center;gap:8px}
@@ -724,25 +723,12 @@ function show(message) {
   clearTimeout(show.timer);
   show.timer = setTimeout(() => el.toast.classList.remove('visible'), 1800);
 }
-function isModalSurfaceVisible(surface) {
-  if (!surface?.isConnected) return false;
-  const style = getComputedStyle(surface);
-  return style.display !== 'none'
-    && style.visibility !== 'hidden'
-    && style.pointerEvents !== 'none'
-    && surface.getClientRects().length > 0;
-}
-function modalSurfaceForDialog(dialog) {
-  return dialog.closest('.modal-backdrop,[id$="Backdrop"],[class*="backdrop"]') || dialog.parentElement || dialog;
-}
 function visibleModalBackdrops() {
-  const surfaces = new Set([...document.querySelectorAll('.modal-backdrop.visible')]);
-  document.querySelectorAll('[role="dialog"][aria-modal="true"]').forEach((dialog) => {
-    if (!isModalSurfaceVisible(dialog)) return;
-    const surface = modalSurfaceForDialog(dialog);
-    if (isModalSurfaceVisible(surface)) surfaces.add(surface);
-  });
-  return [...surfaces].filter(isModalSurfaceVisible);
+  return [...document.querySelectorAll([
+    '.modal-backdrop.visible',
+    '#corralonNewArticlesBackdrop.open',
+    '.corralon-number-calc-backdrop.is-visible'
+  ].join(','))];
 }
 function modalFocusableElements(backdrop) {
   return [...backdrop.querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), [href], [tabindex]:not([tabindex="-1"])')]
@@ -752,70 +738,19 @@ function modalFocusableElements(backdrop) {
     });
 }
 function topVisibleModalBackdrop() {
-  return visibleModalBackdrops().sort((a, b) => {
-    const za = Number.parseInt(getComputedStyle(a).zIndex, 10) || 0;
-    const zb = Number.parseInt(getComputedStyle(b).zIndex, 10) || 0;
-    return za - zb;
-  }).at(-1) || null;
+  return visibleModalBackdrops().at(-1) || null;
 }
-function refreshModalPriority() {
-  const visible = visibleModalBackdrops();
-  const active = visible.length ? topVisibleModalBackdrop() : null;
-  const appRoot = document.querySelector('.app');
-  appRoot?.toggleAttribute('inert', visible.length > 0);
-  appRoot?.setAttribute('aria-hidden', visible.length > 0 ? 'true' : 'false');
-  document.body.classList.toggle('modal-priority-open', visible.length > 0);
-  document.querySelectorAll('.modal-backdrop,[role="dialog"][aria-modal="true"]').forEach((element) => {
-    const surface = element.matches('[role="dialog"]') ? modalSurfaceForDialog(element) : element;
-    const isActive = surface === active;
-    surface.toggleAttribute('inert', visible.length > 0 && !isActive);
-    surface.setAttribute('aria-hidden', isActive ? 'false' : 'true');
-  });
-  if (!visible.length) return;
-  closeTableContextMenu();
-  el.providerContextMenu?.classList.remove('visible');
-  closeArticleProviderList();
-  closeProviderList();
-  if (!active?.contains(document.activeElement)) {
-    const first = modalFocusableElements(active)[0];
-    first?.focus?.({ preventScroll: true });
-  }
-}
-const modalPriorityObserver = new MutationObserver(refreshModalPriority);
-modalPriorityObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden', 'disabled'] });
-refreshModalPriority();
-['pointerdown', 'mousedown', 'click', 'dblclick', 'contextmenu', 'touchstart', 'wheel'].forEach((eventName) => {
-  document.addEventListener(eventName, (event) => {
-    const active = topVisibleModalBackdrop();
-    if (!active || active.contains(event.target)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    modalFocusableElements(active)[0]?.focus?.({ preventScroll: true });
-  }, { capture: true, passive: false });
-});
 document.addEventListener('keydown', (event) => {
   const active = topVisibleModalBackdrop();
-  if (!active || active.contains(event.target)) {
-    if (!active || event.key !== 'Tab') return;
-    const focusable = modalFocusableElements(active);
-    if (!focusable.length) {
-      event.preventDefault();
-      active.focus?.({ preventScroll: true });
-      return;
-    }
-    const currentIndex = focusable.indexOf(document.activeElement);
-    const nextIndex = event.shiftKey
-      ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
-      : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
-    event.preventDefault();
-    focusable[nextIndex].focus({ preventScroll: true });
-    return;
-  }
-  if (event.key === 'Escape') return;
+  if (!active || event.key !== 'Tab') return;
+  const focusable = modalFocusableElements(active);
+  if (!focusable.length) return;
+  const currentIndex = focusable.indexOf(document.activeElement);
+  const nextIndex = event.shiftKey
+    ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+    : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
   event.preventDefault();
-  event.stopImmediatePropagation();
-  const first = modalFocusableElements(active)[0];
-  first?.focus?.({ preventScroll: true });
+  focusable[nextIndex].focus({ preventScroll: true });
 }, true);
 function saveRows() {
   window.CorralonCacheDB.set(CACHE_KEY, rowsData).then(() => {
@@ -4154,11 +4089,12 @@ document.addEventListener('paste', (event) => {
   if (!pasteIntoCompareTable(text)) applyStockComparisonPaste(text);
 });
 document.getElementById('copyBtn').addEventListener('click', () => copyGreen().catch((error) => { console.error(error); show('No pude copiar'); }));
-document.getElementById('closeCopyResultBtn').addEventListener('click', () => {
+function closeCopyResultModal() {
   document.getElementById('copyResultBackdrop').classList.remove('visible');
-});
+}
+document.getElementById('closeCopyResultBtn').addEventListener('click', closeCopyResultModal);
 document.getElementById('copyResultBackdrop').addEventListener('mousedown', (event) => {
-  if (event.target === document.getElementById('copyResultBackdrop')) event.currentTarget.classList.remove('visible');
+  if (event.target === document.getElementById('copyResultBackdrop')) closeCopyResultModal();
 });
 el.corner.addEventListener('click', () => el.corner.classList.toggle('active'));
 el.corner.addEventListener('dblclick', (event) => {
@@ -4368,6 +4304,11 @@ document.addEventListener('mousedown', (event) => {
 }, true);
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
+    if (document.getElementById('copyResultBackdrop').classList.contains('visible')) {
+      event.preventDefault();
+      closeCopyResultModal();
+      return;
+    }
     if (el.priceComparatorBackdrop.classList.contains('visible')) {
       event.preventDefault();
       closePriceComparator();
