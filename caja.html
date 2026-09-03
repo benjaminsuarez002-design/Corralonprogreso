@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="corralon-cache-db.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -1505,7 +1506,7 @@
     #diffModal .diff-modal{flex:0 0 auto;width:125vw;height:125dvh;min-width:0;min-height:0;max-width:none;max-height:none;zoom:1;transform:scale(.8);transform-origin:top left;resize:none;border:0;border-radius:0;box-shadow:none}
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
-<script src="corralon-system.js?v=1.0.14"></script>
+<script src="corralon-system.js?v=1.0.15"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -1854,6 +1855,8 @@
     const SUPABASE_CAJA_SYSTEM = 'caja_transferencias_sistema';
     const SUPABASE_CAJA_CUTOFF = '2026-07-29';
     const SUPABASE_CAJA_EDIT_FUNCTION = 'editar-caja-transferencias';
+    const CAJA_REMOTE_CACHE_PREFIX = 'corralon_caja_remota_v2:';
+    const CAJA_META_POLL_MS = 60 * 1000;
     const TODAY_DATE_KEY = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     let selectedDateKey = TODAY_DATE_KEY;
     const FIREBASE_CONFIG = {
@@ -2050,6 +2053,11 @@
     };
     let lastManualCajaSignature = '';
     let lastSupabaseCajaVersion = '';
+    let lastSupabaseCajaVersions = { movimientos: 0, cashMovements: 0, receipts: 0, system: 0 };
+    let loadedSupabaseCajaCacheDate = '';
+    let cajaRealtimeClient = null;
+    let cajaRealtimeChannel = null;
+    let cajaRealtimeRefreshTimer = null;
     let systemTableSnapshot = new Map();
     let systemTableSaveTimer = null;
     let applyingSystemTable = false;
@@ -2190,8 +2198,6 @@
       renderTransferRows();
       renderSystemRows();
       updateTotals();
-      lastPublicCajaSignature = '';
-      loadPublicCajaData({ force: true, showPublicLoading: true });
       return true;
     }
 
@@ -2945,6 +2951,7 @@
             receiptBranches: values.receiptBranches,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
+          if (usesSupabaseCaja(dateKey)) await bumpCajaPublicationVersion(dateKey, Date.now(), []);
         } catch (error) {
           showToast('No pude guardar los datos manuales de caja en Firebase.');
         }
@@ -3016,6 +3023,7 @@
             values,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
+          if (usesSupabaseCaja(dateKey)) await bumpCajaPublicationVersion(dateKey, Date.now(), []);
         } catch (error) {
           showToast('No pude guardar los totales manuales en Firebase.');
         }
@@ -3416,24 +3424,34 @@
       return result.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
     }
 
-    async function bumpCajaPublicationVersion(dateKey = selectedDateKey) {
-      const version = Date.now();
+    async function bumpCajaPublicationVersion(dateKey = selectedDateKey, version = Date.now(), sections = ['transferencias']) {
+      const payload = { version, updated_at: new Date().toISOString() };
+      if (sections.includes('movimientos')) payload.movimientos_version = version;
+      if (sections.includes('ingresosEgresos')) payload.ingresos_egresos_version = version;
+      if (sections.includes('recibos')) payload.recibos_version = version;
+      if (sections.includes('transferencias')) payload.transferencias_version = version;
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_PUBLICACIONES}?fecha=eq.${encodeURIComponent(dateKey)}`, {
         method: 'PATCH',
         headers: supabaseHeaders({ Prefer: 'return=minimal' }),
-        body: JSON.stringify({ version, updated_at: new Date().toISOString() })
+        body: JSON.stringify(payload)
       });
       if (!response.ok) throw new Error(await response.text());
       lastSupabaseCajaVersion = String(version);
+      sections.forEach((section) => {
+        const key = section === 'ingresosEgresos' ? 'cashMovements' : (section === 'transferencias' ? 'system' : section);
+        lastSupabaseCajaVersions[key] = version;
+      });
+      return version;
     }
 
     async function persistSystemTable(dateKey, currentRows, removedIds = []) {
       if (!usesSupabaseCaja(dateKey)) return;
+      const version = Date.now();
       if (currentRows.length) {
         const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?on_conflict=id`, {
           method: 'POST',
           headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-          body: JSON.stringify(currentRows)
+          body: JSON.stringify(currentRows.map((row) => ({ ...row, idversion: version, updated_at: new Date().toISOString() })))
         });
         if (!response.ok) throw new Error(await response.text());
       }
@@ -3442,11 +3460,11 @@
         const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?fecha=eq.${encodeURIComponent(dateKey)}&id=in.(${encodeURIComponent(ids)})`, {
           method: 'PATCH',
           headers: supabaseHeaders({ Prefer: 'return=minimal' }),
-          body: JSON.stringify({ deleted: true, updated_at: new Date().toISOString() })
+          body: JSON.stringify({ deleted: true, source_present: false, idversion: version, updated_at: new Date().toISOString() })
         });
         if (!response.ok) throw new Error(await response.text());
       }
-      await bumpCajaPublicationVersion(dateKey);
+      await bumpCajaPublicationVersion(dateKey, version, ['transferencias']);
     }
 
     function queueSystemTableSave() {
@@ -3474,40 +3492,160 @@
       }, 350);
     }
 
-    async function loadSupabaseCaja(dateKey = selectedDateKey, options = {}) {
-      if (!usesSupabaseCaja(dateKey)) return false;
-      const silent = Boolean(options.silent);
-      const publicationUrl = `${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_PUBLICACIONES}?fecha=eq.${encodeURIComponent(dateKey)}&select=fecha,version,movimientos,ingresos_egresos,recibos&limit=1`;
-      const publicationResponse = await fetch(publicationUrl, { headers: supabaseHeaders(), cache: 'no-store' });
-      if (!publicationResponse.ok) throw new Error(await publicationResponse.text());
-      const publication = (await publicationResponse.json())?.[0];
-      if (!publication || dateKey !== selectedDateKey) return false;
-      const version = String(publication.version || '');
-      if (silent && version && version === lastSupabaseCajaVersion) return false;
-      if (silent && cajaHasActiveEditor()) {
-        pendingCajaRefresh = true;
-        return false;
+    function cajaRemoteCacheKey(dateKey) {
+      return `${CAJA_REMOTE_CACHE_PREFIX}${dateKey}`;
+    }
+
+    async function readCajaRemoteCache(dateKey) {
+      try {
+        const cached = await window.CorralonCacheDB?.get(cajaRemoteCacheKey(dateKey));
+        return cached && cached.fecha === dateKey ? cached : null;
+      } catch (_) {
+        return null;
       }
-      const systemUrl = `${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?fecha=eq.${encodeURIComponent(dateKey)}&deleted=eq.false&source_present=eq.true&select=*&order=orden.asc`;
-      const systemResponse = await fetch(systemUrl, { headers: supabaseHeaders(), cache: 'no-store' });
-      if (!systemResponse.ok) throw new Error(await systemResponse.text());
-      const dbRows = await systemResponse.json();
-      const manualPayload = await loadFirebaseCajaManual(dateKey);
+    }
+
+    async function writeCajaRemoteCache(dateKey, cached) {
+      try {
+        await window.CorralonCacheDB?.set(cajaRemoteCacheKey(dateKey), { ...cached, fecha: dateKey, savedAt: Date.now() });
+      } catch (error) {
+        console.warn('No se pudo guardar la caja en IndexedDB', error);
+      }
+    }
+
+    async function fetchCajaPublicationMeta(dateKey) {
+      const base = `${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_PUBLICACIONES}?fecha=eq.${encodeURIComponent(dateKey)}&limit=1&select=`;
+      const incrementalFields = 'fecha,version,movimientos_version,ingresos_egresos_version,recibos_version,transferencias_version,updated_at';
+      let response = await fetch(`${base}${incrementalFields}`, { headers: supabaseHeaders(), cache: 'no-store' });
+      if (response.ok) return { publication: (await response.json())?.[0] || null, legacy: false };
+      response = await fetch(`${base}fecha,version,updated_at`, { headers: supabaseHeaders(), cache: 'no-store' });
+      if (!response.ok) throw new Error(await response.text());
+      return { publication: (await response.json())?.[0] || null, legacy: true };
+    }
+
+    async function fetchCajaPublicationSections(dateKey, fields) {
+      if (!fields.length) return {};
+      const url = `${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_PUBLICACIONES}?fecha=eq.${encodeURIComponent(dateKey)}&select=${fields.join(',')}&limit=1`;
+      const response = await fetch(url, { headers: supabaseHeaders(), cache: 'no-store' });
+      if (!response.ok) throw new Error(await response.text());
+      return (await response.json())?.[0] || {};
+    }
+
+    async function fetchCajaSystemRows(dateKey, sinceVersion = 0) {
+      const delta = Number(sinceVersion || 0) > 0 ? `&idversion=gt.${Number(sinceVersion)}` : '&deleted=eq.false&source_present=eq.true';
+      const url = `${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?fecha=eq.${encodeURIComponent(dateKey)}${delta}&select=*&order=orden.asc`;
+      const response = await fetch(url, { headers: supabaseHeaders(), cache: 'no-store' });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    }
+
+    function mergeCajaSystemDelta(currentRows = [], changedRows = []) {
+      const merged = new Map(currentRows.map((row) => [String(row.id), row]));
+      changedRows.forEach((row) => {
+        const id = String(row.id || '');
+        if (!id) return;
+        if (row.deleted || row.source_present === false) merged.delete(id);
+        else merged.set(id, row);
+      });
+      return [...merged.values()].sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
+    }
+
+    function applyCajaRemoteCache(cached, dateKey = selectedDateKey) {
+      if (!cached || dateKey !== selectedDateKey) return false;
       const focusSnapshot = captureCajaFocusState();
       applyingSystemTable = true;
-      applyPublicCajaMovements(publication.movimientos);
-      applyPublicCajaCashMovements(publication.ingresos_egresos);
-      applyPublicCajaReceipts(publication.recibos);
-      state.system = systemRowsFromDb(dbRows);
+      applyPublicCajaMovements(cached.movimientos);
+      applyPublicCajaCashMovements(cached.ingresosEgresos);
+      applyPublicCajaReceipts(cached.recibos);
+      state.system = systemRowsFromDb(cached.systemRows || []);
       systemTableSnapshot = new Map(systemDbRowsFromState(state.system, dateKey).map((row) => [row.id, JSON.stringify(row)]));
-      if (manualPayload) applyCajaManualPayload(manualPayload, { includeSystem: false });
       applyingSystemTable = false;
-      lastSupabaseCajaVersion = version;
+      lastSupabaseCajaVersion = String(cached.version || '');
+      lastSupabaseCajaVersions = { ...lastSupabaseCajaVersions, ...(cached.versions || {}) };
+      loadedSupabaseCajaCacheDate = dateKey;
       selectedSystemRows.clear();
       preserveCajaFocusedValue(focusSnapshot);
       persistLocalState();
       renderAll();
       restoreCajaFocusState(focusSnapshot);
+      return true;
+    }
+
+    async function loadSupabaseCaja(dateKey = selectedDateKey, options = {}) {
+      if (!usesSupabaseCaja(dateKey)) return false;
+      const silent = Boolean(options.silent);
+      const forceFull = Boolean(options.forceFull);
+      let cached = await readCajaRemoteCache(dateKey);
+      if (cached && loadedSupabaseCajaCacheDate !== dateKey) applyCajaRemoteCache(cached, dateKey);
+
+      const { publication, legacy } = await fetchCajaPublicationMeta(dateKey);
+      if (!publication || dateKey !== selectedDateKey) return false;
+      const generalVersion = Number(publication.version || 0);
+      const remoteVersions = {
+        movimientos: Number(publication.movimientos_version || generalVersion),
+        cashMovements: Number(publication.ingresos_egresos_version || generalVersion),
+        receipts: Number(publication.recibos_version || generalVersion),
+        system: Number(publication.transferencias_version || generalVersion)
+      };
+      const localVersions = cached?.versions || {};
+      const changed = {
+        movimientos: forceFull || !cached || Number(localVersions.movimientos || 0) !== remoteVersions.movimientos,
+        cashMovements: forceFull || !cached || Number(localVersions.cashMovements || 0) !== remoteVersions.cashMovements,
+        receipts: forceFull || !cached || Number(localVersions.receipts || 0) !== remoteVersions.receipts,
+        system: forceFull || !cached || Number(localVersions.system || 0) !== remoteVersions.system
+      };
+      if (!Object.values(changed).some(Boolean)) {
+        const generalChanged = Number(cached?.version || 0) !== generalVersion;
+        if (cached && generalChanged) {
+          cached = { ...cached, version: generalVersion, versions: remoteVersions };
+          await writeCajaRemoteCache(dateKey, cached);
+          const manualPayload = await loadFirebaseCajaManual(dateKey);
+          if (manualPayload && dateKey === selectedDateKey) {
+            applyCajaManualPayload(manualPayload, { includeSystem: false });
+            persistLocalState();
+            renderAll();
+          }
+          await loadSummaryManualState(dateKey);
+        }
+        lastSupabaseCajaVersion = String(generalVersion || '');
+        lastSupabaseCajaVersions = remoteVersions;
+        return generalChanged;
+      }
+      if (silent && cajaHasActiveEditor()) {
+        pendingCajaRefresh = true;
+        return false;
+      }
+
+      const fields = [];
+      if (changed.movimientos) fields.push('movimientos');
+      if (changed.cashMovements) fields.push('ingresos_egresos');
+      if (changed.receipts) fields.push('recibos');
+      const sections = await fetchCajaPublicationSections(dateKey, fields);
+      let systemRows = Array.isArray(cached?.systemRows) ? cached.systemRows : [];
+      if (changed.system) {
+        const useDelta = !legacy && !forceFull && cached && Number(localVersions.system || 0) > 0;
+        const incoming = await fetchCajaSystemRows(dateKey, useDelta ? localVersions.system : 0);
+        systemRows = useDelta ? mergeCajaSystemDelta(systemRows, incoming) : incoming;
+        if (useDelta && !incoming.length) systemRows = await fetchCajaSystemRows(dateKey, 0);
+      }
+
+      cached = {
+        fecha: dateKey,
+        version: generalVersion,
+        versions: remoteVersions,
+        movimientos: changed.movimientos ? sections.movimientos : cached?.movimientos,
+        ingresosEgresos: changed.cashMovements ? sections.ingresos_egresos : cached?.ingresosEgresos,
+        recibos: changed.receipts ? sections.recibos : cached?.recibos,
+        systemRows
+      };
+      await writeCajaRemoteCache(dateKey, cached);
+      applyCajaRemoteCache(cached, dateKey);
+      const manualPayload = await loadFirebaseCajaManual(dateKey);
+      if (manualPayload && dateKey === selectedDateKey) {
+        applyCajaManualPayload(manualPayload, { includeSystem: false });
+        persistLocalState();
+        renderAll();
+      }
       pendingCajaRefresh = false;
       return true;
     }
@@ -5785,7 +5923,7 @@
         const manualPayload = await loadFirebaseCajaManual(dateKey);
         if (!snap.exists && !manualPayload) return false;
         resetState();
-        let loaded = false;
+        let loaded = null;
         if (snap.exists) {
           const data = snap.data() || {};
           const payload = data.payload || (data.payloadJson ? JSON.parse(data.payloadJson) : null);
@@ -5869,16 +6007,18 @@
     async function loadPublicCajaData(options = {}) {
       if (usesSupabaseCaja()) {
         const showPublicLoading = !options.silent || Boolean(options.showSystemLoading) || Boolean(options.showPublicLoading);
+        let loaded = null;
         if (showPublicLoading) setCajaPublicLoading(true);
         try {
-          const loaded = await loadSupabaseCaja(selectedDateKey, options);
+          loaded = await loadSupabaseCaja(selectedDateKey, options);
           if (loaded && !options.silent) showToast('Caja actualizada', 5000);
         } catch (error) {
+          loaded = null;
           if (!options.silent) showToast('No pude cargar la caja desde Supabase.');
         } finally {
           if (showPublicLoading) setCajaPublicLoading(false);
         }
-        return;
+        return loaded;
       }
       if (selectedDateKey !== TODAY_DATE_KEY) {
         setCajaPublicLoading(false);
@@ -5988,7 +6128,48 @@
       setInterval(() => {
         if (document.hidden) return;
         loadPublicCajaData({ silent: true });
-      }, 10000);
+      }, CAJA_META_POLL_MS);
+    }
+
+    async function startCajaVersionRealtime() {
+      if (cajaRealtimeChannel) return;
+      try {
+        if (!window.supabase?.createClient) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = new URL('vendor/supabase.js?v=20260812-caja-version1', document.baseURI).href;
+            script.async = true;
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('No se pudo cargar Supabase Realtime'));
+            document.head.appendChild(script);
+          });
+        }
+        if (!window.supabase?.createClient) throw new Error('Cliente Supabase Realtime no disponible');
+        cajaRealtimeClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+          global: { headers: { 'x-client-info': 'corralon-caja-version-realtime' } }
+        });
+        cajaRealtimeChannel = cajaRealtimeClient
+          .channel('caja-publicaciones-version-v1')
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: SUPABASE_CAJA_PUBLICACIONES
+          }, (payload) => {
+            const changedDate = String(payload?.new?.fecha || payload?.old?.fecha || '');
+            if (changedDate && changedDate !== selectedDateKey) return;
+            clearTimeout(cajaRealtimeRefreshTimer);
+            cajaRealtimeRefreshTimer = setTimeout(() => loadPublicCajaData({ silent: true }), 80);
+          })
+          .subscribe();
+        window.addEventListener('pagehide', () => {
+          if (cajaRealtimeChannel && cajaRealtimeClient) cajaRealtimeClient.removeChannel(cajaRealtimeChannel).catch(() => {});
+          cajaRealtimeChannel = null;
+          cajaRealtimeClient = null;
+        }, { once: true });
+      } catch (error) {
+        console.warn('Realtime de Caja no disponible; se usará la revisión cada 60 segundos', error);
+      }
     }
 
     document.addEventListener('focusout', () => {
@@ -6201,7 +6382,6 @@
           });
           if (!response.ok) throw new Error(await response.text());
           systemTableSnapshot.clear();
-          await bumpCajaPublicationVersion(selectedDateKey);
           showToast('Transferencias reiniciadas. La próxima actualización de Access las cargará de nuevo.');
         } catch (error) {
           showToast('No se pudo limpiar la tabla de hoy.');
@@ -6788,10 +6968,17 @@
       }, 0);
     });
     document.getElementById('updateTotalsBtn').addEventListener('click', async () => {
-      await loadPublicCajaData({ force: true, showPublicLoading: true });
+      const updated = await loadPublicCajaData({ showPublicLoading: true });
       updateTotals();
       saveState();
-      showToast('Caja y movimientos actualizados y guardados.', 5000);
+      if (updated !== null) showToast(updated === false ? 'Los importes ya están actualizados.' : 'Caja e importes actualizados.', 5000);
+    });
+    document.getElementById('updateTotalsBtn').addEventListener('contextmenu', async (event) => {
+      event.preventDefault();
+      const updated = await loadPublicCajaData({ forceFull: true, showPublicLoading: true });
+      updateTotals();
+      saveState();
+      if (updated !== null) showToast('Caja completa recargada.', 5000);
     });
     document.getElementById('closePasteModalBtn').addEventListener('click', closePasteModal);
     document.getElementById('closeDiffModalBtn').addEventListener('click', closeDiffModal);
@@ -7122,6 +7309,7 @@
     (usesSupabaseCaja() ? Promise.resolve() : loadRemoteState(selectedDateKey))
       .finally(() => loadPublicCajaData().finally(() => loadSummaryManualState(selectedDateKey)));
     startPublicCajaPolling();
+    startCajaVersionRealtime();
   </script>
 </body>
 </html>
