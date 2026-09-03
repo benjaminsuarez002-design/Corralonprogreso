@@ -799,13 +799,15 @@
     const root = options.root || document;
     const labelSelector = options.labelSelector || 'label';
     const controlSelector = options.controlSelector || 'input, textarea, select';
-    let controlFocusedBeforePointer = null;
 
     root.addEventListener('pointerdown', (event) => {
       const control = event.target?.closest?.(controlSelector);
-      controlFocusedBeforePointer = control && root.contains(control) && document.activeElement === control
-        ? control
-        : null;
+      if (!control || !root.contains(control) || control.disabled) return;
+      const belongsToLabel = control.closest?.(labelSelector) || control.labels?.length;
+      if (!belongsToLabel || document.activeElement === control) return;
+      event.preventDefault();
+      control.focus?.({ preventScroll: true });
+      if (typeof control.select === 'function' && control.type !== 'checkbox' && control.type !== 'radio') control.select();
     }, true);
 
     root.addEventListener('click', (event) => {
@@ -816,11 +818,7 @@
         : label.querySelector(controlSelector) || label.nextElementSibling?.matches?.(controlSelector) && label.nextElementSibling;
       if (!control || control.disabled) return;
       const directControl = event.target?.closest?.(controlSelector);
-      if (directControl === control && controlFocusedBeforePointer === control) {
-        controlFocusedBeforePointer = null;
-        return;
-      }
-      controlFocusedBeforePointer = null;
+      if (directControl === control) return;
       control.focus?.();
       if (typeof control.select === 'function' && control.type !== 'checkbox' && control.type !== 'radio') control.select();
     });

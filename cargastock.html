@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.10"></script>
+<script src="corralon-system.js?v=1.0.11"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -522,6 +522,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const CACHE_KEY = 'corralon_carga_stock_rows_v1';
 const PROVIDER_KEY = 'corralon_carga_stock_provider_v1';
+const PROVIDERS_VERSION_CACHE_KEY = 'corralon_carga_stock_providers_version_v1';
 const INDEX_CODES_CACHE_KEY = 'corralon_carga_stock_index_code_providers_v3';
 const PRICE_COMPARATOR_CACHE_KEY = 'corralon_carga_stock_price_comparator_v1';
 const PRICE_COMPARATOR_LAST_PROVIDER_KEY = 'corralon_carga_stock_price_comparator_last_provider_v1';
@@ -1406,7 +1407,7 @@ function applyExactProviderCode(cell) {
   return true;
 }
 function setProvider(nextProvider, options = {}) {
-  pushUndoSnapshot();
+  if (!options.skipUndo) pushUndoSnapshot();
   // Los porcentajes de la barra son ajustes temporales de esta carga.
   // Se trabaja sobre una copia para no modificar el registro maestro de proveedores.
   provider = nextProvider ? { ...nextProvider } : null;
@@ -1419,7 +1420,7 @@ function setProvider(nextProvider, options = {}) {
   rowsData.forEach((row) => row.descuento = desc);
   saveRows();
   render();
-  loadProviderArticles(provider);
+  if (!options.skipProviderArticles) loadProviderArticles(provider);
 }
 function applyProvider() {
   const text = norm(el.providerInput.value);
@@ -1951,6 +1952,7 @@ async function saveProviderModal() {
   else providers.push(localProvider);
   providers.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
   await CorralonSystem.setProvidersCache(providers);
+  await updateProvidersVersion();
   modalEditingProviderId = localProvider.id_proveedor;
   setProvider(localProvider);
   setProviderModalEditing(false);
@@ -1968,6 +1970,7 @@ async function deleteProviderModal() {
   if (!response.ok) throw new Error(await response.text());
   providers = providers.filter((item) => String(item.id_proveedor) !== String(id));
   await CorralonSystem.setProvidersCache(providers);
+  await updateProvidersVersion();
   closeProviderModal();
   setProvider(null);
   show('Proveedor eliminado');
@@ -2916,16 +2919,58 @@ function applyStockComparisonPaste(text) {
 }
 async function loadProviders() {
   el.status.textContent = 'Cargando proveedores...';
+  const applyProviders = (list, options = {}) => {
+    providers = Array.isArray(list) ? list.slice() : [];
+    providers.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
+    const selectedId = localStorage.getItem(PROVIDER_KEY);
+    const selected = providers.find((item) => String(item.id_proveedor) === selectedId);
+    setProvider(selected || null, { skipUndo: true, skipProviderArticles: Boolean(options.skipProviderArticles) });
+  };
+  const remoteProvidersVersion = async () => {
+    const url = `${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providersMeta}?select=version&id=eq.principal&limit=1`;
+    const response = await fetch(url, { headers: CorralonSystem.headers(), cache: 'no-store' });
+    if (!response.ok) throw new Error(await response.text());
+    const result = await response.json();
+    return Number(result?.[0]?.version || 0);
+  };
+  const refreshProvidersInBackground = async () => {
+    const remoteVersion = await remoteProvidersVersion();
+    const localVersion = Number(localStorage.getItem(PROVIDERS_VERSION_CACHE_KEY) || 0);
+    if (remoteVersion > 0 && remoteVersion === localVersion) return;
+    const remoteProviders = await CorralonSystem.importProvidersCloud();
+    if (Array.isArray(remoteProviders) && remoteProviders.length) {
+      applyProviders(remoteProviders, { skipProviderArticles: true });
+      if (remoteVersion > 0) localStorage.setItem(PROVIDERS_VERSION_CACHE_KEY, String(remoteVersion));
+    }
+  };
   try {
-    providers = await CorralonSystem.importProvidersCloud();
+    const cachedProviders = await CorralonSystem.getProvidersCache();
+    if (cachedProviders.length) {
+      applyProviders(cachedProviders);
+      refreshProvidersInBackground().catch((error) => console.warn('No se pudo actualizar proveedores en segundo plano', error));
+      return;
+    }
+    const remoteVersion = await remoteProvidersVersion().catch(() => 0);
+    applyProviders(await CorralonSystem.importProvidersCloud());
+    if (remoteVersion > 0) localStorage.setItem(PROVIDERS_VERSION_CACHE_KEY, String(remoteVersion));
   } catch (error) {
     console.warn(error);
-    providers = [];
+    applyProviders([]);
   }
-  providers.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
-  const saved = localStorage.getItem(PROVIDER_KEY);
-  const savedProvider = providers.find((item) => String(item.id_proveedor) === saved);
-  setProvider(savedProvider || null);
+}
+async function updateProvidersVersion() {
+  try {
+    const version = Date.now();
+    const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providersMeta}?on_conflict=id`, {
+      method: 'POST',
+      headers: CorralonSystem.headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify({ id: 'principal', version })
+    });
+    if (!response.ok) throw new Error(await response.text());
+    localStorage.setItem(PROVIDERS_VERSION_CACHE_KEY, String(version));
+  } catch (error) {
+    console.warn('El proveedor se guardó, pero no se pudo actualizar su versión', error);
+  }
 }
 async function fetchJson(url) {
   const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
@@ -3097,7 +3142,18 @@ async function loadIndexCodes(providedList = null, providedMeta = {}) {
     const sharedLoader = window.CorralonSystem?.catalog?.load;
     if (!list.length && typeof progressiveLoader === 'function') {
       progressive = await progressiveLoader({ fallback: true });
-      list = await progressive.complete;
+      const canValidateFromLocalCache = cachedIndexReady
+        && progressive?.fromCache
+        && Number(progressive.version || 0) > 0
+        && Number(progressive.version) === Number(indexCodesCacheVersion)
+        && Array.isArray(progressive.initialRows)
+        && progressive.initialRows.length;
+      if (canValidateFromLocalCache) {
+        list = progressive.initialRows;
+        progressive.complete.catch((error) => console.warn('No se pudo actualizar el índice en segundo plano', error));
+      } else {
+        list = await progressive.complete;
+      }
     }
     else if (!list.length && typeof sharedLoader === 'function') list = await sharedLoader({ fallback: true });
     else if (!list.length && typeof codeIndexLoader === 'function') list = await codeIndexLoader();
