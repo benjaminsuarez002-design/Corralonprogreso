@@ -15,6 +15,7 @@
     catalogEdits: 'catalogo_articulos_edicion'
   };
   const PROVIDERS_DB = 'proveedores_cache_v1';
+  const PROVIDERS_SYNC_META_KEY = 'corralon_proveedores_sync_meta_v1';
   const CLOUDINARY_RAW_UPLOAD_URL = 'https://api.cloudinary.com/v1_1/do0i2da7h/raw/upload';
   const CLOUDINARY_UPLOAD_PRESET = 'Corralon';
   const PROVIDER_MANIFEST_PREFIX = 'provider_manifest:';
@@ -2725,6 +2726,47 @@
   async function importProvidersCloud() {
     const providers = (await fetchAll(TABLES.providers, 'select=*&order=proveedor.asc')).map(normalizeProviderPageLink);
     if (providers.length) await setProvidersCache(providers);
+    return providers;
+  }
+
+  function readProvidersSyncMeta() {
+    try { return JSON.parse(localStorage.getItem(PROVIDERS_SYNC_META_KEY) || 'null'); }
+    catch (_) { return null; }
+  }
+
+  function writeProvidersSyncMeta(meta) {
+    try { localStorage.setItem(PROVIDERS_SYNC_META_KEY, JSON.stringify(meta || {})); }
+    catch (_) {}
+  }
+
+  async function fetchProvidersMeta() {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.providersMeta}?id=eq.principal&select=id,version,total_proveedores,updated_at&limit=1`, { headers: headers() });
+    if (!response.ok) throw new Error(await response.text());
+    return (await response.json())[0] || null;
+  }
+
+  async function syncProvidersCache() {
+    const cached = await getProvidersCache();
+    const remoteMeta = await fetchProvidersMeta();
+    const localMeta = readProvidersSyncMeta();
+    if (!remoteMeta) return cached.length ? cached : importProvidersCloud();
+    if (cached.length && String(localMeta?.version || '') === String(remoteMeta.version || '')) return cached;
+    if (!cached.length || !localMeta?.updated_at) {
+      const providers = await importProvidersCloud();
+      writeProvidersSyncMeta(remoteMeta);
+      return providers;
+    }
+    const since = encodeURIComponent(localMeta.updated_at);
+    const [changed, idRows] = await Promise.all([
+      fetchAll(TABLES.providers, `select=*&updated_at=gte.${since}&order=updated_at.asc`),
+      fetchAll(TABLES.providers, 'select=id_proveedor')
+    ]);
+    const liveIds = new Set(idRows.map((row) => String(row.id_proveedor)));
+    const merged = new Map(cached.filter((row) => liveIds.has(String(row.id_proveedor))).map((row) => [String(row.id_proveedor), row]));
+    changed.map(normalizeProviderPageLink).forEach((row) => merged.set(String(row.id_proveedor), row));
+    const providers = [...merged.values()].sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
+    await setProvidersCache(providers);
+    writeProvidersSyncMeta(remoteMeta);
     return providers;
   }
 
@@ -7170,6 +7212,7 @@
     setProvidersCache,
     putProviderCacheItem,
     importProvidersCloud,
+    syncProvidersCache,
     uploadProviders,
     updateProviderDateOnly,
     touchPriceListMeta,

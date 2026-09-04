@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.7"></script>
+<script src="corralon-system.js?v=1.0.8"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -2689,7 +2689,7 @@
       }
       return false;
     }
-    function openCalcModal(row) {
+    function openCalcModal(row, operation = 'divide') {
       if (!row) return;
       state.calcRow = row;
       el.calcOriginalPrice.value = formatMoney(calcOriginalPrice(row));
@@ -2697,7 +2697,7 @@
       el.calcMultiply.value = row.precio_costo_multiplicador || '';
       updateCalcResult();
       el.calcBackdrop.classList.add('visible');
-      setTimeout(() => focusCalcItem(0), 0);
+      setTimeout(() => focusCalcItem(operation === 'multiply' ? 1 : 0), 0);
     }
     function closeCalcModal() {
       state.calcRow = null;
@@ -3661,6 +3661,20 @@
     el.rows.addEventListener('focusout', (event) => {
       const cell = event.target.closest('.row [data-col="2"]');
       if (cell) restorePriceCell(cell);
+    });
+    el.rows.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+      const opensDivide = event.key === '/' || event.code === 'NumpadDivide';
+      const opensMultiply = event.key === '*' || event.code === 'NumpadMultiply';
+      if (!opensDivide && !opensMultiply) return;
+      const cell = event.target.closest('.row [data-col="2"]');
+      if (!cell || document.querySelector('.modal-backdrop.visible')) return;
+      const row = rowById(cell.closest('.row').dataset.id);
+      if (!row) return;
+      event.preventDefault();
+      event.stopPropagation();
+      hideRowContextMenu();
+      openCalcModal(row, opensMultiply ? 'multiply' : 'divide');
     });
     el.rows.addEventListener('click', (event) => {
       hideRowContextMenu();

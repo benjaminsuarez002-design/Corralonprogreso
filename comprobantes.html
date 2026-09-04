@@ -9,7 +9,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.8"></script>
+  <script src="corralon-cache-db.js"></script>
+<script src="corralon-system.js?v=1.0.9"></script>
   <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -2284,6 +2285,8 @@
       const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1";
       const ALIASES_CACHE_KEY = "corralon_comprobantes_aliases_cache_v1";
       const RECORDS_CACHE_KEY = "corralon_comprobantes_records_cache_v1";
+      const RECORDS_CURSOR_KEY = "corralon_comprobantes_records_cursor_v1";
+      let lastComprobanteSyncId = 0;
 
       // Key used to persist collapsed state of summary sections in localStorage.
       // Stores an object where each property is an encoded alias name and the value is a boolean
@@ -2412,18 +2415,57 @@
           attachmentType: String(item.attachmentType || ""),
           attachmentStorage: String(item.attachmentStorage || ""),
           attachmentPublicId: String(item.attachmentPublicId || ""),
-          createdClientMs: Number(item.createdClientMs || 0)
+          createdClientMs: Number(item.createdClientMs || 0),
+          syncId: Number(item.syncId || 0),
+          eliminado: Boolean(item.eliminado)
         };
       }
 
-      function restoreCachedData() {
+      async function writeRecordsCache(records, cursor) {
+        await Promise.all([
+          window.CorralonCacheDB.set(RECORDS_CACHE_KEY, records || []),
+          window.CorralonCacheDB.set(RECORDS_CURSOR_KEY, Number(cursor || 0))
+        ]);
+      }
+
+      function mergeRecordChanges(base, changes) {
+        const records = new Map((base || []).map((item) => [String(item.id), item]));
+        changes.forEach((item) => {
+          const id = String(item?.id || "");
+          if (!id) return;
+          if (item.eliminado) records.delete(id);
+          else records.set(id, { ...(records.get(id) || {}), ...item });
+        });
+        return [...records.values()];
+      }
+
+      function nextComprobanteSyncId() {
+        const value = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+        lastComprobanteSyncId = Math.max(value, lastComprobanteSyncId + 1);
+        return lastComprobanteSyncId;
+      }
+
+      function comprobanteSyncFields() {
+        return {
+          syncId: nextComprobanteSyncId(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+      }
+
+      async function restoreCachedData() {
         const cachedAliases = readJsonCache(ALIASES_CACHE_KEY, []);
-        const cachedRecords = readJsonCache(RECORDS_CACHE_KEY, []);
+        let cachedRecords = [];
+        try {
+          cachedRecords = await window.CorralonCacheDB.migrateLocalStorage(RECORDS_CACHE_KEY) || [];
+          lastComprobanteSyncId = Number(await window.CorralonCacheDB.get(RECORDS_CURSOR_KEY) || 0);
+        } catch (error) {
+          console.warn("No se pudo restaurar la caché de comprobantes", error);
+        }
         if (Array.isArray(cachedAliases)) {
           state.aliases = cachedAliases.map(normalizeCachedAlias).filter((item) => item.id);
         }
         if (Array.isArray(cachedRecords)) {
-          state.allRecords = cachedRecords.map(normalizeCachedRecord).filter((item) => item.id);
+          state.allRecords = cachedRecords.map(normalizeCachedRecord).filter((item) => item.id && !item.eliminado);
         }
         if (state.allRecords.length) refreshDerivedRecords();
       }
@@ -3454,12 +3496,8 @@
       async function syncAliasObjectivesSummaryFromServer() {
         if (!state.db) return;
         const today = todayIso();
-        const [aliasesSnap, recordsSnap] = await Promise.all([
-          state.db.collection(ALIASES_COLLECTION).get(),
-          state.db.collection(COMPROBANTES_COLLECTION).where("dateIso", "==", today).get()
-        ]);
-        const aliases = aliasesSnap.docs.map(mapAliasDoc);
-        const records = recordsSnap.docs.map(mapDoc);
+        const aliases = state.aliases;
+        const records = state.allRecords.filter((record) => !record.eliminado && record.dateIso === today);
         await writeAliasObjectivesSummary(buildAliasObjectivesSummary(records, aliases));
       }
 
@@ -3975,6 +4013,7 @@
           .onSnapshot((recordsSnapshot) => {
             state.summaryRecords = recordsSnapshot.docs
               .map(mapDoc)
+              .filter((item) => !item.eliminado)
               .filter(hasVisibleRecordData)
               .filter((item) => {
                 const transferId = String(item.transferId || "").trim();
@@ -4385,7 +4424,9 @@
           attachmentType: firstText(data.attachmentType, data.comprobante_tipo, data.comprobanteTipo),
           attachmentStorage: firstText(data.attachmentStorage, data.attachment_storage),
           attachmentPublicId: firstText(data.attachmentPublicId, data.attachment_public_id),
-          createdClientMs: Number(data.createdClientMs || data.created_client_ms || data.timestamp || createdAtMs || 0)
+          createdClientMs: Number(data.createdClientMs || data.created_client_ms || data.timestamp || createdAtMs || 0),
+          syncId: Number(data.syncId || data.sync_id || 0),
+          eliminado: data.eliminado === true
         };
       }
 
@@ -4460,7 +4501,7 @@
           dateText: state.draft.dateText,
           timeText: state.draft.timeText,
           createdClientMs: Date.now(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          ...comprobanteSyncFields()
         };
       }
 
@@ -4781,7 +4822,7 @@
       }
 
       async function updateRecordField(id, field, value) {
-        const payload = { updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+        const payload = comprobanteSyncFields();
         if (field === "client") payload.client = String(value || "").trim();
         if (field === "machine") payload.machine = formatMachine(value);
         if (field === "amount") payload.amountNumber = parseAmount(value);
@@ -4795,7 +4836,7 @@
           transferName: aliasDoc ? aliasDoc.nombre : "",
           transferAlias: aliasDoc ? aliasDoc.alias : "",
           transferCuit: aliasDoc ? aliasDoc.cuit : "",
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          ...comprobanteSyncFields()
         });
         await syncAliasObjectivesSummaryFromServer();
       }
@@ -4809,12 +4850,16 @@
           attachmentType: uploaded.type,
           attachmentStorage: uploaded.storage || "",
           attachmentPublicId: uploaded.publicId || "",
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          ...comprobanteSyncFields()
         });
       }
 
       async function deleteRecord(id, options = {}) {
-        await recordRef(id).delete();
+        await recordRef(id).set({
+          eliminado: true,
+          deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          ...comprobanteSyncFields()
+        }, { merge: true });
         if (options.sync !== false) await syncAliasObjectivesSummaryFromServer();
       }
 
@@ -5108,9 +5153,19 @@
 
       function subscribeTodayRecords() {
         if (state.unsubRecords) state.unsubRecords();
-        state.unsubRecords = state.db.collection(COMPROBANTES_COLLECTION).onSnapshot((snapshot) => {
-          state.allRecords = snapshot.docs.map(mapDoc);
-          writeJsonCache(RECORDS_CACHE_KEY, state.allRecords);
+        const collection = state.db.collection(COMPROBANTES_COLLECTION);
+        const firstLoad = lastComprobanteSyncId <= 0;
+        const query = firstLoad
+          ? collection
+          : collection.where("syncId", ">", lastComprobanteSyncId).orderBy("syncId", "asc");
+        state.unsubRecords = query.onSnapshot(async (snapshot) => {
+          const changes = snapshot.docChanges()
+            .filter((change) => change.type !== "removed")
+            .map((change) => mapDoc(change.doc));
+          state.allRecords = mergeRecordChanges(firstLoad ? [] : state.allRecords, changes);
+          for (const record of changes) lastComprobanteSyncId = Math.max(lastComprobanteSyncId, Number(record.syncId || 0));
+          if (firstLoad && lastComprobanteSyncId <= 0) lastComprobanteSyncId = 1;
+          await writeRecordsCache(state.allRecords, lastComprobanteSyncId).catch((error) => console.warn("No se pudo guardar la caché de comprobantes", error));
           refreshDerivedRecords();
           if (state.aliasSummaryId) renderAliasSummary(state.aliasSummaryId);
           queueAliasObjectivesSummarySync();
@@ -5619,7 +5674,7 @@
         });
       }
 
-      function initStaticUi() {
+      async function initStaticUi() {
         if (state.sharedMode) {
           document.body.classList.add("shared-summary-mode");
           el.sharedSummaryNote.hidden = false;
@@ -5630,7 +5685,7 @@
           return;
         }
         restoreDraftFromStorage();
-        restoreCachedData();
+        await restoreCachedData();
         activateTab("comp");
         syncDraftToInputs();
         renderAliases();
@@ -5694,8 +5749,9 @@
         subscribeSummaryDates();
       }
 
-      initStaticUi();
-      initFirebase().catch((error) => throttleError("Error inicializando Firebase", error));
+      initStaticUi()
+        .then(() => initFirebase())
+        .catch((error) => throttleError("Error inicializando Firebase", error));
     })();
 </script>
 <a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:30;background:#6c4fc7;color:#fff;border:1px solid #6c4fc7;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(58,35,120,.25);">Menú principal</a>

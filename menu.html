@@ -668,7 +668,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.17"></script>
+<script src="corralon-system.js?v=1.0.18"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
   <link rel="stylesheet" href="dark-mode.css">
 </head>
@@ -788,7 +788,8 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, runTransaction, setDoc, serverTimestamp, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, runTransaction, setDoc, serverTimestamp, query, where, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { createNotificationCache } from './menu-notifications-cache.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -850,6 +851,8 @@
     let accesoManualEnPagina = false;
     let reviewUnsubscribe = null;
     let historialUnsubscribe = null;
+    let notificationStreams = null;
+    let notificationStreamsReady = Promise.resolve();
     let reviewOrders = [];
     let historialNotifications = [];
     let staleProviderNotifications = [];
@@ -1657,25 +1660,12 @@
             }, { merge: true })
           ))).catch((error) => console.warn('No se pudieron migrar algunas notificaciones resueltas', error));
         }
-        const [pedidosSnap, historialSnap] = await Promise.all([
-          getDocsFromServer(query(collection(db, 'pedidos'), where('confirmado', '==', true))),
-          getDocsFromServer(query(collection(db, 'historialNotificaciones'), where('resuelta', '==', false)))
-        ]);
-        reviewOrders = pedidosSnap.docs
-          .map((docSnap) => ({ ...docSnap.data(), firestoreId: docSnap.id }))
-          .filter((order) => !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
-          .sort((a, b) => Number(b.id) - Number(a.id));
-        historialNotifications = historialSnap.docs
-          .map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
-          .filter((item) => notifDesdeHoy(item))
-          .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
-        knownReviewIds = new Set(reviewOrders.map(reviewOrderDocId));
-        knownHistorialIds = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
+        setupReviewNotifications(usuario);
+        await notificationStreamsReady;
+        notificationStreams.orders.restore();
+        notificationStreams.history.restore();
         renderReviewNotifications();
-        cleanupOrphanRemitoNotifications();
       } catch (error) {
-        reviewOrders = [];
-        historialNotifications = [];
         renderReviewNotifications();
         console.warn('No se pudieron precargar las notificaciones desde Firebase', error);
       }
@@ -1701,12 +1691,9 @@
           ignoredStaleProviderNotifications = new Map();
           console.warn('No se pudieron leer las listas ignoradas', error);
         }
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/proveedores?select=id_proveedor,proveedor,reserva_texto_1,ultima_actualizacion,updated_at&order=proveedor.asc`, {
-          headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const providers = await window.CorralonSystem.syncProvidersCache();
         const cutoff = Date.now() - (45 * 24 * 60 * 60 * 1000);
-        staleProviderNotifications = (await response.json())
+        staleProviderNotifications = providers
           .map((provider) => {
             const lastUpdate = provider.ultima_actualizacion || provider.updated_at || '';
             return {
@@ -2072,21 +2059,19 @@
       resolvedReviewList.innerHTML = '<div style="padding:18px;font-weight:800;color:var(--muted)">Cargando resueltas...</div>';
       resolvedReviewModal.classList.add('visible');
       try {
-        const [pedidosSnap, historialSnap] = await Promise.all([
-          getDocsFromServer(query(collection(db, 'pedidos'), where('notificacionResuelta', '==', true))),
-          getDocsFromServer(query(collection(db, 'historialNotificaciones'), where('resuelta', '==', true)))
-        ]);
-        const pedidos = pedidosSnap.docs
-          .map((docSnap) => ({ ...docSnap.data(), firestoreId: docSnap.id }))
-          .filter((order) => notifDesdeHoy(order))
+        if (!isAdminUser(obtenerUsuarioActivo())) return;
+        setupReviewNotifications(obtenerUsuarioActivo());
+        await notificationStreamsReady;
+        if (!isAdminUser(obtenerUsuarioActivo())) return;
+        const pedidos = notificationStreams.orders.values()
+          .filter((order) => order.notificacionResuelta && notifDesdeHoy(order))
           .map((order) => {
             const docId = reviewOrderDocId(order);
             const visibleId = String(order.id || docId);
             return { kind: 'pedido', id: visibleId, docId, title: `Pedido ${visibleId}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '', resolvedAt: order.notificacionResueltaAt || null, createdAt: order.notificacionResueltaAt || order.createdAt, updatedAt: order.notificacionResueltaAt || order.updatedAt };
           });
-        const historial = historialSnap.docs
-          .map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
-          .filter((item) => notifDesdeHoy(item))
+        const historial = notificationStreams.history.values()
+          .filter((item) => item.resuelta && notifDesdeHoy(item))
           .map((item) => {
             const notif = { ...item, kind: item.tipo === 'pendiente_lista' ? 'lista_proveedor' : (item.tipo === 'pendiente' ? 'pendiente' : 'historial'), id: String(item.id || item.numero || item.firestoreId || ''), tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id || ''}`.trim(), detail: item.detalle || '', date: item.fecha || '', resolvedAt: item.resueltaAt || null, createdAt: item.resueltaAt || item.createdAt, updatedAt: item.updatedAt };
             return { ...notif, title: notificationTitleFor(notif), detail: cleanNotificationDetail(notif) };
@@ -2137,30 +2122,37 @@
         if (historialUnsubscribe) historialUnsubscribe();
         reviewUnsubscribe = null;
         historialUnsubscribe = null;
+        reviewOrders = [];
+        historialNotifications = [];
+        knownReviewIds = new Set();
+        knownHistorialIds = new Set();
+        renderReviewNotifications();
         return;
       }
-      if (!reviewUnsubscribe) {
-        // Escuchar todos los pedidos confirmados evita que el snapshot de hoy
-        // reemplace y oculte notificaciones pendientes de días anteriores.
-        const pedidosRevisionQuery = query(collection(db, 'pedidos'), where('confirmado', '==', true));
-        reviewUnsubscribe = onSnapshot(pedidosRevisionQuery, (snap) => {
+      if (!notificationStreams) {
+        const api = { db, collection, query, where, Timestamp, getDocsFromServer, onSnapshot };
+        notificationStreams = {
+          orders: createNotificationCache({ collectionName: 'pedidos', versionField: 'syncId', api,
+            onError: error => console.warn('No se pudieron sincronizar pedidos en revisión; se conserva la caché', error),
+            onChange: (rows, cached) => {
+          if (!isAdminUser(obtenerUsuarioActivo())) return;
           const previous = knownReviewIds;
-          reviewOrders = snap.docs.map((docSnap) => ({ ...docSnap.data(), firestoreId: docSnap.id }))
+          reviewOrders = rows
             .filter((order) => order.confirmado && !order.pedido && !order.notificacionResuelta && notifDesdeHoy(order))
             .sort((a, b) => Number(b.id) - Number(a.id));
           const current = new Set(reviewOrders.map(reviewOrderDocId));
           const fresh = reviewOrders.find((order) => !previous.has(reviewOrderDocId(order)));
           knownReviewIds = current;
           renderReviewNotifications();
-          if (fresh) showReviewToast(fresh);
-        }, (error) => console.warn('No se pudieron escuchar pedidos en revisión', error));
-      }
-      if (!historialUnsubscribe) {
-        // No limitar por fecha: los avisos de ayer siguen visibles hasta resolverlos.
-        const historialPendienteQuery = query(collection(db, 'historialNotificaciones'));
-        historialUnsubscribe = onSnapshot(historialPendienteQuery, (snap) => {
+          if (fresh && !cached) showReviewToast(fresh);
+          if (resolvedReviewModal.classList.contains('visible')) cargarNotificacionesResueltas();
+        }}),
+          history: createNotificationCache({ collectionName: 'historialNotificaciones', versionField: 'updatedAt', timestamp: true, api,
+            onError: error => console.warn('No se pudieron sincronizar notificaciones; se conserva la caché', error),
+            onChange: (rows, cached) => {
+          if (!isAdminUser(obtenerUsuarioActivo())) return;
           const previous = knownHistorialIds;
-          historialNotifications = snap.docs.map((docSnap) => ({ firestoreId: docSnap.id, ...docSnap.data() }))
+          historialNotifications = rows
             .filter((item) => !item.resuelta && notifDesdeHoy(item))
             .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
           const current = new Set(historialNotifications.map((item) => `${item.tipo}:${item.id}`));
@@ -2168,8 +2160,15 @@
           knownHistorialIds = current;
           renderReviewNotifications();
           cleanupOrphanRemitoNotifications();
-          if (fresh) showReviewToast({ toastText: `${historialTypeLabel(fresh.tipo)} pendiente: ${fresh.titulo || fresh.id}` });
-        }, (error) => console.warn('No se pudieron escuchar notificaciones de historial', error));
+          if (fresh && !cached) showReviewToast({ toastText: `${historialTypeLabel(fresh.tipo)} pendiente: ${fresh.titulo || fresh.id}` });
+          if (resolvedReviewModal.classList.contains('visible')) cargarNotificacionesResueltas();
+        }})
+        };
+      }
+      if (!reviewUnsubscribe) {
+        reviewUnsubscribe = notificationStreams.orders.stop;
+        historialUnsubscribe = notificationStreams.history.stop;
+        notificationStreamsReady = Promise.all([notificationStreams.orders.start(), notificationStreams.history.start()]);
       }
     }
 
@@ -2209,7 +2208,10 @@
           notificacionResuelta: true,
           notificacionResueltaAt: serverTimestamp(),
           syncId: Date.now() * 1000 + Math.floor(Math.random() * 1000)
-        }, { merge: true }).catch((error) => console.warn('No se pudo marcar el pedido como resuelto', error));
+        }, { merge: true }).catch((error) => {
+          console.warn('No se pudo marcar el pedido como resuelto', error);
+          notificationStreams?.orders.restore();
+        });
         return;
       }
       const item = historialNotifications.find((notif) => String(notif.id) === String(id) && String(notif.tipo) === String(tipo));
@@ -2223,7 +2225,10 @@
         resuelta: true,
         resueltaAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      }, { merge: true }).catch((error) => console.warn('No se pudo marcar notificación como resuelta', error));
+      }, { merge: true }).catch((error) => {
+        console.warn('No se pudo marcar notificación como resuelta', error);
+        notificationStreams?.history.restore();
+      });
     }
 
     async function cargarPreviewPendiente() {
