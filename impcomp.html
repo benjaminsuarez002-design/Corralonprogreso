@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Imprimir comprobante</title>
+  <link rel="icon" href="icono-corralon-Photoroom.ico">
+  <link rel="stylesheet" href="theme-corralon.css">
+  <style>
+    *{box-sizing:border-box}
+    :root{color-scheme:light}
+    body{margin:0;background:#e7e7e7;color:#111;font-family:Arial,sans-serif}
+    .toolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;background:#202124;box-shadow:0 3px 16px #0005}
+    .toolbar button{height:36px;padding:0 18px;border:1px solid #777;border-radius:7px;background:#fff;font-weight:800;cursor:pointer}
+    .toolbar button.active,.toolbar .print{border-color:#ed1118;background:#ed1118;color:#fff}
+    .toolbar .print{margin-left:12px}
+    .status{padding:40px 16px;text-align:center;font-weight:800;color:#666}
+    .spinner{display:inline-block;width:28px;height:28px;margin-bottom:10px;border:4px solid #ddd;border-top-color:#ed1118;border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .paper{width:148mm;min-height:210mm;margin:18px auto;padding:8mm;background:#fff;box-shadow:0 8px 28px #0004}
+    .document{display:none}.document.ready{display:block}
+    .head{display:grid;grid-template-columns:1fr 19mm 1fr;border:1px solid #111}
+    .company,.voucher{min-height:34mm;padding:3mm}
+    .company{border-right:1px solid #111}
+    .company img{display:block;width:48mm;max-height:17mm;object-fit:contain;object-position:left center}
+    .company h1{margin:1mm 0 0;font-size:11pt}.company p,.voucher p{margin:1mm 0;font-size:7.5pt}
+    .letter{display:grid;align-content:start;justify-items:center;border-right:1px solid #111;padding-top:2mm;font-weight:800}
+    .letter strong{font-size:22pt;line-height:1}.letter small{margin-top:1mm;font-size:6.5pt;text-align:center}
+    .voucher h2{margin:0 0 2mm;font-size:13pt}.voucher strong{font-size:9pt}.voucher .number{font-size:11pt}
+    .client{display:grid;grid-template-columns:1fr 1fr;gap:1.5mm 5mm;padding:3mm;border:1px solid #111;border-top:0;font-size:8pt}
+    .client div{min-width:0}.client b{margin-right:1mm}
+    table{width:100%;border-collapse:collapse;table-layout:fixed;margin-top:3mm;font-size:7.5pt}
+    thead{display:table-header-group}
+    th,td{padding:1.4mm 1.2mm;border:1px solid #777;vertical-align:top}
+    th{background:#ededed;text-align:center;font-weight:800}
+    tr{break-inside:avoid;page-break-inside:avoid}
+    .code{width:18mm}.qty{width:16mm}.unit{width:22mm}.amount{width:24mm}.right{text-align:right}.center{text-align:center}
+    .summary{display:grid;grid-template-columns:1fr 43mm;margin-top:3mm;break-inside:avoid;page-break-inside:avoid;font-size:8pt}
+    .notes{min-height:25mm;padding:2mm;border:1px solid #777}.notes p{margin:0 0 2mm;white-space:pre-wrap}
+    .totals{border:1px solid #777;border-left:0}.total-row{display:flex;justify-content:space-between;gap:4mm;padding:1.5mm 2mm;border-bottom:1px solid #aaa}.total-row:last-child{border:0;font-size:11pt;font-weight:900}
+    .authorization{display:grid;grid-template-columns:1fr 1fr;gap:3mm;margin-top:3mm;padding-top:2mm;border-top:1px solid #111;font-size:7.5pt;break-inside:avoid;page-break-inside:avoid}
+    .legal{margin-top:3mm;font-size:6.5pt;line-height:1.3;white-space:pre-wrap;break-inside:avoid;page-break-inside:avoid}
+    .remito .price-column,.remito .invoice-only{display:none}
+    .remito .summary{grid-template-columns:1fr}.remito .notes{min-height:31mm}.remito .document-title::after{content:'REMITO'}.factura .document-title::after{content:'FACTURA'}
+    .error{color:#b00008}
+    @page{size:A5 portrait;margin:8mm}
+    @media print{
+      body{background:#fff}
+      .toolbar,.status{display:none!important}
+      .paper{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}
+      .document{display:block}
+    }
+    @media(max-width:700px){.paper{width:100%;margin:0;padding:5mm;box-shadow:none}.toolbar{flex-wrap:wrap}.toolbar .print{margin-left:0}}
+  </style>
+</head>
+<body>
+  <nav class="toolbar" aria-label="Tipo de impresión">
+    <button id="invoiceButton" class="active" type="button">Factura A5</button>
+    <button id="deliveryButton" type="button">Remito A5</button>
+    <button id="printButton" class="print" type="button">Imprimir</button>
+  </nav>
+  <div id="status" class="status"><span class="spinner"></span><br>Cargando comprobante…</div>
+  <main class="paper">
+    <article id="document" class="document factura">
+      <header class="head">
+        <section class="company"><img src="logo-corralon.png" alt="Corralón Progreso"><h1 id="companyName"></h1><p id="companyActivity"></p><p id="companyAddress"></p><p id="companyContact"></p></section>
+        <section class="letter"><strong id="letter">X</strong><small id="afipType"></small></section>
+        <section class="voucher"><h2 class="document-title"></h2><p><strong>N.º <span id="number" class="number"></span></strong></p><p><b>Fecha:</b> <span id="date"></span></p><p><b>IVA:</b> <span id="companyVat"></span></p></section>
+      </header>
+      <section class="client">
+        <div><b>Cliente:</b><span id="customer"></span></div><div><b>Documento:</b><span id="customerDoc"></span></div>
+        <div><b>Domicilio:</b><span id="customerAddress"></span></div><div><b>Condición IVA:</b><span id="customerVat"></span></div>
+        <div><b>Teléfono:</b><span id="customerPhone"></span></div><div><b>Orden de compra:</b><span id="purchaseOrder"></span></div>
+      </section>
+      <table>
+        <thead><tr><th class="code">Código</th><th>Descripción</th><th class="qty">Cantidad</th><th class="unit price-column">Precio unit.</th><th class="amount price-column">Importe</th></tr></thead>
+        <tbody id="items"></tbody>
+      </table>
+      <section class="summary">
+        <div class="notes"><p><b>Observaciones:</b></p><p id="note"></p></div>
+        <div class="totals invoice-only"><div class="total-row"><span>Subtotal</span><b id="subtotal"></b></div><div id="iva21Row" class="total-row"><span>IVA 21%</span><b id="iva21"></b></div><div id="iva105Row" class="total-row"><span>IVA 10,5%</span><b id="iva105"></b></div><div id="notTaxedRow" class="total-row"><span>No gravado</span><b id="notTaxed"></b></div><div class="total-row"><span>Total</span><b id="total"></b></div></div>
+      </section>
+      <section class="authorization invoice-only"><div><b>CAE N.º:</b> <span id="cae"></span></div><div><b>Vencimiento CAE:</b> <span id="caeDue"></span></div></section>
+      <footer id="legal" class="legal"></footer>
+    </article>
+  </main>
+  <script>
+    const $=id=>document.getElementById(id),params=new URLSearchParams(location.search);let data=null,mode='factura';
+    const money=value=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',minimumFractionDigits:2}).format(Number(value)||0);
+    const number=value=>new Intl.NumberFormat('es-AR',{minimumFractionDigits:0,maximumFractionDigits:3}).format(Number(value)||0);
+    const date=value=>{if(!value)return'';const parts=String(value).slice(0,10).split('-');return parts.length===3?`${parts[2]}/${parts[1]}/${parts[0]}`:value};
+    const text=(id,value)=>$(id).textContent=value??'';
+    function render(){
+      const c=data.comprobante||{};
+      $('document').className=`document ready ${mode}`;
+      $('invoiceButton').classList.toggle('active',mode==='factura');$('deliveryButton').classList.toggle('active',mode==='remito');
+      text('companyName',c.razonSocial||c.empresa);text('companyActivity',c.actividad);text('companyAddress',c.domicilioEmpresa);text('companyContact',[c.telefonoEmpresa,c.emailEmpresa].filter(Boolean).join(' · '));
+      text('letter',mode==='remito'?'R':(c.letra||'X'));text('afipType',mode==='remito'?'DOCUMENTO NO VÁLIDO COMO FACTURA':c.tipo);text('number',mode==='remito'?(c.numeroRemito||c.numero):c.numero);text('date',date(c.fecha));text('companyVat',c.ivaEmpresa);
+      text('customer',c.cliente);text('customerDoc',[c.documentoTipo,c.documento].filter(Boolean).join(' '));text('customerAddress',c.direccion);text('customerVat',c.condicionIva);text('customerPhone',c.telefono);text('purchaseOrder',c.ordenCompra);
+      $('items').innerHTML=(data.articulos||[]).map(item=>`<tr><td>${escapeHtml(item.codigo)}</td><td>${escapeHtml(item.descripcion)}</td><td class="right">${number(item.cantidad)}</td><td class="right price-column">${money(item.precioUnitario)}</td><td class="right price-column">${money(item.importe)}</td></tr>`).join('');
+      text('note',c.nota);text('subtotal',money(c.subtotal));text('iva21',money(c.iva21));text('iva105',money(c.iva105));text('notTaxed',money(c.noGravado));text('total',money(c.total));
+      $('iva21Row').hidden=!Number(c.iva21);$('iva105Row').hidden=!Number(c.iva105);$('notTaxedRow').hidden=!Number(c.noGravado);
+      text('cae',c.cae);text('caeDue',date(c.vencimientoCae));text('legal',c.notaLegal);
+    }
+    function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]))}
+    async function load(){
+      const id=params.get('id');if(!/^\d+$/.test(id||''))throw new Error('Falta el número interno del comprobante.');
+      const response=await fetch(`/api/impcomp?id=${encodeURIComponent(id)}`,{cache:'no-store'});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo cargar el comprobante.');
+      data=result;$('status').hidden=true;render();
+    }
+    $('invoiceButton').onclick=()=>{mode='factura';render()};$('deliveryButton').onclick=()=>{mode='remito';render()};$('printButton').onclick=()=>window.print();
+    load().catch(error=>{$('status').classList.add('error');$('status').innerHTML=escapeHtml(error.message)});
+  </script>
+</body>
+</html>

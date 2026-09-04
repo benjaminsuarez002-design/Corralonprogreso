@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Data.OleDb;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -432,6 +434,7 @@ internal sealed class ServerForm : Form
     {
         string normalized = String.IsNullOrWhiteSpace(requestPath) ? "menu.html" : requestPath;
         normalized = normalized.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        if (String.Equals(normalized, "impcomp", StringComparison.OrdinalIgnoreCase)) normalized = "impcomp.html";
         string factPublic = Path.Combine(root, "Fact Web", "public");
         if (String.Equals(normalized, "facturas", StringComparison.OrdinalIgnoreCase) || String.Equals(normalized, "facturas.html", StringComparison.OrdinalIgnoreCase))
         {
@@ -487,6 +490,17 @@ internal sealed class ServerForm : Form
                 int idLista = ParseInt(context.Request.QueryString["idLista"]);
                 string cantidad = JsonEscape(context.Request.QueryString["cantidad"] ?? "1");
                 WriteJson(context, 200, RunFactDb("articuloDetalle", "{\"idArt\":\"" + idArt + "\",\"idLista\":" + idLista + ",\"cantidad\":\"" + cantidad + "\"}"));
+                return;
+            }
+            if (method == "GET" && path == "/api/impcomp")
+            {
+                int idRecibo = ParseInt(context.Request.QueryString["id"]);
+                if (idRecibo <= 0)
+                {
+                    WriteJson(context, 400, "{\"ok\":false,\"error\":\"IDRecibo invalido.\"}");
+                    return;
+                }
+                WriteJson(context, 200, BuildPrintDocumentJson(idRecibo));
                 return;
             }
             if (method == "GET" && path == "/api/next-number")
@@ -1181,6 +1195,134 @@ internal sealed class ServerForm : Form
     private static string HtmlAttr(string value)
     {
         return WebUtility.HtmlEncode(value ?? "");
+    }
+
+    private string BuildPrintDocumentJson(int idRecibo)
+    {
+        const string databasePath = @"C:\Update\Ariel2App.mdb";
+        if (!File.Exists(databasePath)) return "{\"ok\":false,\"error\":\"No se encontro Ariel2App.mdb.\"}";
+
+        var json = new StringBuilder();
+        using (var connection = new OleDbConnection("Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" + databasePath + ";Mode=Read;"))
+        {
+            connection.Open();
+            const string headerSql =
+                "SELECT TOP 1 IDRecibo,NroFactura,Fecha,ApeYNom,[Dirección],[Teléfono],CUIT,Total,SubTotal," +
+                "ImpIVA21,ImpIVA105,TotNG,Nota,TipoComp,TipoIVA,TipoVenta,Discrimina,LetraEF,cDir," +
+                "IDTipoAFIP,Domicilio,Tel,Email,Empresa,Actividad,RSEmp,IVAEmp,TipoDocFis,Moneda," +
+                "NotaMon,NotaFAC,CAE,CodBarra,NroRemito,NroOCpra FROM FFacturasARPPreImpFEXUno WHERE IDRecibo=?";
+            using (var command = new OleDbCommand(headerSql, connection))
+            {
+                command.Parameters.Add("@id", OleDbType.Integer).Value = idRecibo;
+                using (var reader = command.ExecuteReader(CommandBehavior.SingleRow))
+                {
+                    if (reader == null || !reader.Read())
+                    {
+                        return "{\"ok\":false,\"error\":\"No se encontro el comprobante.\"}";
+                    }
+                    DateTime fecha = DbDate(reader["Fecha"]);
+                    json.Append("{\"ok\":true,\"comprobante\":{");
+                    AppendJson(json, "idRecibo", DbText(reader["IDRecibo"]), false);
+                    AppendJson(json, "numero", DbText(reader["NroFactura"]), true);
+                    AppendJson(json, "fecha", fecha == DateTime.MinValue ? "" : fecha.ToString("yyyy-MM-dd"), true);
+                    AppendJson(json, "cliente", DbText(reader["ApeYNom"]), true);
+                    AppendJson(json, "direccion", FirstText(reader["cDir"], reader["Dirección"]), true);
+                    AppendJson(json, "telefono", DbText(reader["Teléfono"]), true);
+                    AppendJson(json, "documentoTipo", DbText(reader["TipoDocFis"]), true);
+                    AppendJson(json, "documento", DbText(reader["CUIT"]), true);
+                    AppendJson(json, "condicionIva", DbText(reader["TipoIVA"]), true);
+                    AppendJson(json, "tipo", DbText(reader["TipoComp"]), true);
+                    AppendJson(json, "letra", DbText(reader["LetraEF"]), true);
+                    AppendJson(json, "moneda", DbText(reader["Moneda"]), true);
+                    AppendJson(json, "notaMoneda", DbText(reader["NotaMon"]), true);
+                    AppendJson(json, "nota", DbText(reader["Nota"]), true);
+                    AppendJson(json, "notaLegal", DbText(reader["NotaFAC"]), true);
+                    AppendJson(json, "cae", DbText(reader["CAE"]), true);
+                    AppendJson(json, "vencimientoCae", fecha == DateTime.MinValue ? "" : fecha.AddDays(10).ToString("yyyy-MM-dd"), true);
+                    AppendJson(json, "codigoBarras", DbText(reader["CodBarra"]), true);
+                    AppendJson(json, "numeroRemito", DbText(reader["NroRemito"]), true);
+                    AppendJson(json, "ordenCompra", DbText(reader["NroOCpra"]), true);
+                    AppendJson(json, "empresa", DbText(reader["Empresa"]), true);
+                    AppendJson(json, "razonSocial", DbText(reader["RSEmp"]), true);
+                    AppendJson(json, "actividad", DbText(reader["Actividad"]), true);
+                    AppendJson(json, "domicilioEmpresa", DbText(reader["Domicilio"]), true);
+                    AppendJson(json, "telefonoEmpresa", DbText(reader["Tel"]), true);
+                    AppendJson(json, "emailEmpresa", DbText(reader["Email"]), true);
+                    AppendJson(json, "ivaEmpresa", DbText(reader["IVAEmp"]), true);
+                    AppendJsonNumber(json, "subtotal", DbNumber(reader["SubTotal"]), true);
+                    AppendJsonNumber(json, "iva21", DbNumber(reader["ImpIVA21"]), true);
+                    AppendJsonNumber(json, "iva105", DbNumber(reader["ImpIVA105"]), true);
+                    AppendJsonNumber(json, "noGravado", DbNumber(reader["TotNG"]), true);
+                    AppendJsonNumber(json, "total", DbNumber(reader["Total"]), true);
+                    json.Append("},\"articulos\":[");
+                }
+            }
+
+            const string detailSql =
+                "SELECT IDArt,ArtDesc,[Descripción],Cantidad,PrecioUni,Importe,PorcIVA,Orden,UniMed " +
+                "FROM FFacturasARS WHERE IDRecibo=? ORDER BY Orden";
+            using (var command = new OleDbCommand(detailSql, connection))
+            {
+                command.Parameters.Add("@id", OleDbType.Integer).Value = idRecibo;
+                using (var reader = command.ExecuteReader())
+                {
+                    bool first = true;
+                    while (reader != null && reader.Read())
+                    {
+                        if (!first) json.Append(',');
+                        first = false;
+                        json.Append('{');
+                        AppendJson(json, "codigo", DbText(reader["IDArt"]), false);
+                        AppendJson(json, "descripcion", FirstText(reader["ArtDesc"], reader["Descripción"]), true);
+                        AppendJson(json, "unidad", DbText(reader["UniMed"]), true);
+                        AppendJsonNumber(json, "cantidad", DbNumber(reader["Cantidad"]), true);
+                        AppendJsonNumber(json, "precioUnitario", DbNumber(reader["PrecioUni"]), true);
+                        AppendJsonNumber(json, "importe", DbNumber(reader["Importe"]), true);
+                        AppendJsonNumber(json, "iva", DbNumber(reader["PorcIVA"]), true);
+                        json.Append('}');
+                    }
+                }
+            }
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private static string DbText(object value)
+    {
+        return value == null || value == DBNull.Value ? "" : Convert.ToString(value).Trim();
+    }
+
+    private static string FirstText(object first, object second)
+    {
+        string value = DbText(first);
+        return value.Length > 0 ? value : DbText(second);
+    }
+
+    private static decimal DbNumber(object value)
+    {
+        if (value == null || value == DBNull.Value) return 0m;
+        decimal number;
+        return Decimal.TryParse(Convert.ToString(value), out number) ? number : 0m;
+    }
+
+    private static DateTime DbDate(object value)
+    {
+        if (value == null || value == DBNull.Value) return DateTime.MinValue;
+        DateTime date;
+        return DateTime.TryParse(Convert.ToString(value), out date) ? date : DateTime.MinValue;
+    }
+
+    private static void AppendJson(StringBuilder json, string name, string value, bool prependComma)
+    {
+        if (prependComma) json.Append(',');
+        json.Append('\"').Append(name).Append("\":\"").Append(JsonEscape(value)).Append('\"');
+    }
+
+    private static void AppendJsonNumber(StringBuilder json, string name, decimal value, bool prependComma)
+    {
+        if (prependComma) json.Append(',');
+        json.Append('\"').Append(name).Append("\":").Append(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private string RunFactDb(string operation, string argsJson)
