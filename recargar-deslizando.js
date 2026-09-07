@@ -3,7 +3,7 @@
   if (window.__corralonPullRefresh) return;
   window.__corralonPullRefresh = true;
   const style = document.createElement('style');
-  style.textContent = '@media(max-width:760px) and (pointer:coarse){html,body{overscroll-behavior-y:contain}}#corralon-pull-refresh{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);left:50%;transform:translate(-50%,-90px);z-index:2147483647;padding:11px 18px;border-radius:24px;background:#fff;color:#171717;box-shadow:0 3px 16px #0003;font:700 14px system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .12s,transform .12s;white-space:nowrap}#corralon-pull-refresh.visible{opacity:1;transform:translate(-50%,0)}';
+  style.textContent = '@media(max-width:760px) and (pointer:coarse){html{overscroll-behavior-y:contain}}#corralon-pull-refresh{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);left:50%;transform:translate(-50%,-90px);z-index:2147483647;padding:11px 18px;border-radius:24px;background:#fff;color:#171717;box-shadow:0 3px 16px #0003;font:700 14px system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .12s,transform .12s;white-space:nowrap}#corralon-pull-refresh.visible{opacity:1;transform:translate(-50%,0)}';
   document.head.appendChild(style);
   const indicator = document.createElement('div');
   indicator.id = 'corralon-pull-refresh';
@@ -26,14 +26,14 @@
     if (!(target instanceof Element) || target.closest('input,textarea,select,[contenteditable="true"],canvas') || !atTop(target)) return;
     const touch = event.touches[0];
     gesture = { x: touch.clientX, y: touch.clientY, target, distance: 0, pulling: false };
-  }, { passive: true });
+  }, { passive: true, capture: true });
   document.addEventListener('touchmove', event => {
     if (!gesture) return;
     if (event.touches.length !== 1 || !atTop(gesture.target)) { cancel(); return; }
     const touch = event.touches[0];
     const dx = Math.abs(touch.clientX - gesture.x), dy = touch.clientY - gesture.y;
-    if (!gesture.pulling && (dx > 12 && dx > Math.abs(dy) || dy < -8)) { cancel(); return; }
-    if (dy < 12 && !gesture.pulling) return;
+    if (!gesture.pulling && (dy < 0 || dx > Math.abs(dy))) { cancel(); return; }
+    if (dy <= 0 && !gesture.pulling) return;
     if (!event.cancelable) { cancel(); return; }
     event.preventDefault();
     gesture.pulling = true;
@@ -41,7 +41,7 @@
     const message = dy >= threshold ? 'Soltá para recargar' : 'Deslizá para recargar';
     if (indicator.textContent !== message) indicator.textContent = message;
     indicator.classList.toggle('visible', dy > 15);
-  }, { passive: false });
+  }, { passive: false, capture: true });
   document.addEventListener('touchend', () => {
     if (!gesture) return;
     const ready = gesture.pulling && gesture.distance >= threshold && atTop(gesture.target);
@@ -55,6 +55,6 @@
       // Restore the gesture if an existing unsaved-changes prompt cancels navigation.
       setTimeout(() => { refreshing = false; cancel(); }, 1500);
     }, 120);
-  }, { passive: true });
-  document.addEventListener('touchcancel', cancel, { passive: true });
+  }, { passive: true, capture: true });
+  document.addEventListener('touchcancel', cancel, { passive: true, capture: true });
 })();
