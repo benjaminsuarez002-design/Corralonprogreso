@@ -5381,41 +5381,63 @@
       return sortCatalogByDescription(await readProviderArticlesCache());
     }
 
-    async function syncSingleProviderJson(provider = '', providerId = '') {
-      const meta = await remoteProviderListMeta();
-      if (!meta) return [];
-      const manifest = await fetchProviderJsonManifest(meta);
-      if (!manifest) return [];
-      const entry = findProviderJsonEntry(manifest, provider, providerId);
-      if (!entry) return [];
-      const local = localProviderListMeta() || {};
-      const localManifest = localProviderJsonManifest(local);
-      if (!needsProviderJsonSync(entry, localManifest)) {
+    const singleProviderSyncs = new Map();
+    function syncSingleProviderJson(provider = '', providerId = '') {
+      const id = cleanId(providerId);
+      const name = String(provider || '').replace(/^\s*\d+\s*[-–]\s*/, '').trim();
+      const key = id || name;
+      if (!key) return Promise.resolve([]);
+      if (singleProviderSyncs.has(key)) return singleProviderSyncs.get(key);
+      const task = (async () => {
+        // Consult only this supplier; never advance the global version or cursor.
+        const filter = id ? 'id_proveedor=eq.' + encodeURIComponent(id) : 'proveedor=eq.' + encodeURIComponent(name);
+        const entries = await fetchProviderJsonTableRows(filter + '&limit=1');
+        const entry = Object.values(providerJsonManifestFromTableRows(entries).providers || {})[0];
+        if (!entry) return readProviderArticlesCacheByProvider(id, name);
+        const database = await openListDb();
+        const local = await new Promise((resolve, reject) => {
+          const req = database.transaction('meta').objectStore('meta').get('principal');
+          req.onsuccess = () => resolve(req.result || { id: 'principal' });
+          req.onerror = () => reject(req.error);
+        });
         const cached = await readProviderArticlesCacheByProvider(entry.id_proveedor, entry.proveedor);
-        if (cached.length) return cached;
-      }
-      const rows = await fetchProviderJsonRows(entry);
-      await replaceProviderArticlesCacheBlock(entry.id_proveedor, rows);
-      setLocalProviderListMeta({
-        ...local,
-        ...meta,
-        provider_json_manifest: {
-          ...localManifest,
-          [cleanId(entry.id_proveedor)]: {
-            id_proveedor: cleanId(entry.id_proveedor),
-            proveedor: entry.proveedor || '',
-            version: Number(entry.version || 0),
-            updated_at: entry.updated_at || '',
-            total_articulos: Number(entry.total_articulos || rows.length),
-            json_url: entry.json_url,
-            chunk_count: Number(entry.chunk_count || providerJsonUrls(entry).length || 1),
-            chunks: Array.isArray(entry.chunks) ? entry.chunks : null
-          }
-        },
-        last_provider_sync_at: new Date().toISOString(),
-        last_provider_sync_date: today()
-      });
-      return rows.map(normalizeProviderArticle).filter((item) => item.descripcion || item.idart);
+        const overwrittenByFallback = (local.last_provider_updates || []).some(item => String(item.id_proveedor) === String(entry.id_proveedor) && !Number(item.version));
+        if (!overwrittenByFallback && !needsProviderJsonSync(entry, localProviderJsonManifest(local)) &&
+            (cached.length || Number(entry.total_articulos) === 0)) return cached;
+        if (!providerJsonUrls(entry).length) throw new Error('El proveedor no tiene un JSON disponible');
+        const rows = await fetchProviderJsonRows(entry);
+        if (Number.isFinite(Number(entry.total_articulos)) && rows.length !== Number(entry.total_articulos)) {
+          throw new Error('La lista descargada está incompleta; se conserva la copia local');
+        }
+        await new Promise((resolve, reject) => {
+          const tx = database.transaction(['articulos', 'meta'], 'readwrite');
+          const store = tx.objectStore('articulos');
+          const req = store.index('id_proveedor').openCursor(IDBKeyRange.only(String(entry.id_proveedor)));
+          req.onsuccess = () => {
+            const cursor = req.result;
+            if (cursor) { cursor.delete(); cursor.continue(); return; }
+            rows.forEach(row => store.put(row));
+          };
+          const metaStore = tx.objectStore('meta');
+          const metaReq = metaStore.get('principal');
+          metaReq.onsuccess = () => {
+            const current = metaReq.result || { id: 'principal' };
+            metaStore.put({ ...current, last_provider_updates: [
+              ...(current.last_provider_updates || []).filter(item => String(item.id_proveedor) !== String(entry.id_proveedor)),
+              { id_proveedor: String(entry.id_proveedor), proveedor: entry.proveedor, version: entry.version, updated_at: entry.updated_at }
+            ], provider_json_manifest: {
+              ...localProviderJsonManifest(current), [String(entry.id_proveedor)]: entry
+            }});
+          };
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error || new Error('No se pudo guardar la lista'));
+        });
+        return rows.map(normalizeProviderArticle).filter(item => item.descripcion || item.idart);
+      })();
+      singleProviderSyncs.set(key, task);
+      task.finally(() => singleProviderSyncs.delete(key)).catch(() => {});
+      return task;
     }
 
     async function syncProviderArticleBlocks(meta) {

@@ -1,7 +1,9 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia: 25/08/2026
+Fecha de referencia: 05/09/2026
+El cuerpo historico corresponde al 25/08/2026; la seccion 21 registra las
+actualizaciones posteriores y prevalece sobre las descripciones anteriores.
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -15,12 +17,13 @@ REGLAS DE TRABAJO
 
 - Trabajar en modo rápido por defecto: ubicar el código puntual, modificarlo y
   volver con el resultado.
+- No abrir, inspeccionar ni depurar el navegador salvo pedido explicito.
 - No asumir decisiones, comportamientos o alcances que el usuario no haya pedido.
 - Si aparece cualquier duda, ambigüedad o decisión con más de una interpretación,
   preguntar al usuario antes de modificar.
 - Solo hacer una revisión profunda cuando el usuario lo pida específicamente.
-- No crear copias locales .bak ni backups de ejecutables o archivos antes de
-  reemplazarlos. El usuario conserva las versiones recuperables en GitHub.
+- No crear copias locales .bak ni backups de ejecutables, bases Access o archivos
+  antes de reemplazarlos. El usuario ya tiene sus propios backups.
 - Cuando el usuario pide diagnosticar o revisar sin tocar nada, las consultas a
   Access, Supabase y archivos deben ser de solo lectura.
 
@@ -1446,8 +1449,9 @@ Manifesto y convencion
 - version-web.json es el manifiesto y el historial de versiones del sistema.
 - Al 25/08/2026 la version global y la de menu.html son 1.0.11. Este numero es
   historico y cambiara con las siguientes publicaciones.
-- Cada cambio, por pequeno que sea, debe incrementar la version de la pagina
-  afectada y agregar/actualizar su entrada en version-web.json.
+- No incrementar manualmente versiones de paginas, query strings ni
+  version-web.json al editar. El versionado se realiza en el flujo Subir a
+  GitHub, con la seleccion de HTML, descripcion y prioridad del usuario.
 - Cada entrada tiene una prioridad elegida explicitamente:
   Normal, Recomendada o Importante.
 - Normal se anuncia en verde; Recomendada en amarillo; Importante en rojo y su
@@ -1526,3 +1530,57 @@ esperado o si también debe aplicarse en otra pantalla, consultar al usuario.
 
 Salvo que el usuario pida revisar cuidadosamente un problema, trabajar en modo
 rápido y modificar únicamente lo solicitado.
+
+
+21. ACTUALIZACIONES AL 05/09/2026
+================================
+
+Impresion de comprobantes Access mediante HTML
+---------------------------------------------
+
+- Se implemento impcomp.html para elegir Factura o Remito e imprimir el
+  comprobante con sus articulos, evitando el limite del reporte Access A5.
+- CorralonWebServer.cs resuelve /impcomp como impcomp.html y ofrece
+  GET /api/impcomp?id=<IDRecibo>. Lee C:\Update\Ariel2App.mdb mediante OleDb.
+- impcomp.html consulta la API mediante una ruta relativa al mismo servidor.
+- La direccion acordada es:
+  http://192.168.100.28:8080/impcomp?id=<IDRecibo>
+  El boton de Access debe usar esta IP de la red local, no localhost ni el
+  dominio publico corralonprogreso.com.
+- Segun el trabajo completado en esta conversacion, se agrego Imprimir HTML
+  en FFacturasAFP y FFacturasAFPCons de la base activa. El usuario confirmo
+  que funciona. No se volvio a inspeccionar Access al actualizar este contexto.
+- La validacion previa de la API incluyo el ID 456990, con 82 articulos, y
+  acceso por la IP local. Esto es evidencia de esa prueba, no una comprobacion
+  del estado actual del proceso servidor.
+- El usuario autorizo los cambios concretos de impresion en Access; esto no
+  implica permiso para modificar otros formularios o datos sin relacion.
+
+Pedidos: eliminar articulos tambien de Faltantes
+-----------------------------------------------
+
+- pedidos.html incorpora matchingFaltantesForRows y
+  updateFaltantesAfterDeletingRows, llamadas desde deleteSelectedRows.
+- Al eliminar filas seleccionadas del pedido, busca coincidencias en Faltantes
+  mediante UID/vinculo guardado o proveedor, sucursal, codigo y descripcion.
+- Si encuentra coincidencias, pregunta si tambien debe eliminarlas de Faltantes.
+- Si se rechaza, conserva el faltante y desmarca su estado de pedido.
+- Si se acepta, llama a Catalog.deleteRowsByUid y actualiza la cache local.
+  Se reutiliza la eliminacion sincronizada del modulo compartido.
+- Si no hay coincidencias, elimina las filas del pedido sin esa pregunta.
+- Alcance: eliminacion explicita de filas seleccionadas. No se conecto esta
+  pregunta a removeOrderRowWithEmptyDescription, que elimina al vaciar descripcion.
+- Se verifico sintaxis JavaScript y git diff --check. No se hizo prueba de
+  navegador ni se publico este cambio como parte de esa tarea.
+
+Pendientes y criterios para continuar
+------------------------------------
+
+- Quedo pendiente retomar cache persistente + syncId para el historial de
+  presupuestos, remitos y garantias despues de resolver la impresion. Verificar
+  primero el codigo vigente: no asumir que ese pendiente ya esta implementado.
+- Hay muchos cambios locales y archivos nuevos de tareas anteriores. Conservarlos
+  y no confundirlos con cambios realizados en la tarea actual.
+- Las secciones anteriores son una fotografia historica. En particular, las
+  optimizaciones de egress, cache, Realtime y almacenamiento de imagenes tuvieron
+  cambios posteriores: revisar cada pagina antes de afirmar como descarga hoy.

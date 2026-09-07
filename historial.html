@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.10"></script>
+<script src="corralon-system.js?v=1.0.11"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -1705,14 +1705,26 @@ async function pegarImagenGarantiaDesdeClipboard() {
   }
 }
 
+let garantiaPegadoDirectoEnCurso = false;
 function pegarImagenGarantiaDesdePasteEvent(event) {
-  if (!document.getElementById('garantiaFotoBg').classList.contains('open')) return false;
+  const popupAbierto = document.getElementById('garantiaFotoBg').classList.contains('open');
+  const detalleAbierto = document.getElementById('garantiaDetalleBg').classList.contains('open');
+  const garantia = _garantiaDetalleActual;
+  const puedePegarDirecto = detalleAbierto && garantia && !garantiaTieneFoto(garantia);
+  if (garantiaPegadoDirectoEnCurso || (!popupAbierto && !puedePegarDirecto)) return false;
   const items = [...(event.clipboardData?.items || [])];
   const imageItem = items.find((item) => item.kind === 'file' && item.type.startsWith('image/'));
   if (!imageItem) return false;
   const file = imageItem.getAsFile();
   if (!file) return false;
-  setGarantiaFotoFile(file);
+  if (popupAbierto) {
+    setGarantiaFotoFile(file);
+    return true;
+  }
+  garantiaPegadoDirectoEnCurso = true;
+  _garantiaFotoActual = garantia;
+  _garantiaFotoFile = file;
+  guardarFotoGarantia().finally(() => { garantiaPegadoDirectoEnCurso = false; });
   return true;
 }
 
