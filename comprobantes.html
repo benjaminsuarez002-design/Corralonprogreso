@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.10"></script>
+<script src="corralon-system.js?v=1.0.11"></script>
   <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -3493,12 +3493,28 @@
         }, { merge: true });
       }
 
+      let objectiveSyncRunning = null;
+      let objectiveSyncAgain = false;
       async function syncAliasObjectivesSummaryFromServer() {
         if (!state.db) return;
-        const today = todayIso();
-        const aliases = state.aliases;
-        const records = state.allRecords.filter((record) => !record.eliminado && record.dateIso === today);
-        await writeAliasObjectivesSummary(buildAliasObjectivesSummary(records, aliases));
+        objectiveSyncAgain = true;
+        if (objectiveSyncRunning) return objectiveSyncRunning;
+        objectiveSyncRunning = (async () => {
+          do {
+            objectiveSyncAgain = false;
+            const today = todayIso();
+            // A partial incremental cache must never overwrite the shared daily total.
+            const [recordsSnapshot, aliasesSnapshot] = await Promise.all([
+              state.db.collection(COMPROBANTES_COLLECTION).where("dateIso", "==", today).get({ source: "server" }),
+              state.db.collection(ALIASES_COLLECTION).get({ source: "server" })
+            ]);
+            if (today !== todayIso()) { objectiveSyncAgain = true; continue; }
+            const records = recordsSnapshot.docs.map(mapDoc).filter(record => !record.eliminado);
+            const aliases = aliasesSnapshot.docs.map(mapAliasDoc);
+            await writeAliasObjectivesSummary(buildAliasObjectivesSummary(records, aliases));
+          } while (objectiveSyncAgain);
+        })();
+        try { await objectiveSyncRunning; } finally { objectiveSyncRunning = null; }
       }
 
       function queueAliasObjectivesSummarySync() {
@@ -5162,7 +5178,7 @@
           const changes = snapshot.docChanges()
             .filter((change) => change.type !== "removed")
             .map((change) => mapDoc(change.doc));
-          state.allRecords = mergeRecordChanges(firstLoad ? [] : state.allRecords, changes);
+          state.allRecords = mergeRecordChanges(state.allRecords, changes);
           for (const record of changes) lastComprobanteSyncId = Math.max(lastComprobanteSyncId, Number(record.syncId || 0));
           if (firstLoad && lastComprobanteSyncId <= 0) lastComprobanteSyncId = 1;
           await writeRecordsCache(state.allRecords, lastComprobanteSyncId).catch((error) => console.warn("No se pudo guardar la caché de comprobantes", error));
