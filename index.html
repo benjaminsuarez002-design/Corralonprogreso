@@ -3997,7 +3997,8 @@
     </div>
     <div class="ceramico-budget-field">
       <label for="ceramicoBudgetMeters">Cuantos metros necesitás</label>
-      <input type="text" id="ceramicoBudgetMeters" inputmode="decimal" autocomplete="off" placeholder="Ej: 20">
+      <input type="text" id="ceramicoBudgetMeters" inputmode="text" autocomplete="off" placeholder="Ej: 20 o 4*5">
+      <div id="ceramicoBudgetCalculation" hidden aria-live="polite"><span id="ceramicoBudgetCalculationResult"></span> <button type="button" id="ceramicoBudgetApplyCalculation" class="product-detail-btn-secondary">Aplicar resultado</button></div>
     </div>
     <div class="ceramico-budget-options">
       <label class="ceramico-budget-toggle" for="ceramicoBudgetIncludeGlue">
@@ -4141,7 +4142,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.18"></script>
+<script src="corralon-system.js?v=1.0.19"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -6801,6 +6802,28 @@ function actualizarIndicadorPrecioPresupuestoCeramico() {
 }
 
 function calcularPresupuestoCeramico() {
+  const metersInput = document.getElementById('ceramicoBudgetMeters');
+  const expression = metersInput.value.trim();
+  const pending = /[+*/()-]/.test(expression);
+  const calculation = document.getElementById('ceramicoBudgetCalculation');
+  calculation.hidden = !pending;
+  document.querySelector('#ceramicoBudgetModal .ceramico-budget-summary').hidden = pending;
+  if (pending) {
+    ceramicoBudgetCajas = 0;
+    ceramicoBudgetBolsas = 0;
+    document.getElementById('ceramicoBudgetAddCart').disabled = true;
+    const apply = document.getElementById('ceramicoBudgetApplyCalculation');
+    try {
+      const result = calcularCuentaCantidad(expression);
+      document.getElementById('ceramicoBudgetCalculationResult').textContent = 'Resultado: ' + result.toLocaleString('es-AR', { maximumFractionDigits: 3 }) + ' m²';
+      apply.disabled = false;
+    } catch (error) {
+      document.getElementById('ceramicoBudgetCalculationResult').textContent = error.message;
+      apply.disabled = true;
+    }
+    return;
+  }
+
   const articulo = ceramicoBudgetArticulo;
   if (!articulo) return;
   if (ceramicoBudgetModo === 'pegamento') {
@@ -6911,6 +6934,7 @@ function cerrarPresupuestoCeramico() {
 }
 
 function agregarPresupuestoCeramicoAlCarrito() {
+  calcularPresupuestoCeramico();
   const articulo = ceramicoBudgetArticulo;
   const cantidad = Math.max(0, parseInt(ceramicoBudgetCajas, 10) || 0);
   if (ceramicoBudgetModo === 'pegamento') {
@@ -10353,6 +10377,16 @@ document.getElementById('productDetailBudget').addEventListener('click', () => {
     return;
   }
   abrirPresupuestoCeramico(codigo);
+});
+document.getElementById('ceramicoBudgetApplyCalculation').addEventListener('click', () => {
+  const input = document.getElementById('ceramicoBudgetMeters');
+  try { input.value = String(calcularCuentaCantidad(input.value)).replace('.', ','); calcularPresupuestoCeramico(); }
+  catch (error) { calcularPresupuestoCeramico(); }
+});
+document.getElementById('ceramicoBudgetMeters').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && /[+*/()-]/.test(event.target.value)) {
+    event.preventDefault(); document.getElementById('ceramicoBudgetApplyCalculation').click();
+  }
 });
 document.getElementById('ceramicoBudgetMeters').addEventListener('input', calcularPresupuestoCeramico);
 document.getElementById('ceramicoBudgetIncludeGlue').addEventListener('change', (e) => {
