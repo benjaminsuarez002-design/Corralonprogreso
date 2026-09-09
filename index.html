@@ -3823,7 +3823,7 @@
       <div id="modalPrecio" style="margin-top:4px;color:var(--texto-dark);"></div>
       <div class="cantidad-selector" style="margin-top:12px;display:flex;align-items:center;gap:6px;justify-content:center;">
         <button id="modalMinus">-</button>
-        <input type="text" id="modalCantidad" value="1" inputmode="decimal" style="width:60px;text-align:center;border:1px solid var(--borde);border-radius:6px;height:28px;">
+        <input type="text" id="modalCantidad" value="1" inputmode="text" style="width:60px;text-align:center;border:1px solid var(--borde);border-radius:6px;height:28px;">
         <button id="modalPlus">+</button>
       </div>
       <div style="margin-top:16px;text-align:right;">
@@ -3957,7 +3957,7 @@
         </div>
         <div class="product-detail-actions">
           <div class="product-detail-controls">
-            <input class="product-detail-qty" id="productDetailQty" type="text" value="" inputmode="decimal">
+            <input class="product-detail-qty" id="productDetailQty" type="text" value="" inputmode="text">
             <button class="agregar-btn" id="productDetailAddCart" type="button" aria-label="Agregar al carrito">Agregar</button>
             <button class="product-detail-btn-secondary" id="productDetailOpenCart" type="button">Mi Carrito</button>
             <button class="product-detail-btn-secondary" id="productDetailBack" type="button">Volver</button>
@@ -4141,7 +4141,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.17"></script>
+<script src="corralon-system.js?v=1.0.18"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -10105,6 +10105,45 @@ function numeroCantidadCarrito(value) {
   }
   return Number(text);
 }
+function calcularCuentaCantidad(text) {
+  const raw = String(text).replace(/\s/g, '').replace(/,/g, '.');
+  if (raw.length > 150) throw new Error('Cuenta demasiado larga');
+  const tokens = raw.match(/(?:\d+(?:\.\d*)?|\.\d+)|[()+*/-]/g) || [];
+  if (tokens.join('') !== raw) throw new Error('Cuenta inválida');
+  let pos = 0;
+  function factor() {
+    if (tokens[pos] === '+') { pos++; return factor(); }
+    if (tokens[pos] === '-') { pos++; return -factor(); }
+    if (tokens[pos] === '(') { pos++; const n = suma(); if (tokens[pos++] !== ')') throw new Error('Falta cerrar paréntesis'); return n; }
+    const t = tokens[pos++];
+    if (!t || !/^[\d.]+$/.test(t)) throw new Error('Cuenta incompleta');
+    return Number(t);
+  }
+  function producto() { let n = factor(); while (tokens[pos] === '*' || tokens[pos] === '/') { const op = tokens[pos++]; const v = factor(); n = op === '*' ? n * v : n / v; } return n; }
+  function suma() { let n = producto(); while (tokens[pos] === '+' || tokens[pos] === '-') { const op = tokens[pos++]; const v = producto(); n = op === '+' ? n + v : n - v; } return n; }
+  const result = suma();
+  if (pos !== tokens.length || !Number.isFinite(result) || result <= 0) throw new Error('La cantidad debe ser mayor que cero');
+  const rounded = Math.round(result * 1000) / 1000;
+  if (!rounded) throw new Error('La cantidad es demasiado pequeña');
+  return rounded;
+}
+function revisarCuentaCantidad(input, enCarrito = false) {
+  const raw = input.value.trim();
+  if (!/[+*/()-]/.test(raw) || /^-?\d+(?:[.,]\d+)?\s*p$/i.test(raw)) return true;
+  try {
+    const total = calcularCuentaCantidad(raw);
+    input.value = String(total).replace('.', ',');
+    mostrarAvisoCarrito('Resultado: ' + input.value + (enCarrito ? '. Tocá Aplicar para confirmar.' : '. Tocá Agregar nuevamente para confirmar.'));
+    if (enCarrito) {
+      input.parentElement.querySelector('.aplicar-cuenta')?.remove();
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'aplicar-cuenta'; button.textContent = 'Aplicar ' + input.value;
+      button.addEventListener('click', () => { button.remove(); input.dispatchEvent(new Event('change', { bubbles: true })); });
+      input.parentElement.appendChild(button);
+    }
+  } catch (error) { mostrarAvisoCarrito(error.message); }
+  return false;
+}
 function parseCantidadCarrito(value, fallback = 1, articulo = null) {
   const raw = String(value ?? '').trim();
   const placasMatch = raw.match(/^(-?\d+(?:[.,]\d+)?)\s*p$/i);
@@ -10163,7 +10202,7 @@ function actualizarVistaCarrito() {
         <div style="font-weight:600;margin-top:4px;">Subtotal: ${fmtPrecio(importe)}</div>
         <div class="cart-item-controls">
           <button class="qty-minus" data-codigo="${itm.codigo}">-</button>
-          <input class="qty-input" type="text" inputmode="decimal" value="${formatCantidadCarrito(itm.cantidad)}" data-codigo="${itm.codigo}">
+          <input class="qty-input" type="text" inputmode="text" value="${formatCantidadCarrito(itm.cantidad)}" data-codigo="${itm.codigo}">
           <button class="qty-plus" data-codigo="${itm.codigo}">+</button>
           <button class="remove-item" data-codigo="${itm.codigo}" style="margin-left:6px;background:#e50000;">x</button>
         </div>
@@ -10267,6 +10306,7 @@ document.getElementById('productDetailAddCart').addEventListener('click', () => 
   const articulo = obtenerArticuloDesdeCodigo(codigo);
   const chipPrecio = datosChipPrecioArticulo(articulo || {});
   const qtyInput = document.getElementById('productDetailQty');
+  if (!revisarCuentaCantidad(qtyInput)) return;
   const cantidad = parseCantidadCarrito(qtyInput.value, 1, articulo);
   if (cantidad?.error === 'sin_placas') {
     mostrarErrorSinPlacas(qtyInput);
@@ -10363,6 +10403,7 @@ document.getElementById('modalAddCart').addEventListener('click', () => {
   const articulo = obtenerArticuloDesdeCodigo(codigo);
   const chipPrecio = datosChipPrecioArticulo(articulo || {});
   const cantidadInput = document.getElementById('modalCantidad');
+  if (!revisarCuentaCantidad(cantidadInput)) return;
   const cant = parseCantidadCarrito(cantidadInput.value, 1, articulo);
   if (cant?.error === 'sin_placas') {
     mostrarErrorSinPlacas(cantidadInput);
