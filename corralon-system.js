@@ -705,6 +705,10 @@
       updated.foto_url = primary;
       updated.imagen = primary;
       updated.imagenes = images;
+      updated.imageUrl = primary;
+      updated.fotos = [...images];
+      updated.galeria = [...images];
+      updated.fotoUrls = [...images];
     }
     updated.timestamp = Date.now();
     return updated;
@@ -1397,7 +1401,13 @@
         tagsOcultos: articleTags(editorField('tags').value),
         precio: price,
         fotoUrl: savedImages[0] || '',
+        foto_url: savedImages[0] || '',
+        imagen: savedImages[0] || '',
+        imageUrl: savedImages[0] || '',
         imagenes: savedImages,
+        fotos: [...savedImages],
+        galeria: [...savedImages],
+        fotoUrls: [...savedImages],
         oferta: active('oferta'),
         ofertaPct: active('oferta') ? Number(parseFlexibleNumber(editorField('ofertaPct').value) || 0) : 0,
         ofertaHasta: active('oferta') ? articleEditorDateToIso(editorField('ofertaHasta').value) : '',
