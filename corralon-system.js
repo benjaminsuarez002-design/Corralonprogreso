@@ -356,7 +356,7 @@
     const list = Array.isArray(providers) ? providers : Object.values(providers || {});
     return list.some((provider) => {
       const normalized = providerFromObject(provider || {});
-      const providerId = String(normalized.id ?? provider?.id ?? provider?.idProveedor ?? provider?.id_proveedor ?? '').trim();
+      const providerId = providerExternalId(provider);
       const providerName = normalized.nombre ?? provider?.nombre ?? provider?.razonSocial ?? provider?.razon_social ?? '';
       return providerId.replace(/^0+(?=\d)/, '') === wantedId && looksLikeAridosGaldeano(providerName);
     });
@@ -2603,9 +2603,52 @@
     return '';
   }
 
+  // id_proveedor is the immutable list key. codigo_proveedor is the editable ERP code.
+  function providerInternalId(provider) { return cleanId(provider?.id_interno ?? provider?.id_proveedor); }
+  function providerExternalId(provider) { return cleanId(provider?.codigo_proveedor ?? provider?.id_proveedor); }
+  function newProviderId() {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
+  function resolveProviderText(providers, text) {
+    const query = norm(text);
+    const exact = providers.filter(p => norm(p.proveedor) === query || norm(`${providerExternalId(p)} - ${p.proveedor}`) === query);
+    if (exact.length === 1) return exact[0];
+    const byCode = providers.filter(p => norm(providerExternalId(p)) === query);
+    return byCode.length === 1 ? byCode[0] : null;
+  }
+  function mergeProviderImport(existing, incoming) {
+    const result = new Map(existing.map(p => [providerInternalId(p), p]));
+    const touched = new Set();
+    const inputKeys = new Set();
+    for (const row of incoming) {
+      const explicit = cleanId(row.id_interno);
+      const code = providerExternalId(row);
+      const inputKey = explicit || JSON.stringify([code, norm(row.proveedor)]);
+      if (inputKeys.has(inputKey)) throw new Error(`Proveedor repetido en el archivo: ${row.proveedor}`);
+      inputKeys.add(inputKey);
+      const matches = existing.filter(p => providerExternalId(p) === code && norm(p.proveedor) === norm(row.proveedor));
+      if (matches.length > 1) throw new Error(`Proveedor ambiguo: ${row.proveedor}. Incluí IDInterno en el archivo.`);
+      const prior = explicit ? result.get(explicit) : matches[0];
+      if (explicit && !prior) throw new Error(`IDInterno desconocido: ${explicit}`);
+      // A code by itself never identifies a list (multiple lists can share it).
+      const sameName = existing.filter(p => norm(p.proveedor) === norm(row.proveedor));
+      if (!prior && sameName.length) throw new Error(`Cambió el código de ${row.proveedor}. Incluí su IDInterno para actualizarlo sin duplicarlo.`);
+      const id = prior ? providerInternalId(prior) : newProviderId();
+      if (touched.has(id)) throw new Error(`Proveedor repetido en el archivo: ${row.proveedor}`);
+      touched.add(id);
+      result.set(id, normalizeProviderPageLink({ ...prior, ...row, id_proveedor: id, id_interno: id, codigo_proveedor: code }));
+    }
+    return [...result.values()];
+  }
+
   function providerFromObject(obj) {
     const provider = {
-      id_proveedor: String(getByHeader(obj, ['ID Proveedor', 'id_proveedor', 'idprov'])).trim(),
+      id_proveedor: String(getByHeader(obj, ['codigo_proveedor', 'ID Proveedor', 'id_proveedor', 'idprov'])).trim(),
+      id_interno: cleanId(getByHeader(obj, ['IDInterno', 'ID Interno', 'id_interno'])),
+      codigo_proveedor: cleanId(getByHeader(obj, ['codigo_proveedor', 'ID Proveedor', 'id_proveedor', 'idprov'])),
       proveedor: String(getByHeader(obj, ['Proveedor', 'proveedor'])).trim(),
       descuento_factura: Number(getByHeader(obj, ['Descuento En Factura', 'descuento_factura'])) || 0,
       descuento_lista: Number(getByHeader(obj, ['Descuento En Lista', 'descuento_lista'])) || 0,
@@ -2624,7 +2667,7 @@
   }
 
   const PROVIDER_REMOTE_COLUMNS = [
-    'id_proveedor', 'proveedor', 'descuento_factura', 'descuento_lista', 'ultima_actualizacion',
+    'id_proveedor', 'codigo_proveedor', 'proveedor', 'descuento_factura', 'descuento_lista', 'ultima_actualizacion',
     'vendedor', 'telefono', 'nota', 'porc_flete', 'porc_iva', 'iva_incluido',
     'descuento_total_fc', 'proveedor_norm', 'reserva_texto_1', 'reserva_texto_2',
     'reserva_texto_3', 'reserva_texto_4', 'reserva_numero_1', 'reserva_numero_2',
@@ -2635,7 +2678,7 @@
     if (!provider) return provider;
     const link = String(provider.pagina_link || provider.pagina || provider.web || provider.reserva_texto_1 || '').trim();
     const descuentoTotalFc = provider.descuento_total_fc ?? provider.descuento_final_factura ?? null;
-    const normalized = { ...provider, descuento_total_fc: descuentoTotalFc };
+    const normalized = { ...provider, id_interno: providerInternalId(provider), codigo_proveedor: providerExternalId(provider), descuento_total_fc: descuentoTotalFc };
     return link ? { ...normalized, pagina_link: link, reserva_texto_1: link } : { ...normalized, pagina_link: '', reserva_texto_1: provider.reserva_texto_1 || null };
   }
 
@@ -2647,6 +2690,54 @@
     }
     payload.reserva_texto_1 = normalized.pagina_link || normalized.reserva_texto_1 || null;
     return payload;
+  }
+
+  // IndexedDB distinguishes numeric supplier IDs from string supplier IDs.
+  function currentProviderCacheEntries(entries) {
+    // Only explicit migration aliases retire a key; equal names never merge lists.
+    const retired = new Set(entries.flatMap(entry => (entry.previous_provider_ids || []).map(String)));
+    return entries.filter(entry => !retired.has(String(entry.id_proveedor)));
+  }
+
+  function providerCacheKeys(providerId) {
+    const id = String(providerId ?? '').trim();
+    return id && Number.isFinite(Number(id)) ? [id, Number(id)] : [id];
+  }
+  function queueProviderCacheReplacement(store, providerId, rows, previousIds = []) {
+    const id = String(providerId ?? '').trim();
+    const indexed = store.indexNames.contains('id_proveedor');
+    const ids = [id, ...previousIds.map(String)];
+    const keys = indexed ? [...new Set(ids.flatMap(providerCacheKeys))] : [null];
+    let pending = keys.length;
+    for (const key of keys) {
+      const request = indexed ? store.index('id_proveedor').openCursor(IDBKeyRange.only(key)) : store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) {
+          if (indexed || ids.includes(String(cursor.value?.id_proveedor ?? '').trim())) cursor.delete();
+          cursor.continue();
+          return;
+        }
+        if (--pending === 0) rows.forEach(row => store.put({ ...row, id_proveedor: id }));
+      };
+    }
+  }
+  function providerCacheCounts(database, entries) {
+    return new Promise((resolve, reject) => {
+      const counts = new Map();
+      const tx = database.transaction('articulos', 'readonly');
+      const index = tx.objectStore('articulos').index('id_proveedor');
+      for (const entry of entries) {
+        const id = String(entry.id_proveedor);
+        counts.set(id, 0);
+        for (const key of [...new Set([id, ...(entry.previous_provider_ids || [])].flatMap(providerCacheKeys))]) {
+          const req = index.count(key);
+          req.onsuccess = () => counts.set(id, counts.get(id) + req.result);
+        }
+      }
+      tx.oncomplete = () => resolve(counts);
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('No se pudo revisar la caché'));
+    });
   }
 
   function openDb(name, upgrade, version = 1) {
@@ -2760,8 +2851,8 @@
     const remoteMeta = await fetchProvidersMeta();
     const localMeta = readProvidersSyncMeta();
     if (!remoteMeta) return cached.length ? cached : importProvidersCloud();
-    if (cached.length && String(localMeta?.version || '') === String(remoteMeta.version || '')) return cached;
-    if (!cached.length || !localMeta?.updated_at) {
+    if (cached.length && cached.every(row => row.codigo_proveedor != null) && String(localMeta?.version || '') === String(remoteMeta.version || '')) return cached;
+    if (!cached.length || cached.some(row => row.codigo_proveedor == null) || !localMeta?.updated_at) {
       const providers = await importProvidersCloud();
       writeProvidersSyncMeta(remoteMeta);
       return providers;
@@ -2781,12 +2872,14 @@
   }
 
   async function uploadProviders(data, fileName = '') {
-    await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.providers}?id_proveedor=not.is.null`, { method: 'DELETE', headers: headers() });
-    for (let i = 0; i < data.length; i += 1000) {
+    const existing = await fetchAll(TABLES.providers, 'select=*');
+    data = mergeProviderImport(existing, data);
+    const changed = data.filter(row => !existing.includes(row));
+    for (let i = 0; i < changed.length; i += 1000) {
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.providers}?on_conflict=id_proveedor`, {
         method: 'POST',
         headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-        body: JSON.stringify(data.slice(i, i + 1000).map(providerRemotePayload))
+        body: JSON.stringify(changed.slice(i, i + 1000).map(providerRemotePayload))
       });
       if (!response.ok) throw new Error(await response.text());
     }
@@ -2795,7 +2888,7 @@
       headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
       body: JSON.stringify({ id: 'principal', version: Date.now(), total_proveedores: data.length, archivo_nombre: fileName })
     });
-    await setProvidersCache(data.map(normalizeProviderPageLink));
+    await importProvidersCloud();
   }
 
   async function updateProviderDateOnly(provider, timestamp = nowTimestamp()) {
@@ -2922,6 +3015,7 @@
   function providerJsonTableEntryFromManifestEntry(entry) {
     return {
       id_proveedor: cleanId(entry?.id_proveedor),
+      previous_provider_ids: entry?.previous_provider_ids || [],
       proveedor: String(entry?.proveedor || '').trim(),
       json_url: String(entry?.json_url || '').trim(),
       chunks: Array.isArray(entry?.chunks) ? entry.chunks : [],
@@ -2942,6 +3036,7 @@
       providers[id] = {
         id_proveedor: id,
         proveedor: row?.proveedor || '',
+        previous_provider_ids: row?.previous_provider_ids || [],
         version: Number(row?.version || 0),
         updated_at: row?.fecha_actualizacion || row?.updated_at || '',
         total_articulos: Number(row?.total_articulos || 0),
@@ -2972,7 +3067,7 @@
   }
 
   async function fetchProviderJsonTableRows(query = '') {
-    const select = 'select=id_proveedor,proveedor,json_url,chunks,chunk_count,total_articulos,version,fecha_actualizacion,updated_at';
+    const select = 'select=id_proveedor,proveedor,json_url,chunks,chunk_count,total_articulos,version,fecha_actualizacion,updated_at,previous_provider_ids';
     const suffix = query ? `&${query}` : '&order=proveedor.asc';
     return fetchAll(TABLES.priceListJsonProviders, `${select}${suffix}`);
   }
@@ -3029,7 +3124,7 @@
       cod_proveedor: String(article.cod_proveedor || article.codProv || '').trim(),
       articulo: String(article.articulo || article.descripcion || '').trim(),
       precio_costo: Number(article.precio_costo ?? article.precioCosto ?? 0) || 0,
-      id_proveedor: cleanId(article.id_proveedor || article.idProveedor || id),
+      id_proveedor: id,
       proveedor: String(article.proveedor || '').trim(),
       cod_proveedor_norm: norm(article.cod_proveedor_norm || article.cod_proveedor || article.codProv || ''),
       articulo_norm: norm(article.articulo_norm || article.articulo || article.descripcion || ''),
@@ -3110,6 +3205,7 @@
     providers[id] = {
       id_proveedor: id,
       proveedor: providerName,
+      previous_provider_ids: providers[id]?.previous_provider_ids || [],
       version,
       updated_at: new Date().toISOString(),
       total_articulos: rows.length,
@@ -3187,7 +3283,8 @@
     return `<Cell><Data ss:Type="${type}">${text}</Data></Cell>`;
   }
 
-  function buildArticlesXlsBlob(articles) {
+  function buildArticlesXlsBlob(articles, provider = null) {
+    const exportProviderId = article => provider ? providerExternalId(provider) : (article.id_proveedor_externo ?? article.id_proveedor ?? '');
     const headers = ['IDArt', 'CodProveedor', 'Articulo', 'CodBarra', 'PrecioCosto', 'preciolista', 'PrecioVta', 'IDProveedor', 'IDRubro', 'IDMoneda', 'Nota', 'PorcIVA'];
     const rows = [headers, ...articles.map((article) => [
       '',
@@ -3197,7 +3294,7 @@
       Number(article.precio_costo || 0),
       '',
       '',
-      article.id_proveedor || '',
+      exportProviderId(article),
       '',
       '',
       '',
@@ -3229,7 +3326,7 @@
         xmlCell(Number(article.precio_costo || 0), 'Number'),
         xmlCell(''),
         xmlCell(''),
-        xmlCell(article.id_proveedor || ''),
+        xmlCell(exportProviderId(article)),
         xmlCell(''),
         xmlCell(''),
         xmlCell(''),
@@ -4650,6 +4747,7 @@
       );
       return withSearch({
         source: 'index',
+        codigoProveedorExterno: item.codigoProveedorExterno ?? idProveedor,
         idart,
         idProveedor,
         codProv,
@@ -5017,16 +5115,15 @@
           }
         }
         if (!providers.length) return rows;
-        const providerMap = new Map();
-        for (const provider of providers) {
-          const name = String(provider.proveedor || '').trim();
-          for (const id of idVariants(provider.id_proveedor)) providerMap.set(id, name);
-        }
         for (const row of rows) {
-          if (row.idProveedor) {
-            row.proveedor = idVariants(row.idProveedor).map((id) => providerMap.get(id)).find(Boolean) || row.proveedor || '';
-            withSearch(row);
-          }
+          const code = cleanId(row.codigoProveedorExterno ?? row.idProveedor);
+          const matches = providers.filter(p => idVariants(providerExternalId(p)).some(id => idVariants(code).includes(id)));
+          const named = matches.filter(p => norm(p.proveedor) === norm(row.proveedor));
+          const match = matches.length === 1 ? matches[0] : named.length === 1 ? named[0] : null;
+          row.codigoProveedorExterno = code;
+          row.idProveedor = match ? providerInternalId(match) : '';
+          row.proveedor = match?.proveedor || row.proveedor || '';
+          withSearch(row);
         }
         return rows;
       } catch (error) {
@@ -5115,9 +5212,14 @@
           const tx = database.transaction('articulos', 'readonly');
           const store = tx.objectStore('articulos');
           if (id && store.indexNames.contains('id_proveedor')) {
-            const request = store.index('id_proveedor').getAll(id);
-            request.onsuccess = () => resolve(request.result || []);
-            request.onerror = () => reject(request.error);
+            const found = [];
+            const keys = providerCacheKeys(id);
+            let pending = keys.length;
+            keys.forEach(key => {
+              const request = store.index('id_proveedor').getAll(key);
+              request.onsuccess = () => { found.push(...(request.result || [])); if (--pending === 0) resolve(found); };
+              request.onerror = () => reject(request.error);
+            });
             return;
           }
           if (name && store.indexNames.contains('proveedor')) {
@@ -5198,26 +5300,13 @@
       });
     }
 
-    async function replaceProviderArticlesCacheBlock(providerId, rows) {
+    async function replaceProviderArticlesCacheBlock(providerId, rows, previousIds = []) {
       const database = await openListDb();
       return new Promise((resolve, reject) => {
         const id = String(providerId || '');
         const tx = database.transaction('articulos', 'readwrite');
         const store = tx.objectStore('articulos');
-        const source = store.indexNames.contains('id_proveedor')
-          ? store.index('id_proveedor')
-          : store;
-        const request = source.openCursor(store.indexNames.contains('id_proveedor') ? IDBKeyRange.only(id) : null);
-        request.onsuccess = () => {
-          const cursor = request.result;
-          if (cursor) {
-            if (source !== store || String(cursor.value?.id_proveedor || '') === id) cursor.delete();
-            cursor.continue();
-            return;
-          }
-          rows.forEach((row) => store.put(row));
-        };
-        request.onerror = () => reject(request.error);
+        queueProviderCacheReplacement(store, id, rows, previousIds);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
@@ -5265,18 +5354,19 @@
     }
 
     function providerJsonManifestEntries(manifest) {
-      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length);
+      return currentProviderCacheEntries(Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length));
     }
     function findProviderJsonEntry(manifest, provider = '', providerId = '') {
       const id = cleanId(providerId || String(provider || '').match(/^\s*([0-9.]+)\s*[-–]/)?.[1] || '');
       const name = norm(String(provider || '').replace(/^\s*\d+\s*[-–]\s*/, ''));
       const entries = providerJsonManifestEntries(manifest);
       if (id) {
-        const byId = entries.find((entry) => cleanId(entry.id_proveedor) === id);
-        if (byId) return byId;
+        const byId = entries.find((entry) => cleanId(entry.id_proveedor) === id || (entry.previous_provider_ids || []).includes(id));
+        return byId || null;
       }
       if (name) {
-        return entries.find((entry) => norm(entry.proveedor) === name) || entries.find((entry) => norm(entry.proveedor).includes(name) || name.includes(norm(entry.proveedor)));
+        const matches = entries.filter(entry => norm(entry.proveedor) === name);
+        return matches.length === 1 ? matches[0] : null;
       }
       return null;
     }
@@ -5295,7 +5385,7 @@
     }
 
     function normalizeProviderJsonCacheRow(row, entry, index) {
-      const id = cleanId(row?.id_proveedor || row?.idProveedor || entry?.id_proveedor || '');
+      const id = cleanId(entry?.id_proveedor || row?.id_proveedor || row?.idProveedor || '');
       const providerName = String(row?.proveedor || entry?.proveedor || '').trim();
       const cod = String(row?.cod_proveedor || row?.codProv || row?.codprov || '').trim();
       const article = String(row?.articulo || row?.descripcion || row?.nombre || '').trim();
@@ -5343,7 +5433,8 @@
       const local = localProviderListMeta() || {};
       const localManifest = localProviderJsonManifest(local);
       const entries = providerJsonManifestEntries(manifest);
-      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest));
+      const counts = await providerCacheCounts(await openListDb(), entries);
+      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest) || counts.get(String(entry.id_proveedor)) !== Number(entry.total_articulos));
       if (!changed.length) {
         if (options.updateWhenNoChanges !== false) {
           setLocalProviderListMeta({
@@ -5366,10 +5457,8 @@
         });
       }
       for (const entry of changed) {
-        const deletePromise = options.clearBeforeImport ? Promise.resolve() : replaceProviderArticlesCacheBlock(entry.id_proveedor, []);
         const rows = await fetchProviderJsonRows(entry);
-        await deletePromise;
-        await replaceProviderArticlesCacheBlock(entry.id_proveedor, rows);
+        await replaceProviderArticlesCacheBlock(entry.id_proveedor, rows, entry.previous_provider_ids);
         nextLocalManifest[cleanId(entry.id_proveedor)] = {
           id_proveedor: cleanId(entry.id_proveedor),
           proveedor: entry.proveedor || '',
@@ -5400,9 +5489,10 @@
       if (singleProviderSyncs.has(key)) return singleProviderSyncs.get(key);
       const task = (async () => {
         // Consult only this supplier; never advance the global version or cursor.
-        const filter = id ? 'id_proveedor=eq.' + encodeURIComponent(id) : 'proveedor=eq.' + encodeURIComponent(name);
-        const entries = await fetchProviderJsonTableRows(filter + '&limit=1');
-        const entry = Object.values(providerJsonManifestFromTableRows(entries).providers || {})[0];
+        const filter = id ? 'or=(id_proveedor.eq.' + encodeURIComponent(id) + ',previous_provider_ids.cs.%7B' + encodeURIComponent(id) + '%7D)' : 'proveedor=eq.' + encodeURIComponent(name);
+        const entries = currentProviderCacheEntries(await fetchProviderJsonTableRows(filter));
+        if (entries.length > 1) throw new Error('Hay varias listas con ese nombre. Seleccioná el proveedor exacto.');
+        const entry = providerJsonManifestEntries(providerJsonManifestFromTableRows(entries))[0];
         if (!entry) return readProviderArticlesCacheByProvider(id, name);
         const database = await openListDb();
         const local = await new Promise((resolve, reject) => {
@@ -5412,8 +5502,9 @@
         });
         const cached = await readProviderArticlesCacheByProvider(entry.id_proveedor, entry.proveedor);
         const overwrittenByFallback = (local.last_provider_updates || []).some(item => String(item.id_proveedor) === String(entry.id_proveedor) && !Number(item.version));
-        if (!overwrittenByFallback && !needsProviderJsonSync(entry, localProviderJsonManifest(local)) &&
-            (cached.length || Number(entry.total_articulos) === 0)) return cached;
+        const counts = await providerCacheCounts(database, [entry]);
+        if (counts.get(String(entry.id_proveedor)) === Number(entry.total_articulos) && !overwrittenByFallback && !needsProviderJsonSync(entry, localProviderJsonManifest(local)) &&
+            (cached.length === Number(entry.total_articulos))) return cached;
         if (!providerJsonUrls(entry).length) throw new Error('El proveedor no tiene un JSON disponible');
         const rows = await fetchProviderJsonRows(entry);
         if (Number.isFinite(Number(entry.total_articulos)) && rows.length !== Number(entry.total_articulos)) {
@@ -5422,12 +5513,7 @@
         await new Promise((resolve, reject) => {
           const tx = database.transaction(['articulos', 'meta'], 'readwrite');
           const store = tx.objectStore('articulos');
-          const req = store.index('id_proveedor').openCursor(IDBKeyRange.only(String(entry.id_proveedor)));
-          req.onsuccess = () => {
-            const cursor = req.result;
-            if (cursor) { cursor.delete(); cursor.continue(); return; }
-            rows.forEach(row => store.put(row));
-          };
+          queueProviderCacheReplacement(store, entry.id_proveedor, rows, entry.previous_provider_ids);
           const metaStore = tx.objectStore('meta');
           const metaReq = metaStore.get('principal');
           metaReq.onsuccess = () => {
@@ -5500,7 +5586,7 @@
         providers = await getProvidersCache();
       }
       return providers
-        .map((provider) => ({ ...provider, idNorm: norm(provider.id_proveedor), nameNorm: norm(provider.proveedor) }))
+        .map((provider) => ({ ...provider, idNorm: norm(providerExternalId(provider)), nameNorm: norm(provider.proveedor) }))
         .sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es', { numeric: true, sensitivity: 'base' }));
     }
 
@@ -5750,6 +5836,7 @@
       loadCatalog,
       syncCatalogInBackground,
       catalogFilter,
+      catalogMatches,
       catalogOptions,
       providerOptions,
       applyArticle,
@@ -6660,7 +6747,13 @@
         options.showMessage?.('Ya hay una importación de artículos ejecutándose en segundo plano');
         return false;
       }
-      const provider = options.provider || {};
+      let provider = options.provider || {};
+      if (options.providerInternalId) {
+        const providers = await syncProvidersCache();
+        const internal = providers.find(p => providerInternalId(p) === cleanId(options.providerInternalId));
+        if (!internal) throw new Error('No se encontró el proveedor de esta lista. Recargá los proveedores.');
+        provider = { ...internal, id_proveedor: providerExternalId(internal) };
+      }
       const sourceRows = Array.isArray(options.rows) ? options.rows : [];
       if (!text(provider.id_proveedor || provider.idProveedor)) { options.showMessage?.('Primero elegí un proveedor'); return false; }
       if (!sourceRows.length) { options.showMessage?.('No hay artículos para importar'); return false; }
@@ -7057,6 +7150,95 @@
     };
   })();
 
+  const ARTICLE_OPTION_PAGER = (() => {
+    const collator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' });
+    function defaultKey(row = {}) {
+      return [row.idart, row.idArt, row.codigo, row.codProv, row.cod_proveedor, row.descripcion, row.nombre, row.articulo, row.proveedor]
+        .map(value => String(value ?? '').trim())
+        .join('|');
+    }
+    function defaultDescription(row = {}) {
+      return String(row.descripcion ?? row.nombre ?? row.articulo ?? '').trim();
+    }
+    function sortedUnique(source, key, description) {
+      const seen = new Set();
+      return [...(source || [])]
+        .filter(Boolean)
+        .filter(row => {
+          const value = key(row);
+          if (!value || seen.has(value)) return false;
+          seen.add(value);
+          return true;
+        })
+        .sort((a, b) => collator.compare(description(a), description(b)) || collator.compare(key(a), key(b)));
+    }
+    function take(page, direction, requestedCount) {
+      if (!page?.source?.length) return [];
+      const count = Math.max(0, Number(requestedCount) || (direction === 'up' ? page.beforeCount : page.afterCount));
+      const added = [];
+      let cursor = direction === 'up' ? page.beforeCursor : page.afterCursor;
+      while (cursor >= 0 && cursor < page.source.length && added.length < count) {
+        const row = page.source[cursor];
+        cursor += direction === 'up' ? -1 : 1;
+        const rowKey = page.key(row);
+        if (!page.seen.has(rowKey)) {
+          page.seen.add(rowKey);
+          added.push(row);
+        }
+      }
+      if (direction === 'up') {
+        page.beforeCursor = cursor;
+        added.reverse();
+      } else {
+        page.afterCursor = cursor;
+      }
+      return added;
+    }
+    function create(source, options = {}) {
+      const key = typeof options.key === 'function' ? options.key : defaultKey;
+      const description = typeof options.description === 'function' ? options.description : defaultDescription;
+      const ordered = sortedUnique(source, key, description);
+      const hasSearch = options.hasSearch !== false;
+      const isMatch = typeof options.isMatch === 'function' ? options.isMatch : (() => false);
+      const rank = typeof options.rank === 'function' ? options.rank : (() => 0);
+      const matchLimit = Math.max(1, Number(options.matchLimit) || 100);
+      const beforeCount = Math.max(0, Number(options.beforeCount) || 20);
+      const afterCount = Math.max(0, Number(options.afterCount) || 40);
+      const matches = hasSearch
+        ? ordered.filter(isMatch).sort((a, b) => rank(a) - rank(b) || collator.compare(description(a), description(b))).slice(0, matchLimit)
+        : [];
+      const anchor = matches.length ? Math.max(0, ordered.indexOf(matches[0])) : 0;
+      const page = {
+        source: ordered,
+        key,
+        seen: new Set(matches.map(key)),
+        beforeCursor: hasSearch ? anchor - 1 : -1,
+        afterCursor: anchor,
+        beforeCount,
+        afterCount,
+        focusIndex: 0,
+        options: []
+      };
+      const before = take(page, 'up', beforeCount);
+      const after = take(page, 'down', afterCount);
+      page.focusIndex = before.length;
+      page.options = [...before, ...matches, ...after];
+      return page;
+    }
+    function extend(page, direction) {
+      const added = take(page, direction);
+      if (!added.length) return added;
+      if (direction === 'up') {
+        page.options = [...added, ...page.options];
+        page.focusIndex += added.length;
+      } else {
+        page.options = [...page.options, ...added];
+      }
+      return added;
+    }
+    return { create, take, extend, defaultKey, defaultDescription };
+  })();
+
   const WEB_VERSION_NOTIFIER = (() => {
     const RAW_MANIFEST_URL = 'https://raw.githubusercontent.com/benjaminsuarez002-design/Corralonprogreso/main/version-web.json';
     const MANIFEST_URL = /^(https?:)$/i.test(location.protocol)
@@ -7268,6 +7450,7 @@
       apply: applyProviderEditorLayout
     },
     numericCalculator: NUMERIC_CALCULATOR,
+    articleOptionPager: ARTICLE_OPTION_PAGER,
     newArticlesImporter: NEW_ARTICLES_IMPORTER,
     budgetSearch: BUDGET_SEARCH,
     articleEditor: {
@@ -7290,6 +7473,8 @@
     catalogEditorSession: CATALOG_EDITOR_SESSION,
     catalog: CATALOG,
     catalogRealtime: CATALOG_REALTIME,
+    providerIdentity: { internalId: providerInternalId, externalId: providerExternalId, newId: newProviderId, resolveText: resolveProviderText, mergeImport: mergeProviderImport },
+    providerCache: { currentEntries: currentProviderCacheEntries, keys: providerCacheKeys, replace: queueProviderCacheReplacement, counts: providerCacheCounts },
     faltantes: FALTANTES,
     versionNotifier: WEB_VERSION_NOTIFIER
   };

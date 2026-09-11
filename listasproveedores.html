@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.16"></script>
+<script src="corralon-system.js?v=1.0.17"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -1694,12 +1694,19 @@
       if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(fallback);
       else fallback();
     }
-    function copyProviderListPriceForAccess(row = state.selectedRow) {
+    async function copyProviderListPriceForAccess(row = state.selectedRow) {
       if (!row) {
         showToast('Seleccioná un artículo para copiar.');
         return false;
       }
-      const providerId = String(row.id_proveedor || row.idProveedor || '').trim();
+      const internalId = String(row.id_proveedor || row.idProveedor || '').trim();
+      let providerId;
+      try {
+        const providers = await CorralonSystem.syncProvidersCache();
+        const provider = providers.find(item => String(item.id_proveedor) === internalId);
+        if (!provider) throw new Error('Recargá la lista para identificar el proveedor actual.');
+        providerId = CorralonSystem.providerIdentity.externalId(provider);
+      } catch (error) { showToast(error.message || 'No se pudo identificar el proveedor'); return false; }
       const code = String(row.cod_proveedor || '').trim();
       const price = Number(row.precio_costo || 0);
       if (!providerId || !code || !Number.isFinite(price) || price <= 0) {
@@ -2041,7 +2048,8 @@
           if (msg.type === 'replaceProvider') {
             const providerId = String(msg.providerId || '');
             const incoming = Array.isArray(msg.rows) ? msg.rows : [];
-            data = data.filter(row => String(row.id_proveedor || '') !== providerId).concat(incoming);
+            const replacedIds = new Set([providerId, ...(msg.previousIds || []).map(String)]);
+            data = data.filter(row => !replacedIds.has(String(row.id_proveedor || ''))).concat(incoming);
             const article = norm(msg.filter?.article || '');
             const f = {
               code: norm(msg.filter?.code || ''),
@@ -3114,7 +3122,7 @@
       return text.startsWith(FULL_PROVIDER_MANIFEST_PREFIX) ? text.slice(FULL_PROVIDER_MANIFEST_PREFIX.length) : '';
     }
     async function fetchProviderManifest(meta, urlOverride = '') {
-      if (!urlOverride && CorralonSystem.fetchProviderJsonTableManifest) {
+      if (CorralonSystem.fetchProviderJsonTableManifest) {
         const tableManifest = await CorralonSystem.fetchProviderJsonTableManifest().catch((error) => {
           console.warn(error);
           return null;
@@ -3139,7 +3147,7 @@
         : {};
     }
     function providerManifestEntries(manifest) {
-      return Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length);
+      return CorralonSystem.providerCache.currentEntries(Object.values(manifest?.providers || {}).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length));
     }
     function providerJsonUrls(entry) {
       const chunks = Array.isArray(entry?.chunks) ? entry.chunks.map((chunk) => String(chunk?.json_url || '').trim()).filter(Boolean) : [];
@@ -3153,7 +3161,7 @@
       return Number(local.version || 0) < Number(entry.version || 0);
     }
     function normalizeProviderJsonRow(row, entry, index) {
-      const id = cleanProviderCode(row?.id_proveedor || row?.idProveedor || entry?.id_proveedor);
+      const id = cleanProviderCode(entry?.id_proveedor || row?.id_proveedor || row?.idProveedor);
       const providerName = cleanProviderLabel(row?.proveedor || entry?.proveedor);
       const cod = cleanProviderCode(row?.cod_proveedor || row?.codProv || row?.codprov);
       const article = cleanProviderLabel(row?.articulo || row?.descripcion || row?.nombre);
@@ -3310,19 +3318,7 @@
         const id = String(providerId || '');
         const tx = state.db.transaction('articulos', 'readwrite');
         const store = tx.objectStore('articulos');
-        const source = store.indexNames.contains('id_proveedor')
-          ? store.index('id_proveedor')
-          : store;
-        const request = source.openCursor(store.indexNames.contains('id_proveedor') ? IDBKeyRange.only(id) : null);
-        request.onsuccess = () => {
-          const cursor = request.result;
-          if (cursor) {
-            if (source !== store || String(cursor.value?.id_proveedor || '') === id) cursor.delete();
-            cursor.continue();
-            return;
-          }
-        };
-        request.onerror = () => reject(request.error);
+        CorralonSystem.providerCache.replace(store, id, []);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
@@ -3337,25 +3333,20 @@
       });
     }
     async function idbReplaceProviderArticles(providerId, rows, onProgress = null, options = {}) {
-      if (!options.skipDelete) await idbDeleteProviderArticles(providerId);
-      const total = rows.length;
-      if (!total) {
-        if (onProgress) onProgress(0, 0);
-        return;
-      }
-      const chunkSize = 500;
-      for (let i = 0; i < total; i += chunkSize) {
-        const done = Math.min(i + chunkSize, total);
-        await idbPutArticleChunk(rows.slice(i, done));
-        if (onProgress) onProgress(done, total);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise((resolve, reject) => {
+        const tx = state.db.transaction('articulos', 'readwrite');
+        CorralonSystem.providerCache.replace(tx.objectStore('articulos'), providerId, rows, options.previousIds);
+        tx.oncomplete = resolve;
+        tx.onerror = tx.onabort = () => reject(tx.error || new Error('No se pudo reemplazar la lista local'));
+      });
+      if (onProgress) onProgress(rows.length, rows.length);
     }
-    function replaceProviderInWorker(providerId, rows) {
+    function replaceProviderInWorker(providerId, rows, previousIds = []) {
       if (!state.worker || !state.loaded) return false;
       workerPost({
         type: 'replaceProvider',
         providerId: String(providerId || ''),
+        previousIds,
         rows,
         filter: currentFilter(),
         sort: state.sort
@@ -3389,7 +3380,8 @@
       const localManifest = localProviderManifest(local);
       const entries = providerManifestEntries(manifest);
       const fallbackIds = new Set((local.last_provider_updates || []).filter(item => !Number(item.version)).map(item => String(item.id_proveedor)));
-      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest) || fallbackIds.has(String(entry.id_proveedor)));
+      const counts = await CorralonSystem.providerCache.counts(state.db, entries);
+      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest) || fallbackIds.has(String(entry.id_proveedor)) || counts.get(String(entry.id_proveedor)) !== expectedProviderJsonRows(entry));
       if (!changed.length) {
         if (options.updateWhenNoChanges !== false) {
           await markSyncFinished({
@@ -3418,7 +3410,6 @@
         const processEnd = startProgress + (providerSpan * 2) / 3;
         setSyncProgress(startProgress);
         setStatus(`1/3 Descargando ${label}...`);
-        const deletePromise = options.clearBeforeImport ? Promise.resolve() : idbDeleteProviderArticles(entry.id_proveedor);
         const rowsPromise = fetchProviderJsonRows(entry, {
           onDownload: (progress) => {
             const clamped = Math.max(0, Math.min(1, progress));
@@ -3432,15 +3423,15 @@
             setStatus(`2/3 Procesando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
           }
         });
-        const [rows] = await Promise.all([rowsPromise, deletePromise]);
+        const rows = await rowsPromise;
         setSyncProgress(processEnd);
         await idbReplaceProviderArticles(entry.id_proveedor, rows, (done, totalRows) => {
           const articleProgress = totalRows ? done / totalRows : 1;
           const clamped = Math.max(0, Math.min(1, articleProgress));
           setSyncProgress(processEnd + (endProgress - processEnd) * clamped);
           setStatus(`3/3 Aplicando ${label}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
-        }, { skipDelete: true });
-        replaceProviderInWorker(entry.id_proveedor, rows);
+        }, { previousIds: entry.previous_provider_ids });
+        replaceProviderInWorker(entry.id_proveedor, rows, entry.previous_provider_ids);
         total += rows.length;
         updatedProviders.push({
           id_proveedor: String(entry.id_proveedor),
@@ -3484,7 +3475,7 @@
         return Boolean(remoteMeta);
       }
       const jsonManifest = await fetchProviderManifest(remoteMeta || local);
-      const jsonIds = new Set(providerManifestEntries(jsonManifest).map(entry => String(entry.id_proveedor)));
+      const jsonIds = new Set(providerManifestEntries(jsonManifest).flatMap(entry => [String(entry.id_proveedor), ...(entry.previous_provider_ids || [])]));
       const candidates = await fetchProvidersUpdatedAfter(lastSyncAt);
       const changed = candidates.filter(provider => !jsonIds.has(String(provider.id_proveedor)));
       if (!changed.length) {
@@ -3505,17 +3496,15 @@
         const prepareEnd = startProgress + (endProgress - startProgress) * 0.62;
         setSyncProgress(startProgress);
         setStatus(`1/3 Descargando ${provider.proveedor || provider.id_proveedor}...`);
-        const deletePromise = idbDeleteProviderArticles(provider.id_proveedor);
         const rows = await fetchProviderArticles(provider.id_proveedor);
         setSyncProgress(downloadEnd);
         setStatus(`2/3 Preparando ${provider.proveedor || provider.id_proveedor}...`);
-        await deletePromise;
         setSyncProgress(prepareEnd);
         await idbReplaceProviderArticles(provider.id_proveedor, rows, (done, totalRows) => {
           const articleProgress = totalRows ? done / totalRows : 1;
           setSyncProgress(prepareEnd + (endProgress - prepareEnd) * articleProgress);
           setStatus(`3/3 Aplicando ${provider.proveedor || provider.id_proveedor}: ${done.toLocaleString('es-AR')} / ${totalRows.toLocaleString('es-AR')} artículos`);
-        }, { skipDelete: true });
+        });
         total += rows.length;
         updatedProviders.push({
           id_proveedor: String(provider.id_proveedor || ''),
@@ -3927,6 +3916,7 @@
         return;
       }
       CorralonSystem.newArticlesImporter.open({
+        providerInternalId: row.id_proveedor || row.idProveedor,
         provider: {
           id_proveedor: row.id_proveedor || row.idProveedor,
           proveedor: row.proveedor
@@ -4152,11 +4142,7 @@
         if(!entries.length)throw new Error('No hay JSON publicados disponibles.');
         const local=(await idbGet('meta','principal'))||{id:'principal'};
         const versions=localProviderManifest(local);
-        const counts=await new Promise((resolve,reject)=>{
-          const out=new Map(),tx=state.db.transaction('articulos','readonly'),index=tx.objectStore('articulos').index('id_proveedor');
-          for(const entry of entries){const req=index.count(String(entry.id_proveedor));req.onsuccess=()=>out.set(String(entry.id_proveedor),req.result);}
-          tx.oncomplete=()=>resolve(out);tx.onerror=()=>reject(tx.error);
-        });
+        const counts=await CorralonSystem.providerCache.counts(state.db,entries);
         const missing=entries.filter(entry=>full||!versions[String(entry.id_proveedor)]||counts.get(String(entry.id_proveedor))!==expectedProviderJsonRows(entry));
         let done=0;
         for(const entry of missing){
@@ -4166,13 +4152,12 @@
           await new Promise((resolve,reject)=>{
             const tx=state.db.transaction(['articulos','meta'],'readwrite');
             const store=tx.objectStore('articulos');
-            const req=store.index('id_proveedor').openCursor(IDBKeyRange.only(String(entry.id_proveedor)));
-            req.onsuccess=()=>{const cursor=req.result;if(cursor){cursor.delete();cursor.continue();return;}rows.forEach(row=>store.put(row));};
+            CorralonSystem.providerCache.replace(store,entry.id_proveedor,rows,entry.previous_provider_ids);
             const metaStore=tx.objectStore('meta'),read=metaStore.get('principal');
             read.onsuccess=()=>{const current=read.result||{id:'principal'};metaStore.put({...current,provider_json_manifest:{...localProviderManifest(current),[String(entry.id_proveedor)]:entry},last_provider_updates:[...(current.last_provider_updates||[]).filter(item=>String(item.id_proveedor)!==String(entry.id_proveedor)),{...entry,synced_at:new Date().toISOString()}]});};
             tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('No se pudo guardar la lista'));
           });
-          replaceProviderInWorker(entry.id_proveedor,rows);done++;
+          replaceProviderInWorker(entry.id_proveedor,rows,entry.previous_provider_ids);done++;
         }
         await loadCacheIntoWorker();
         status.textContent=missing.length?'Listo. '+done+' listas descargadas.':'La base está completa. No faltan JSON por descargar.';

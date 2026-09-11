@@ -180,7 +180,7 @@
     if (window.CorralonSystem?.fetchProviderJsonTableRows) {
       return CorralonSystem.fetchProviderJsonTableRows('order=proveedor.asc');
     }
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/${JSON_TABLE}?select=id_proveedor,proveedor,json_url,chunks,chunk_count,total_articulos,version,fecha_actualizacion&order=proveedor.asc`, {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/${JSON_TABLE}?select=id_proveedor,proveedor,json_url,chunks,chunk_count,total_articulos,version,fecha_actualizacion,previous_provider_ids&order=proveedor.asc`, {
       headers: headers()
     });
     if (!response.ok) throw new Error(await response.text());
@@ -195,7 +195,9 @@
   async function articulosOnline(options = {}) {
     const now = Date.now();
     if (!options.force && onlineManifestCache.rows.length && now - onlineManifestCache.at < LOCAL_CACHE_MS) return onlineManifestCache.rows;
-    const providers = await filasTablaJsonProveedores();
+    const entries = await filasTablaJsonProveedores();
+    const retired = new Set(entries.flatMap(entry => entry.previous_provider_ids || []));
+    const providers = entries.filter(entry => !retired.has(String(entry.id_proveedor)));
     const out = [];
     const maxProviders = Number(options.maxProviders || 0) || providers.length;
     for (const provider of providers.slice(0, maxProviders)) {
@@ -203,7 +205,7 @@
         const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}ai=${Date.now()}`);
         if (!response.ok) continue;
         const rows = await response.json();
-        if (Array.isArray(rows)) out.push(...rows.map((row) => normalizeArticle({ ...row, proveedor: row.proveedor || provider.proveedor })));
+        if (Array.isArray(rows)) out.push(...rows.map((row) => normalizeArticle({ ...row, id_proveedor: provider.id_proveedor, proveedor: row.proveedor || provider.proveedor })));
         if (options.limit && out.length >= options.limit) break;
       }
       if (options.limit && out.length >= options.limit) break;

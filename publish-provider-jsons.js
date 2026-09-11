@@ -184,6 +184,7 @@ async function publishJsonProviderTable(manifest) {
   const rows = Object.values(manifest.providers || {}).map((entry) => ({
     id_proveedor: cleanId(entry.id_proveedor),
     proveedor: String(entry.proveedor || '').trim(),
+    previous_provider_ids: entry.previous_provider_ids || [],
     json_url: String(entry.json_url || '').trim(),
     chunks: Array.isArray(entry.chunks) ? entry.chunks : [],
     chunk_count: Number(entry.chunk_count || entry.chunks?.length || 1) || 1,
@@ -209,6 +210,10 @@ async function main() {
   console.log('Leyendo manifest actual...');
   const existing = await fetchExistingManifest();
   const existingProviders = existing.manifest.providers || {};
+  const metadata = await fetchAll(JSON_PROVIDERS_TABLE, 'select=*');
+  for (const entry of metadata) existingProviders[cleanId(entry.id_proveedor)] = { ...existingProviders[cleanId(entry.id_proveedor)], ...entry, updated_at: entry.fecha_actualizacion || entry.updated_at };
+  const retired = new Set(metadata.flatMap(entry => entry.previous_provider_ids || []).map(String));
+  for (const id of retired) delete existingProviders[id];
   const existingCount = Object.values(existingProviders).filter((entry) => entry?.id_proveedor && providerJsonUrls(entry).length).length;
   console.log(`Manifest actual: ${existingCount} proveedor(es) con JSON.`);
 
@@ -226,7 +231,7 @@ async function main() {
   let skipped = 0;
   articles.forEach((row, index) => {
     const article = normalizeArticle(row, index, providerMap);
-    if (!article.id_proveedor) {
+    if (!article.id_proveedor || retired.has(article.id_proveedor)) {
       skipped += 1;
       return;
     }
@@ -234,6 +239,7 @@ async function main() {
     groups.get(article.id_proveedor).push(article);
   });
 
+  for (const id of Object.keys(existingProviders)) if (!groups.has(id)) groups.set(id, []);
   const entries = [...groups.entries()].sort((a, b) => String(providerMap.get(a[0]) || a[0]).localeCompare(String(providerMap.get(b[0]) || b[0]), 'es', { numeric: true, sensitivity: 'base' }));
   console.log(`Publicando ${entries.length} proveedor(es), ${articles.length.toLocaleString('es-AR')} articulos (${skipped} sin proveedor).`);
 
@@ -278,6 +284,7 @@ async function main() {
     }
     manifest.providers[id] = {
       id_proveedor: id,
+      previous_provider_ids: existingEntry?.previous_provider_ids || [],
       proveedor: providerName,
       version,
       updated_at: manifest.updated_at,

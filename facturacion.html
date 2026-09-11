@@ -99,9 +99,9 @@
   </section>
 </main>
 <div class="suggestions" id="suggestions"></div><div class="modal-wrap" id="draftModal" role="dialog" aria-modal="true"><section class="modal"><header class="modal-head"><h2>Borradores</h2><button id="closeDrafts" type="button">Cerrar</button></header><div class="draft-list" id="draftList"></div></section></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.9"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.10"></script><script>
 const FIREBASE_CONFIG={apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',authDomain:'corralon-progreso.firebaseapp.com',projectId:'corralon-progreso',storageBucket:'corralon-progreso.firebasestorage.app',messagingSenderId:'466583614632',appId:'1:466583614632:web:42cb839f83e97475fabe9d'},DB_NAME='corralon_facturacion_v1',STORE='borradores';
-const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=0,saveTimer=null,paymentReconcileTimer=null;
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=0,suggestionPage=null,suggestionPaging=false,saveTimer=null,paymentReconcileTimer=null;
 function firestore(){if(db)return db;if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CONFIG);return db=firebase.firestore()}function uid(){try{return JSON.parse(localStorage.getItem('corralon_menu_active_user_snapshot_v1')||'{}')}catch{return{}}}function n(v){if(typeof v==='number')return Number.isFinite(v)?v:0;const s=String(v??'').replace(/[^\d,.-]/g,'');if(!s)return 0;if(s.includes(','))return Number(s.replace(/\./g,'').replace(',','.'))||0;if(/^-?\d{1,3}(?:\.\d{3})+$/.test(s))return Number(s.replace(/\./g,''))||0;return Number(s)||0}function money(v){return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',minimumFractionDigits:2}).format(Number(v)||0)}function num(v){return new Intl.NumberFormat('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v)||0)}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function today(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function blankArticle(){return{idart:'',codProv:'',descripcion:'',cantidad:1,precio:0,precioBase:0,stock:0,descuento:0,iva:21}}function blankPayment(tipo='Efectivo',autoDifference=false){return{tipo,importe:0,tarjeta:'Ninguna',cuotas:0,descripcion:'',autoDifference}}function articleStarted(r){return Boolean(String(r?.idart||'').trim()&&n(r?.cantidad)>0)}function paymentStarted(r){return Boolean(n(r?.importe)>0||String(r?.tipo||'Efectivo')!=='Efectivo'||String(r?.tarjeta||'Ninguna')!=='Ninguna'||n(r?.cuotas)>0||String(r?.descripcion||'').trim())}function appendFillerRows(body,dataRows,minimumRows,columns){for(let i=dataRows;i<minimumRows;i++){const tr=document.createElement('tr');tr.className='filler-row';tr.setAttribute('aria-hidden','true');tr.innerHTML='<td></td>'.repeat(columns);body.appendChild(tr)}}function setMsg(t,type=''){$('#message').textContent=t;$('#message').className=`message ${type}`}
 function ensureBlanks(){const valid=articles.filter(r=>String(r?.idart||'').trim()),pending=articles.find(r=>!String(r?.idart||'').trim()&&(String(r?.codProv||'').trim()||String(r?.descripcion||'').trim()||n(r?.precio)>0||n(r?.cantidad)!==1||n(r?.descuento)>0))||articles.find(r=>!String(r?.idart||'').trim())||blankArticle();articles=[...valid,pending];if(!payments.length)payments.push(blankPayment('Efectivo',true));if(payments.length===1&&!paymentStarted(payments[0])&&payments[0].tipo==='Efectivo')payments[0].autoDifference=true}function totals(){let net=0,iva21=0,iva105=0,other=0,total=0;articles.forEach(r=>{if(!String(r.idart||'').trim()||n(r.cantidad)<=0)return;const gross=n(r.cantidad)*n(r.precio),rate=n(r.iva);total+=gross;if(rate>0){const base=gross/(1+rate/100);net+=base;if(Math.abs(rate-21)<.01)iva21+=gross-base;else if(Math.abs(rate-10.5)<.01)iva105+=gross-base;else other+=gross-base}else other+=gross});const paid=payments.reduce((a,r)=>a+n(r.importe),0);return{net,iva21,iva105,other,total,paid,difference:paid-total}}
 function renderArticles(){
@@ -296,7 +296,7 @@ function showSuggestions(input,force=false){
   if(!force&&!q){hideSuggestions();return}
   if(activeSuggestionInput&&activeSuggestionInput!==input)activeSuggestionInput.closest('.description-cell')?.classList.remove('combo-open');
   const terms=q.split(/\s+/).filter(Boolean);
-  suggestionItems=catalog.map(x=>{
+  const scored=catalog.map(x=>{
     const idart=norm(x.idart),codProv=norm(x.codProv),descripcion=norm(x.descripcion);
     const text=`${idart} ${codProv} ${descripcion}`.trim(),words=text.split(/\s+/);
     if(!q)return{x,score:9};
@@ -315,8 +315,18 @@ function showSuggestions(input,force=false){
     if(terms.every(term=>words.some(word=>word.startsWith(term))))return{x,score:2};
     if(terms.every(term=>text.includes(term)))return{x,score:3};
     return null;
-  }).filter(Boolean).sort((a,b)=>a.score-b.score||norm(a.x.descripcion).localeCompare(norm(b.x.descripcion))).slice(0,80).map(item=>item.x);
-  suggestionIndex=0;
+  }).filter(Boolean);
+  const scoreByItem=new Map(scored.map(item=>[item.x,item.score]));
+  suggestionPage=CorralonSystem.articleOptionPager.create(catalog,{
+    isMatch:x=>scoreByItem.has(x),
+    rank:x=>scoreByItem.get(x)??99,
+    hasSearch:Boolean(q),
+    beforeCount:20,
+    afterCount:40,
+    matchLimit:100
+  });
+  suggestionItems=suggestionPage.options;
+  suggestionIndex=suggestionPage.focusIndex;
   activeSuggestionInput=input;
   input.closest('.description-cell')?.classList.add('combo-open');
   const box=$('#suggestions'),rect=input.getBoundingClientRect();
@@ -326,15 +336,19 @@ function showSuggestions(input,force=false){
   box.style.left=`${dropdownLeft}px`;
   box.style.top=`${rect.bottom+2}px`;
   box.style.width=`${dropdownWidth}px`;
-  box.innerHTML=suggestionItems.length?suggestionItems.map((x,i)=>`<div class="suggestion ${i===0?'active':''}" data-suggestion="${i}"><span>${esc(mode==='codProv'?(x.codProv||x.idart):(x.idart||x.codProv))}</span><span>${esc(x.descripcion)}</span><span class="price">${money(x.precioFinal)}</span></div>`).join(''):'<div class="empty">Sin coincidencias</div>';
+  renderSuggestionItems();
   box.classList.add('open');
-  $$('[data-suggestion]').forEach(el=>el.addEventListener('mousedown',event=>{event.preventDefault();pickSuggestion(+el.dataset.suggestion)}));
+  requestAnimationFrame(()=>{const active=box.querySelector(`[data-suggestion="${suggestionIndex}"]`);if(active)box.scrollTop=Math.max(0,active.offsetTop)});
 }
+function renderSuggestionItems(){const box=$('#suggestions'),mode=activeSuggestionInput?.dataset.a||'descripcion';box.innerHTML=suggestionItems.length?suggestionItems.map((x,i)=>`<div class="suggestion ${i===suggestionIndex?'active':''}" data-suggestion="${i}"><span>${esc(mode==='codProv'?(x.codProv||x.idart):(x.idart||x.codProv))}</span><span>${esc(x.descripcion)}</span><span class="price">${money(x.precioFinal)}</span></div>`).join(''):'<div class="empty">Sin coincidencias</div>';$$('[data-suggestion]').forEach(el=>el.addEventListener('mousedown',event=>{event.preventDefault();pickSuggestion(+el.dataset.suggestion)}))}
+function extendSuggestions(direction){if(suggestionPaging||!suggestionPage||!$('#suggestions').classList.contains('open'))return;suggestionPaging=true;const box=$('#suggestions'),oldHeight=box.scrollHeight,oldTop=box.scrollTop,added=CorralonSystem.articleOptionPager.extend(suggestionPage,direction);if(direction==='up'){suggestionItems=[...added,...suggestionItems];suggestionIndex+=added.length}else suggestionItems=[...suggestionItems,...added];renderSuggestionItems();box.scrollTop=direction==='up'?oldTop+(box.scrollHeight-oldHeight):oldTop;suggestionPaging=false}
 function hideSuggestions(){
   activeSuggestionInput?.closest('.description-cell')?.classList.remove('combo-open');
   $('#suggestions').classList.remove('open');
   activeSuggestionInput=null;
+  suggestionPage=null;
 }
+$('#suggestions').addEventListener('scroll',()=>{const box=$('#suggestions');if(box.scrollTop<=18)extendSuggestions('up');if(box.scrollTop+box.clientHeight>=box.scrollHeight-18)extendSuggestions('down')},{passive:true});
 function pickSuggestion(i){
   const x=suggestionItems[i];
   if(!x||!activeSuggestionInput)return;

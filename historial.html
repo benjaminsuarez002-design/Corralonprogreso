@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.13"></script>
+<script src="corralon-system.js?v=1.0.14"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -629,6 +629,8 @@ let _budgetDropdownIndex = null;
 let _budgetDropdownResults = [];
 let _budgetDropdownRendered = 20;
 let _budgetDropdownActive = -1;
+let _budgetDropdownPage = null;
+let _budgetDropdownPaging = false;
 let _confirmCallback = null;
 let logoCacheData = null;
 let _pdfDetalleActual = null;
@@ -2551,14 +2553,30 @@ function renderEditItems() {
 }
 
 function resultadosArticulosPresupuesto(valor, mostrarTodos = false) {
-  if(mostrarTodos) return _budgetCatalog;
   const normalizar = window.CorralonSystem?.norm || (txt => String(txt || '').trim().toLowerCase());
   const terminos = normalizar(valor).split(' ').filter(Boolean);
-  if(!terminos.length) return _budgetCatalog;
-  return _budgetCatalog.filter(item => {
+  const codigoBuscado = normalizar(valor).replace(/\s+/g, '');
+  const coincide = item => {
     const texto = normalizar(`${item.codigo} ${item.desc}`);
     return terminos.every(termino => texto.includes(termino));
+  };
+  const rango = item => {
+    const codigo = normalizar(item.codigo).replace(/\s+/g, '');
+    if(codigoBuscado && codigo === codigoBuscado) return 0;
+    if(codigoBuscado && codigo.startsWith(codigoBuscado)) return 1;
+    return 10;
+  };
+  _budgetDropdownPage = CorralonSystem.articleOptionPager.create(_budgetCatalog, {
+    key: item => `${item.codigo}|${item.desc}`,
+    description: item => item.desc,
+    isMatch: coincide,
+    rank: rango,
+    hasSearch: !mostrarTodos && Boolean(terminos.length),
+    beforeCount: 20,
+    afterCount: 40,
+    matchLimit: 100
   });
+  return _budgetDropdownPage.options;
 }
 
 function posicionarListaArticuloPresupuesto() {
@@ -2584,7 +2602,7 @@ function posicionarListaArticuloPresupuesto() {
 function renderListaArticuloPresupuesto() {
   const menu = document.getElementById('budgetArticleMenu');
   if(!menu) return;
-  const visibles = _budgetDropdownResults.slice(0, _budgetDropdownRendered);
+  const visibles = _budgetDropdownResults;
   menu.innerHTML = visibles.length ? visibles.map((item, posicion) => `
     <div class="budget-article-option ${posicion === _budgetDropdownActive ? 'active' : ''}" onmousedown="event.preventDefault();elegirArticuloPresupuesto(${posicion})">
       <div class="budget-article-option-code">${esc(item.codigo)}</div>
@@ -2602,9 +2620,13 @@ function abrirListaArticuloPresupuesto(input, index, mostrarTodos = false) {
   _budgetDropdownInput = input;
   _budgetDropdownIndex = index;
   _budgetDropdownResults = resultadosArticulosPresupuesto(input.value, mostrarTodos);
-  _budgetDropdownRendered = 20;
-  _budgetDropdownActive = -1;
+  _budgetDropdownRendered = _budgetDropdownResults.length;
+  _budgetDropdownActive = _budgetDropdownPage?.focusIndex ?? -1;
   renderListaArticuloPresupuesto();
+  requestAnimationFrame(() => {
+    const activo = document.querySelector(`#budgetArticleMenu .budget-article-option:nth-child(${_budgetDropdownActive + 1})`);
+    if(activo) document.getElementById('budgetArticleMenu').scrollTop = Math.max(0, activo.offsetTop);
+  });
 }
 
 function filtrarArticuloPresupuestoFila(index, input) {
@@ -2651,12 +2673,23 @@ function elegirArticuloPresupuesto(posicion) {
 }
 
 function cargarMasArticulosPresupuesto(menu) {
-  if(menu.scrollTop + menu.clientHeight < menu.scrollHeight - 24) return;
-  if(_budgetDropdownRendered >= _budgetDropdownResults.length) return;
-  const scrollTop = menu.scrollTop;
-  _budgetDropdownRendered += 20;
+  if(_budgetDropdownPaging || !_budgetDropdownPage) return;
+  let direccion = '';
+  if(menu.scrollTop <= 18) direccion = 'up';
+  else if(menu.scrollTop + menu.clientHeight >= menu.scrollHeight - 18) direccion = 'down';
+  if(!direccion) return;
+  _budgetDropdownPaging = true;
+  const altoAnterior = menu.scrollHeight;
+  const scrollAnterior = menu.scrollTop;
+  const agregados = CorralonSystem.articleOptionPager.extend(_budgetDropdownPage, direccion);
+  if(direccion === 'up') {
+    _budgetDropdownResults = [...agregados, ..._budgetDropdownResults];
+    _budgetDropdownActive += agregados.length;
+  } else _budgetDropdownResults = [..._budgetDropdownResults, ...agregados];
+  _budgetDropdownRendered = _budgetDropdownResults.length;
   renderListaArticuloPresupuesto();
-  menu.scrollTop = scrollTop;
+  menu.scrollTop = direccion === 'up' ? scrollAnterior + (menu.scrollHeight - altoAnterior) : scrollAnterior;
+  _budgetDropdownPaging = false;
 }
 
 function teclaListaArticuloPresupuesto(event) {
@@ -2665,9 +2698,20 @@ function teclaListaArticuloPresupuesto(event) {
   if(event.key === 'Escape') {
     event.preventDefault(); event.stopPropagation(); cerrarListaArticuloPresupuesto(); return;
   }
-  if(event.key === 'Enter' || event.key === 'Tab' || event.key.startsWith('Arrow')) {
-    cerrarListaArticuloPresupuesto();
+  if(event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    _budgetDropdownActive = Math.max(0, Math.min(_budgetDropdownResults.length - 1, _budgetDropdownActive + (event.key === 'ArrowDown' ? 1 : -1)));
+    renderListaArticuloPresupuesto();
+    menu.querySelector('.budget-article-option.active')?.scrollIntoView({ block:'nearest' });
+    return;
   }
+  if(event.key === 'Enter') {
+    event.preventDefault();
+    if(String(event.target?.value || '').trim() && _budgetDropdownActive >= 0) elegirArticuloPresupuesto(_budgetDropdownActive);
+    else cerrarListaArticuloPresupuesto();
+    return;
+  }
+  if(event.key === 'Tab') cerrarListaArticuloPresupuesto();
 }
 
 function cerrarListaArticuloPresupuestoAlSalir(input) {
@@ -2685,6 +2729,7 @@ function cerrarListaArticuloPresupuesto() {
   _budgetDropdownIndex = null;
   _budgetDropdownResults = [];
   _budgetDropdownActive = -1;
+  _budgetDropdownPage = null;
 }
 
 function actualizarNuevoSubtotalPresupuesto() {

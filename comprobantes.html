@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.11"></script>
+<script src="corralon-system.js?v=1.0.12"></script>
   <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -2936,7 +2936,7 @@
       function providerForAlias(item) {
         const savedId = providerId(item?.idProveedor);
         if (savedId) {
-          return state.providers.find((provider) => providerId(provider.id_proveedor) === savedId) || null;
+          return state.providers.find((provider) => providerId(CorralonSystem.providerIdentity.externalId(provider)) === savedId) || null;
         }
         const candidates = [item?.alias, item?.nombre].map(normalizeMatch).filter(Boolean);
         if (!candidates.length) return null;
@@ -2950,7 +2950,7 @@
       }
 
       function resolvedAliasProviderId(item) {
-        return providerId(item?.idProveedor) || providerId(providerForAlias(item)?.id_proveedor);
+        return providerId(item?.idProveedor) || providerId(CorralonSystem.providerIdentity.externalId(providerForAlias(item)));
       }
 
       function supplierDebtForAlias(item) {
@@ -2975,12 +2975,12 @@
 
       function providerLabel(provider) {
         if (!provider) return "";
-        return `${providerId(provider.id_proveedor)} - ${String(provider.proveedor || "").trim()}`;
+        return `${providerId(CorralonSystem.providerIdentity.externalId(provider))} - ${String(provider.proveedor || "").trim()}`;
       }
 
       function providerById(id) {
         const wanted = providerId(id);
-        return state.providers.find((provider) => providerId(provider.id_proveedor) === wanted) || null;
+        return state.providers.find((provider) => providerId(CorralonSystem.providerIdentity.externalId(provider)) === wanted) || null;
       }
 
       function setProviderComboValue(input, id) {
@@ -2999,7 +2999,7 @@
         if (!raw) return "";
         const possibleId = providerId(raw.split(/\s+-\s+/)[0]);
         const exact = providerById(possibleId) || state.providers.find((provider) => normalizeMatch(providerLabel(provider)) === normalizeMatch(raw));
-        return providerId(exact?.id_proveedor || "");
+        return providerId(CorralonSystem.providerIdentity.externalId(exact));
       }
 
       function providerComboList(input) {
@@ -3057,12 +3057,12 @@
         const query = showAll || input.dataset.providerId ? "" : normalizeMatch(input.value);
         state.providerCombo.input = input;
         state.providerCombo.options = state.providers
-          .filter((provider) => !query || normalizeMatch(`${provider.id_proveedor} ${provider.proveedor}`).includes(query))
+          .filter((provider) => !query || normalizeMatch(`${CorralonSystem.providerIdentity.externalId(provider)} ${provider.proveedor}`).includes(query))
           .slice(0, 40);
         state.providerCombo.active = Math.max(0, Math.min(state.providerCombo.active, state.providerCombo.options.length - 1));
         list.innerHTML = state.providerCombo.options.length
           ? state.providerCombo.options.map((provider, index) => `
-              <button class="provider-combo-option ${index === state.providerCombo.active ? "active" : ""}" type="button" role="option" data-provider-id="${esc(provider.id_proveedor)}" data-provider-index="${index}">
+              <button class="provider-combo-option ${index === state.providerCombo.active ? "active" : ""}" type="button" role="option" data-provider-id="${esc(CorralonSystem.providerIdentity.externalId(provider))}" data-provider-index="${index}">
                 ${esc(providerLabel(provider))}
               </button>
             `).join("")
@@ -3088,7 +3088,7 @@
           }
           return false;
         }
-        setProviderComboValue(input, provider.id_proveedor);
+        setProviderComboValue(input, CorralonSystem.providerIdentity.externalId(provider));
         hideProviderCombo();
         input.focus();
         input.select();
@@ -3100,6 +3100,7 @@
         if (!name) return;
         hideProviderCombo();
         state.providerCreateInputId = input.id;
+        state.providerCreateInternalId = CorralonSystem.providerIdentity.newId();
         el.providerCreateId.value = "";
         el.providerCreateName.value = name;
         el.providerCreateModalBg.classList.add("open");
@@ -3131,15 +3132,16 @@
           el.providerCreateName.focus();
           return;
         }
-        if (providerById(id)) {
+        if (state.providers.some(p => CorralonSystem.providerIdentity.externalId(p) === id && normalizeMatch(p.proveedor) === normalizeMatch(name))) {
           el.providerCreateId.focus();
           el.providerCreateId.select();
-          showToast("Esa ID de proveedor ya existe");
+          showToast("Ya existe ese proveedor con ese código");
           return;
         }
 
         const provider = window.CorralonSystem.normalizeProviderPageLink({
-          id_proveedor: id,
+          id_proveedor: state.providerCreateInternalId || (state.providerCreateInternalId = CorralonSystem.providerIdentity.newId()),
+          codigo_proveedor: id,
           proveedor: name,
           proveedor_norm: normalizeMatch(name),
           descuento_factura: 0,

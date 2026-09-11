@@ -262,7 +262,7 @@
     .clear-price-btn:hover{background:#fff1f1}
     input[type="checkbox"]{accent-color:#ef1015}
   </style>
-<script src="corralon-system.js?v=1.0.8"></script>
+<script src="corralon-system.js?v=1.0.9"></script>
   <script src="funciones.js"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="calculadoras"></script>
@@ -598,20 +598,11 @@
     }
 
     function providerMatchesText(value) {
-      const text = String(value || '').trim();
-      const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      return providerState.rows.find((item) => {
-        const id = String(item.id_proveedor || '').trim();
-        const name = String(item.proveedor || '').trim();
-        const display = `${id} - ${name}`;
-        return text === id || text === name || text === display ||
-          normalized === name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() ||
-          normalized === display.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      });
+      return CorralonSystem.providerIdentity.resolveText(providerState.rows,value);
     }
 
     function providerDisplay(provider) {
-      return `${provider.id_proveedor || ''} - ${provider.proveedor || ''}`.trim();
+      return `${CorralonSystem.providerIdentity.externalId(provider)} - ${provider.proveedor || ''}`.trim();
     }
 
     function escapeHtml(value) {
@@ -663,7 +654,7 @@
     }
 
     function providerSearchText(provider) {
-      return `${provider.id_proveedor || ''} ${provider.proveedor || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      return `${CorralonSystem.providerIdentity.externalId(provider)} ${provider.proveedor || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     }
 
     function renderProviderDropdown(open = true) {
@@ -677,7 +668,7 @@
       providerState.active = Math.max(0, Math.min(providerState.active, providerState.matches.length - 1));
       dropdown.innerHTML = providerState.matches.map((provider, index) => `
         <div class="provider-option ${index === providerState.active ? 'active' : ''}" data-index="${index}">
-          <span class="provider-code">${escapeHtml(provider.id_proveedor)}</span>
+          <span class="provider-code">${escapeHtml(CorralonSystem.providerIdentity.externalId(provider))}</span>
           <span>${escapeHtml(provider.proveedor)}</span>
         </div>
       `).join('');
@@ -705,7 +696,7 @@
 
       providerState.modalProviderId = String(provider.id_proveedor || '');
       setProviderModalEditing(false);
-      $('modalProviderId').value = provider.id_proveedor || '';
+      $('modalProviderId').value = CorralonSystem.providerIdentity.externalId(provider);
       $('modalProviderName').value = provider.proveedor || '';
       $('modalDiscountInvoice').value = percentDisplay(provider.descuento_factura);
       $('modalDiscountFinalInvoice').value = percentDisplay(provider.descuento_total_fc ?? provider.descuento_final_factura ?? 0);
@@ -718,7 +709,7 @@
       $('modalIva').value = percentDisplay(provider.porc_iva);
       $('modalIvaIncluded').checked = boolInput(provider.iva_incluido);
       $('modalNote').value = provider.nota || '';
-      providerEditorLayout?.setIdentity(provider.proveedor, provider.id_proveedor);
+      providerEditorLayout?.setIdentity(provider.proveedor, CorralonSystem.providerIdentity.externalId(provider));
       $('providerModal').classList.add('visible');
     }
 
@@ -728,7 +719,7 @@
     }
 
     function setProviderModalEditing(enabled) {
-      ['modalProviderName','modalDiscountInvoice','modalDiscountFinalInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
+      ['modalProviderId','modalProviderName','modalDiscountInvoice','modalDiscountFinalInvoice','modalDiscountList','modalDate','modalSeller','modalPhone','modalPageLink','modalFreight','modalIva','modalNote'].forEach((id) => {
         const field = $(id);
         if (field) field.readOnly = !enabled;
       });
@@ -743,6 +734,7 @@
       const provider = {
         ...current,
         id_proveedor: String(id).trim(),
+        codigo_proveedor: String($('modalProviderId').value).trim(),
         proveedor: String($('modalProviderName').value).trim(),
         descuento_factura: parsePercentField('modalDiscountInvoice'),
         descuento_total_fc: parsePercentField('modalDiscountFinalInvoice'),
@@ -758,7 +750,7 @@
         iva_incluido: $('modalIvaIncluded').checked
       };
       provider.proveedor_norm = String(provider.proveedor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-      if (!provider.id_proveedor || !provider.proveedor) return;
+      if (!provider.codigo_proveedor || !provider.proveedor) return;
 
       const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?on_conflict=id_proveedor`, {
         method: 'POST',
@@ -1432,7 +1424,7 @@
     function aplicarProveedorExterno(valor) {
       const raw = String(valor || '').trim();
       if (!providerInput || !raw) return false;
-      const provider = providerMatchesText(raw) || providerState.rows.find((item) => String(item.id_proveedor || '').trim() === raw);
+      const provider = providerMatchesText(raw);
       if (provider) {
         providerInput.value = providerDisplay(provider);
         renderProviderDropdown(false);
