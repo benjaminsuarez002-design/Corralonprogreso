@@ -624,6 +624,56 @@
   .loading-state { text-align: center; padding: 60px 20px; color: var(--violeta); }
   .spinner { width: 34px; height: 34px; border: 3px solid var(--fila-header); border-top-color: var(--violeta); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .catalog-search-loading {
+    width: 100%;
+    min-height: 310px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 34px 18px;
+    color: var(--texto-dark);
+    text-align: center;
+  }
+  .catalog-search-loading-spinner {
+    width: 46px;
+    height: 46px;
+    border: 4px solid rgba(239,16,21,.16);
+    border-top-color: var(--rojo);
+    border-radius: 50%;
+    animation: spin .72s linear infinite;
+  }
+  .catalog-search-loading strong {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 19px;
+    font-weight: 900;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+  }
+  .catalog-search-loading span { color: #777; font-size: 13px; }
+  .catalog-search-loading-bars {
+    width: min(100%, 520px);
+    display: grid;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .catalog-search-loading-bar {
+    height: 58px;
+    border: 1px solid rgba(222,222,219,.9);
+    border-radius: 12px;
+    background: linear-gradient(100deg, rgba(255,255,255,.72) 20%, rgba(239,16,21,.09) 38%, rgba(255,255,255,.72) 56%);
+    background-size: 220% 100%;
+    box-shadow: 0 5px 16px rgba(0,0,0,.05);
+    animation: catalogSearchShimmer 1.05s ease-in-out infinite;
+  }
+  .catalog-search-loading-bar:nth-child(2) { animation-delay: .09s; }
+  .catalog-search-loading-bar:nth-child(3) { animation-delay: .18s; }
+  @keyframes catalogSearchShimmer { to { background-position-x: -220%; } }
+  @media (prefers-reduced-motion: reduce) {
+    .catalog-search-loading-spinner { animation-duration: 1.6s; }
+    .catalog-search-loading-bar { animation: none; background: rgba(255,255,255,.82); }
+  }
   .empty-state { text-align: center; padding: 60px 20px; color: #bbb; }
   .empty-state .icon { font-size: 44px; margin-bottom: 10px; }
   .hidden { display: none !important; }
@@ -4338,7 +4388,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.20"></script>
+<script src="corralon-system.js?v=1.0.21"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4554,6 +4604,8 @@ let catalogoCambioVersionEscuchada = null;
 let articulosPortadaPublica = [];
 let terminoBaseBusquedaPublica = '';
 let solicitudBusquedaPublica = 0;
+let busquedaPublicaEnCurso = '';
+let enfocarBusquedaPublicaAlCompletar = false;
 const cacheBusquedaPublica = new Map();
 const PUBLIC_CATALOG_VERSION_POLL_MS = 60000;
 let publicCatalogVersion = null;
@@ -4944,7 +4996,33 @@ function primeraPalabraBusquedaPublica(value) {
 function restaurarPortadaCatalogoPublico() {
   ++solicitudBusquedaPublica;
   terminoBaseBusquedaPublica = '';
+  busquedaPublicaEnCurso = '';
+  enfocarBusquedaPublicaAlCompletar = false;
   reemplazarCatalogoPublico(articulosPortadaPublica, 'portada');
+}
+
+function mostrarCargaBusquedaPublica() {
+  const body = document.getElementById('scrollBody');
+  const estado = document.getElementById('estado');
+  if (!body || !estado) return;
+  destroyHomeCarouselInstances();
+  disconnectPublicListObserver();
+  limpiarResultadoActivo();
+  body.classList.remove('home-mode');
+  body.setAttribute('aria-busy', 'true');
+  estado.classList.remove('home-state');
+  estado.dataset.mobileCount = 'Buscando...';
+  estado.textContent = 'Buscando artículos...';
+  body.innerHTML = `<div class="catalog-search-loading" role="status" aria-live="polite">
+    <div class="catalog-search-loading-spinner" aria-hidden="true"></div>
+    <strong>Buscando artículos</strong>
+    <span>Un momento, estamos consultando la lista.</span>
+    <div class="catalog-search-loading-bars" aria-hidden="true">
+      <div class="catalog-search-loading-bar"></div>
+      <div class="catalog-search-loading-bar"></div>
+      <div class="catalog-search-loading-bar"></div>
+    </div>
+  </div>`;
 }
 
 async function confirmarPrimeraPalabraPublica({ enfocarResultado = false } = {}) {
@@ -4956,6 +5034,10 @@ async function confirmarPrimeraPalabraPublica({ enfocarResultado = false } = {})
   const clave = normalizarTexto(termino);
   if (!clave) return;
   if (terminoBaseBusquedaPublica === clave) {
+    if (busquedaPublicaEnCurso === clave) {
+      enfocarBusquedaPublicaAlCompletar ||= enfocarResultado;
+      return;
+    }
     aplicarBusquedaActual();
     if (enfocarResultado) enfocarPrimerResultado();
     return;
@@ -4966,15 +5048,27 @@ async function confirmarPrimeraPalabraPublica({ enfocarResultado = false } = {})
   try {
     let rows = cacheBusquedaPublica.get(clave);
     if (!rows) {
+      busquedaPublicaEnCurso = clave;
+      enfocarBusquedaPublicaAlCompletar = !!enfocarResultado;
+      mostrarCargaBusquedaPublica();
       rows = await consultarCatalogoPublicoReducido({ termino, limite: 600 });
       cacheBusquedaPublica.set(clave, rows);
+    }
+    const debeEnfocarResultado = enfocarResultado || (busquedaPublicaEnCurso === clave && enfocarBusquedaPublicaAlCompletar);
+    if (busquedaPublicaEnCurso === clave) {
+      busquedaPublicaEnCurso = '';
+      enfocarBusquedaPublicaAlCompletar = false;
     }
     if (requestId !== solicitudBusquedaPublica || terminoBaseBusquedaPublica !== clave) return;
     reemplazarCatalogoPublico(rows, `busqueda|${clave}`);
     if (searchInput.value.trim()) guardarBusquedaReciente(searchInput.value);
-    if (enfocarResultado) enfocarPrimerResultado();
+    if (debeEnfocarResultado) enfocarPrimerResultado();
   } catch (error) {
     if (requestId !== solicitudBusquedaPublica) return;
+    if (busquedaPublicaEnCurso === clave) {
+      busquedaPublicaEnCurso = '';
+      enfocarBusquedaPublicaAlCompletar = false;
+    }
     terminoBaseBusquedaPublica = '';
     console.error(error);
     restaurarPortadaCatalogoPublico();
@@ -5574,6 +5668,7 @@ function renderHomeLanding() {
   resetPublicWindow();
   const body = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
+  body.removeAttribute('aria-busy');
   limpiarResultadoActivo();
   const ofertas = obtenerArticulosPortada('oferta', (articulo) => articulo.ofertaVigente, 'oferta');
   const destacados = obtenerArticulosPortada('destacado', (articulo) => !!articulo.destacado, 'general');
@@ -7445,6 +7540,7 @@ function abrirDetalleProducto(codigo) {
 function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = null } = {}) {
   const body   = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
+  body.removeAttribute('aria-busy');
   const resultadoActivoPrevio = preserveWindow
     ? (Number.isInteger(restoreActiveIndex) ? restoreActiveIndex : resultadoActivoIndex)
     : -1;
