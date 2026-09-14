@@ -5862,13 +5862,15 @@
         .corralon-provider-editor-head .corralon-provider-head-copy{display:flex;flex-direction:column;gap:1px;min-width:0;margin-right:auto}
         .corralon-provider-editor-head .corralon-provider-head-copy>span:first-child{font:900 25px/1 'Barlow Condensed',sans-serif!important;color:#171717!important}
         .corralon-provider-editor-head .corralon-provider-editor-subtitle{font:700 12px/1.2 Barlow,sans-serif;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .corralon-provider-editor .corralon-provider-editor-grid{display:flex!important;flex-direction:column!important;gap:8px!important;padding:10px 18px!important}
-        .corralon-provider-section{border:1px solid #e2e2de;border-radius:11px;padding:8px 10px;background:#fff}
-        .corralon-provider-section-title{margin:0 0 6px;font:900 13px/1 'Barlow Condensed',sans-serif;letter-spacing:.05em;color:#191919;text-transform:uppercase}
-        .corralon-provider-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px}
-        .corralon-provider-field{display:grid;grid-template-columns:128px minmax(0,1fr);align-items:center;gap:7px;min-width:0}
+        .corralon-provider-editor .corralon-provider-editor-grid{display:flex!important;flex-direction:column!important;gap:5px!important;padding:7px 14px!important}
+        .corralon-provider-section{border:1px solid #e2e2de;border-radius:10px;padding:6px 9px;background:#fff}
+        .corralon-provider-section-title{margin:0 0 4px;font:900 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.05em;color:#191919;text-transform:uppercase}
+        .corralon-provider-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 12px}
+        .corralon-provider-field{display:grid;grid-template-columns:128px minmax(0,1fr);align-items:center;gap:6px;min-width:0}
+        .corralon-provider-section.is-commercial .corralon-provider-fields{grid-template-columns:repeat(3,minmax(0,1fr))}
+        .corralon-provider-section.is-commercial .corralon-provider-field{grid-template-columns:minmax(92px,112px) minmax(0,1fr);gap:4px}
         .corralon-provider-field>label{margin:0!important;font:800 13px/1.1 'Barlow Condensed',sans-serif!important;color:#666!important;align-self:center!important}
-        .corralon-provider-field>input,.corralon-provider-field>textarea,.corralon-provider-field>select{width:100%!important;min-width:0!important;height:32px!important;margin:0!important;padding:4px 8px!important;border:1px solid #c9c9c5!important;border-radius:7px!important;background:#fff!important;color:#171717!important;box-shadow:none!important}
+        .corralon-provider-field>input,.corralon-provider-field>textarea,.corralon-provider-field>select{width:100%!important;min-width:0!important;height:28px!important;margin:0!important;padding:3px 7px!important;border:1px solid #c9c9c5!important;border-radius:7px!important;background:#fff!important;color:#171717!important;box-shadow:none!important}
         .corralon-provider-field>input:focus,.corralon-provider-field>textarea:focus,.corralon-provider-field>select:focus{border-color:#ef1015!important;box-shadow:0 0 0 2px rgba(239,16,21,.12)!important;outline:0!important}
         .corralon-provider-field.is-check{grid-template-columns:128px 1fr}
         .corralon-provider-field.is-check>input{width:18px!important;height:18px!important;justify-self:start}
@@ -5876,12 +5878,12 @@
         .corralon-provider-section.is-notes .corralon-provider-fields{display:block}
         .corralon-provider-field.is-note{display:block}
         .corralon-provider-field.is-note>label{display:none}
-        .corralon-provider-field.is-note>textarea{height:72px!important;min-height:72px!important;resize:vertical!important;background:#fffdf8!important}
-        .corralon-provider-note-help{margin-top:4px;font:600 11px/1.2 Barlow,sans-serif;color:#8a7652}
+        .corralon-provider-field.is-note>textarea{height:46px!important;min-height:46px!important;resize:vertical!important;background:#fffdf8!important}
+        .corralon-provider-note-help{margin-top:2px;font:600 10px/1.15 Barlow,sans-serif;color:#8a7652}
         .corralon-provider-editor .corralon-provider-editor-actions{display:flex!important;justify-content:flex-end!important;align-items:center!important;gap:8px!important;padding:9px 18px 11px!important;border-top:1px solid #e3e3df!important;background:#fff!important}
         .corralon-provider-editor-actions .danger,.corralon-provider-editor-actions [id*="delete" i]{margin-right:auto!important}
         .corralon-provider-editor-actions button{min-height:34px!important;padding:6px 16px!important;border-radius:8px!important}
-        @media(max-width:700px){.corralon-provider-editor{width:96vw!important}.corralon-provider-fields{grid-template-columns:1fr}.corralon-provider-field{grid-template-columns:118px minmax(0,1fr)}.corralon-provider-editor .corralon-provider-editor-grid{padding:8px!important}.corralon-provider-editor .corralon-provider-editor-actions{padding:8px!important}}
+        @media(max-width:700px){.corralon-provider-editor{width:96vw!important}.corralon-provider-fields{grid-template-columns:1fr}.corralon-provider-field{grid-template-columns:118px minmax(0,1fr)}.corralon-provider-section.is-commercial .corralon-provider-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 8px}.corralon-provider-section.is-commercial .corralon-provider-field{grid-template-columns:1fr;align-content:start;gap:2px}.corralon-provider-section.is-commercial .corralon-provider-field>label{min-height:14px}.corralon-provider-section.is-commercial .corralon-provider-field.is-check>input{align-self:end}.corralon-provider-editor .corralon-provider-editor-grid{padding:8px!important}.corralon-provider-editor .corralon-provider-editor-actions{padding:8px!important}}
       `;
       document.head.appendChild(style);
     }
@@ -5942,7 +5944,7 @@
       const used = new Set();
       sectionData.forEach(([groupKey, title]) => {
         const section = document.createElement('section');
-        section.className = `corralon-provider-section${groupKey === 'notes' ? ' is-notes' : ''}`;
+        section.className = `corralon-provider-section is-${groupKey}`;
         const heading = document.createElement('h3');
         heading.className = 'corralon-provider-section-title';
         heading.textContent = title;

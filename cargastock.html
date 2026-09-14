@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.17"></script>
+<script src="corralon-system.js?v=1.0.18"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -402,7 +402,7 @@
 <div class="modal-backdrop" id="providerModal">
   <div class="provider-modal">
     <div class="provider-modal-head">
-      <span class="provider-modal-title">Proveedor <button class="provider-edit-btn" type="button" id="editProviderModalBtn" title="Editar">✎</button></span>
+      <span class="provider-modal-title"><span id="providerModalTitleText">Proveedor</span> <button class="provider-edit-btn" type="button" id="editProviderModalBtn" title="Editar">✎</button></span>
       <button type="button" id="closeProviderModalBtn">Cerrar</button>
     </div>
     <div class="provider-modal-grid">
@@ -465,6 +465,7 @@
   <button type="button" class="danger-item" id="clearTableContextBtn">Limpiar tabla</button>
 </div>
 <div class="table-context-menu" id="providerContextMenu">
+  <button type="button" id="addProviderContextBtn">Agregar nuevo proveedor</button>
   <button type="button" id="openProviderPageContextBtn">Abrir página web</button>
 </div>
 <div class="modal-backdrop" id="calcBackdrop">
@@ -531,6 +532,7 @@ const PRICE_COMPARATOR_LAST_PROVIDER_KEY = 'corralon_carga_stock_price_comparato
 let providers = [];
 let provider = null;
 let modalEditingProviderId = null;
+let modalNewProviderDraftId = null;
 let providerModalActiveField = null;
 let providerModalMouseEditField = null;
 let providerModalReturnFocus = null;
@@ -627,6 +629,7 @@ const el = {
   sendToComparatorContextBtn: document.getElementById('sendToComparatorContextBtn'),
   importNewArticlesContextBtn: document.getElementById('importNewArticlesContextBtn'),
   providerContextMenu: document.getElementById('providerContextMenu'),
+  addProviderContextBtn: document.getElementById('addProviderContextBtn'),
   openProviderPageContextBtn: document.getElementById('openProviderPageContextBtn'),
   calcPriceContextBtn: document.getElementById('calcPriceContextBtn'),
   applyDiscountContextBtn: document.getElementById('applyDiscountContextBtn'),
@@ -1864,7 +1867,7 @@ function setProviderModalEditing(enabled) {
   });
   modalValue('modalIvaIncluded').disabled = !enabled;
   modalValue('saveProviderModalBtn')?.classList.toggle('provider-hidden', !enabled);
-  modalValue('deleteProviderModalBtn')?.classList.toggle('provider-hidden', !enabled);
+  modalValue('deleteProviderModalBtn')?.classList.toggle('provider-hidden', !enabled || modalEditingProviderId === null);
   if (enabled) requestAnimationFrame(() => focusProviderModalControl(modalValue('modalProviderId')));
 }
 function openProviderModal() {
@@ -1875,6 +1878,9 @@ function openProviderModal() {
     return;
   }
   providerModalReturnFocus = document.activeElement;
+  modalNewProviderDraftId = null;
+  modalValue('providerModalTitleText').textContent = 'Proveedor';
+  modalValue('editProviderModalBtn').classList.remove('provider-hidden');
   setProviderModalEditing(false);
   modalEditingProviderId = current.id_proveedor || null;
   modalValue('modalProviderId').value = CorralonSystem.providerIdentity.externalId(current);
@@ -1894,9 +1900,36 @@ function openProviderModal() {
   modalValue('providerModal').classList.add('visible');
   requestAnimationFrame(() => focusProviderModalControl(modalValue('modalProviderId')));
 }
+function openNewProviderModal() {
+  providerModalReturnFocus = el.providerInput;
+  modalEditingProviderId = null;
+  modalNewProviderDraftId = CorralonSystem.providerIdentity.newId();
+  modalValue('providerModalTitleText').textContent = 'Nuevo proveedor';
+  modalValue('editProviderModalBtn').classList.add('provider-hidden');
+  modalValue('modalProviderId').value = '';
+  modalValue('modalProviderName').value = '';
+  modalValue('modalDiscountInvoice').value = percent(0);
+  modalValue('modalDiscountFinalInvoice').value = percent(0);
+  modalValue('modalDiscountList').value = percent(0);
+  modalValue('modalDate').value = '';
+  modalValue('modalSeller').value = '';
+  modalValue('modalPhone').value = '';
+  modalValue('modalPageLink').value = '';
+  modalValue('modalFreight').value = percent(0);
+  modalValue('modalIva').value = percent(0);
+  modalValue('modalIvaIncluded').checked = false;
+  modalValue('modalNote').value = '';
+  providerEditorLayout?.setIdentity('', '', true);
+  setProviderModalEditing(true);
+  modalValue('providerModal').classList.add('visible');
+  requestAnimationFrame(() => focusProviderModalControl(modalValue('modalProviderId')));
+}
 function closeProviderModal() {
   modalValue('providerModal').classList.remove('visible');
   modalEditingProviderId = null;
+  modalNewProviderDraftId = null;
+  modalValue('providerModalTitleText').textContent = 'Proveedor';
+  modalValue('editProviderModalBtn').classList.remove('provider-hidden');
   setProviderModalEditing(false);
   providerModalActiveField = null;
   providerModalMouseEditField = null;
@@ -1907,11 +1940,14 @@ function closeProviderModal() {
 async function saveProviderModal() {
   const id = String(modalValue('modalProviderId').value || '').trim();
   const originalId = modalEditingProviderId;
-  const current = providers.find((item) => String(item.id_proveedor) === String(originalId ?? id)) || {};
+  const creatingProvider = originalId === null && !!modalNewProviderDraftId;
+  const current = creatingProvider
+    ? {}
+    : providers.find((item) => String(item.id_proveedor) === String(originalId)) || {};
   const pageLink = String(modalValue('modalPageLink').value || '').trim();
   const nextProvider = {
     ...current,
-    id_proveedor: originalId,
+    id_proveedor: originalId || (modalNewProviderDraftId ||= CorralonSystem.providerIdentity.newId()),
     codigo_proveedor: id,
     proveedor: String(modalValue('modalProviderName').value || '').trim(),
     descuento_factura: parseModalPercent('modalDiscountInvoice'),
@@ -1950,9 +1986,11 @@ async function saveProviderModal() {
   await CorralonSystem.setProvidersCache(providers);
   await updateProvidersVersion();
   modalEditingProviderId = localProvider.id_proveedor;
+  modalNewProviderDraftId = null;
   setProvider(localProvider);
-  setProviderModalEditing(false);
   show('Proveedor guardado');
+  if (creatingProvider) closeProviderModal();
+  else setProviderModalEditing(false);
 }
 async function deleteProviderModal() {
   const id = modalEditingProviderId;
@@ -4210,9 +4248,16 @@ el.providerInput.addEventListener('contextmenu', (event) => {
   const page = String(current?.pagina_link || current?.pagina || '').trim();
   el.openProviderPageContextBtn.disabled = !/^https?:\/\//i.test(page);
   el.openProviderPageContextBtn.dataset.url = page;
-  el.providerContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 210)}px`;
-  el.providerContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 52)}px`;
   el.providerContextMenu.classList.add('visible');
+  const menuWidth = el.providerContextMenu.offsetWidth;
+  const menuHeight = el.providerContextMenu.offsetHeight;
+  el.providerContextMenu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8))}px`;
+  el.providerContextMenu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8))}px`;
+});
+el.addProviderContextBtn.addEventListener('click', () => {
+  el.providerContextMenu.classList.remove('visible');
+  closeProviderList();
+  openNewProviderModal();
 });
 el.openProviderPageContextBtn.addEventListener('click', () => {
   const url = el.openProviderPageContextBtn.dataset.url || '';
