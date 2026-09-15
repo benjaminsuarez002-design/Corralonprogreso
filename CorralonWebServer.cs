@@ -435,6 +435,8 @@ internal sealed class ServerForm : Form
         string normalized = String.IsNullOrWhiteSpace(requestPath) ? "menu.html" : requestPath;
         normalized = normalized.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
         if (String.Equals(normalized, "impcomp", StringComparison.OrdinalIgnoreCase)) normalized = "impcomp.html";
+        string pedidosPrefix = "pedidos" + Path.DirectorySeparatorChar;
+        if (normalized.StartsWith(pedidosPrefix, StringComparison.OrdinalIgnoreCase)) normalized = "pedido-compartido.html";
         string factPublic = Path.Combine(root, "Fact Web", "public");
         if (String.Equals(normalized, "facturas", StringComparison.OrdinalIgnoreCase) || String.Equals(normalized, "facturas.html", StringComparison.OrdinalIgnoreCase))
         {
