@@ -2,7 +2,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'GET' && /^\/pedidos\/[^/]+\/?$/i.test(url.pathname)) {
-      const assetUrl = new URL('/pedido-compartido.html', url);
+      // Pedimos la URL canónica del asset para que Cloudflare no responda con
+      // una redirección que reemplace /pedidos/<slug> y haga perder la clave.
+      const assetUrl = new URL('/pedido-compartido', url);
       const response = await env.ASSETS.fetch(new Request(assetUrl, request));
       const headers = new Headers(response.headers);
       headers.set('cache-control', 'no-store');

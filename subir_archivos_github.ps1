@@ -301,6 +301,15 @@ try {
         }
         $fullPath.Substring($repoRoot.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
     } | Sort-Object -Unique)
+    $pedidoShareFiles = @('pedidos.html', 'pedido-compartido.html', 'cloudflare-worker.js', 'wrangler.jsonc', '.assetsignore')
+    if (@($relativeFiles | Where-Object { $pedidoShareFiles -contains $_ }).Count) {
+        foreach ($dependency in $pedidoShareFiles) {
+            if ((Test-Path -LiteralPath (Join-Path $repoRoot $dependency) -PathType Leaf) -and $relativeFiles -notcontains $dependency) {
+                $relativeFiles += $dependency
+            }
+        }
+        $relativeFiles = @($relativeFiles | Sort-Object -Unique)
+    }
     $htmlFiles = @($relativeFiles | Where-Object { $_ -match '\.html$' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
     if ($htmlFiles.Count) {
         $manifestSource = Join-Path $repoRoot 'version-web.json'
