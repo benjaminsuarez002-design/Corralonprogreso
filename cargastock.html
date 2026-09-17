@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.18"></script>
+<script src="corralon-system.js?v=1.0.19"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -79,6 +79,8 @@
     .price-comparator-row .comparison-higher{color:#c61231;font-weight:900}
     .price-comparator-row .comparison-lower{color:#087a43;font-weight:900}
     .price-comparator-row .comparison-equal{color:#536078;font-weight:900}
+    .price-comparator-row .price-comparator-price-input{width:100%;height:30px;padding:3px 5px;border:1px solid transparent;border-radius:6px;background:transparent;text-align:right;font:700 15px Barlow}
+    .price-comparator-row .price-comparator-price-input:focus{border-color:#7d6cff;background:#fff}
     .price-comparator-row button{height:30px;margin:0 6px;padding:3px 10px;font-size:15px}
     .price-comparator-provider-cell{padding:4px 6px!important;overflow:visible!important}
     .price-comparator-provider-combo{position:relative;display:flex;align-items:center;min-width:0}
@@ -543,6 +545,8 @@ let priceComparatorReturnFocus = null;
 let priceComparatorProviderInput = null;
 let priceComparatorProviderOptions = [];
 let priceComparatorProviderActive = -1;
+const priceComparatorUndo = [];
+let priceComparatorEdit = null;
 let lastPriceComparatorProvider = '';
 let indexCodeProviders = new Map();
 let indexCodeMatchCounts = new Map();
@@ -822,6 +826,55 @@ function percentagePresentation(difference) {
 function priceComparisonPresentation(precioFinal, precioComparar) {
   return percentagePresentation(priceComparisonPercent(precioFinal, precioComparar));
 }
+function formatComparatorMoneyInput(input) {
+  const before = input.value;
+  const caret = input.selectionStart ?? before.length;
+  const left = before.slice(0, caret);
+  const raw = before.replace(/[^\d,]/g, '');
+  const comma = raw.indexOf(',');
+  const integer = (comma < 0 ? raw : raw.slice(0, comma)).replace(/^0+(?=\d)/, '') || '0';
+  const decimals = comma < 0 ? '' : raw.slice(comma + 1).replace(/,/g, '').slice(0, 2);
+  const group = (digits) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  input.value = `$ ${group(integer)}${comma < 0 ? '' : `,${decimals}`}`;
+  const leftInteger = (left.replace(/[^\d,]/g, '').split(',')[0] || '0').replace(/^0+(?=\d)/, '');
+  const position = `$ ${group(leftInteger)}`.length + (left.includes(',') ? 1 + left.split(',').at(-1).replace(/\D/g, '').slice(0, 2).length : 0);
+  input.setSelectionRange(Math.min(position, input.value.length), Math.min(position, input.value.length));
+}
+function updateComparatorRowDifference(input) {
+  const row = input.closest('.price-comparator-row');
+  const item = priceComparisons.find((entry) => entry.id === row?.dataset.priceComparisonId);
+  const cell = row?.querySelector('[data-price-comparison-difference]');
+  if (!item || !cell) return;
+  const difference = priceComparisonPresentation(item.precioFinal, moneyNumber(input.value));
+  cell.textContent = difference.text;
+  cell.className = `num ${difference.className}`;
+}
+function commitPriceComparatorEdit(input) {
+  if (!input) return;
+  const item = priceComparisons.find((entry) => entry.id === input.dataset.priceComparisonPrice || entry.id === input.dataset.priceComparisonProvider);
+  if (!item) return;
+  const field = input.dataset.priceComparisonPrice ? 'precioComparar' : 'proveedor';
+  const oldValue = item[field];
+  const value = field === 'precioComparar' ? Math.round(moneyNumber(input.value) * 100) / 100 : input.value.trim();
+  if (field === 'precioComparar' && !(value > 0)) {
+    input.value = money(oldValue);
+    updateComparatorRowDifference(input);
+    show('Ingresá un precio mayor a cero');
+    return;
+  }
+  if (value === oldValue) {
+    if (field === 'precioComparar') input.value = money(value);
+    return;
+  }
+  item[field] = value;
+  if (priceComparatorEdit?.input === input) priceComparatorUndo.push({ id: item.id, field, value: oldValue });
+  savePriceComparisons();
+  if (field === 'precioComparar') {
+    input.value = money(value);
+    updateComparatorRowDifference(input);
+  } else if (value) rememberPriceComparatorProvider(value);
+  renderPriceComparatorAverages();
+}
 function renderPriceComparator() {
   if (!el.priceComparatorList) return;
   el.priceComparatorCount.textContent = priceComparisons.length.toLocaleString('es-AR');
@@ -839,8 +892,8 @@ function renderPriceComparator() {
           <div title="${escapeHtml(item.codigo)}">${escapeHtml(item.codigo)}</div>
           <div title="${escapeHtml(item.articulo)}">${escapeHtml(item.articulo)}</div>
           <div class="num">${money(item.precioFinal)}</div>
-          <div class="num">${money(item.precioComparar)}</div>
-          <div class="num ${difference.className}">${difference.text}</div>
+          <div class="num"><input class="price-comparator-price-input" data-price-comparison-price="${escapeHtml(item.id)}" inputmode="decimal" autocomplete="off" aria-label="Precio a comparar de ${escapeHtml(item.articulo)}" value="${money(item.precioComparar)}"></div>
+          <div class="num ${difference.className}" data-price-comparison-difference>${difference.text}</div>
           <div class="price-comparator-provider-cell">
             <div class="price-comparator-provider-combo" data-combo>
               <input class="price-comparator-provider-input" data-price-comparison-provider="${escapeHtml(item.id)}" value="${escapeHtml(item.proveedor || '')}" autocomplete="off" placeholder="Elegir proveedor">
@@ -953,12 +1006,7 @@ function commitPriceComparatorProviderInput(input, remember = true) {
   const value = String(input?.value || '').trim();
   const comparisonId = input?.dataset.priceComparisonProvider;
   if (comparisonId) {
-    const comparison = priceComparisons.find((item) => item.id === comparisonId);
-    if (comparison && comparison.proveedor !== value) {
-      comparison.proveedor = value;
-      savePriceComparisons();
-      renderPriceComparatorAverages();
-    }
+    commitPriceComparatorEdit(input);
   }
   if (remember && value) rememberPriceComparatorProvider(value);
   return value;
@@ -3848,6 +3896,104 @@ document.getElementById('closePriceComparatorBtn').addEventListener('click', clo
 document.getElementById('cancelPriceComparatorEntryBtn').addEventListener('click', clearPriceComparatorDraft);
 document.getElementById('savePriceComparatorEntryBtn').addEventListener('click', addPriceComparison);
 el.priceComparatorCompare.addEventListener('input', updatePriceComparatorPreview);
+el.priceComparatorCompare.addEventListener('input', () => formatComparatorMoneyInput(el.priceComparatorCompare));
+el.priceComparatorCompare.addEventListener('focus', () => {
+  el.priceComparatorCompare.dataset.focusValue = el.priceComparatorCompare.value;
+  el.priceComparatorCompare.select();
+});
+el.priceComparatorCompare.addEventListener('keydown', (event) => {
+  if (event.key === 'F2') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isTextFullySelected(event.target)) event.target.setSelectionRange(event.target.value.length, event.target.value.length);
+    else event.target.select();
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    event.target.value = event.target.dataset.focusValue ?? '';
+    updatePriceComparatorPreview();
+    event.target.select();
+  }
+});
+el.priceComparatorCompare.addEventListener('blur', () => {
+  if (moneyNumber(el.priceComparatorCompare.value) > 0) el.priceComparatorCompare.value = money(moneyNumber(el.priceComparatorCompare.value));
+});
+el.priceComparatorBackdrop.addEventListener('focusin', (event) => {
+  const input = event.target.closest('.price-comparator-price-input,.price-comparator-provider-input');
+  if (!input) return;
+  priceComparatorEdit = { input, original: input.value };
+  if (input.matches('.price-comparator-price-input')) requestAnimationFrame(() => input === document.activeElement && input.select());
+});
+el.priceComparatorBackdrop.addEventListener('focusout', (event) => {
+  const input = event.target.closest('.price-comparator-price-input,.price-comparator-provider-input');
+  if (!input) return;
+  if (input.matches('.price-comparator-price-input,.price-comparator-provider-input[data-price-comparison-provider]')) commitPriceComparatorEdit(input);
+  if (priceComparatorEdit?.input === input) priceComparatorEdit = null;
+});
+el.priceComparatorBackdrop.addEventListener('input', (event) => {
+  const input = event.target.closest('.price-comparator-price-input');
+  if (!input) return;
+  formatComparatorMoneyInput(input);
+  updateComparatorRowDifference(input);
+});
+el.priceComparatorList.addEventListener('keydown', (event) => {
+  const input = event.target.closest('.price-comparator-price-input,.price-comparator-provider-input');
+  if (!input) return;
+  if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    if (priceComparatorEdit?.input === input && input.value !== priceComparatorEdit.original) {
+      input.value = priceComparatorEdit.original;
+      if (input.matches('.price-comparator-price-input')) updateComparatorRowDifference(input);
+      return;
+    }
+    const undo = priceComparatorUndo.pop();
+    const target = priceComparisons.find((entry) => entry.id === undo?.id);
+    if (target) {
+      target[undo.field] = undo.value;
+      savePriceComparisons();
+      renderPriceComparator();
+      const restored = el.priceComparatorList.querySelector(`[data-price-comparison-${undo.field === 'precioComparar' ? 'price' : 'provider'}="${CSS.escape(undo.id)}"]`);
+      restored?.focus({ preventScroll: true });
+    }
+    return;
+  }
+  if (input.matches('.price-comparator-provider-input') && priceComparatorProviderListIsOpen(input)) return;
+  if (event.key === 'F2') {
+    event.preventDefault();
+    if (isTextFullySelected(input)) input.setSelectionRange(input.value.length, input.value.length);
+    else input.select();
+    return;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    input.value = priceComparatorEdit?.input === input ? priceComparatorEdit.original : input.value;
+    if (input.matches('.price-comparator-price-input')) updateComparatorRowDifference(input);
+    closePriceComparatorProviderList();
+    input.select();
+    return;
+  }
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(event.key)) return;
+  const rows = [...el.priceComparatorList.querySelectorAll('.price-comparator-row[data-price-comparison-id]')];
+  const row = input.closest('.price-comparator-row');
+  const rowIndex = rows.indexOf(row);
+  const field = input.matches('.price-comparator-price-input') ? 0 : 1;
+  const horizontal = ['ArrowLeft', 'ArrowRight', 'Enter'].includes(event.key);
+  if (horizontal && event.key !== 'Enter') {
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? start;
+    if (start !== 0 || end !== input.value.length) {
+      if (start !== end || (event.key === 'ArrowLeft' ? start > 0 : end < input.value.length)) return;
+    }
+  }
+  const targetRow = horizontal ? row : rows[rowIndex + (event.key === 'ArrowUp' ? -1 : 1)];
+  const targetField = horizontal ? field + (event.key === 'ArrowLeft' ? -1 : 1) : field;
+  const next = targetRow?.querySelector(targetField === 0 ? '.price-comparator-price-input' : targetField === 1 ? '.price-comparator-provider-input' : '[data-remove-price-comparison]');
+  if (!next) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  next.focus({ preventScroll: true });
+  next.select?.();
+}, true);
 el.priceComparatorEntry.addEventListener('keydown', (event) => {
   if (event.defaultPrevented) return;
   const field = event.target.closest('#priceComparatorCode,#priceComparatorArticle,#priceComparatorFinal,#priceComparatorCompare,#priceComparatorProvider,#savePriceComparatorEntryBtn');

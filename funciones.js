@@ -695,6 +695,7 @@
     root.addEventListener('focusin', (event) => {
       const input = event.target?.closest?.(selector);
       if (!input || !root.contains(input)) return;
+      if (options.selectOnFocus === false) return;
       const end = String(input.value || '').replace(suffix, '').trim().length;
       input.setSelectionRange?.(0, end);
     });
