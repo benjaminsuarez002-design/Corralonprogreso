@@ -691,7 +691,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.24"></script>
+<script src="corralon-system.js?v=1.0.25"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -877,6 +877,7 @@
     let notificationStreamsReady = Promise.resolve();
     let reviewOrders = [];
     let historialNotifications = [];
+    const resolvedNotificationsInSession = new Set();
     let staleProviderNotifications = [];
     let ignoredStaleProviderNotifications = new Map();
     let reviewActiveSection = 'general';
@@ -1983,14 +1984,14 @@
 
     function allVisibleNotifications() {
       const pedidos = reviewOrders
-        .filter((order) => !order.notificacionResuelta)
+        .filter((order) => !order.notificacionResuelta && !resolvedNotificationsInSession.has(`pedidos/${reviewOrderDocId(order)}`))
         .map((order) => {
           const docId = reviewOrderDocId(order);
           const visibleId = String(order.id || docId);
           return { kind: 'pedido', id: visibleId, docId, title: `Pedido ${visibleId}`, detail: displayProviderName(order.proveedor) || 'Sin proveedor', date: order.fecha || '', createdAt: order.createdAt, updatedAt: order.updatedAt };
         });
       const historial = historialNotifications
-        .filter((item) => !item.resuelta)
+        .filter((item) => !item.resuelta && !resolvedNotificationsInSession.has(`historialNotificaciones/${item.firestoreId || `${item.tipo}_${item.id}`}`))
         .map((item) => {
           const notif = { ...item, kind: item.tipo === 'pendiente' ? 'pendiente' : 'historial', id: String(item.id || item.numero || item.firestoreId || ''), docId: item.tipo === 'autorizacion_pedido' ? String(item.pedidoDocId || '') : '', tipo: item.tipo, firestoreId: item.firestoreId, title: item.titulo || `${historialTypeLabel(item.tipo)} ${item.id || ''}`.trim(), detail: item.detalle || '', date: item.fecha || '', createdAt: item.createdAt, updatedAt: item.updatedAt };
           return { ...notif, title: notificationTitleFor(notif), detail: cleanNotificationDetail(notif) };
@@ -2216,6 +2217,12 @@
     function resolveMenuNotification(kind, id, tipo, docId = '') {
       const targetDocId = String(docId || id || '').trim();
       if (!targetDocId) return;
+      const item = kind === 'pedido' ? null : historialNotifications.find((notif) => String(notif.id) === String(id) && String(notif.tipo) === String(tipo));
+      const collectionName = kind === 'pedido' ? 'pedidos' : 'historialNotificaciones';
+      const resolvedDocId = kind === 'pedido' ? targetDocId : String(item?.firestoreId || `${tipo}_${id}`);
+      const pendingKey = `${collectionName}/${resolvedDocId}`;
+      if (resolvedNotificationsInSession.has(pendingKey)) return;
+      resolvedNotificationsInSession.add(pendingKey);
       const resolvedNow = new Date().toISOString();
       const targetKey = notificationKey({ kind, tipo, id, docId: targetDocId });
       if (reviewModalSnapshot) {
@@ -2233,23 +2240,24 @@
           syncId: Date.now() * 1000 + Math.floor(Math.random() * 1000)
         }, { merge: true }).catch((error) => {
           console.warn('No se pudo marcar el pedido como resuelto', error);
+          resolvedNotificationsInSession.delete(pendingKey);
           notificationStreams?.orders.restore();
         });
         return;
       }
-      const item = historialNotifications.find((notif) => String(notif.id) === String(id) && String(notif.tipo) === String(tipo));
       historialNotifications = historialNotifications.map((notif) => (
         String(notif.id) === String(id) && String(notif.tipo) === String(tipo)
           ? { ...notif, resuelta: true, resueltaAt: resolvedNow, updatedAt: resolvedNow }
           : notif
       ));
       renderReviewNotifications();
-      setDoc(doc(db, 'historialNotificaciones', item?.firestoreId || `${tipo}_${id}`), {
+      setDoc(doc(db, 'historialNotificaciones', resolvedDocId), {
         resuelta: true,
         resueltaAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       }, { merge: true }).catch((error) => {
         console.warn('No se pudo marcar notificación como resuelta', error);
+        resolvedNotificationsInSession.delete(pendingKey);
         notificationStreams?.history.restore();
       });
     }
