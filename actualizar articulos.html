@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.11"></script>
+<script src="corralon-system.js?v=1.0.12"></script>
   <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -341,7 +341,7 @@ async function copySelection(){const text=selectedText();if(!text)return;await n
 function makeBlankArticle(i){return applyProviderData({cod_proveedor:'',articulo:'',precio_lista:0,precio_costo:0,id_proveedor:provider?.id_proveedor||'',proveedor:provider?.proveedor||'',cod_proveedor_norm:'',articulo_norm:'',proveedor_norm:norm(provider?.proveedor||''),idorden:Date.now()*1000+i})}
 function applyColumnValue(article,col,value){if(col==='cod'){article.cod_proveedor=String(value??'').trim();article.cod_proveedor_norm=norm(article.cod_proveedor)}else if(col==='art'){article.articulo=String(value??'').trim();article.articulo_norm=norm(article.articulo)}else if(col==='lista'){const list=parseMoney(value);article.precio_lista=list;const desc=Number(provider?.descuento_lista||article.descuento_lista||0);article.precio_costo=Number((list*(1-desc)).toFixed(2))}if(provider){article.id_proveedor=provider.id_proveedor;article.proveedor=provider.proveedor;article.descuento_lista=Number(provider.descuento_lista||0);article.ultima_actualizacion=provider.ultima_actualizacion||'';article.proveedor_norm=norm(provider.proveedor)}}
 async function pasteSelectedColumnsFromClipboard(){const cols=orderedSelectedCols();if(!cols.length){await pasteArticlesFromClipboard();return}const text=await navigator.clipboard.readText();const lines=String(text||'').split(/\r?\n/).filter(line=>line.trim().length);const target=view.length?view:articles;lines.forEach((line,i)=>{const values=line.split('\t');let article=target[i];if(!article){article=makeBlankArticle(articles.length+i);articles.push(article);if(target!==articles)target.push(article)}cols.forEach((col,n)=>applyColumnValue(article,col,values[n]??''))});await saveArticlesCache();render();show('Columnas pegadas')}
-async function pasteClipboardToFilter(){const text=await navigator.clipboard.readText();filterInput.value=String(text||'').split(/\r?\n/)[0]||'';render();filterInput.focus()}
+async function pasteClipboardToFilter(){const text=await navigator.clipboard.readText();filterInput.value=String(text||'').split(/\r?\n/)[0]||'';render();filterInput.focus();filterInput.select()}
 function parseFactor(v,fallback=1){const text=String(v??'').trim();const n=window.CorralonFunciones?.evaluateNumericExpression?window.CorralonFunciones.evaluateNumericExpression(text):parseMoney(text);return Number.isFinite(n)&&n!==0?n:fallback}
 function calcBasePrice(a){if(!a)return 0;if(a.precio_costo_original)return Number(a.precio_costo_original||0);const cost=Number(a.precio_costo||0);const list=Number(a.precio_lista||0);const desc=Number(provider?.descuento_lista||a.descuento_lista||0)||0;if(desc>0&&list>0&&Math.abs(cost-list)<=0.009)return netListPrice(list,desc);return cost}
 function calcCurrentPrice(){return calcBasePrice(calcArticle)/parseFactor(calcDivide.value,1)*parseFactor(calcMultiply.value,1)}
@@ -356,14 +356,15 @@ function calcKey(event){if(!calcBackdrop.classList.contains('visible'))return;if
 function setupProviderEditFunciones(){const helpers=window.CorralonFunciones;if(!helpers)return;helpers.bindShiftEnterNewLine?.({root:providerEditForm,selector:'textarea'});helpers.bindLinearNavigation?.({root:providerEditForm,selector:'.provider-edit-grid input,.provider-edit-grid textarea,.provider-modal-actions button:not(.hidden)',selectOnFocus:false});helpers.bindLiveLocaleNumber?.({root:providerEditForm,selector:'.provider-percent-live',decimals:2,suffix:' %',selectOnFocus:false});}
 function showRowContext(event,article){contextArticle=article;rowContextMenu.style.left=`${event.clientX}px`;rowContextMenu.style.top=`${event.clientY}px`;rowContextMenu.classList.add('visible')}
 function hideRowContext(){rowContextMenu.classList.remove('visible');contextArticle=null}
-providerSearch.addEventListener('focus',()=>{openProviderCombo()});
+function selectProviderSearch(){requestAnimationFrame(()=>{if(document.activeElement===providerSearch)providerSearch.select()})}
+providerSearch.addEventListener('focus',()=>{openProviderCombo();selectProviderSearch()});
 providerSearch.addEventListener('input',()=>{comboActive=0;openProviderCombo()});
 providerSearch.addEventListener('dblclick',(event)=>{if(openCurrentProviderPage())event.preventDefault()});
 provName.addEventListener('dblclick',(event)=>{if(openCurrentProviderPage())event.preventDefault()});
 providerSearch.addEventListener('contextmenu',(event)=>{event.preventDefault();closeProviderCombo();hideRowContext();const url=currentProviderUrl();openProviderPageContextBtn.disabled=!url;openProviderPageContextBtn.dataset.url=url;providerContextMenu.style.left=`${Math.min(event.clientX,window.innerWidth-220)}px`;providerContextMenu.style.top=`${Math.min(event.clientY,window.innerHeight-42)}px`;providerContextMenu.classList.add('visible')});
 openProviderPageContextBtn.addEventListener('click',()=>{const url=openProviderPageContextBtn.dataset.url||'';providerContextMenu.classList.remove('visible');if(!url)return;window.open(url,'_blank','noopener,noreferrer')});
 providerSearch.addEventListener('change',()=>selectProviderByText(providerSearch.value));
-providerSearch.addEventListener('keydown',(event)=>{if(event.key==='ArrowDown'){event.preventDefault();moveProviderCombo(1)}else if(event.key==='ArrowUp'){event.preventDefault();moveProviderCombo(-1)}else if(event.key==='Enter'){event.preventDefault();chooseProviderCombo()}else if(event.key==='Escape'){event.preventDefault();closeProviderCombo()}});
+providerSearch.addEventListener('keydown',(event)=>{if(event.key==='F2'){event.preventDefault();if(providerSearch.selectionStart===0&&providerSearch.selectionEnd===providerSearch.value.length)providerSearch.setSelectionRange(providerSearch.value.length,providerSearch.value.length);else providerSearch.select()}else if(event.key==='ArrowDown'){event.preventDefault();moveProviderCombo(1)}else if(event.key==='ArrowUp'){event.preventDefault();moveProviderCombo(-1)}else if(event.key==='Enter'){event.preventDefault();chooseProviderCombo();selectProviderSearch()}else if(event.key==='Escape'){event.preventDefault();closeProviderCombo();providerSearch.value=provider?.proveedor||'Independiente';selectProviderSearch()}});
 providerComboBtn.addEventListener('mousedown',(event)=>{event.preventDefault();providerCombo.classList.contains('open')?closeProviderCombo():openProviderCombo();providerSearch.focus()});
 providerDropdown.addEventListener('mousedown',(event)=>{event.preventDefault();const option=event.target.closest('.combo-option');if(!option)return;comboActive=Number(option.dataset.index)||0;chooseProviderCombo()});
 document.addEventListener('mousedown',(event)=>{if(!providerCombo.contains(event.target))closeProviderCombo();if(!event.target.closest('.table'))clearTableSelection();if(!event.target.closest('#rowContextMenu'))hideRowContext();if(!event.target.closest('#providerContextMenu'))providerContextMenu.classList.remove('visible')});
@@ -375,6 +376,16 @@ tableSelector.addEventListener('dblclick',(event)=>{event.preventDefault();if(!a
 document.querySelectorAll('.selectable-head').forEach(head=>head.addEventListener('click',(event)=>setSelection('column',head.dataset.selectCol,event)));
 window.addEventListener('keydown',(event)=>{if(event.key==='F1'){event.preventDefault();event.stopPropagation();filterInput.focus()}},{capture:true});
 document.addEventListener('keydown',(event)=>{if(event.key==='Escape'){hideRowContext();closeCalcModal();closeProviderEditModal()}if(event.key==='F1')return;const key=event.key.toLowerCase();const editable=event.target?.matches?.('input,textarea,[contenteditable="true"]');const modalOpen=calcBackdrop.classList.contains('visible')||providerEditBackdrop.classList.contains('visible');if(modalOpen)return;if(event.ctrlKey&&key==='v'&&selectionMode.type==='column'&&!editable){event.preventDefault();pasteSelectedColumnsFromClipboard().catch(e=>{console.error(e);show('No pude pegar')})}else if(event.ctrlKey&&key==='v'&&!selectionMode.type&&!editable){event.preventDefault();pasteClipboardToFilter().catch(e=>{console.error(e);show('No pude pegar en filtro')})}else if(event.ctrlKey&&key==='c'&&selectionMode.type&&!editable){event.preventDefault();copySelection().catch(e=>{console.error(e);show('No pude copiar')})}});
+document.addEventListener('paste',(event)=>{
+  const input=event.target;
+  if(!input?.matches?.('input,textarea')||typeof input.selectionStart!=='number')return;
+  const start=input.selectionStart, end=input.selectionEnd, oldLength=input.value.length;
+  setTimeout(()=>{
+    if(event.defaultPrevented||!input.isConnected||document.activeElement!==input)return;
+    const insertedLength=input.value.length-(oldLength-(end-start));
+    if(insertedLength>0)input.setSelectionRange(start,start+insertedLength);
+  },0);
+});
 filterInput.addEventListener('keydown',(event)=>{if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();render();focusTableCell(0,3)}});
 window.CorralonFunciones?.bindLinearNavigation?.({root:document,selector:'#filterInput',selectOnFocus:false});
 setupProviderEditFunciones();

@@ -4521,8 +4521,11 @@
             schema: 'public',
             table: TABLES.catalogMeta,
             filter: 'id=eq.principal'
-          }, () => {
+          }, (payload) => {
             announceCatalogChange();
+            window.dispatchEvent(new CustomEvent('corralon:catalog-meta-changed', {
+              detail: { rankingVersion: Number(payload?.new?.ranking_version || 0) }
+            }));
             scheduleRefresh();
           })
           .subscribe((status) => {
@@ -4561,7 +4564,10 @@
       if (event.key === MESSAGE_KEY && event.newValue) {
         try {
           const message = JSON.parse(event.newValue);
-          if (message?.sender !== tabId && message?.type === 'catalog-change') scheduleRefresh();
+          if (message?.sender !== tabId && message?.type === 'catalog-change') {
+            window.dispatchEvent(new Event('corralon:catalog-meta-changed'));
+            scheduleRefresh();
+          }
         } catch (_) {}
       }
       if (event.key === LEADER_KEY) evaluateLeadership();
@@ -4577,7 +4583,10 @@
       if ('BroadcastChannel' in window) {
         broadcast = new BroadcastChannel(CHANNEL_NAME);
         broadcast.onmessage = (event) => {
-          if (event.data?.sender !== tabId && event.data?.type === 'catalog-change') scheduleRefresh();
+          if (event.data?.sender !== tabId && event.data?.type === 'catalog-change') {
+            window.dispatchEvent(new Event('corralon:catalog-meta-changed'));
+            scheduleRefresh();
+          }
         };
       }
       window.addEventListener('storage', onStorage);
@@ -6242,6 +6251,16 @@
       return control?.matches?.('input:not([type="checkbox"]):not([type="radio"]),textarea') || false;
     }
 
+    function selectImporterFocusText(control) {
+      const field = control?.dataset?.newArticlesField;
+      if (field !== 'margen' && field !== 'rubroText') return false;
+      if (field === 'margen') {
+        const end = String(control.value || '').replace(/\s*%$/, '').length;
+        control.setSelectionRange?.(0, end);
+      } else control.select?.();
+      return true;
+    }
+
     function importerTextFullySelected(control) {
       if (!isImporterTextControl(control)) return true;
       const length = String(control.value || '').length;
@@ -6256,13 +6275,19 @@
       return direction < 0 ? start === 0 : end === String(control.value || '').length;
     }
 
-    function focusImporterCell(control, options = {}) {
+    function focusImporterCell(control) {
       if (!control) return false;
       const position = importerCellPosition(control);
       if (Number.isInteger(position.row)) selectImporterRow(position.row);
       importerBackdrop()?.querySelectorAll('.corralon-new-cell-editing').forEach((item) => item.classList.remove('corralon-new-cell-editing'));
       control.focus({ preventScroll:true });
-      if (options.select !== false && isImporterTextControl(control)) control.select?.();
+      if (isImporterTextControl(control)) {
+        control.classList.add('corralon-new-cell-editing');
+        if (!selectImporterFocusText(control)) {
+          const end = String(control.value || '').length;
+          control.setSelectionRange?.(end, end);
+        }
+      }
       control.scrollIntoView({ block:'nearest', inline:'nearest' });
       return true;
     }
@@ -6385,8 +6410,11 @@
         }
         if (pointerCell !== fieldControl) {
           selectImporterRow(index);
-          fieldControl.classList.remove('corralon-new-cell-editing');
-          if (isImporterTextControl(fieldControl)) fieldControl.select?.();
+          if (isImporterTextControl(fieldControl)) fieldControl.classList.add('corralon-new-cell-editing');
+          if (isImporterTextControl(fieldControl) && !selectImporterFocusText(fieldControl)) {
+            const end = String(fieldControl.value || '').length;
+            fieldControl.setSelectionRange?.(end, end);
+          }
         }
       });
       backdrop.addEventListener('focusout', (event) => {
@@ -6432,10 +6460,15 @@
         if (cell && !cell.disabled) {
           pointerCell = cell;
           if (document.activeElement !== cell) {
-            event.preventDefault();
-            cell.classList.remove('corralon-new-cell-editing');
-            cell.focus({ preventScroll:true });
-            if (isImporterTextControl(cell)) cell.select?.();
+            if (isImporterTextControl(cell)) cell.classList.add('corralon-new-cell-editing');
+            if (cell.dataset.newArticlesField === 'margen' || cell.dataset.newArticlesField === 'rubroText') {
+              event.preventDefault();
+              cell.focus({ preventScroll:true });
+              selectImporterFocusText(cell);
+            } else if (!isImporterTextControl(cell)) {
+              event.preventDefault();
+              cell.focus({ preventScroll:true });
+            }
           } else if (isImporterTextControl(cell) && !cell.readOnly) {
             cell.classList.add('corralon-new-cell-editing');
           }
@@ -6499,7 +6532,7 @@
         if (!event.target.closest('.corralon-new-rubro-combo')) closeRubroMenus();
       }, true);
       const fx = window.CorralonFunciones;
-      fx?.bindLiveLocaleNumber?.({ root:backdrop, selector:'[data-new-articles-field="margen"]', decimals:2, suffix:' %' });
+      fx?.bindLiveLocaleNumber?.({ root:backdrop, selector:'[data-new-articles-field="margen"]', decimals:2, suffix:' %', selectOnFocus:false });
     }
 
     function ensureUi() {
@@ -6745,6 +6778,10 @@
     }
 
     async function open(options = {}) {
+      if (options.localSql && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+        const importer = await import('./local-article-importer.js');
+        return importer.open(options);
+      }
       if (state?.importing) {
         options.showMessage?.('Ya hay una importación de artículos ejecutándose en segundo plano');
         return false;

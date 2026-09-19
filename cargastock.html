@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.19"></script>
+<script src="corralon-system.js?v=1.0.20"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -572,8 +572,9 @@ let compareContextSide = '';
 let compareContextIndex = -1;
 let compareScrollSyncing = false;
 let undoStack = null;
-let editSnapshot = null;
-let editHadChanges = false;
+const cellEditSnapshots = new Map();
+let fieldMovementSequence = 0;
+let restoringUndo = false;
 let tableEditUndoPushed = false;
 let tableSelectionApi = null;
 let suppressFullSelectTarget = null;
@@ -1090,22 +1091,78 @@ function rowsState() {
   return rowsData.map((row) => ({ ...row }));
 }
 function restoreRowsState(state) {
+  cellEditSnapshots.clear();
   rowsData = Array.isArray(state) ? state.map((row, index) => normalizeRow(row, index)) : [];
   saveRows();
   render();
   show('Cambio deshecho');
 }
 function pushUndoSnapshot(state = rowsState()) {
+  const activeCell = document.activeElement?.closest?.('#rows [data-field][data-row][data-col]');
+  if (activeCell) commitCellEditSnapshot(activeCell);
+  cellEditSnapshots.clear();
   if (undoStack && Array.isArray(state)) undoStack.push(state);
 }
-function startCellEditSnapshot() {
-  editSnapshot = rowsState();
-  editHadChanges = false;
+function cellEditKey(cell) {
+  const rowId = cell?.closest?.('.row')?.dataset.id;
+  return rowId && cell?.dataset.field ? `${rowId}|${cell.dataset.field}` : '';
 }
-function commitCellEditSnapshot() {
-  if (editHadChanges && editSnapshot) pushUndoSnapshot(editSnapshot);
-  editSnapshot = null;
-  editHadChanges = false;
+function startCellEditSnapshot(cell) {
+  const row = rowFromCell(cell);
+  const key = cellEditKey(cell);
+  if (!row || !key || cell.dataset.readonlyCell === '1' || cellEditSnapshots.has(key)) return;
+  cellEditSnapshots.set(key, { rowId: row.id, rowIndex: rowsData.indexOf(row), field: cell.dataset.field, before: { ...row } });
+}
+function commitCellEditSnapshot(cell) {
+  const key = cellEditKey(cell);
+  const snapshot = cellEditSnapshots.get(key);
+  if (!snapshot) return false;
+  cellEditSnapshots.delete(key);
+  if (restoringUndo) return false;
+  const row = rowsData.find((item) => item.id === snapshot.rowId);
+  if (!row || JSON.stringify(row) === JSON.stringify(snapshot.before)) return false;
+  undoStack?.push({ _fieldMove: true, idMov: ++fieldMovementSequence, ...snapshot });
+  return true;
+}
+function pushStockRowMovement(row, field, before) {
+  if (!row || !before || JSON.stringify(row) === JSON.stringify(before)) return false;
+  undoStack?.push({ _fieldMove: true, idMov: ++fieldMovementSequence, rowId: row.id, rowIndex: rowsData.indexOf(row), field, before });
+  return true;
+}
+function restoreStockFieldMovement(movement) {
+  restoringUndo = true;
+  try {
+    cellEditSnapshots.clear();
+    const index = rowsData.findIndex((row) => row.id === movement.rowId);
+    const targetIndex = index >= 0 ? index : Math.min(movement.rowIndex, rowsData.length);
+    if (index >= 0) rowsData[index] = { ...movement.before };
+    else rowsData.splice(targetIndex, 0, { ...movement.before });
+    saveRows();
+    render();
+    const restoredIndex = rowsData.findIndex((row) => row.id === movement.rowId);
+    const cell = el.rows.querySelector(`.row[data-id="${CSS.escape(movement.rowId)}"] [data-field="${CSS.escape(movement.field)}"]`);
+    if (cell && restoredIndex >= 0) requestAnimationFrame(() => focusNavigationTarget(cell));
+    show(`Movimiento ${movement.idMov} deshecho`);
+  } finally { restoringUndo = false; }
+}
+function restoreStockUndoState(state) {
+  if (state?._fieldMove) restoreStockFieldMovement(state);
+  else {
+    restoringUndo = true;
+    try { restoreRowsState(state); }
+    finally { restoringUndo = false; }
+  }
+}
+function cancelActiveCellEdit(cell) {
+  const key = cellEditKey(cell);
+  const snapshot = cellEditSnapshots.get(key);
+  if (!snapshot) return false;
+  const row = rowsData.find((item) => item.id === snapshot.rowId);
+  if (!row || JSON.stringify(row) === JSON.stringify(snapshot.before)) return false;
+  cellEditSnapshots.delete(key);
+  restoreStockFieldMovement({ ...snapshot, idMov: fieldMovementSequence });
+  show('Edición actual deshecha');
+  return true;
 }
 function beginTableEditUndo() {
   if (tableEditUndoPushed) return;
@@ -1411,7 +1468,6 @@ function pickArticleProviderOption(index = articleProviderActive) {
   const rowIndex = Number(cell.dataset.row);
   const row = rowsData[rowIndex];
   if (!row) return false;
-  pushUndoSnapshot();
   row.codigo = String(item.codProv || item.idart || '').trim();
   row.descripcion = String(item.descripcion || '').trim();
   if (!moneyNumber(row.precio)) {
@@ -1420,6 +1476,7 @@ function pickArticleProviderOption(index = articleProviderActive) {
     row.precioDivisor = '';
     row.precioMultiplicador = '';
   }
+  commitCellEditSnapshot(cell);
   saveRows();
   closeArticleProviderList();
   render();
@@ -1446,6 +1503,7 @@ function applyExactProviderCode(cell) {
     row.precioDivisor = '';
     row.precioMultiplicador = '';
   }
+  commitCellEditSnapshot(cell);
   saveRows();
   render();
   requestAnimationFrame(() => focusNavigationTarget(editableCellAt(rowIndex, 2)));
@@ -1723,6 +1781,7 @@ async function openNewArticlesModal() {
     return;
   }
   return CorralonSystem.newArticlesImporter.open({
+    localSql: true,
     provider: {
       id_proveedor: CorralonSystem.providerIdentity.externalId(currentProvider),
       proveedor: providerLabel(currentProvider)
@@ -1734,8 +1793,21 @@ async function openNewArticlesModal() {
     })),
     catalogRows: indexCatalogRows,
     showMessage: show,
-    onImported(payload) {
-      el.status.textContent = `${payload.importados || candidates.length} artículos nuevos importados en Access`;
+    onImported(payload, appliedRows) {
+      if (payload.directSql && Array.isArray(payload.rows)) {
+        const changed = payload.rows.map((result, index) => {
+          const row = appliedRows[index];
+          const prior = indexCatalogRows.find(article => catalogArticleCode(article) === result.id) || {};
+          return { ...prior, codigo:result.id, cod_proveedor:row.codigo,
+            nombre:row.descripcion, descripcion:row.descripcion,
+            id_proveedor:CorralonSystem.providerIdentity.externalId(currentProvider),
+            proveedor:providerLabel(currentProvider), id_rubro:row.rubro };
+        });
+        applyIndexCodesDelta(changed);
+      }
+      el.status.textContent = payload.directSql
+        ? `${payload.nuevos} artículos nuevos y ${payload.actualizados} actualizados en la base local`
+        : `${payload.importados || candidates.length} artículos nuevos importados en Access`;
     }
   });
 }
@@ -2337,7 +2409,9 @@ function parsePasted(text) {
       const descripcion = String(column(cols, 'descripcion', 1) ?? '').trim();
       const cantidad = String(column(cols, 'cantidad', 2) ?? '').trim();
       const precio = moneyNumber(column(cols, 'precio', 3) ?? 0);
-      const descuentoAdicional = columnMap.descuentoAdicional == null ? 0 : parsePercent(cols[columnMap.descuentoAdicional]);
+      const descuentoAdicional = columnMap.descuentoAdicional == null
+        ? (headerIndex < 0 && cols.length >= 5 ? parsePercent(cols[4]) : 0)
+        : parsePercent(cols[columnMap.descuentoAdicional]);
       if (!codigo && !descripcion && !cantidad && !precio) return null;
       return normalizeRow({ codigo, descripcion, cantidad, precio, descuento: providerDiscountValue(), descuentoAdicional }, index);
     })
@@ -3509,7 +3583,7 @@ function openRowNumberCalc(rowIndex, field, initialField = 'divide') {
     formatValue: isPrice ? money : rawNumber,
     returnFocus: () => focusCalculatedRow(row.id, col),
     onApply: (result, details) => {
-      pushUndoSnapshot();
+      const before = { ...row };
       if (isPrice) {
         row.precio = Math.round(result * 100) / 100;
         row.precioOriginal = original;
@@ -3518,12 +3592,13 @@ function openRowNumberCalc(rowIndex, field, initialField = 'divide') {
       } else {
         row.cantidad = rawNumber(result);
       }
+      pushStockRowMovement(row, field, before);
       saveRows();
       render();
       show(isPrice ? 'Precio unitario guardado' : 'Cantidad guardada');
     },
     onRestore: () => {
-      pushUndoSnapshot();
+      const before = { ...row };
       if (isPrice) {
         row.precio = original;
         row.precioOriginal = 0;
@@ -3532,6 +3607,7 @@ function openRowNumberCalc(rowIndex, field, initialField = 'divide') {
       } else {
         row.cantidad = rawNumber(original);
       }
+      pushStockRowMovement(row, field, before);
       saveRows();
       render();
       show(isPrice ? 'Precio original restaurado' : 'Cantidad original restaurada');
@@ -3692,7 +3768,8 @@ document.querySelector('.head').addEventListener('click', (event) => {
 function initFuncionesJsBindings() {
   undoStack = FX.createUndoStack ? FX.createUndoStack({
     getState: rowsState,
-    restoreState: restoreRowsState,
+    restoreState: restoreStockUndoState,
+    limit: 80,
     onStatus: show
   }) : null;
 
@@ -3788,6 +3865,11 @@ function initFuncionesJsBindings() {
   document.addEventListener('keydown', (event) => {
     if (topVisibleModalBackdrop()) return;
     if (FX.isUndoShortcut ? FX.isUndoShortcut(event) : (event.ctrlKey && !event.shiftKey && String(event.key || '').toLowerCase() === 'z')) {
+      const activeCell = document.activeElement?.closest?.('#rows [data-field][data-row][data-col]');
+      if (activeCell && cancelActiveCellEdit(activeCell)) {
+        event.preventDefault();
+        return;
+      }
       if (undoStack?.undo()) event.preventDefault();
     }
   });
@@ -4317,7 +4399,7 @@ el.rows.addEventListener('focusin', (event) => {
   el.rows.querySelectorAll('.row.has-focused-cell').forEach((row) => row.classList.remove('has-focused-cell'));
   cell.closest('.row')?.classList.add('has-focused-cell');
   lastFocusedTableCell = { row: Number(cell.dataset.row), col: Number(cell.dataset.col) };
-  startCellEditSnapshot();
+  startCellEditSnapshot(cell);
   if (cell.dataset.field === 'precio') cell.textContent = getEditableCellValue(cell);
   if (suppressFullSelectTarget === cell) {
     suppressFullSelectTarget = null;
@@ -4432,6 +4514,9 @@ function sendStockRowToComparator(rowIndex) {
 el.sendToComparatorContextBtn.addEventListener('click', () => {
   sendStockRowToComparator(contextMenuRowIndex);
 });
+if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+  el.importNewArticlesContextBtn.textContent = 'Importar / actualizar artículos';
+}
 el.importNewArticlesContextBtn.addEventListener('click', () => {
   closeTableContextMenu();
   openNewArticlesModal().catch((error) => {
@@ -4570,7 +4655,6 @@ el.rows.addEventListener('input', (event) => {
     el.copySummary.textContent = `${rowsData.filter(isGreen).length.toLocaleString('es-AR')} listos para copiar`;
   }
   el.totalRows.textContent = `${rowsData.filter((item) => !isBlankStockRow(item)).length.toLocaleString('es-AR')} filas`;
-  editHadChanges = true;
   saveRows();
   if (field === 'descuento' || field === 'precio' || field === 'cantidad') updateCalculatedCells();
   if (field === 'descripcion') openArticleProviderList(cell);
@@ -4684,7 +4768,7 @@ el.rows.addEventListener('blur', (event) => {
   if (!cell) return;
   cell.classList.remove('text-caret-visible');
   if (cell.dataset.field === 'descripcion') closeArticleProviderList();
-  commitCellEditSnapshot();
+  commitCellEditSnapshot(cell);
   if (cell.dataset.field === 'precio') cell.textContent = money(rowFromCell(cell)?.precio || 0);
   if (cell.dataset.field === 'descuento') {
     const row = rowFromCell(cell);
@@ -4706,6 +4790,11 @@ el.rows.addEventListener('keydown', (event) => {
   if (event.defaultPrevented) return;
   const cell = event.target.closest('[contenteditable="true"]');
   if (!cell) return;
+  if (event.key === 'Escape' && cancelActiveCellEdit(cell)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const opensDivide = event.key === '/' || event.code === 'NumpadDivide';
   const opensMultiply = event.key === '*' || event.code === 'NumpadMultiply';
   if ((cell.dataset.field === 'precio' || cell.dataset.field === 'cantidad') && !event.ctrlKey && !event.metaKey && !event.altKey && (opensDivide || opensMultiply)) {

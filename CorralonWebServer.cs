@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.OleDb;
+using System.Data.SqlClient;
+using System.Web.Script.Serialization;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -12,6 +14,199 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+
+// Direct article operations are available only on loopback, with a same-origin token.
+internal static class LocalArticleImport
+{
+    private static readonly object Gate = new object();
+    private static readonly string Token = Guid.NewGuid().ToString("N");
+    private static readonly Dictionary<string, string> Completed = new Dictionary<string, string>();
+    private static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength = 16777216 }; }
+    private static string Str(object value) { return value == null || value == DBNull.Value ? "" : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture).Trim(); }
+    private static decimal Num(object value) { return value == null || value == DBNull.Value ? 0 : Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture); }
+    private static string Hash(string value) { using (var sha = SHA256.Create()) return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(value))); }
+    internal static SqlConnection Connect()
+    {
+        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\CorralonProgreso\LocalSql"))
+        {
+            string encrypted = key == null ? "" : Str(key.GetValue("Connection"));
+            if (encrypted.Length == 0) throw new InvalidOperationException("Falta configurar la conexion SQL local para este usuario de Windows.");
+            string cs = Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(encrypted), null, DataProtectionScope.CurrentUser));
+            var connection = new SqlConnection(cs);
+            connection.Open();
+            return connection;
+        }
+    }
+    private static SqlCommand Command(SqlConnection c, SqlTransaction t, string sql, params object[] args)
+    {
+        var cmd = new SqlCommand(sql, c, t); cmd.CommandTimeout = 120;
+        for (int i = 0; i < args.Length; i++) cmd.Parameters.AddWithValue("@p" + i, args[i] ?? DBNull.Value);
+        return cmd;
+    }
+    private static List<Dictionary<string, object>> Rows(SqlCommand cmd)
+    {
+        using (cmd) using (var r = cmd.ExecuteReader())
+        {
+            var rows = new List<Dictionary<string, object>>();
+            while (r.Read()) { var row = new Dictionary<string, object>(); for (int i = 0; i < r.FieldCount; i++) row[r.GetName(i)] = r.IsDBNull(i) ? null : r.GetValue(i); rows.Add(row); }
+            return rows;
+        }
+    }
+    private const string ArticleSelect = "SELECT IDArt AS id, [Descripción] AS descripcion, IDArtProv AS codigo, IDProveedor AS proveedor, IDRubro AS rubro, PorcIVA1 AS iva, PorcGanMin AS margen, PorcGanMay AS margenMay, PorcGanInt AS margenInt, PrecioCpraSISDto AS costo, PrecioCpraSI AS costoSI, PrecioCpraCI AS costoCI, PrecioVta1 AS venta1, PrecioVta2 AS venta2, PrecioVta3 AS venta3, PorcDto1 AS dto1, PorcDto2 AS dto2, IDMoneda AS moneda, FechaActPrec AS fecha FROM dbo.[Artículos]";
+    private static Dictionary<string, object> Article(SqlConnection c, SqlTransaction t, string id)
+    {
+        var rows = Rows(Command(c, t, ArticleSelect + " WHERE IDArt=@p0", id));
+        if (rows.Count != 1) throw new InvalidOperationException("El articulo " + id + " ya no existe. Volve a seleccionarlo.");
+        var row = rows[0]; row["version"] = Hash(Json().Serialize(row)); return row;
+    }
+    private static void Reply(HttpListenerContext ctx, int status, object value)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(Json().Serialize(value));
+        ctx.Response.StatusCode = status; ctx.Response.ContentType = "application/json; charset=utf-8";
+        ctx.Response.Headers["Cache-Control"] = "no-store";
+        ctx.Response.ContentLength64 = bytes.Length; ctx.Response.OutputStream.Write(bytes, 0, bytes.Length); ctx.Response.Close();
+    }
+    internal sealed class Batch
+    {
+        public string operation { get; set; }
+        public int provider { get; set; }
+        public bool validateOnly { get; set; }
+        public List<Item> rows { get; set; }
+    }
+    internal sealed class Item
+    {
+        public string mode { get; set; }
+        public string id { get; set; }
+        public string version { get; set; }
+        public string codigo { get; set; }
+        public string descripcion { get; set; }
+        public decimal costo { get; set; }
+        public decimal iva { get; set; }
+        public int rubro { get; set; }
+        public decimal? margen { get; set; }
+    }
+    internal static object Apply(SqlConnection c, Batch batch)
+    {
+        if (batch == null || batch.rows == null || batch.rows.Count == 0 || batch.rows.Count > 1000 || batch.provider <= 0)
+            throw new InvalidOperationException("El lote o el proveedor no son validos.");
+        bool hasNew = batch.rows.Exists(row => row != null && row.mode == "new");
+        using (var tx = c.BeginTransaction(hasNew ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted))
+        {
+            // Reservar la numeracion solo cuando el lote realmente crea articulos.
+            // IDArt siempre es numerico de seis digitos: MAX(IDArt) usa su indice unico
+            // y bloquea solamente el extremo de la numeracion, no toda la tabla.
+            int max = 0;
+            if (hasNew)
+                using (var cmd = Command(c, tx, "SELECT ISNULL(MAX(IDArt),'000000') FROM dbo.[Artículos] WITH (UPDLOCK,HOLDLOCK)")) max = Convert.ToInt32(cmd.ExecuteScalar());
+            using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.Proveedores WHERE IDProveedor=@p0", batch.provider))
+                if (Convert.ToInt32(cmd.ExecuteScalar()) != 1) throw new InvalidOperationException("El proveedor no existe en la base local.");
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var descriptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var commands = new List<SqlCommand>();
+            var result = new List<object>(); int added = 0, updated = 0;
+            try
+            {
+                foreach (var row in batch.rows)
+                {
+                    bool update = row.mode == "update";
+                    if (!update && row.mode != "new") throw new InvalidOperationException("Elegi Nuevo o Actualizar en cada fila.");
+                    string code = Str(row.codigo), description = Str(row.descripcion), id = Str(row.id);
+                    if (code.Length == 0 || code.Length > 30 || !codes.Add(code)) throw new InvalidOperationException("Codigo de proveedor vacio, demasiado largo o repetido: " + code);
+                    if (row.costo <= 0 || row.costo > 1000000000m || row.rubro <= 0 || (row.margen.HasValue && (row.margen.Value < 0 || row.margen.Value > 10000))) throw new InvalidOperationException("Revisa costo, rubro y margen de " + code);
+                    using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.Rubros WHERE IDRubro=@p0", row.rubro))
+                        if (Convert.ToInt32(cmd.ExecuteScalar()) != 1) throw new InvalidOperationException("El rubro de " + code + " no existe.");
+                    decimal iva = row.iva, min = (row.margen ?? 30m) / 100m, may = min, inter = min;
+                    if (iva != .21m && iva != .105m) throw new InvalidOperationException("IVA invalido: " + code);
+                    if (update)
+                    {
+                        if (id.Length == 0 || !ids.Add(id)) throw new InvalidOperationException("Seleccionaste dos veces el mismo articulo o falta seleccionarlo.");
+                        var old = Article(c, tx, id);
+                        if (Str(old["version"]) != row.version) throw new InvalidOperationException("El articulo " + id + " cambio en la base. Volve a seleccionarlo antes de actualizar.");
+                        description = Str(old["descripcion"]);
+                        if (!row.margen.HasValue) { min = Num(old["margen"]); may = Num(old["margenMay"]); inter = Num(old["margenInt"]); }
+                    }
+                    else
+                    {
+                        description = description.ToUpperInvariant();
+                        if (description.Length == 0 || description.Length > 100 || !descriptions.Add(description)) throw new InvalidOperationException("Descripcion vacia, demasiado larga o repetida: " + code);
+                        using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE [Descripción]=@p0", description))
+                            if (Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("Ya existe la descripcion de " + code + ". Elegi Actualizar y selecciona el articulo.");
+                        if (++max > 999999) throw new InvalidOperationException("Se agoto la numeracion de seis digitos.");
+                        id = max.ToString("D6"); ids.Add(id);
+                    }
+                    using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE IDProveedor=@p0 AND IDArtProv=@p1 AND IDArt<>@p2", batch.provider, code, id))
+                        if (Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("El codigo " + code + " ya pertenece a otro articulo de este proveedor.");
+                    decimal cost = Decimal.Round(row.costo, 2, MidpointRounding.AwayFromZero);
+                    decimal ci = Decimal.Round(cost * (1 + iva), 4, MidpointRounding.AwayFromZero);
+                    object[] args = { id, code, description, batch.provider, row.rubro, iva, cost, ci,
+                        Decimal.Round(cost*(1+iva)*(1+may),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+inter),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+min),2,MidpointRounding.AwayFromZero), min, may, inter };
+                    string sql = update
+                        ? "UPDATE dbo.[Artículos] SET IDArtProv=@p1, IDProveedor=@p3, IDRubro=@p4, PorcIVA1=@p5, IDPorcIVA=CASE WHEN @p5=0.105 THEN 2 ELSE 1 END, PrecioCpraSISDto=@p6, PrecioCpraSI=@p6, PrecioCpraCI=@p7, PrecioVta1=@p8, PrecioVta2=@p9, PrecioVta3=@p10, PorcGanMin=@p11, PorcGanMay=@p12, PorcGanInt=@p13, FechaActPrec=GETDATE() WHERE IDArt=@p0"
+                        : "INSERT INTO dbo.[Artículos] (IDArt,IDArtProv,[Descripción],DescImpr,IDProveedor,IDRubro,PorcIVA1,IDPorcIVA,PrecioCpraSISDto,PrecioCpraSI,PrecioCpraCI,PrecioVta1,PrecioVta2,PrecioVta3,PorcGanMin,PorcGanMay,PorcGanInt,IDMoneda,IDSeccion) VALUES (@p0,@p1,@p2,@p2,@p3,@p4,@p5,CASE WHEN @p5=0.105 THEN 2 ELSE 1 END,@p6,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,1,1)";
+                    commands.Add(Command(c, tx, sql, args));
+                    if (update) updated++; else { added++; commands.Add(Command(c, tx, "INSERT INTO dbo.ArtsStock (IDArt,IDSuc) SELECT @p0,IDSuc FROM dbo.Sucursales", id)); }
+                    result.Add(new { id = id, mode = row.mode, codigo = code });
+                }
+                if (batch.validateOnly) tx.Rollback();
+                else { foreach (var cmd in commands) cmd.ExecuteNonQuery(); tx.Commit(); }
+                return new { ok = true, nuevos = added, actualizados = updated, rows = result, validated = batch.validateOnly };
+            }
+            finally { foreach (var cmd in commands) cmd.Dispose(); }
+        }
+    }
+    internal static void Handle(HttpListenerContext ctx)
+    {
+        string host = ctx.Request.Url.Host;
+        string origin = ctx.Request.Headers["Origin"];
+        bool loopback = ctx.Request.RemoteEndPoint != null && IPAddress.IsLoopback(ctx.Request.RemoteEndPoint.Address);
+        bool localHost = host == "localhost" || host == "127.0.0.1" || host == "[::1]" || host == "::1";
+        if (!loopback || !localHost || (origin != null && origin != ctx.Request.Url.GetLeftPart(UriPartial.Authority)) || ctx.Request.Headers["Sec-Fetch-Site"] == "cross-site")
+        { Reply(ctx, 403, new { error = "Disponible solamente desde localhost." }); return; }
+        try
+        {
+            string path = ctx.Request.Url.AbsolutePath;
+            if (ctx.Request.HttpMethod == "GET")
+            {
+                using (var c = Connect())
+                {
+                    if (path == "/api/local-articles/catalog")
+                    {
+                        var articles = Rows(Command(c, null, "SELECT a.IDArt AS id,a.[Descripción] AS descripcion,a.IDArtProv AS codigo,a.IDProveedor AS proveedor,p.[RazónSocial] AS proveedorNombre,a.IDRubro AS rubro FROM dbo.[Artículos] a LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor ORDER BY a.[Descripción],a.IDArt"));
+                        var rubros = Rows(Command(c, null, "SELECT IDRubro AS id,[Descripción] AS nombre FROM dbo.Rubros ORDER BY [Descripción]"));
+                        Reply(ctx, 200, new { articles = articles, rubros = rubros, token = Token }); return;
+                    }
+                    if (path == "/api/local-articles/article") { Reply(ctx, 200, Article(c, null, ctx.Request.QueryString["id"] ?? "")); return; }
+                }
+            }
+            if (ctx.Request.HttpMethod == "POST" && path == "/api/local-articles/apply")
+            {
+                if (ctx.Request.Headers["X-Local-Articles-Token"] != Token || !(ctx.Request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+                { Reply(ctx, 403, new { error = "Reabri el importador para renovar la sesion local." }); return; }
+                string body; using (var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8)) body = reader.ReadToEnd();
+                if (body.Length > 2000000) throw new InvalidOperationException("El lote es demasiado grande.");
+                var batch = Json().Deserialize<Batch>(body);
+                Guid operation;
+                if (batch == null || !Guid.TryParse(batch.operation, out operation)) throw new InvalidOperationException("Operacion invalida.");
+                lock (Gate)
+                {
+                    string key = operation.ToString() + ":" + Hash(body), completed;
+                    if (!batch.validateOnly && Completed.TryGetValue(key, out completed)) { Reply(ctx, 200, Json().DeserializeObject(completed)); return; }
+                    using (var c = Connect())
+                    {
+                        object result = Apply(c, batch);
+                        if (!batch.validateOnly) Completed[key] = Json().Serialize(result);
+                        Reply(ctx, 200, result); return;
+                    }
+                }
+            }
+            Reply(ctx, 404, new { error = "Operacion no encontrada." });
+        }
+        catch (InvalidOperationException ex) { Reply(ctx, 409, new { error = ex.Message }); }
+        catch (SqlException ex) { Reply(ctx, 503, new { error = "No se pudo completar la operacion en SQL Server. El lote no se guardo. " + ex.Message }); }
+        catch (Exception) { Reply(ctx, 500, new { error = "No se pudo procesar el lote. Revisa los datos y la configuracion local." }); }
+    }
+}
 
 internal static class Program
 {
@@ -59,6 +254,7 @@ internal sealed class ServerForm : Form
     private readonly object catalogSyncLock = new object();
     private readonly object accessPriceUpdateLock = new object();
     private Process catalogSyncProcess;
+    private bool catalogSyncFinishing;
     private string catalogSyncMessage = "Listo para sincronizar.";
     private int? catalogSyncExitCode;
     private FileSystemWatcher htmlWatcher;
@@ -517,6 +713,11 @@ internal sealed class ServerForm : Form
                 WriteJson(context, 200, SaveFactDraft(ReadRequestBody(context)));
                 return;
             }
+            if (path.StartsWith("/api/local-articles/", StringComparison.Ordinal))
+            {
+                LocalArticleImport.Handle(context);
+                return;
+            }
             if (method == "POST" && path == "/api/import-access")
             {
                 WriteJson(context, 200, SaveFactAccessPending(ReadRequestBody(context)));
@@ -639,7 +840,7 @@ internal sealed class ServerForm : Form
 
         lock (catalogSyncLock)
         {
-            if (catalogSyncProcess != null && !catalogSyncProcess.HasExited)
+            if (catalogSyncFinishing || (catalogSyncProcess != null && !catalogSyncProcess.HasExited))
             {
                 try { if (!string.IsNullOrEmpty(sourceFile) && File.Exists(sourceFile)) File.Delete(sourceFile); } catch { }
                 return "{\"ok\":true,\"running\":true,\"message\":\"La sincronizacion completa ya esta en curso.\"}";
@@ -660,6 +861,7 @@ internal sealed class ServerForm : Form
             };
 
             catalogSyncExitCode = null;
+            catalogSyncFinishing = true;
             catalogSyncMessage = "Sincronizando el catalogo completo...";
             catalogSyncProcess = Process.Start(info);
             Process runningProcess = catalogSyncProcess;
@@ -669,11 +871,37 @@ internal sealed class ServerForm : Form
                 try
                 {
                     runningProcess.WaitForExit();
+                    int rankingExitCode = -1;
+                    string rankingError = "";
+                    string rankingScript = Path.Combine(root, "tools", "publicar-ranking-articulos.ps1");
+                    if (!File.Exists(rankingScript)) rankingError = "No se encontro el publicador local.";
+                    if (runningProcess.ExitCode == 0 && File.Exists(rankingScript))
+                    {
+                        lock (catalogSyncLock) catalogSyncMessage = "Catalogo actualizado. Publicando ranking de ventas...";
+                        using (var rankingProcess = Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "powershell.exe",
+                            Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + rankingScript + "\"",
+                            WorkingDirectory = root,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden,
+                            RedirectStandardError = true
+                        }))
+                        {
+                            rankingError = rankingProcess.StandardError.ReadToEnd().Trim();
+                            rankingProcess.WaitForExit();
+                            rankingExitCode = rankingProcess.ExitCode;
+                        }
+                    }
                     lock (catalogSyncLock)
                     {
                         catalogSyncExitCode = runningProcess.ExitCode;
                         catalogSyncMessage = runningProcess.ExitCode == 0
-                            ? "Sincronizacion completa finalizada."
+                            ? (rankingExitCode == 0
+                                ? "Catalogo y ranking actualizados."
+                                : "Catalogo actualizado; no se pudo publicar el ranking. " +
+                                  (rankingError.Length > 300 ? rankingError.Substring(0, 300) : rankingError))
                             : "La sincronizacion termino con error (codigo " + runningProcess.ExitCode + ").";
                     }
                 }
@@ -687,6 +915,7 @@ internal sealed class ServerForm : Form
                 }
                 finally
                 {
+                    lock (catalogSyncLock) catalogSyncFinishing = false;
                     try { if (!string.IsNullOrEmpty(sourceFile) && File.Exists(sourceFile)) File.Delete(sourceFile); } catch { }
                 }
             });
@@ -704,7 +933,7 @@ internal sealed class ServerForm : Form
 
         lock (catalogSyncLock)
         {
-            bool running = catalogSyncProcess != null && !catalogSyncProcess.HasExited;
+            bool running = catalogSyncFinishing || (catalogSyncProcess != null && !catalogSyncProcess.HasExited);
             string exitCode = catalogSyncExitCode.HasValue ? catalogSyncExitCode.Value.ToString() : "null";
             return "{\"ok\":true,\"running\":" + (running ? "true" : "false") +
                 ",\"exitCode\":" + exitCode +

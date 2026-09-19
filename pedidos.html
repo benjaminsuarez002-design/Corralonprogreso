@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.26"></script>
+<script src="corralon-system.js?v=1.0.27"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -221,6 +221,7 @@
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="pedidos"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
+  <link rel="stylesheet" href="pedidos-ranking.css">
   <style id="pedidos-mobile-final">
     @media(max-width:600px){
       body[data-page-theme="pedidos"] .app{
@@ -258,6 +259,7 @@
         display:none!important;
       }
       body[data-page-theme="pedidos"] header .top-actions>#historyBtn,
+      body[data-page-theme="pedidos"] header .top-actions>#rankingBtn,
       body[data-page-theme="pedidos"] header .top-actions>button[data-nav-url="menu.html"]{
         display:inline-flex!important;
         align-items:center!important;
@@ -911,6 +913,7 @@
       <button id="newOrderBtn" type="button">Nuevo pedido</button>
       <button id="cancelOrderBtn" type="button">Cancelar pedido</button>
       <button id="historyBtn" type="button">Historial</button>
+      <button id="rankingBtn" type="button">Rotación</button>
       <button data-nav-url="menu.html">Menu</button>
     </div>
   </header>
@@ -938,6 +941,7 @@
 </div>
 <div class="combo-menu" id="comboMenu"></div>
 <div class="context-menu" id="rowContextMenu">
+  <button type="button" id="consultRankingBtn">Consultar</button>
   <button type="button" id="addFaltanteBtn">Agregar faltante</button>
   <button type="button" id="sendToFaltantesBtn">Enviar a faltantes</button>
   <button type="button" id="compareRowBtn">Comparar</button>
@@ -1907,6 +1911,7 @@ function otherUserOrderConflict(faltantes){const keys=new Set(faltantes.map(falt
 async function importFaltantesForCurrentProvider(){if(!selectedProviderName()&&!headerProviderId){show('Elegí un proveedor antes de importar faltantes');els.providerInput.focus();return}if(!selectedBranch()){openBranchChoice();return}const all=await freshFaltantesRows();const faltantes=faltantesForCurrentProvider(all).filter(f=>!f.pedido&&!orderContainsFaltante(f));if(!faltantes.length){els.status.textContent='No hay faltantes nuevos para ese proveedor y sucursal';return}const conflicts=otherUserOrderConflict(faltantes);if(conflicts.length&&!confirm(`Esos articulos ya estan cargados en un pedido de otro usuario (${conflicts.length}). ¿Continuar igual?`))return;els.importFaltantesBtn.classList.add('loading');els.importFaltantesBtn.textContent='Importando...';try{pushUndoState(cloneOrderState());for(const faltante of faltantes)addFaltanteToOrder(faltante,{deferPaint:true});await markFaltantesForOrder(rows);paint();saveLocal();syncPendingRows();els.status.textContent=`${faltantes.length} faltantes importados y marcados como pedido`;show(`${faltantes.length} faltantes importados`)}finally{els.importFaltantesBtn.classList.remove('loading');els.importFaltantesBtn.textContent='Agregar faltantes'}}
 async function selectBranchAndImport(branchId){els.branchSelect.value=branchSelectValue(branchId);closeBranchChoice();await refreshMonthlyLimit();if(validateProviderBranchSelection())return;queueSave();saveRemote();await importFaltantesForCurrentProvider();focusCell(0,3,false)}
 els.addFaltanteBtn.addEventListener('click',()=>{hideRowContextMenu();openFaltantesPopup()})
+document.getElementById('consultRankingBtn').addEventListener('click',()=>{const row=rows[contextRowIndex];hideRowContextMenu();window.CorralonPedidosRanking?.openConsult(row||null)})
 els.importFaltantesBtn.addEventListener('click',()=>importFaltantesForCurrentProvider().catch(error=>{console.warn(error);els.status.textContent='No pude importar faltantes';show('No pude importar faltantes')}))
 els.closeFaltantesBtn.addEventListener('click',()=>els.faltantesModal.classList.remove('visible'))
 els.faltantesModal.addEventListener('mousedown',e=>{if(e.target===els.faltantesModal)els.faltantesModal.classList.remove('visible')})
@@ -2287,6 +2292,7 @@ async function init(){
 }
 init();
 </script>
+<script src="pedidos-ranking.js"></script>
 <script src="recargar-deslizando.js" defer></script>
 </body>
 </html>
