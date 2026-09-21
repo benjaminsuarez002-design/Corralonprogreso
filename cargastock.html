@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.20"></script>
+<script src="corralon-system.js?v=1.0.21"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1671,6 +1671,12 @@ function selectedRedRowsForNewArticles() {
     .map((index) => rowsData[index])
     .filter((row) => row && !isBlankStockRow(row) && !isGreen(row));
 }
+function hasLocalArticleImportDraft() {
+  const provider = selectedProvider();
+  const id = provider && CorralonSystem.providerIdentity.externalId(provider);
+  if (!id || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return false;
+  try { return Boolean(localStorage.getItem(`corralon_local_article_import_draft_v1_${id}`)); } catch { return false; }
+}
 function assignNewArticleIds() {
   newArticlesRows.forEach((row, index) => { row.idArt = formatNewIdArt(newArticlesIndexMax + index + 1); });
 }
@@ -1774,7 +1780,7 @@ async function openNewArticlesModal() {
     return;
   }
   const candidates = selectedRedRowsForNewArticles();
-  if (!candidates.length) {
+  if (!candidates.length && !hasLocalArticleImportDraft()) {
     show(selectedRows.size
       ? 'Las filas seleccionadas ya existen o no se pueden importar'
       : 'Seleccioná las filas rojas que querés importar');
@@ -4462,7 +4468,7 @@ document.querySelector('.table-wrap').addEventListener('contextmenu', (event) =>
   el.applyDiscountContextBtn.hidden = !canApplyDiscount;
   const comparatorRow = Number.isFinite(contextMenuRowIndex) ? rowsData[contextMenuRowIndex] : null;
   el.sendToComparatorContextBtn.disabled = !comparatorRow || isBlankStockRow(comparatorRow) || !(calcPrecioFinal(comparatorRow) > 0);
-  el.importNewArticlesContextBtn.disabled = !selectedProvider()?.id_proveedor || !selectedRedRowsForNewArticles().length;
+  el.importNewArticlesContextBtn.disabled = !selectedProvider()?.id_proveedor || (!selectedRedRowsForNewArticles().length && !hasLocalArticleImportDraft());
   el.tableContextMenu.classList.add('visible');
   const menuWidth = el.tableContextMenu.offsetWidth;
   const menuHeight = el.tableContextMenu.offsetHeight;

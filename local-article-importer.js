@@ -3,6 +3,10 @@ const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-AR', { style:'currency', currency:'ARS' });
 let active = false;
+const draftKey = providerId => `corralon_local_article_import_draft_v1_${providerId}`;
+export function hasDraft(providerId) {
+  try { return Boolean(localStorage.getItem(draftKey(providerId))); } catch { return false; }
+}
 
 async function api(path, options = {}) {
   const response = await fetch(`/api/local-articles/${path}`, { cache:'no-store', ...options });
@@ -20,13 +24,15 @@ export async function open(options) {
   const backdrop = document.createElement('div');
   backdrop.className = 'local-articles-backdrop';
   backdrop.innerHTML = `<section class="local-articles-dialog" role="dialog" aria-modal="true" aria-labelledby="localArticlesTitle">
-    <header><div><h2 id="localArticlesTitle">Importar o actualizar artículos</h2><p data-provider></p></div><button type="button" data-close>Cerrar</button></header>
-    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:115px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:34px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Venta</th><th></th></tr></thead><tbody></tbody></table></div>
-    <div data-status role="status"><span data-status-text>Leyendo artículos de la base local…</span><button type="button" data-reconnect hidden>Restablecer conexión</button></div><footer><span data-summary></span><button type="button" data-close>Cancelar</button><button type="button" class="primary" data-apply disabled>Aplicar todos</button></footer>
+    <header><div><h2 id="localArticlesTitle">Importar o actualizar artículos</h2><p data-provider></p><p data-original-description hidden></p></div><button type="button" data-close>Cerrar</button></header>
+    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:115px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:34px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div data-status role="status"><span data-status-text>Leyendo artículos de la base local…</span><button type="button" data-reconnect hidden>Restablecer conexión</button></div><footer><span data-summary></span><button type="button" data-cancel>Cancelar</button><button type="button" class="primary" data-apply disabled>Aplicar todos</button></footer>
   </section>`;
   document.body.append(backdrop);
   const status = backdrop.querySelector('[data-status]'), statusText = backdrop.querySelector('[data-status-text]');
+  const originalDescription = backdrop.querySelector('[data-original-description]');
   const reconnect = backdrop.querySelector('[data-reconnect]'), apply = backdrop.querySelector('[data-apply]');
+  const providerId = Number(options.provider.id_proveedor || options.provider.idProveedor);
   let busy = false, rows = [], catalog = [], catalogSorted = [], rubros = [], token = '', operation = crypto.randomUUID();
   let catalogReady = false;
   let menu = null, menuInput = null, menuIndex = -1, menuKind = '', matches = [];
@@ -38,13 +44,28 @@ export async function open(options) {
     status.classList.toggle('error', error);
     reconnect.hidden = !recoverable;
   };
+  function saveDraft() {
+    if (!catalogReady) return;
+    if (!rows.length) { clearDraft(); return; }
+    try { localStorage.setItem(draftKey(providerId), JSON.stringify({ operation, rows })); } catch (error) { console.warn('No se pudo guardar el borrador del importador.', error); }
+  }
+  function clearDraft() {
+    try { localStorage.removeItem(draftKey(providerId)); } catch (error) { console.warn('No se pudo borrar el borrador del importador.', error); }
+  }
+  function loadDraft() {
+    try {
+      const draft = JSON.parse(localStorage.getItem(draftKey(providerId)) || 'null');
+      return draft && Array.isArray(draft.rows) && draft.rows.length && draft.rows.every(row => row && typeof row.codigo === 'string' && typeof row.descripcion === 'string') ? draft : null;
+    } catch { return null; }
+  }
   function hideMenu() { menu?.remove(); menu = null; menuInput = null; menuIndex = -1; menuKind = ''; }
-  function close() {
+  function close(discard = false) {
     if (busy) return;
+    if (discard) clearDraft(); else saveDraft();
     hideMenu(); window.removeEventListener('keydown', handleDialogKeydown, true);
     backdrop.remove(); active = false; returnFocus?.focus?.({ preventScroll:true });
   }
-  function changed() { operation = crypto.randomUUID(); }
+  function changed() { operation = crypto.randomUUID(); saveDraft(); }
   const rowCopy = row => ({ ...row, ...(row.original ? { original:{ ...row.original } } : {}) });
   const rowAt = element => rows[Number(element?.closest('[data-row]')?.dataset.row)];
   function beginFieldEdit(input) {
@@ -103,9 +124,11 @@ export async function open(options) {
   function displayMargin(value) {
     return Number.isFinite(value) ? `${value.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:4 })} %` : '';
   }
-  function displayPrice(row) {
-    if (!Number.isFinite(row.margen)) return '—';
-    return money(row.costo * (1 + Number(row.iva)) * (1 + Number(row.margen) / 100));
+  function costDifference(row) {
+    const oldCost = Number(row.original?.costo);
+    if (!row.original || !Number.isFinite(oldCost) || oldCost <= 0) return '—';
+    const difference = (row.costo - oldCost) / oldCost * 100;
+    return `${difference > 0 ? '+' : ''}${difference.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %`;
   }
   function summary() {
     const updates = rows.filter(r => r.mode === 'update').length;
@@ -121,7 +144,7 @@ export async function open(options) {
       <td><div class="local-articles-combo"><input data-field="rubro" autocomplete="off" value="${escape(rubros.find(item => Number(item.id) === Number(r.rubro))?.nombre || '')}" placeholder="Elegir rubro"><button type="button" data-rubro-toggle tabindex="-1" title="Buscar rubro">▼</button></div></td>
       <td><select data-field="iva"><option value="0.21">21 %</option><option value="0.105">10,5 %</option>${![.21,.105].some(v => Math.abs(v-r.iva)<.00001) ? `<option value="${Number(r.iva)}">${Number(r.iva)*100} %</option>` : ''}</select></td>
       <td><input data-field="margen" inputmode="decimal" value="${displayMargin(r.margen)}"></td>
-      <td class="num">${money(r.costo)}</td><td class="num" data-price>${displayPrice(r)}</td>
+      <td class="num">${money(r.costo)}</td><td class="num">${r.original ? money(r.original.costo) : '—'}</td><td class="num" data-difference>${costDifference(r)}</td>
       <td><button type="button" data-remove title="Quitar">×</button></td>
     </tr>`).join('');
     backdrop.querySelectorAll('tr[data-row]').forEach(tr => {
@@ -237,7 +260,8 @@ export async function open(options) {
     document.body.append(menu);
   }
   backdrop.addEventListener('click', e => {
-    if (e.target.closest('[data-close]')) close();
+    if (e.target.closest('[data-cancel]')) { close(true); return; }
+    if (e.target.closest('[data-close]')) { close(); return; }
     const articleToggle=e.target.closest('[data-article-toggle]');
     const rubroToggle=e.target.closest('[data-rubro-toggle]');
     if (articleToggle || rubroToggle) {
@@ -267,6 +291,11 @@ export async function open(options) {
   });
   backdrop.addEventListener('focusin', e => {
     if (e.target.matches('[data-field]')) beginFieldEdit(e.target);
+    if (e.target.matches('[data-field="descripcion"]')) {
+      const snapshot = fieldSnapshots.get(e.target);
+      originalDescription.textContent = `Descripción original: ${snapshot?.before.descripcion || e.target.value}`;
+      originalDescription.hidden = false;
+    }
   });
   function confirmNew(row, force = false) {
     if (row.mode !== 'new' || row.newConfirmed || !row.needsNewConfirmation) return true;
@@ -284,6 +313,7 @@ export async function open(options) {
       if (input) input.value = row.descripcion;
       row.newConfirmed = true;
       row.declinedDescription = '';
+      changed();
       setStatus('El artículo se cargará como nuevo. Podés seguir revisando las demás filas.');
       return true;
     }
@@ -298,7 +328,6 @@ export async function open(options) {
     if (row && e.target.dataset.field === 'margen') {
       row.margen = parseMargin(e.target.value);
       if (Number.isFinite(row.margen)) e.target.value = displayMargin(row.margen);
-      e.target.closest('tr').querySelector('[data-price]').textContent = displayPrice(row);
     }
     finishFieldEdit(e.target);
   });
@@ -318,13 +347,13 @@ export async function open(options) {
       searchRubro(input,row);
     }
     if (field === 'margen') row.margen = parseMargin(input.value);
-    changed(); tr.querySelector('[data-price]').textContent = displayPrice(row);
+    changed();
   });
   backdrop.addEventListener('change', e => {
     const input = e.target.closest('[data-field]'); if (!input || busy) return;
     const row = rows[Number(input.closest('[data-row]').dataset.row)], field = input.dataset.field;
     if (field === 'iva') {
-      row[field]=Number(input.value); changed(); input.closest('tr').querySelector('[data-price]').textContent=displayPrice(row);
+      row[field]=Number(input.value); changed();
     }
   });
   const editableFields = ['descripcion','rubro','iva','margen'];
@@ -445,7 +474,7 @@ export async function open(options) {
     const message=`${result.nuevos} artículos nuevos y ${result.actualizados} actualizados en la base local`;
     // Liberar el popup antes de refrescar la tabla principal. Así un error visual
     // posterior nunca puede dejar el importador bloqueado para el próximo uso.
-    busy=false; close();
+    busy=false; close(true);
     try { options.showMessage?.(message); } catch(error) { console.warn('El lote se guardó; falló el mensaje visual.',error); }
     try { options.onImported?.({...result,importados:result.nuevos+result.actualizados,directSql:true},appliedRows); } catch(error) { console.warn('El lote se guardó; falló la actualización visual.',error); }
   });
@@ -457,15 +486,20 @@ export async function open(options) {
       if (!backdrop.isConnected) return;
       token=data.token; catalog=data.articles.map(a=>({...a,search:normalize(`${a.id} ${a.codigo} ${a.descripcion}`)})); rubros=data.rubros;
       catalogSorted=catalog.slice().sort((a,b)=>String(a.descripcion || '').localeCompare(String(b.descripcion || ''),'es',{sensitivity:'base'}) || String(a.id).localeCompare(String(b.id)));
-      const provider=Number(options.provider.id_proveedor || options.provider.idProveedor);
       backdrop.querySelector('[data-provider]').textContent=`${options.provider.proveedor || options.provider.nombre || ''} · ${catalog.length.toLocaleString('es-AR')} artículos leídos desde SQL Server`;
       if (!catalogReady) {
-        const counts=new Map(); catalog.filter(a=>Number(a.proveedor)===provider).forEach(a=>counts.set(Number(a.rubro),(counts.get(Number(a.rubro))||0)+1));
+        const draft = loadDraft();
+        const counts=new Map(); catalog.filter(a=>Number(a.proveedor)===providerId).forEach(a=>counts.set(Number(a.rubro),(counts.get(Number(a.rubro))||0)+1));
         const defaultRubro=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0] || '';
-        rows=options.rows.map(source=>({uid:crypto.randomUUID(),mode:'new',id:'',codigo:String(source.codigo || source.cod_proveedor || source.codProveedor || '').trim(),descripcion:String(source.descripcion || source.articulo || '').trim().toLocaleUpperCase('es-AR'),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
+        rows=draft ? draft.rows.map(row=>({ ...row, uid:row.uid || crypto.randomUUID(), loading:false, lookup:null }))
+          : (options.rows || []).map(source=>({uid:crypto.randomUUID(),mode:'new',id:'',codigo:String(source.codigo || source.cod_proveedor || source.codProveedor || '').trim(),descripcion:String(source.descripcion || source.articulo || '').trim().toLocaleUpperCase('es-AR'),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
+        if (draft?.operation) operation = draft.operation;
         catalogReady=true;
+        saveDraft();
+        render(); setStatus(draft ? 'Borrador recuperado. Podés seguir donde lo dejaste.' : 'Conexión restablecida. Podés continuar y aplicar el lote.');
+      } else {
+        render(); setStatus('Conexión restablecida. Podés continuar y aplicar el lote.');
       }
-      render(); setStatus('Conexión restablecida. Podés continuar y aplicar el lote.');
     } catch(error) {
       setStatus(`${error.message} Cerrá y abrí Corralón Local si tampoco responde al reintentar.`,true,true);
     } finally {

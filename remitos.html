@@ -11,7 +11,7 @@
 <script src="funciones.js?v=20260610-menu-session"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.10"></script>
+<script src="corralon-system.js?v=1.0.11"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -951,7 +951,23 @@ function initDp() {
 }
 
 function parseFecha(val) {
-  const parsed = window.CorralonFunciones?.parseFechaFlexible?.(val);
+  const textoDia = String(val || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const diasSemana = { domingo:0, lunes:1, martes:2, miercoles:3, jueves:4, viernes:5, sabado:6 };
+  let parsed;
+  if(Object.prototype.hasOwnProperty.call(diasSemana, textoDia)) {
+    const fecha = new Date();
+    fecha.setHours(0,0,0,0);
+    fecha.setDate(fecha.getDate() - ((fecha.getDay() - diasSemana[textoDia] + 7) % 7));
+    parsed = {
+      date: fecha,
+      day: fecha.getDate(),
+      month: fecha.getMonth() + 1,
+      year: fecha.getFullYear(),
+      text: `${String(fecha.getDate()).padStart(2,'0')}/${String(fecha.getMonth()+1).padStart(2,'0')}/${fecha.getFullYear()}`
+    };
+  } else {
+    parsed = window.CorralonFunciones?.parseFechaFlexible?.(val);
+  }
   if(!parsed) return;
   dpSel = parsed.date; dpY = parsed.year; dpM = parsed.month - 1;
   document.getElementById('fechaInput').value = parsed.text;
