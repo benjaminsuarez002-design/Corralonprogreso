@@ -1,5 +1,32 @@
 // Loaded only by the importer on localhost. No database credentials reach the browser.
 const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+const normalizeIndexFilter = value => String(value ?? '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[-_]/g, ' ')
+  .replace(/[^a-z0-9\s]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+const compactIndexFilter = value => normalizeIndexFilter(value).replace(/\s+/g, '');
+function indexDescriptionFilterRank(description, queryText) {
+  const query = normalizeIndexFilter(queryText);
+  if (!query) return 0;
+  const text = normalizeIndexFilter(description);
+  if (!text) return Number.POSITIVE_INFINITY;
+  const compactQuery = compactIndexFilter(query);
+  const compactText = compactIndexFilter(text);
+  const terms = query.split(' ').filter(Boolean);
+  const words = text.split(' ').filter(Boolean);
+  if (text === query) return 0;
+  if (compactQuery && compactText === compactQuery) return 1;
+  if (text.startsWith(query)) return 2;
+  if (` ${text} `.includes(` ${query} `)) return 3;
+  if (compactQuery && compactText.includes(compactQuery)) return 4;
+  if (terms.every(term => words.some(word => word.startsWith(term)))) return 5;
+  if (terms.every(term => words.some(word => word.includes(term)))) return 6;
+  return Number.POSITIVE_INFINITY;
+}
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-AR', { style:'currency', currency:'ARS' });
 let active = false;
@@ -171,14 +198,16 @@ export async function open(options) {
   }
   function search(input, row) {
     hideMenu(); menuInput = input; menuKind = 'article';
-    const query = normalize(input.value), words = query.split(/\s+/).filter(Boolean);
-    const isMatch = article => normalize(article.codigo) === query || words.every(word => article.search.includes(word));
+    const queryText = input.value;
+    const query = normalize(queryText);
+    const filterRank = article => normalize(article.codigo) === query ? -1 : indexDescriptionFilterRank(article.descripcion, queryText);
+    const isMatch = article => Number.isFinite(filterRank(article));
     articleHasMatch = Boolean(query) && catalogSorted.some(isMatch);
     articlePage = window.CorralonSystem.articleOptionPager.create(catalogSorted, {
       key: article => String(article.id),
       description: article => article.descripcion,
       isMatch,
-      rank: article => normalize(article.codigo) === query ? 0 : 10,
+      rank: filterRank,
       hasSearch: Boolean(query), beforeCount:20, afterCount:40, matchLimit:100
     });
     menu = document.createElement('div'); menu.className = 'local-articles-search article'; menu.setAttribute('role','listbox');

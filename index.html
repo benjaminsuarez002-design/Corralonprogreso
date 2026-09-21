@@ -4176,6 +4176,7 @@ body[data-catalog-view="mosaico"] .producto-card .card-cta .agregar-btn{grid-are
 <div id="productDetailModal" class="product-detail-overlay hidden">
   <div class="product-detail-modal">
     <div class="product-detail-top-actions">
+      <button class="product-detail-budget-btn hidden" id="productDetailPrint" type="button" aria-label="Imprimir cartel de cerámico" title="Imprimir cartel de cerámico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 9V3h12v6M6 17H3V9h18v8h-3M6 14h12v7H6z"/><path d="M17 11h1"/></svg></button>
       <button class="product-detail-budget-btn hidden" id="productDetailBudget" type="button">Presupuestar</button>
       <button class="product-detail-discount-btn hidden" id="productDetailDiscount" type="button">Descuentos</button>
       <button class="product-detail-edit hidden" id="productDetailEdit" type="button" aria-label="Editar artículo" title="Editar artículo">✎</button>
@@ -4387,7 +4388,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.22"></script>
+<script src="corralon-system.js?v=1.0.23"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -7503,6 +7504,9 @@ function abrirDetalleProducto(codigo) {
   qtyInput.placeholder = MODO_A_DESCONTAR ? 'Ej: 4p' : '';
   productDetailAdminCode = obtenerIdArticulo(articulo);
   budgetBtn.dataset.codigo = productDetailAdminCode;
+  const printBtn = document.getElementById('productDetailPrint');
+  printBtn.dataset.codigo = productDetailAdminCode;
+  printBtn.classList.toggle('hidden', !sesionMenuActiva || !articulo.ceramico);
   const admitePresupuesto = articulo.arido || (articulo.ceramico && sanitizeM2(articulo.ceramicoM2) > 0) || esArticuloPegamento(articulo);
   const presupuestoRequiereSesion = !!articulo.arido;
   budgetBtn.classList.toggle('hidden', !admitePresupuesto || (presupuestoRequiereSesion && !sesionMenuActiva));
@@ -10605,6 +10609,26 @@ document.getElementById('productDetailQty').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   e.preventDefault();
   document.getElementById('productDetailAddCart').click();
+});
+document.getElementById('productDetailPrint').addEventListener('click', async () => {
+  if (!window.CorralonFunciones?.isMenuSessionActive?.()) return;
+  const button = document.getElementById('productDetailPrint');
+  const articulo = buscarArticuloPorCodigo(button.dataset.codigo);
+  if (!articulo?.ceramico) return;
+  button.disabled = true;
+  try {
+    const { abrirCartelCeramico } = await import('./ceramico-cartel.js');
+    abrirCartelCeramico({
+      codigo: obtenerIdArticulo(articulo),
+      descripcion: obtenerDescripcionArticulo(articulo).principal,
+      m2: sanitizeM2(articulo.ceramicoM2),
+      precioCaja: Number(document.getElementById('productDetailAddCart').dataset.precio || articulo.precioVigente || articulo.precio || 0),
+      returnFocus: button
+    });
+  } catch (error) {
+    console.error('No se pudo abrir el cartel:', error);
+    mostrarAvisoCarrito('No se pudo abrir el cartel. Intentá nuevamente.');
+  } finally { button.disabled = false; }
 });
 document.getElementById('productDetailBudget').addEventListener('click', () => {
   const codigo = document.getElementById('productDetailBudget').dataset.codigo || productDetailAdminCode;

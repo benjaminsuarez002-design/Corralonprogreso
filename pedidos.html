@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.28"></script>
+<script src="corralon-system.js?v=1.0.29"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -1492,9 +1492,11 @@ async function saveConfirmedPayloadRemote(payload,lockDocId=''){
   try{
     const preferredDocId=String(payload._docId||lockDocId||activeOrderDocId||'').trim();
     const existing=allRemoteOrders.find(order=>orderListKey(order)===preferredDocId||orderFirebaseDocId(order)===preferredDocId);
-    const allocateOrderNumber=!editingConfirmedDraftDocId;
-    const finalPayload={...payload,...orderSyncFields(),updatedAt:Date.now()};
-    finalPayload._docId=allocateOrderNumber?'':resolveOrderDocId(finalPayload,preferredDocId);
+    const fixedOrderNumber=String(editingConfirmedDraftId||existing?.id||'').trim();
+    const editingExistingOrder=Boolean(editingConfirmedDraftDocId||preferredDocId&&existing?.confirmado);
+    const allocateOrderNumber=!editingExistingOrder;
+    const finalPayload={...payload,...(fixedOrderNumber?{id:fixedOrderNumber}:{}),...orderSyncFields(),updatedAt:Date.now()};
+    finalPayload._docId=allocateOrderNumber?'':String(editingConfirmedDraftDocId||preferredDocId||resolveOrderDocId(finalPayload)).trim();
     if(window.firebase?.firestore?.FieldValue?.delete)finalPayload.usarLista=window.firebase.firestore.FieldValue.delete();
     if(allocateOrderNumber)await ensureOrderNumberCounter();
     const saved=await setOrderWithMonthlyTotal(finalPayload._docId,finalPayload,{allocateOrderNumber,observedMax:maxOrderNumberFrom(allRemoteOrders)});
@@ -2303,7 +2305,7 @@ els.nextHistoryOrderBtn.addEventListener('click',()=>navigateOrderDetail(1))
 els.closeOrderDetailBtn.addEventListener('click',()=>els.orderDetailModal.classList.remove('visible'))
 els.orderDetailModal.addEventListener('mousedown',e=>{if(e.target===els.orderDetailModal)els.orderDetailModal.classList.remove('visible')})
 els.sendReviewFromDetailBtn.addEventListener('click',()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();return}if(!detailOrderId)return;sendOrderBackToReview(detailOrderId).catch(error=>{console.warn(error);stopTopProgress('No pude enviar a revisión')})})
-els.editOrderDetailBtn.addEventListener('click',async()=>{const order=findOrderByKey(detailOrderId);if(!order)return;const permission=canEditOrderByStatus(order);if(!permission.ok){els.status.textContent=permission.msg;return}els.orderDetailModal.classList.remove('visible');els.historyModal.classList.remove('visible');startTopProgress('Abriendo pedido...');try{const targetDocId=orderFirebaseDocId(order);if(editingConfirmedDraft()&&String(editingConfirmedDraftDocId)!==targetDocId&&hasOrderContent())syncCurrentOrderInBackground();const ok=await claimOrderForEdit(order);if(!ok){stopTopProgress();return}editingConfirmedDraftId=String(order.id||'');editingConfirmedDraftDocId=targetDocId;loadOrder(localDraftOrder(targetDocId)||order);stopTopProgress('Pedido cargado para editar') }catch(error){console.warn(error);stopTopProgress('No pude abrir el pedido')}})
+els.editOrderDetailBtn.addEventListener('click',async()=>{const order=findOrderByKey(detailOrderId);if(!order)return;const permission=canEditOrderByStatus(order);if(!permission.ok){els.status.textContent=permission.msg;return}els.orderDetailModal.classList.remove('visible');els.historyModal.classList.remove('visible');startTopProgress('Abriendo pedido...');const targetDocId=orderFirebaseDocId(order),previousEditId=editingConfirmedDraftId,previousEditDocId=editingConfirmedDraftDocId;try{if(editingConfirmedDraft()&&String(editingConfirmedDraftDocId)!==targetDocId&&hasOrderContent())syncCurrentOrderInBackground();editingConfirmedDraftId=String(order.id||'');editingConfirmedDraftDocId=targetDocId;const ok=await claimOrderForEdit(order);if(!ok){editingConfirmedDraftId=previousEditId;editingConfirmedDraftDocId=previousEditDocId;stopTopProgress();return}loadOrder(localDraftOrder(targetDocId)||order);stopTopProgress('Pedido cargado para editar') }catch(error){editingConfirmedDraftId=previousEditId;editingConfirmedDraftDocId=previousEditDocId;console.warn(error);stopTopProgress('No pude abrir el pedido')}})
 els.shareOrderDetailBtn.addEventListener('click',async()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para compartir el pedido';return}const order=findOrderByKey(detailOrderId);if(!order)return;if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}els.shareOrderDetailBtn.disabled=true;els.status.textContent='Preparando enlace...';try{await shareOrder(order);await clearFaltantesForOrder(order);await setHistoryPedido(orderListKey(order),true);renderOrderDetail(order);els.status.textContent='Enlace copiado y pedido marcado'}catch(error){console.warn(error);show('No se pudo generar el enlace del pedido.');els.status.textContent='No se pudo compartir el pedido'}finally{els.shareOrderDetailBtn.disabled=false}})
 els.exportOrderDetailBtn.addEventListener('click',async()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para generar el pedido';return}const order=findOrderByKey(detailOrderId);if(!order)return;if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}try{exportOrderExcel(order);await clearFaltantesForOrder(order);await setHistoryPedido(orderListKey(order),true);els.status.textContent='Excel generado desde historial y faltantes limpiados'}catch(error){console.warn(error);els.status.textContent='No se pudo generar el Excel'}})
 els.pdfOrderDetailBtn.addEventListener('click',async()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para generar el pedido';return}const order=findOrderByKey(detailOrderId);if(!order)return;if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}try{await exportOrderPdf(order);await clearFaltantesForOrder(order);await setHistoryPedido(orderListKey(order),true);els.status.textContent='PDF generado desde historial y faltantes limpiados'}catch(error){console.warn(error);els.status.textContent='No se pudo generar el PDF'}})
