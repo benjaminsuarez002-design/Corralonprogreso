@@ -4388,7 +4388,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.23"></script>
+<script src="corralon-system.js?v=1.0.24"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -6232,7 +6232,7 @@ function encontrarMejorMatchTermino(articulo, termino) {
 
 function evaluarArticuloBusqueda(articulo, parsed) {
   if (!cumpleFiltrosBusqueda(articulo, parsed)) return null;
-  if (!parsed.hasText) return { score: 0, highlightTerms: [], matchedFields: [] };
+  if (!parsed.hasText) return { score: 0, firstWordPriority: 1, highlightTerms: [], matchedFields: [] };
   if (!cumpleRepeticionesBusqueda(articulo, parsed.termCounts)) return null;
 
   let score = 0;
@@ -6289,7 +6289,15 @@ function evaluarArticuloBusqueda(articulo, parsed) {
     }
   }
 
-  return { score, highlightTerms: [...highlightTerms], matchedFields: [...matchedFields] };
+  return {
+    score,
+    firstWordPriority: prioridadPrimeraPalabraDescripcion(
+      articulo._searchFields?.principal || '',
+      parsed.normalizedFreeText
+    ),
+    highlightTerms: [...highlightTerms],
+    matchedFields: [...matchedFields]
+  };
 }
 
 function normalizarFiltroDescripcionFlexible(texto) {
@@ -6300,6 +6308,15 @@ function normalizarFiltroDescripcionFlexible(texto) {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function prioridadPrimeraPalabraDescripcion(descripcion, consulta) {
+  const primeraDescripcion = normalizarFiltroDescripcionFlexible(descripcion).split(/\s+/).filter(Boolean)[0] || '';
+  const primeraConsulta = normalizarFiltroDescripcionFlexible(consulta).split(/\s+/).filter(Boolean)[0] || '';
+  if (!primeraConsulta || !/[a-z]/.test(primeraConsulta)) return 1;
+  if (primeraDescripcion === primeraConsulta) return 0;
+  if (primeraDescripcion.startsWith(primeraConsulta)) return 1;
+  return 2;
 }
 
 function cumplenTerminosEnPalabrasDistintas(palabras, terminos, tipoCoincidencia) {
@@ -6329,6 +6346,7 @@ function procesarFiltroDescripcionFlexible(parsed) {
     if (!cumpleFiltrosBusqueda(articulo, parsed)) return;
     const descripcion = normalizarFiltroDescripcionFlexible(obtenerDescripcionArticulo(articulo).principal);
     const palabras = descripcion.split(/\s+/).filter(Boolean);
+    const firstWordPriority = prioridadPrimeraPalabraDescripcion(descripcion, consulta);
     let score = null;
 
     if (descripcion === consulta) score = 0;
@@ -6340,8 +6358,10 @@ function procesarFiltroDescripcionFlexible(parsed) {
     resultados.push({
       articulo,
       score,
+      firstWordPriority,
       meta: {
         score,
+        firstWordPriority,
         highlightTerms: terminos.filter((termino) => termino.length > 1),
         matchedFields: ['principal']
       }
@@ -6349,6 +6369,7 @@ function procesarFiltroDescripcionFlexible(parsed) {
   });
 
   resultados.sort((a, b) => {
+    if (a.firstWordPriority !== b.firstWordPriority) return a.firstWordPriority - b.firstWordPriority;
     if (a.score !== b.score) return a.score - b.score;
     return obtenerDescripcionArticulo(a.articulo).principal.localeCompare(obtenerDescripcionArticulo(b.articulo).principal, 'es');
   });
@@ -6379,6 +6400,7 @@ function procesarBusquedaArticulos(rawInput) {
   });
 
   evaluados.sort((a, b) => {
+    if (a.meta.firstWordPriority !== b.meta.firstWordPriority) return a.meta.firstWordPriority - b.meta.firstWordPriority;
     if (a.meta.score !== b.meta.score) return a.meta.score - b.meta.score;
     return obtenerDescripcionArticulo(a.articulo).principal.localeCompare(obtenerDescripcionArticulo(b.articulo).principal, 'es');
   });

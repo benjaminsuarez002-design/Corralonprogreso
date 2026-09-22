@@ -60,20 +60,21 @@ export function abrirCartelCeramico({ codigo, descripcion, m2, precioCaja, retur
     style.id = 'ceramicoCartelStyles';
     style.textContent = `
       #ceramicoCartelEditor{position:fixed;inset:0;z-index:2147483600;background:#0008;display:flex;align-items:center;justify-content:center;padding:14px;font-family:Barlow,Arial,sans-serif;color:var(--corralon-black,#111)}
-      #ceramicoCartelEditor .cartel-dialog{background:var(--corralon-panel,#fff);border:1px solid var(--corralon-line,#ddd);border-radius:16px;width:min(1240px,100%);max-height:95dvh;overflow:auto;box-shadow:0 20px 65px #0005}
+      #ceramicoCartelEditor .cartel-dialog{background:var(--corralon-panel,#fff);border:1px solid var(--corralon-line,#ddd);border-radius:16px;width:min(1020px,100%);max-height:95dvh;overflow:auto;box-shadow:0 20px 65px #0005}
       #ceramicoCartelEditor header,#ceramicoCartelEditor .cartel-actions{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--corralon-soft,#f6f6f4)}
+      #ceramicoCartelEditor .cartel-actions{position:sticky;bottom:0;z-index:5;border-top:1px solid var(--corralon-line,#ddd);box-shadow:0 -8px 20px rgba(0,0,0,.12)}
       #ceramicoCartelEditor h2{margin:0;font:900 25px 'Barlow Condensed',Arial,sans-serif}
-      #ceramicoCartelEditor .cartel-content{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;padding:16px}
+      #ceramicoCartelEditor .cartel-content{display:grid;grid-template-columns:280px minmax(0,640px);justify-content:center;gap:16px;padding:16px}
       #ceramicoCartelEditor .cartel-fields{display:grid;align-content:start;gap:10px}
       #ceramicoCartelEditor label{display:grid;gap:4px;font-size:14px;font-weight:700}
       #ceramicoCartelEditor input:not([type=checkbox]),#ceramicoCartelEditor textarea,#ceramicoCartelEditor select{width:100%;min-width:0;border:1px solid var(--corralon-line,#bbb);border-radius:7px;padding:7px;font:15px Barlow,Arial,sans-serif;background:#fff;color:#111}
       #ceramicoCartelEditor textarea{resize:vertical;min-height:66px}#ceramicoCartelEditor .cartel-check{display:flex;align-items:center;gap:8px}#ceramicoCartelEditor input[type=checkbox]{width:18px;height:18px;margin:0}
       #ceramicoCartelEditor .cartel-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-      #ceramicoCartelEditor .cartel-preview{align-self:start;min-width:0;background:#e9e9e6;padding:8px;border-radius:8px}#ceramicoCartelEditor iframe{display:block;width:100%;height:auto;aspect-ratio:285/198;border:0;background:#fff}
+      #ceramicoCartelEditor .cartel-preview{align-self:start;justify-self:center;width:100%;max-width:640px;min-width:0;background:#e9e9e6;padding:8px;border-radius:8px}#ceramicoCartelEditor iframe{display:block;width:100%;height:auto;aspect-ratio:285/198;border:0;background:#fff}
       #ceramicoCartelEditor button{border:1px solid var(--corralon-line,#bbb);border-radius:8px;padding:8px 16px;background:#fff;color:#111;font:700 16px 'Barlow Condensed',Arial;cursor:pointer}
       #ceramicoCartelEditor button[type=submit]{background:var(--corralon-red,#e50914);color:#fff;border-color:transparent}#ceramicoCartelEditor button:disabled{opacity:.5;cursor:wait}
       #ceramicoCartelEditor [hidden]{display:none!important}#ceramicoCartelEditor [data-status]{font-size:13px;color:#666}#ceramicoCartelEditor [data-status].error{color:#c00}
-      @media screen and (max-width:800px){#ceramicoCartelEditor .cartel-content{grid-template-columns:1fr}#ceramicoCartelEditor .cartel-dialog{max-height:96dvh}}
+      @media screen and (max-width:800px){#ceramicoCartelEditor .cartel-content{grid-template-columns:1fr}#ceramicoCartelEditor .cartel-dialog{max-height:96dvh}#ceramicoCartelEditor .cartel-preview{max-width:560px}#ceramicoCartelEditor .cartel-actions{padding-bottom:max(12px,env(safe-area-inset-bottom))}}
     `;
     document.head.appendChild(style);
   }
