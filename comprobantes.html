@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.13"></script>
+<script src="corralon-system.js?v=1.0.14"></script>
   <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -770,6 +770,12 @@
     }
 
     .summary-date {
+      width: 145px;
+      max-width: 100%;
+      padding: 7px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
       text-align: center;
       font-size: 17px;
       font-weight: 900;
@@ -2078,7 +2084,7 @@
         <div class="summary-nav">
           <button class="nav-btn" id="summary-prev" type="button">← Día anterior</button>
           <div class="summary-date-actions">
-            <div class="summary-date" id="summary-date">Sin datos</div>
+            <input class="summary-date" id="summary-date" type="text" aria-label="Fecha del resumen" placeholder="dd/mm/aaaa" autocomplete="off" spellcheck="false">
           </div>
           <button class="nav-btn" id="summary-next" type="button">Día siguiente →</button>
         </div>
@@ -3429,9 +3435,7 @@
           ...all.map((item) => item.dateIso).filter(Boolean),
           today
         ])).sort();
-        if (!state.summaryDates.includes(state.summaryDateIso)) {
-          state.summaryDateIso = state.summaryDates[state.summaryDates.length - 1] || today;
-        }
+        if (!state.summaryDateIso) state.summaryDateIso = today;
         state.summaryRecords = all.filter((item) => item.dateIso === state.summaryDateIso);
         renderTodayRecords();
         renderSummaryDate();
@@ -3867,18 +3871,9 @@
       }
 
       function renderSummaryDate() {
-        if (!state.summaryDates.length) {
-          el.summaryDate.textContent = "Sin datos";
-          el.summaryPrev.disabled = true;
-          el.summaryNext.disabled = true;
-          return;
-        }
-        const index = state.summaryDates.indexOf(state.summaryDateIso);
-        const safeIndex = index >= 0 ? index : state.summaryDates.length - 1;
-        state.summaryDateIso = state.summaryDates[safeIndex];
-        el.summaryDate.textContent = formatDate(state.summaryDateIso);
-        el.summaryPrev.disabled = safeIndex <= 0;
-        el.summaryNext.disabled = safeIndex >= state.summaryDates.length - 1;
+        if (document.activeElement !== el.summaryDate) el.summaryDate.value = formatDate(state.summaryDateIso);
+        el.summaryPrev.disabled = !state.summaryDates.some((date) => date < state.summaryDateIso);
+        el.summaryNext.disabled = !state.summaryDates.some((date) => date > state.summaryDateIso);
       }
 
       function sharedRecordPayload(item) {
@@ -5484,17 +5479,56 @@
       }
 
       function bindSummary() {
+        el.summaryDate.addEventListener("focus", () => {
+          el.summaryDate.dataset.beforeFocus = el.summaryDate.value;
+          el.summaryDate.select();
+        });
+        el.summaryDate.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            el.summaryDate.value = el.summaryDate.dataset.beforeFocus || formatDate(state.summaryDateIso);
+            el.summaryDate.blur();
+          } else if (event.key === "F2") {
+            event.preventDefault();
+            if (el.summaryDate.selectionStart === 0 && el.summaryDate.selectionEnd === el.summaryDate.value.length) {
+              el.summaryDate.setSelectionRange(el.summaryDate.value.length, el.summaryDate.value.length);
+            } else el.summaryDate.select();
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            el.summaryDate.blur();
+          }
+        });
+        el.summaryDate.addEventListener("blur", () => {
+          if (state.sharedToken) return;
+          const raw = el.summaryDate.value.trim();
+          const weekday = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
+          const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+          let iso = parseShortcutDateToIso(raw);
+          const targetDay = weekday.indexOf(normalized);
+          if (targetDay >= 0) {
+            const date = new Date();
+            date.setDate(date.getDate() - ((date.getDay() - targetDay + 7) % 7));
+            iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+          }
+          if (!iso) {
+            el.summaryDate.value = formatDate(state.summaryDateIso);
+            return;
+          }
+          state.summaryDateIso = iso;
+          el.summaryDate.value = formatDate(iso);
+          subscribeSummaryRecords();
+        });
         el.summaryPrev.addEventListener("click", () => {
-          const index = state.summaryDates.indexOf(state.summaryDateIso);
-          if (index > 0) {
-            state.summaryDateIso = state.summaryDates[index - 1];
+          const previous = state.summaryDates.filter((date) => date < state.summaryDateIso).pop();
+          if (previous) {
+            state.summaryDateIso = previous;
             subscribeSummaryRecords();
           }
         });
         el.summaryNext.addEventListener("click", () => {
-          const index = state.summaryDates.indexOf(state.summaryDateIso);
-          if (index >= 0 && index < state.summaryDates.length - 1) {
-            state.summaryDateIso = state.summaryDates[index + 1];
+          const next = state.summaryDates.find((date) => date > state.summaryDateIso);
+          if (next) {
+            state.summaryDateIso = next;
             subscribeSummaryRecords();
           }
         });
@@ -5694,6 +5728,7 @@
       async function initStaticUi() {
         if (state.sharedMode) {
           document.body.classList.add("shared-summary-mode");
+          el.summaryDate.readOnly = true;
           el.sharedSummaryNote.hidden = false;
           activateTab("resumen");
           bindSummary();

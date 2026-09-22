@@ -11,7 +11,7 @@
 <script src="funciones.js?v=20260610-menu-session"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.11"></script>
+<script src="corralon-system.js?v=1.0.12"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -199,14 +199,14 @@ input[type="checkbox"]{accent-color:#ef1015}
     <div style="display:flex;align-items:center;gap:6px">
       <input type="text" class="dato-input" id="fechaInput" placeholder="Ej: 4 6" style="flex:1"
         onblur="parseFecha(this.value)">
-      <button onclick="toggleDp()" style="background:var(--violeta);border:none;color:#fff;border-radius:8px;width:34px;height:34px;font-size:13px;font-weight:900;cursor:pointer;font-family:'Barlow Condensed',sans-serif;">▦</button>
+      <button onclick="toggleDp()" tabindex="-1" style="background:var(--violeta);border:none;color:#fff;border-radius:8px;width:34px;height:34px;font-size:13px;font-weight:900;cursor:pointer;font-family:'Barlow Condensed',sans-serif;">▦</button>
     </div>
   </div>
   <div class="dato-field">
     <div class="dato-label">N° Remito</div>
     <div style="display:flex;align-items:center;gap:4px">
       <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;color:#aaa;">0001 —</span>
-      <input id="nroRemito" class="dato-input" type="text" inputmode="numeric" maxlength="8" aria-label="Número de remito" placeholder="..." oninput="editarNumeroRemito()" onblur="normalizarNumeroRemito()" style="width:112px;min-width:0;flex:1">
+      <input id="nroRemito" class="dato-input" type="text" inputmode="numeric" maxlength="8" tabindex="-1" aria-label="Número de remito" placeholder="..." oninput="editarNumeroRemito()" onblur="normalizarNumeroRemito()" style="width:112px;min-width:0;flex:1">
     </div>
   </div>
 </div>
@@ -584,7 +584,6 @@ function remitoCamposNavegables() {
   return [
     document.getElementById('cliente'),
     document.getElementById('fechaInput'),
-    document.getElementById('nroRemito'),
     ...document.querySelectorAll('.item-row .item-input:not([readonly])'),
     document.getElementById('nCant'),
     document.getElementById('nDesc'),
@@ -621,7 +620,6 @@ function moverCampo(actual, delta) {
 }
 
 function moverCampoVertical(actual, delta) {
-  if(actual.id === 'nroRemito') return moverCampo(actual, delta);
   const cols = 4;
   const agInputs = [document.getElementById('nCant'), document.getElementById('nDesc'), document.getElementById('nPrecio'), document.getElementById('nSub')];
   const rows = [...document.querySelectorAll('.item-row')];
@@ -685,15 +683,15 @@ function manejarEnterRemito(event, target) {
   const esEnter = esEnterRemito(event);
   if((!esEnter && event.key !== 'Tab') || event.isComposing || !esCampoNavegable(target)) return false;
   event.preventDefault();
+  if(target.id === 'nroRemito') {
+    normalizarNumeroRemito();
+    return seleccionarCampo(document.getElementById(event.shiftKey ? 'fechaInput' : 'nCant'));
+  }
   if(event.key === 'Tab' && event.shiftKey) return moverCampo(target, -1);
   if(target.id === 'cliente') return seleccionarCampo(document.getElementById('fechaInput'));
   if(target.id === 'fechaInput') {
     parseFecha(target.value);
-    return seleccionarCampo(document.getElementById('nroRemito'));
-  }
-  if(target.id === 'nroRemito') {
-    normalizarNumeroRemito();
-    return moverCampo(target, event.shiftKey ? -1 : 1);
+    return seleccionarCampo(document.getElementById('nCant'));
   }
   if(target.id === 'nCant') { finalizarCantidad(target); updatePreview('cant'); return seleccionarCampo(document.getElementById('nDesc')); }
   if(target.id === 'nDesc') return seleccionarCampo(document.getElementById('nPrecio'));
@@ -724,6 +722,7 @@ function manejarEnterRemito(event, target) {
 
 function manejarFlechasRemito(event, target) {
   if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key) || !esCampoNavegable(target)) return false;
+  if(target.id === 'nroRemito') return false;
   const allSelected = campoTodoSeleccionado(target);
   if(event.key === 'ArrowLeft') {
     if(!allSelected) return false;

@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.15"></script>
+<script src="corralon-system.js?v=1.0.16"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -603,7 +603,6 @@ let _garantiaFotoPreviewUrl = '';
 let _garantiaDetallePreviewUrl = '';
 let _garantiaViewerUrl = '';
 let _garantiaViewerToken = 0;
-let _garantiaPreviewToken = 0;
 let _garantiasFotosDbPromise = null;
 let _garantiasFotoLocalIds = new Set();
 const _garantiasThumbUrls = new Map();
@@ -1445,7 +1444,10 @@ function indiceGarantiaActual() {
 
 function abrirFotoGarantiaActual() {
   const index = indiceGarantiaActual();
-  if (index >= 0) abrirFotoGarantia(index);
+  if (index < 0) return;
+  const input = document.getElementById('garantiaFotoInput');
+  input.value = '';
+  input.click();
 }
 
 function verFotoGarantiaActual() {
@@ -1648,11 +1650,9 @@ async function actualizarDropzoneGarantia() {
   const label = document.getElementById('garantiaDropzoneFile');
   const preview = document.getElementById('garantiaDropzonePreview');
   if (!label || !preview) return;
-  const token = ++_garantiaPreviewToken;
   if (_garantiaFotoPreviewUrl) URL.revokeObjectURL(_garantiaFotoPreviewUrl);
   _garantiaFotoPreviewUrl = '';
-  const garantia = _garantiaFotoActual;
-  label.textContent = _garantiaFotoFile ? _garantiaFotoFile.name : (garantiaTieneFoto(garantia) ? 'Foto actual — tocá para reemplazarla' : 'Sin imagen seleccionada');
+  label.textContent = _garantiaFotoFile ? _garantiaFotoFile.name : 'Sin imagen seleccionada';
   if (_garantiaFotoFile) {
     _garantiaFotoPreviewUrl = URL.createObjectURL(_garantiaFotoFile);
     preview.src = _garantiaFotoPreviewUrl;
@@ -1661,28 +1661,6 @@ async function actualizarDropzoneGarantia() {
   }
   preview.removeAttribute('src');
   preview.hidden = true;
-  if (!garantiaTieneFoto(garantia)) return;
-  try {
-    let record = await obtenerMiniaturaGarantiaDisponible(garantia);
-    if (!record?.blob && garantia.fotoUrl) {
-      await obtenerFotoCompletaGarantia(garantia);
-      record = await obtenerMiniaturaGarantiaIndexedDb(garantia.id);
-    }
-    if (!record?.blob && _garantiasFotoLocalIds.has(String(garantia.id))) {
-      record = await obtenerFotoGarantiaIndexedDb(garantia.id);
-    }
-    if (token !== _garantiaPreviewToken || !record?.blob) return;
-    _garantiaFotoPreviewUrl = URL.createObjectURL(record.blob);
-    preview.src = _garantiaFotoPreviewUrl;
-    preview.hidden = false;
-  } catch (error) {
-    console.warn('No se pudo mostrar la foto actual de la garantía', error);
-    const remoteThumb = urlMiniaturaGarantia(garantia);
-    if (token === _garantiaPreviewToken && remoteThumb) {
-      preview.src = remoteThumb;
-      preview.hidden = false;
-    }
-  }
 }
 
 async function pegarImagenGarantiaDesdeClipboard() {
@@ -3089,7 +3067,14 @@ document.getElementById('garantiaDropzone').addEventListener('keydown', (event) 
   }
 });
 document.getElementById('garantiaFotoInput').addEventListener('change', (event) => {
-  setGarantiaFotoFile(event.target.files?.[0]);
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!document.getElementById('garantiaFotoBg').classList.contains('open')) {
+    const index = indiceGarantiaActual();
+    if (index < 0) return;
+    abrirFotoGarantia(index);
+  }
+  setGarantiaFotoFile(file);
 });
 document.getElementById('garantiaDropzone').addEventListener('dragover', (event) => {
   event.preventDefault();
