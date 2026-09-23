@@ -322,7 +322,8 @@ export async function open(options) {
     if (e.target.matches('[data-field]')) beginFieldEdit(e.target);
     if (e.target.matches('[data-field="descripcion"]')) {
       const snapshot = fieldSnapshots.get(e.target);
-      originalDescription.textContent = `Descripción original: ${snapshot?.before.descripcion || e.target.value}`;
+      const row = rowAt(e.target);
+      originalDescription.textContent = `Descripción original: ${row?.importedDescription || row?.descripcion || ''}`;
       originalDescription.hidden = false;
     }
   });
@@ -520,8 +521,13 @@ export async function open(options) {
         const draft = loadDraft();
         const counts=new Map(); catalog.filter(a=>Number(a.proveedor)===providerId).forEach(a=>counts.set(Number(a.rubro),(counts.get(Number(a.rubro))||0)+1));
         const defaultRubro=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0] || '';
-        rows=draft ? draft.rows.map(row=>({ ...row, uid:row.uid || crypto.randomUUID(), loading:false, lookup:null }))
-          : (options.rows || []).map(source=>({uid:crypto.randomUUID(),mode:'new',id:'',codigo:String(source.codigo || source.cod_proveedor || source.codProveedor || '').trim(),descripcion:String(source.descripcion || source.articulo || '').trim().toLocaleUpperCase('es-AR'),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
+        const importedRows = Array.isArray(options.rows) ? options.rows : [];
+        const importedText = source => String(source?.descripcion || source?.articulo || '').trim().toLocaleUpperCase('es-AR');
+        const importedCode = source => String(source?.codigo || source?.cod_proveedor || source?.codProveedor || '').trim();
+        rows=draft ? draft.rows.map(row=>({ ...row,
+            importedDescription:row.importedDescription || importedText(row.codigo && importedRows.find(source=>importedCode(source)===row.codigo)) || row.descripcion,
+            uid:row.uid || crypto.randomUUID(), loading:false, lookup:null }))
+          : importedRows.map(source=>({uid:crypto.randomUUID(),mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
         if (draft?.operation) operation = draft.operation;
         catalogReady=true;
         saveDraft();
