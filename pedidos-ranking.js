@@ -278,7 +278,7 @@
     const shown = filtered.slice(0, rankPage * 50);
     panel.querySelector('#rankingTableBody').innerHTML = shown.map((a) => {
       const data = statsFor(idOf(a));
-      return `<tr data-ranking-article="${html(idOf(a))}"><td><b>${html(a.nombre || a.descripcion || '')}</b><small>${html(idOf(a))} · ${html(a.codprov || '')}</small></td><td>${fmt(data?.ventas_progreso)} ventas / ${fmt(data?.unidades_progreso)} unidades<small>Stock: ${stockText(a.stockSucursalProgresoRuta)}</small></td><td>${fmt(data?.ventas_calle5)} ventas / ${fmt(data?.unidades_calle5)} unidades<small>Stock: ${stockText(a.stockSucursalCalle5Espana)}</small></td></tr>`;
+      return `<tr data-ranking-article="${html(idOf(a))}" tabindex="0" role="button"><td><b>${html(a.nombre || a.descripcion || '')}</b><small>${html(idOf(a))} · ${html(a.codprov || '')}</small></td><td>${fmt(data?.ventas_progreso)} ventas / ${fmt(data?.unidades_progreso)} unidades<small>Stock: ${stockText(a.stockSucursalProgresoRuta)}</small></td><td>${fmt(data?.ventas_calle5)} ventas / ${fmt(data?.unidades_calle5)} unidades<small>Stock: ${stockText(a.stockSucursalCalle5Espana)}</small></td></tr>`;
     }).join('') || '<tr><td colspan="3">No hay artículos para esos filtros.</td></tr>';
     panel.querySelector('#rankingCount').textContent = `${shown.length.toLocaleString('es-AR')} de ${filtered.length.toLocaleString('es-AR')} artículos`;
     panel.querySelector('#rankingMore').hidden = shown.length >= filtered.length;
@@ -310,16 +310,34 @@
   async function openRanking() {
     rankPage = 1;
     panel.classList.add('visible');
+    panel.querySelector('#rankingFilter').focus();
     renderRanking();
     try { await Promise.all([catalogue(), sync()]); renderRanking(); }
     catch (error) { console.warn(error); panel.querySelector('#rankingPeriod').textContent = 'No pude actualizar el ranking; se muestra la copia disponible.'; renderRanking(); }
   }
 
   consult.querySelector('#rankingArticleSearch').addEventListener('input', () => { selectedArticle = null; suggest(); });
-  consult.querySelector('#rankingArticleSearch').addEventListener('focus', suggest);
+  consult.querySelector('#rankingArticleSearch').addEventListener('focus', (event) => { event.target.select(); suggest(); });
   consult.querySelector('#rankingArticleSearch').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { const first = consult.querySelector('[data-ranking-id]'); if (first) { event.preventDefault(); first.click(); } }
   });
+  for (const input of [consult.querySelector('#rankingArticleSearch'), panel.querySelector('#rankingFilter')]) {
+    input.addEventListener('focus', () => { input.dataset.beforeFocus = input.value; input.select(); });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'F2') {
+        event.preventDefault();
+        if (input.selectionStart === 0 && input.selectionEnd === input.value.length)
+          input.setSelectionRange(input.value.length, input.value.length);
+        else input.select();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        input.value = input.dataset.beforeFocus || '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.select();
+      }
+    });
+  }
   consult.querySelector('#rankingSuggestions').addEventListener('click', (event) => {
     const button = event.target.closest('[data-ranking-id]');
     if (!button) return;
@@ -336,7 +354,7 @@
     input.addEventListener('input', () => renderFilterMenu(kind));
     input.addEventListener('keydown', (event) => {
       if (event.key === 'F4') { event.preventDefault(); renderFilterMenu(kind, true); return; }
-      if (event.key === 'Escape') { event.preventDefault(); closeFilterMenus(); restoreFilterText(kind); return; }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeFilterMenus(); restoreFilterText(kind); return; }
       if (!menu.classList.contains('visible') && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) renderFilterMenu(kind, true);
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -366,18 +384,37 @@
   panel.querySelector('#rankingTableBody').addEventListener('click', (event) => {
     const row = event.target.closest('[data-ranking-article]');
     if (row) {
+      row.focus();
       const article = articles.find((a) => idOf(a) === row.dataset.rankingArticle);
       openConsult({ codProv: '', articulo: row.querySelector('b')?.textContent || '' }, article);
     }
   });
+  panel.querySelector('#rankingTableBody').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const row = event.target.closest('[data-ranking-article]');
+    if (!row) return;
+    event.preventDefault();
+    row.click();
+  });
   document.getElementById('rankingBtn')?.addEventListener('click', openRanking);
   for (const overlay of [consult, panel]) {
     overlay.addEventListener('click', (event) => {
-      if (event.target === overlay || event.target.closest('[data-ranking-close]')) overlay.classList.remove('visible');
+      if (event.target === overlay || event.target.closest('[data-ranking-close]')) {
+        overlay.classList.remove('visible');
+        if (overlay === panel) closeFilterMenus();
+      }
     });
   }
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') { consult.classList.remove('visible'); panel.classList.remove('visible'); }
+    if (event.key !== 'Escape') return;
+    if (consult.classList.contains('visible')) {
+      event.preventDefault();
+      consult.classList.remove('visible');
+    } else if (panel.classList.contains('visible')) {
+      event.preventDefault();
+      closeFilterMenus();
+      panel.classList.remove('visible');
+    }
   });
   window.addEventListener('corralon:catalog-meta-changed', (event) => {
     if (Number(event.detail?.rankingVersion || 0) > state.version || !event.detail) sync().catch(console.warn);
