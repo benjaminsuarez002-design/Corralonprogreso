@@ -200,15 +200,18 @@ export async function open(options) {
     hideMenu(); menuInput = input; menuKind = 'article';
     const queryText = input.value;
     const query = normalize(queryText);
-    const filterRank = article => normalize(article.codigo) === query ? -1 : indexDescriptionFilterRank(article.descripcion, queryText);
+    const rowCode = normalize(row?.codigo);
+    const sameProviderCode = article => Boolean(rowCode) && normalize(article.codigo) === rowCode;
+    const hasSameProviderCode = catalogSorted.some(sameProviderCode);
+    const filterRank = article => sameProviderCode(article) ? -2 : normalize(article.codigo) === query ? -1 : indexDescriptionFilterRank(article.descripcion, queryText);
     const isMatch = article => Number.isFinite(filterRank(article));
-    articleHasMatch = Boolean(query) && catalogSorted.some(isMatch);
+    articleHasMatch = (Boolean(query) || hasSameProviderCode) && catalogSorted.some(isMatch);
     articlePage = window.CorralonSystem.articleOptionPager.create(catalogSorted, {
       key: article => String(article.id),
       description: article => article.descripcion,
       isMatch,
       rank: filterRank,
-      hasSearch: Boolean(query), beforeCount:20, afterCount:40, matchLimit:100
+      hasSearch: Boolean(query) || hasSameProviderCode, beforeCount:hasSameProviderCode ? 0 : 20, afterCount:40, matchLimit:100
     });
     menu = document.createElement('div'); menu.className = 'local-articles-search article'; menu.setAttribute('role','listbox');
     const rect = input.getBoundingClientRect();

@@ -1,0 +1,173 @@
+# DIAGNOSTICO DE VISTA PREVIA ACCESS / TICKET POS-80
+# Ejecutar en Windows PowerShell en CADA PC (la que falla y la que funciona).
+# No requiere administrador y no cambia ninguna configuracion.
+# Copiar desde la linea "$ErrorActionPreference" hasta el final y pegar en PowerShell.
+
+$ErrorActionPreference = 'Continue'
+$diagFile = Join-Path $env:TEMP ("diagnostico_ticket_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmmss'))
+$diag = New-Object System.Collections.Generic.List[string]
+function Add-Line([string]$line = '') { [void]$diag.Add($line) }
+function Add-Section([string]$title) { Add-Line ''; Add-Line ("===== {0} =====" -f $title) }
+function Add-Data($data) {
+    if ($null -eq $data) { Add-Line '(sin datos)'; return }
+    $lines = $data | Format-List * | Out-String -Width 220
+    foreach ($line in ($lines -split "`r?`n")) { if ($line.Trim()) { Add-Line $line } }
+}
+function Add-Error([string]$message) { Add-Line ("No disponible: {0}" -f $message) }
+
+Add-Line 'DIAGNOSTICO ACCESS / POS-80 - SOLO LECTURA'
+Add-Line ("Fecha: {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+Add-Line ("Equipo: {0}" -f $env:COMPUTERNAME)
+Add-Line ("Sesion: {0}" -f $env:SESSIONNAME)
+
+Add-Section 'Windows'
+try {
+    $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    Add-Data ([pscustomobject]@{
+        Nombre = $os.Caption
+        Version = $os.Version
+        Compilacion = $os.BuildNumber
+        Arquitectura = $os.OSArchitecture
+    })
+    $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop
+    Add-Data ([pscustomobject]@{ DisplayVersion = $cv.DisplayVersion; UBR = $cv.UBR })
+} catch { Add-Error $_.Exception.Message }
+
+Add-Section 'Access instalado y en ejecucion'
+try {
+    $office = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration' -ErrorAction Stop
+    Add-Data ([pscustomobject]@{
+        OfficeVersion = $office.VersionToReport
+        Plataforma = $office.Platform
+        Canal = $office.UpdateChannel
+    })
+} catch { Add-Error 'No aparece la instalacion Click-to-Run (puede ser MSI o Runtime).' }
+try {
+    $access = @(Get-Process MSACCESS -ErrorAction Stop)
+    foreach ($process in $access) {
+        $exe = $process.Path
+        $info = if ($exe) { (Get-Item -LiteralPath $exe -ErrorAction Stop).VersionInfo } else { $null }
+        Add-Data ([pscustomobject]@{
+            PID = $process.Id
+            Ruta = $exe
+            VersionArchivo = $info.FileVersion
+            VersionProducto = $info.ProductVersion
+            BitsProceso = if ($exe -match '\\Program Files \(x86\)\\') { '32 (por ruta)' } elseif ($exe -match '\\Program Files\\') { '64 (por ruta probable)' } else { 'No determinado' }
+        })
+    }
+} catch { Add-Error 'Access no esta abierto o no se pudo leer su ejecutable. Abrir Access y repetir para obtener estos datos.' }
+
+Add-Section 'Colas de impresora POS / Ticket'
+try {
+    $printers = @(Get-CimInstance Win32_Printer -ErrorAction Stop | Where-Object { $_.Name -match 'POS.?80|Ticket|Thermal' })
+    if (-not $printers.Count) { Add-Line 'No se encontraron colas POS-80/Ticket/Thermal.' }
+    foreach ($printer in $printers) {
+        Add-Data ([pscustomobject]@{
+            Nombre = $printer.Name
+            Controlador = $printer.DriverName
+            Puerto = $printer.PortName
+            Predeterminada = $printer.Default
+            Red = $printer.Network
+            Compartida = $printer.Shared
+            Procesador = $printer.PrintProcessor
+            TipoDato = $printer.Datatype
+            Estado = $printer.PrinterStatus
+        })
+    }
+} catch { Add-Error $_.Exception.Message; $printers = @() }
+
+Add-Section 'Configuracion de papel de Windows'
+try {
+    $configs = @(Get-CimInstance Win32_PrinterConfiguration -ErrorAction Stop)
+    foreach ($printer in $printers) {
+        $config = $configs | Where-Object { $_.Name -eq $printer.Name } | Select-Object -First 1
+        if ($config) {
+            Add-Data ([pscustomobject]@{
+                Impresora = $printer.Name
+                NombrePapel = $config.FormName
+                CodigoPapel = $config.PaperSize
+                AnchoDecimasMm = $config.PaperWidth
+                AltoDecimasMm = $config.PaperLength
+                Orientacion = $config.Orientation
+                ResolucionX = $config.HorizontalResolution
+                ResolucionY = $config.VerticalResolution
+                Calidad = $config.PrintQuality
+            })
+        } else { Add-Line ("Sin Win32_PrinterConfiguration para {0}" -f $printer.Name) }
+    }
+} catch { Add-Error $_.Exception.Message }
+try {
+    if (Get-Command Get-PrintConfiguration -ErrorAction SilentlyContinue) {
+        foreach ($printer in $printers) {
+            try {
+                $pc = Get-PrintConfiguration -PrinterName $printer.Name -ErrorAction Stop
+                Add-Data ([pscustomobject]@{
+                    Impresora = $printer.Name
+                    TamanoPapel = $pc.PaperSize
+                    AnchoMicrones = $pc.MediaSizeWidth
+                    AltoMicrones = $pc.MediaSizeHeight
+                    Orientacion = $pc.PageOrientation
+                    Calidad = $pc.PrintQuality
+                })
+            } catch { Add-Error ("Get-PrintConfiguration {0}: {1}" -f $printer.Name, $_.Exception.Message) }
+        }
+    }
+} catch { Add-Error $_.Exception.Message }
+
+Add-Section 'Tamanos que ofrece el controlador (alto en mm)'
+try {
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    foreach ($printer in $printers) {
+        $settings = New-Object System.Drawing.Printing.PrinterSettings
+        $settings.PrinterName = $printer.Name
+        Add-Line ("Impresora: {0}; valida: {1}" -f $printer.Name, $settings.IsValid)
+        if ($settings.IsValid) {
+            $sizes = @($settings.PaperSizes | ForEach-Object {
+                [pscustomobject]@{
+                    Nombre = $_.PaperName
+                    AnchoMm = [math]::Round($_.Width * 0.254, 1)
+                    AltoMm = [math]::Round($_.Height * 0.254, 1)
+                    Codigo = $_.RawKind
+                }
+            })
+            foreach ($size in $sizes) {
+                Add-Line ("{0} | {1} x {2} mm | codigo {3}" -f $size.Nombre, $size.AnchoMm, $size.AltoMm, $size.Codigo)
+            }
+        }
+    }
+} catch { Add-Error $_.Exception.Message }
+
+Add-Section 'Controlador instalado'
+try {
+    $drivers = @(Get-CimInstance Win32_PrinterDriver -ErrorAction Stop)
+    foreach ($printer in $printers) {
+        $matches = @($drivers | Where-Object { $_.Name -like ("{0}*" -f $printer.DriverName) })
+        foreach ($driver in $matches) {
+            Add-Data ([pscustomobject]@{
+                Impresora = $printer.Name
+                Nombre = $driver.Name
+                Version = $driver.Version
+                RutaControlador = $driver.DriverPath
+                ArchivoConfiguracion = $driver.ConfigFile
+            })
+        }
+        if (-not $matches.Count) { Add-Line ("No se encontro detalle de driver para {0}" -f $printer.Name) }
+    }
+} catch { Add-Error $_.Exception.Message }
+
+Add-Section 'Servicio de impresion'
+try {
+    $spooler = Get-Service Spooler -ErrorAction Stop
+    Add-Data ([pscustomobject]@{ Estado = $spooler.Status; Inicio = $spooler.StartType })
+} catch { Add-Error $_.Exception.Message }
+
+Add-Section 'Actualizaciones recientes de Windows (10 ultimas)'
+try {
+    $hotfixes = @(Get-HotFix -ErrorAction Stop | Sort-Object InstalledOn -Descending | Select-Object -First 10)
+    foreach ($fix in $hotfixes) { Add-Line ("{0} | {1}" -f $fix.HotFixID, $fix.InstalledOn) }
+} catch { Add-Error $_.Exception.Message }
+
+$diag | Set-Content -LiteralPath $diagFile -Encoding UTF8
+$diag | ForEach-Object { Write-Output $_ }
+Write-Output ''
+Write-Output ("ARCHIVO DEL RESULTADO: {0}" -f $diagFile)

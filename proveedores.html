@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.9"></script>
+<script src="corralon-system.js?v=1.0.10"></script>
   <style>
     *{box-sizing:border-box}
     :root{--red:#ef1015;--red2:#c90006;--line:#dededb;--line-strong:#b8b8b5;--soft:#f4f4f2;--bg:#f4f4f2;--text:#171717;--muted:#686865;--green:#238b45;--green-soft:#e5f6e9;--amber:#b86b00;--amber-soft:#fff3d7;--danger-soft:#ffe7e8}
@@ -249,6 +249,7 @@ function renderDetail(){
     <div class="detail-actions">
       <button class="detail-action" type="button" data-nav-url="listasproveedores.html"><span>Abrir lista</span><span>›</span></button>
       <button class="detail-action" type="button" data-nav-url="actualizar articulos.html"><span>Actualizar lista</span><span>›</span></button>
+      <button class="detail-action" type="button" data-delete-list-json><span>Desvincular JSON de la lista</span><span>›</span></button>
       <button class="detail-action" type="button" data-nav-url="pedidos.html"><span>Crear pedido</span><span>›</span></button>
       <button class="detail-action" type="button" data-edit-detail><span>Editar proveedor</span><span>›</span></button>
     </div>`;
@@ -349,8 +350,27 @@ el.detail.addEventListener('click',(event)=>{
   const provider=providerRows.find(p=>String(p.id_proveedor)===String(selectedProviderId));
   if(event.target.closest('[data-detail-close]')){selectedProviderId=null;renderDetail();return}
   if(event.target.closest('[data-edit-detail]')&&provider){openProviderModal(provider);return}
+  if(event.target.closest('[data-delete-list-json]')&&provider){deleteProviderListJson(provider);return}
   if(event.target.closest('[data-open-page]')&&provider){const url=providerPage(provider);if(url)window.open(url,'_blank','noopener')}
 });
+async function deleteProviderListJson(provider){
+  const id=String(provider.id_proveedor);
+  const button=el.detail.querySelector('[data-delete-list-json]');
+  if(button)button.disabled=true;
+  try{
+    const url=`${SUPABASE_URL}/rest/v1/listas_json_proveedores?id_proveedor=eq.${encodeURIComponent(id)}`;
+    const lookup=await fetch(`${url}&select=id_proveedor,json_url,chunks`,{headers:headers()});
+    if(!lookup.ok)throw new Error(await lookup.text());
+    const entry=(await lookup.json())[0];
+    if(!entry){el.status.textContent=`${provider.proveedor} no tiene un JSON asociado.`;return}
+    if(!confirm(`¿Eliminar la asociación del JSON de la lista de ${provider.proveedor}? La lista y el proveedor seguirán disponibles.`))return;
+    const response=await fetch(url,{method:'DELETE',headers:headers({Prefer:'return=representation'})});
+    if(!response.ok)throw new Error(await response.text());
+    if(!(await response.json()).length)throw new Error('No se eliminó la asociación del JSON. Revisá los permisos de la tabla.');
+    el.status.textContent=`JSON de ${provider.proveedor} desvinculado de la lista.`;
+  }catch(error){console.error(error);el.status.textContent=error.message||'No se pudo eliminar el JSON de la lista'}
+  finally{if(button)button.disabled=false}
+}
 document.querySelectorAll('.metric-card[data-status-filter]').forEach(button=>button.addEventListener('click',()=>{
   const requested=button.dataset.statusFilter||'all';
   activeStatusFilter=activeStatusFilter===requested?'all':requested;

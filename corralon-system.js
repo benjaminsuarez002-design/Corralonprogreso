@@ -5342,7 +5342,7 @@
         console.warn(error);
         return null;
       });
-      if (tableManifest && Object.keys(tableManifest.providers || {}).length) return tableManifest;
+      if (tableManifest) return tableManifest;
       const url = manifestUrlFromMetaValue(meta?.archivo_nombre);
       if (!url) return null;
       const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`);
@@ -5456,7 +5456,7 @@
         }
         return false;
       }
-      const nextLocalManifest = options.forceAll ? {} : { ...localManifest };
+      const nextLocalManifest = options.forceAll ? {} : Object.fromEntries(Object.entries(localManifest).filter(([id]) => Object.prototype.hasOwnProperty.call(manifest.providers || {}, id)));
       if (options.clearBeforeImport) {
         const database = await openListDb();
         await new Promise((resolve, reject) => {
