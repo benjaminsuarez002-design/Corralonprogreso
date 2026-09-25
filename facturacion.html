@@ -5,37 +5,43 @@
   <title>Facturación — Corralón Progreso</title>
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="theme-corralon.css?v=20260820-facturacion1">
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="menu-auth-guard.js?v=20260820-facturacion1" data-menu-guard="facturacion"></script>
   <style>
     *{box-sizing:border-box}
     body{margin:0;min-height:100vh;font-family:Barlow,Arial,sans-serif;background:#eceef2}
-    .app{width:calc(100% - 10px);max-width:1680px;margin:5px auto}
+    .app{display:flex;flex-direction:column;width:calc(100% - 10px);max-width:1680px;min-height:calc(100vh - 10px);min-height:calc(100dvh - 10px);margin:5px auto}
     .topbar{display:flex;align-items:end;gap:7px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.08)}
     .brand{display:flex;align-items:center;align-self:center;gap:7px;white-space:nowrap}
     .brand b{font:900 27px "Barlow Condensed",Barlow,Arial}
     .mode{padding:3px 7px;border-radius:99px;background:#fff2bf;color:#6b5000;font-size:10px;font-weight:900}
-    .top-context{display:grid;grid-template-columns:190px 150px;gap:5px;margin-right:auto}
+    .top-context{display:grid;grid-template-columns:190px 205px 320px;gap:5px;margin-right:auto}
     .top-context .field label{font-size:9px}
     .top-context .field :is(input,select){height:28px;min-height:28px}
+    .printer-control{display:flex;gap:4px}.printer-control select{min-width:0;flex:1}.printer-control button{height:28px;min-height:28px;padding:0 8px;white-space:nowrap}
     .topbar button,.actions button,.modal button{height:31px;padding:0 12px;border:1px solid var(--line-strong);border-radius:6px;background:#fff;font-weight:900;cursor:pointer}
     .topbar .primary,.actions .primary{color:#fff;background:#ef1015;border-color:#ef1015}
-    .sheet{margin-top:4px;border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.08);overflow:hidden}
+    body[data-page-theme="facturacion"] #issueInvoice{color:#fff!important;border-color:#0b6b35!important;background:linear-gradient(180deg,#1da653,#0b7b3b)!important;box-shadow:0 6px 15px rgba(11,107,53,.22)!important}
+    body[data-page-theme="facturacion"] #issueInvoice:not(:disabled):hover{background:linear-gradient(180deg,#25b85f,#0b6b35)!important}
+    .sheet{display:flex;flex:1;flex-direction:column;margin-top:4px;border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.08);overflow:hidden}
     .meta,.customer{display:grid;gap:5px;padding:5px 7px;border-bottom:1px solid var(--line)}
-    .meta{grid-template-columns:165px 145px 145px minmax(180px,1fr) 145px}
-    .customer{grid-template-columns:255px minmax(240px,1.25fr) 180px 160px minmax(190px,1fr) 145px}
+    .meta{grid-template-columns:245px 145px 145px 175px minmax(180px,1fr) 145px}
+    .customer{grid-template-columns:minmax(190px,225px) minmax(180px,1fr) 105px minmax(135px,.75fr) 115px minmax(275px,1.15fr)}
+    .tax-combo{position:relative;min-width:0}body[data-page-theme="facturacion"] #customerTax{color:transparent!important}body[data-page-theme="facturacion"] #customerTax option{color:#111!important}.tax-short{position:absolute;left:8px;top:50%;transform:translateY(-50%);pointer-events:none;font:800 13px Barlow,Arial;color:#111}
+    .customer{position:relative;z-index:2}.associated-row{position:relative;min-width:0}.associated-control{display:flex;gap:4px;min-width:0}.associated-control input{min-width:0;flex:1}.associated-control button{min-width:96px;padding:0 5px;border:1px solid var(--line-strong);border-radius:5px;background:#fff;font:800 11px Barlow,Arial;cursor:pointer}
+    .invoice-options{position:fixed;z-index:60;display:none;width:min(450px,calc(100vw - 20px));max-height:250px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;background:#fff;box-shadow:0 8px 24px #0003}.invoice-options.open{display:block}.invoice-option{display:grid;grid-template-columns:minmax(125px,1fr) 90px minmax(110px,1fr);gap:3px 8px;align-items:center;padding:7px 9px;border-bottom:1px solid var(--line);font:800 12px Barlow,Arial;cursor:pointer}.invoice-option small{font-size:11px;color:inherit}.invoice-option .invoice-client{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.invoice-options .empty{padding:9px}
+    body[data-page-theme] #invoiceOptions .invoice-option:is(:hover,.active,[aria-selected="true"]){background:#ef1015!important;color:#111!important}
     .document-combo{display:grid;grid-template-columns:105px 1fr;gap:5px}
     .field{display:grid;gap:1px;min-width:0}
     .field label{font-size:9px;font-weight:900;text-transform:uppercase;color:#555;cursor:pointer}
     .field :is(input,select,textarea){width:100%;min-height:29px;padding:3px 6px;border:1px solid var(--line-strong);border-radius:5px;font:800 13px Barlow,Arial}
     .field textarea{min-height:38px;max-height:52px;resize:vertical}
     .table-card{position:relative;border-bottom:1px solid var(--line)}
+    #articleCard{display:flex;flex:1;flex-direction:column}
     .table-title{display:flex;align-items:center;gap:8px;height:28px;padding:3px 7px;background:var(--soft)}
     .table-title h2{margin:0;font:900 17px "Barlow Condensed",Barlow,Arial}
     .table-title span{color:#666;font-size:10px;font-weight:800}
     .table-scroll{overflow:auto}
-    .article-scroll{height:242px;max-height:242px;background:linear-gradient(#fff,#fff)}
+    .article-scroll{flex:1;min-height:242px;overflow:auto;background:linear-gradient(#fff,#fff)}
     .payment-scroll{height:116px;max-height:116px;background:#fff}
     .grid{width:100%;min-width:1180px;border-collapse:collapse;table-layout:fixed;background:#fff}
     #articleTable{width:100%;min-width:100%}
@@ -61,13 +67,29 @@
     .grid .filler-row td{height:27px;background:#fff}
     .recordbar{display:flex;align-items:center;gap:8px;height:23px;padding:2px 7px;border-top:1px solid var(--line);background:#f7f7f5;color:#555;font-size:10px;font-weight:800}
     .recordbar b{color:#222}.recordbar .catalog-state{margin-left:auto}
-    .suggestions{position:fixed;z-index:40;display:none;max-height:260px;overflow:auto;border:1px solid #888;border-radius:7px;background:#fff;box-shadow:0 12px 32px rgba(0,0,0,.25)}
+    .suggestions{position:fixed;z-index:40;display:none;max-height:340px;overflow:auto;border:1px solid #888;border-radius:7px;background:#fff;box-shadow:0 12px 32px rgba(0,0,0,.25)}
     .suggestions.open{display:block}
-    .suggestion{display:grid;grid-template-columns:90px 1fr 115px;gap:9px;padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer;font-size:75%;font-weight:800}
-    .suggestion:hover,.suggestion.active{background:#e8e8e5}
+    .suggestion-head,.suggestion{display:grid;grid-template-columns:90px 120px minmax(0,1fr) 115px;gap:9px;padding:6px 8px;border-bottom:1px solid var(--line);font-size:75%;font-weight:800}
+    .suggestion-head{position:sticky;top:0;z-index:1;background:#eee;color:#333}.suggestion{cursor:pointer}.suggestion span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .suggestion:hover{background:#e8e8e5}.suggestion.active,.suggestion.active:hover{background:#b7192b;color:#fff}
     .suggestion .price{text-align:right;color:#d00008}
-    .lower{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(310px,.45fr);gap:5px;padding:5px}
+    .suggestion.active .price{color:#fff}
+    #voucherType{appearance:none;padding-right:28px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23222' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;background-size:12px 8px}
+    .client-field{position:relative}.client-field input{padding-right:28px}.client-drop,.payment-drop{position:absolute;right:2px;top:2px;width:23px;height:23px;border:1px solid #aaa;border-radius:5px;background:#fff;cursor:pointer}.client-drop{top:20px;display:block;border:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23222' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 8px no-repeat;font-size:0}.client-options{position:fixed;z-index:60;display:none;max-height:220px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;background:#fff;box-shadow:0 8px 24px #0003}.client-options.open{display:block}.client-option{padding:5px 8px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;cursor:pointer}.client-option:hover{background:#e8e8e5}.client-option.active,.client-option.active:hover{background:#b7192b;color:#fff}.client-option small{display:block;color:#666}.client-option.active small{color:#fff}
+    .payment-combo{position:relative}.payment-combo input{padding-right:27px}.payment-combo:hover .payment-drop,.payment-combo:focus-within .payment-drop{display:block}.payment-drop{display:none;z-index:3}.payment-options{position:fixed;z-index:45;display:none;max-height:240px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;background:#fff;box-shadow:0 8px 24px #0003}.payment-options.open{display:block}.payment-option{padding:6px 9px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;cursor:pointer}.payment-option:hover{background:#e8e8e5}.payment-option.active,.payment-option.active:hover{background:#b7192b;color:#fff}
+    .lower{display:grid;grid-template-columns:minmax(0,1fr) 136px minmax(270px,.38fr);gap:5px;padding:5px}
     .payments,.summary{border:1px solid var(--line);border-radius:6px;overflow:hidden}
+    .article-photo{display:flex;align-items:center;justify-content:center;position:relative;width:136px;height:136px;margin:0;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#f5f5f3}
+    .article-photo-trigger{display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:zoom-in}
+    .article-photo-trigger:disabled{cursor:default}
+    .article-photo img{display:block;width:100%;height:100%;object-fit:contain;background:#fff}
+    .article-photo img[hidden]{display:none}
+    .article-photo span{padding:8px;text-align:center;color:#666;font-size:11px;font-weight:700}
+    .article-photo span[hidden]{display:none}
+    .article-photo-lightbox{position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(0,0,0,.9)}
+    .article-photo-lightbox[hidden]{display:none}
+    .article-photo-lightbox img{display:block;max-width:100%;max-height:100%;object-fit:contain}
+    .article-photo-close{position:absolute;top:10px;right:10px;z-index:1;width:46px;height:46px;border:0;border-radius:50%;background:#fff;color:#111;font:32px/1 Arial,sans-serif;cursor:pointer}
     .summary{padding:7px 9px;background:#fafaf8}
     .summary-grid{display:grid;grid-template-columns:1fr auto;gap:3px 12px;align-items:center}
     .summary-grid span{font-size:12px;font-weight:800;color:#555}
@@ -75,34 +97,195 @@
     .summary-grid .total-label,.summary-grid .total{padding-top:4px;border-top:2px solid #111;color:#111;font-size:19px;font-weight:900}
     .difference.ok{color:#14964f}.difference.bad{color:#ef1015}
     .foot{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:end;padding:0 5px 4px}
-    .actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}
+    .actions{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:flex-end;gap:5px}
+    .issue-control{display:flex;min-width:200px;flex-direction:column;align-items:stretch;gap:6px}
+    .issue-control button{width:100%;flex:none}
+    #issueInvoice.issuing{display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:wait;opacity:1}
+    #issueInvoice.issuing::before{content:'';width:14px;height:14px;flex:none;border:2px solid #fff8;border-top-color:#fff;border-radius:50%;animation:issue-spin .7s linear infinite}
+    @keyframes issue-spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){#issueInvoice.issuing::before{animation:none}}
+    .auto-print-label{display:flex;align-items:center;gap:5px;padding-left:4px;white-space:nowrap;font-size:11px;font-weight:800;cursor:pointer}
+    .auto-print-label input{width:15px;height:15px;margin:0;accent-color:#ef1015;cursor:pointer}
+    .preview-printer{display:grid;gap:5px;padding:9px 12px;border-top:1px solid var(--line);font-size:12px;font-weight:800}.preview-printer select{min-height:30px;width:100%;padding:3px 6px;border:1px solid var(--line-strong);border-radius:5px;font:800 12px Barlow,Arial}.preview-printer small{color:#b00020}
+    .preview-printer[hidden]{display:none}
     .message{min-height:17px;padding:0 7px 4px;font-size:12px;font-weight:800;color:#666}
     .message.error{color:#ef1015}.message.ok{color:#14964f}
+    .recovery-alert{display:none;position:fixed;z-index:10000;top:50%;left:50%;transform:translate(-50%,-50%);width:min(550px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:20px;border:3px solid #b00020;border-radius:8px;background:#fff0f1;color:#700018;box-shadow:0 0 0 100vmax rgba(0,0,0,.65);font-size:15px;font-weight:700}
+    .recovery-alert.open{display:block}.recovery-alert strong{display:block;font-size:19px;margin-bottom:7px}.recovery-alert p{margin:5px 0}.recovery-alert button{margin:8px 8px 0 0;padding:8px 12px}
     .modal-wrap{position:fixed;inset:0;z-index:80;display:none;place-items:center;padding:16px;background:rgba(0,0,0,.58)}
     .modal-wrap.open{display:grid}.modal{width:min(760px,100%);max-height:85vh;overflow:auto;border-radius:12px;background:#fff;box-shadow:0 20px 55px rgba(0,0,0,.35)}
     .modal-head{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line)}.modal-head h2{margin:0;font:900 22px "Barlow Condensed",Barlow,Arial}.modal-head button{margin-left:auto}
+    .printer-setup{width:min(450px,100%)}.printer-setup-body{display:grid;gap:8px;padding:14px;font-size:12px;font-weight:800}.printer-setup-body select{width:100%;min-height:32px;padding:4px 7px;border:1px solid var(--line-strong);border-radius:5px;font:800 13px Barlow,Arial}.printer-setup-body small{color:#b00020}.printer-setup-actions{display:flex;justify-content:flex-end;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
     .draft-list{display:grid;gap:7px;padding:10px}.draft{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:7px}.draft strong,.draft span{display:block}.draft small{color:#666}.empty{padding:25px;text-align:center;color:#666;font-weight:800}
+    .associated-row .field{display:flex;align-items:end;gap:6px;max-width:none}.associated-row .field label{align-self:center}.associated-row .field input{width:170px}.associated-search{padding:12px}.associated-search input{width:100%;padding:8px;border:1px solid var(--line-strong);border-radius:5px}.associated-results{display:grid;gap:5px;max-height:55vh;overflow:auto;margin-top:10px}.associated-result{display:grid;grid-template-columns:130px 100px 1fr auto;gap:8px;align-items:center;width:100%;padding:8px;border:1px solid var(--line);border-radius:5px;background:#fff;text-align:left;font:700 13px Barlow,Arial;cursor:pointer}.associated-result:hover,.associated-result:focus{background:#fff0f0;border-color:#ef1015}.associated-result small{font-weight:600;color:#666}
+    .trial-modal{width:min(440px,100%);display:flex;flex-direction:column}.trial-preview{overflow:auto;padding:14px;background:#e9e9e9}.trial-actions{display:flex;gap:8px;justify-content:flex-end;padding:10px 12px;border-top:1px solid var(--line)}.trial-actions .primary{background:#ef1015;color:white;border-color:#ef1015}.trial-ticket{width:70mm;max-width:100%;margin:auto;padding:2mm;background:#fff;color:#000;font:400 12px/1.3 Arial,sans-serif;box-shadow:0 3px 12px #bbb}.trial-ticket strong{font-weight:400}.trial-ticket h2{margin:0;font:bold 18px Arial;text-align:center}.trial-ticket .trial-mark{margin:9px 0;padding:5px 2px;border:2px solid #000;text-align:center;font:bold 15px Arial}.trial-ticket .trial-muted{font-size:11px;font-weight:400;color:#000;text-align:center}.trial-ticket .trial-rule{border:0;border-top:1px solid #000;margin:8px 0}.trial-ticket .trial-line{display:flex;justify-content:space-between;gap:8px}.trial-ticket .trial-line span:last-child{text-align:right;white-space:nowrap}.trial-ticket .trial-item{padding:4px 0;border-bottom:1px solid #000}.trial-ticket .trial-item-name{font-weight:400}.trial-ticket .trial-total{font:bold 18px Arial}.trial-ticket .trial-note{white-space:pre-wrap;overflow-wrap:anywhere}
+    .ticket-company{text-align:center;border:1px solid #000}.ticket-company>div{padding:1px 2px;border-top:1px solid #000}.ticket-company h2{padding:2px 0}.ticket-pair{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:3px;text-align:left}.ticket-pair span{min-width:0;overflow-wrap:anywhere}.ticket-type{display:flex;justify-content:space-between;align-items:center;border:1px solid #000;border-top:0;padding:2px 3px;font-weight:400}.ticket-facts,.ticket-client{border:1px solid #000;border-top:0;padding:3px}.ticket-facts>div{display:flex;justify-content:space-between;gap:4px}.ticket-facts strong{white-space:nowrap}.ticket-client>div{min-height:15px}.ticket-client-bottom{display:flex;justify-content:space-between;gap:4px}.ticket-items{border:1px solid #000;border-top:0}.ticket-items-head,.ticket-item-main{display:grid;grid-template-columns:11mm 1fr;gap:3px;padding:2px 3px}.ticket-items-head{border-bottom:1px solid #000;font-weight:400}.ticket-item-main{font-weight:400}.ticket-item-main span:first-child{text-align:center}.ticket-item-price{display:flex;justify-content:space-between;gap:4px;padding:1px 3px 3px;border-bottom:1px solid #000}.ticket-item-price span:last-child{text-align:right;white-space:nowrap}.ticket-payment-head,.ticket-payment-row{display:grid;grid-template-columns:1fr 22mm;gap:3px;padding:2px 3px;border:1px solid #000;border-top:0}.ticket-payment-head{font-weight:400}.ticket-payment-row span:last-child{text-align:right}.ticket-total{display:flex;justify-content:space-between;padding:3px;border:1px solid #000;border-top:0;font:bold 17px Arial}.ticket-fiscal{border:1px solid #000;border-top:0;padding:4px}.ticket-legal{border:1px solid #000;border-top:0;padding:4px;text-align:center;font-size:11px;font-weight:400;line-height:1.25}.ticket-extra{border:1px solid #000;border-top:0;padding:3px;white-space:pre-wrap;overflow-wrap:anywhere}
+    .ticket-item-main span:last-child{font-size:10px;line-height:1.2}
+    .ticket-payment-head,.ticket-payment-row{font-size:10px;line-height:1.15;padding:1px 3px}.ticket-total{font-size:15px;padding:2px 3px}.ticket-fiscal,.ticket-extra,.ticket-tax-lines{font-size:10px;line-height:1.15;padding:2px 3px}.ticket-legal{font-size:9.5px;line-height:1.15;padding:2px 3px}
+    .ticket-qr{border:1px solid #000;border-top:0;padding:3px;text-align:center}.ticket-qr img{display:block;width:27mm;height:27mm;margin:0 auto;image-rendering:pixelated}.ticket-qr small{display:block;margin-top:2px;font-size:8px}.ticket-tax-lines{border:1px solid #000;border-top:0;padding:3px;font-size:11px}.ticket-tax-lines>div{display:flex;justify-content:space-between}
+    .trial-ticket,.ticket-company>div{overflow-wrap:anywhere}.ticket-facts strong,.ticket-item-price span:last-child{min-width:0;white-space:normal;text-align:right}.ticket-client-bottom>*{min-width:0}.ticket-total span:last-child{min-width:0;text-align:right}
+    @media print{@page{size:80mm 297mm;margin:0}html,body{width:80mm!important;min-height:0!important;margin:0!important;padding:0!important;background:#fff!important}body>.app,body>#suggestions,body>#draftModal,body>script{display:none!important}#trialModal{position:static!important;display:block!important;width:80mm!important;min-height:0!important;margin:0!important;padding:0!important;background:#fff!important}#trialModal .trial-modal{display:block!important;width:80mm!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}#trialModal .modal-head,#trialModal .trial-actions,#trialModal .preview-printer{display:none!important}#trialModal .trial-preview{overflow:visible!important;width:80mm!important;padding:0!important;background:#fff!important}#trialTicket{width:70mm!important;max-width:none!important;margin:0 0 0 1mm!important;padding:0!important;box-shadow:none!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}#trialTicket *{color:#000!important;opacity:1!important;text-shadow:none!important;filter:none!important}.trial-ticket .trial-item{break-inside:avoid}}
     @media(max-width:1180px){#articleTable{width:1180px;min-width:1180px}}
-    @media(max-width:1100px){.topbar{flex-wrap:wrap}.top-context{order:3;width:100%;grid-template-columns:1fr 1fr}.meta{grid-template-columns:repeat(3,1fr)}.customer{grid-template-columns:repeat(3,1fr)}.lower{grid-template-columns:1fr}.foot{grid-template-columns:1fr}}
-    @media(max-width:650px){.app{width:calc(100% - 4px);margin:2px auto}.brand b{font-size:23px}.mode{display:none}.meta,.customer{grid-template-columns:1fr 1fr}.topbar button{flex:1}.actions button{flex:1}.article-scroll{height:230px}.payment-scroll{height:112px}}
+    @media(max-width:1100px){.topbar{flex-wrap:wrap}.top-context{order:3;width:100%;grid-template-columns:repeat(3,1fr)}.meta{grid-template-columns:repeat(3,1fr)}.customer{grid-template-columns:repeat(3,1fr)}.foot{grid-template-columns:1fr}}
+    @media(max-width:650px){.app{width:calc(100% - 4px);margin:2px auto}.brand b{font-size:23px}.mode{display:none}.top-context{grid-template-columns:1fr 1fr}.top-context .field:last-child{grid-column:1/-1}.meta,.customer{grid-template-columns:1fr 1fr}.topbar button{flex:1}.actions button{flex:1}.article-scroll{height:230px}.payment-scroll{height:112px}.lower{grid-template-columns:108px minmax(0,1fr)}.payments{grid-column:1/-1}.article-photo{width:108px;height:108px}}
+    /* En monitores de 768 px, mantener a la vista la nota y el botón Emitir. */
+    @media screen and (max-height:820px){
+      .app{margin:2px auto}
+      .topbar{padding:3px 6px}.brand b{font-size:23px}.mode{padding:2px 6px}
+      .top-context .field :is(input,select),.printer-control button{height:25px;min-height:25px}
+      .topbar button,.actions button{height:27px;padding:0 9px}
+      .sheet{margin-top:2px}
+      .meta,.customer{padding:3px 6px;gap:4px}
+      .field :is(input,select){min-height:25px;padding:2px 5px}
+      .field textarea{min-height:29px;height:29px;padding:3px 5px}
+      .article-scroll{min-height:180px}
+      .payment-scroll{height:88px;max-height:88px}
+      .table-title{height:24px}.table-title h2{font-size:15px}
+      .grid th{height:21px;padding:2px 5px}
+      .grid input,.grid select,.grid button.remove{height:23px}
+      .grid .filler-row td{height:23px}
+      .recordbar{height:19px;padding:1px 6px}
+      .lower{padding:3px;gap:3px}
+      .summary{padding:4px 7px}.summary-grid{gap:1px 10px}
+      .summary-grid span{font-size:11px}.summary-grid strong{font-size:12px}
+      .summary-grid .total-label,.summary-grid .total{padding-top:2px;font-size:17px}
+      .foot{gap:4px;padding:0 4px 2px}.issue-control{gap:2px}
+      .auto-print-label{font-size:10px}.message{min-height:15px;padding-bottom:2px}
+    }
+    @media screen and (max-height:700px){.article-scroll{min-height:150px}}
+    body[data-page-theme] :is(#suggestions,#clientesSql,#paymentOptions) :is(.suggestion,.client-option,.payment-option):is(:hover,.active,[aria-selected="true"]){background:#ef1015!important;background-color:#ef1015!important;color:#111!important}
+    body[data-page-theme] #suggestions .suggestion .price{color:#111!important}
+    body[data-page-theme] #clientesSql .client-option small{color:#333!important}
   </style>
 </head>
 <body data-page-theme="facturacion"><main class="app">
-  <header class="topbar"><div class="brand"><b>Facturación</b><span class="mode" id="modeBadge">Modo preparación</span></div><div class="top-context" data-nav-zone><div class="field"><label for="branch">Sucursal</label><select id="branch"><option value="progreso_ruta">Progreso y Ruta</option><option value="calle5_espana">Calle 5 y España</option></select></div><div class="field"><label for="pos">Punto de venta</label><select id="pos"><option value="">Sin configurar</option></select></div></div><button id="newInvoice" type="button">Nuevo</button><button id="openDrafts" type="button">Consultar</button><button type="button" onclick="location.href='menu.html'">Menú</button></header>
+  <header class="topbar"><div class="brand"><b>Facturación</b><span class="mode" id="modeBadge">Cargando SQL…</span></div><div class="top-context" data-nav-zone><div class="field"><label for="branch">Sucursal</label><select id="branch"><option value="">Elegir sucursal</option><option value="progreso_ruta">Progreso y Ruta</option><option value="calle5_espana">Calle 5 y España</option></select></div><div class="field"><label for="pos">Punto de venta</label><select id="pos"><option value="">Elegir punto de venta</option></select></div><div class="field"><label for="ticketPrinter">Destino del ticket</label><div class="printer-control"><select id="ticketPrinter"><option value="">Buscando impresoras…</option></select><button id="chooseTicketPrinter" type="button">Elegir impresora</button></div></div></div><button id="openDrafts" type="button" hidden>Pendientes</button><button id="newInvoice" type="button">Nuevo</button><button type="button" onclick="location.href='menu.html'">Menú</button></header>
   <section class="sheet">
-    <div class="meta" data-nav-zone><div class="field"><label for="voucherType">Comprobante</label><select id="voucherType"><option>Factura B</option><option>Factura A</option><option>Nota de crédito B</option><option>Nota de crédito A</option></select></div><div class="field"><label for="voucherNumber">Número</label><input id="voucherNumber" value="Pendiente de CAE" readonly></div><div class="field"><label for="date">Fecha</label><input id="date" type="date"></div><div class="field"><label for="seller">Vendedor</label><input id="seller"></div><div class="field"><label for="priceList">Precios</label><select id="priceList"><option value="minorista">Minorista</option><option value="intermedio">Intermedio</option><option value="mayorista">Mayorista</option></select></div></div>
-    <div class="customer" data-nav-zone><div class="field"><label for="docType">Documento</label><div class="document-combo"><select id="docType"><option>DNI</option><option>CUIT</option><option>CUIL</option><option>Sin identificar</option></select><input id="docNumber" inputmode="numeric" aria-label="Número de documento"></div></div><div class="field"><label for="customerName">Cliente</label><input id="customerName" value="CONSUMIDOR FINAL"></div><div class="field"><label for="customerTax">Condición IVA</label><select id="customerTax"><option>Consumidor final</option><option>Responsable inscripto</option><option>Monotributista</option><option>Exento</option></select></div><div class="field"><label for="customerEmail">Email</label><input id="customerEmail" type="email"></div><div class="field"><label for="customerAddress">Dirección</label><input id="customerAddress"></div><div class="field"><label for="customerPhone">Teléfono</label><input id="customerPhone" inputmode="tel"></div></div>
-    <section class="table-card" id="articleCard"><div class="table-scroll article-scroll"><table class="grid" id="articleTable"><colgroup><col style="width:24px"><col style="width:9%"><col style="width:11%"><col><col style="width:9%"><col style="width:11%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:34px"></colgroup><thead><tr><th class="row-selector" data-table-corner></th><th data-col="0" data-sort-key="idart">IDArt</th><th data-col="1" data-sort-key="codProv">Cód. prov.</th><th data-col="2" data-sort-key="descripcion">Artículo</th><th data-col="3" data-sort-key="cantidad">Cantidad</th><th data-col="4" data-sort-key="precio">Precio unit.</th><th data-col="5" data-sort-key="stock">Stock</th><th data-col="6" data-sort-key="descuento">% Dto.</th><th data-col="7">Importe</th><th></th></tr></thead><tbody id="articleBody"></tbody></table></div><div class="recordbar"><span>Registro:</span><b id="articleRecordCount">1 de 1</b><span>Buscar</span><span class="catalog-state" id="catalogStatus">Cargando catálogo…</span></div></section>
-    <div class="lower"><section class="payments"><div class="table-title"><h2>Valores recibidos</h2><span>El total debe coincidir con el comprobante</span></div><div class="table-scroll payment-scroll"><table class="grid" id="paymentTable" style="min-width:760px"><colgroup><col style="width:145px"><col style="width:130px"><col style="width:130px"><col style="width:75px"><col><col style="width:110px"><col style="width:34px"></colgroup><thead><tr><th data-col="0" data-sort-key="tipo">Tipo de valor</th><th data-col="1" data-sort-key="importe">Importe</th><th data-col="2" data-sort-key="tarjeta">Tarjeta / cuenta</th><th data-col="3" data-sort-key="cuotas">Cuotas</th><th data-col="4" data-sort-key="descripcion">Descripción</th><th data-col="5">Total</th><th></th></tr></thead><tbody id="paymentBody"></tbody></table></div><div class="recordbar"><span>Registro:</span><b id="paymentRecordCount">1 de 1</b><span>Buscar</span></div></section><aside class="summary"><div class="summary-grid"><span>Neto gravado</span><strong id="netTotal">$ 0,00</strong><span>IVA 21%</span><strong id="iva21">$ 0,00</strong><span>IVA 10,5%</span><strong id="iva105">$ 0,00</strong><span>Otros / exento</span><strong id="otherTax">$ 0,00</strong><span>Valores recibidos</span><strong id="paymentsTotal">$ 0,00</strong><span>Diferencia</span><strong id="difference" class="difference">$ 0,00</strong><span class="total-label">Total</span><strong class="total" id="grandTotal">$ 0,00</strong></div></aside></div>
-    <div class="foot"><div class="field"><label for="note">Nota</label><textarea id="note" placeholder="Observaciones del comprobante"></textarea></div><div class="actions"><button id="cancelEdit" type="button">Cancelar cambios</button><button id="saveDraft" type="button">Guardar borrador</button><button class="primary" id="issueInvoice" type="button" disabled>Emitir comprobante</button></div></div><div class="message" id="message"></div>
+    <div class="meta" data-nav-zone><div class="field"><label for="voucherType">Comprobante</label><select id="voucherType"><option value="">Cargando comprobantes…</option></select></div><div class="field"><label for="voucherNumber">Número</label><input id="voucherNumber" value="Sin emitir" readonly></div><div class="field"><label for="date">Fecha</label><input id="date" type="date"></div><div class="field"><label for="cae">CAE</label><input id="cae" placeholder="Sin CAE" readonly></div><div class="field"><label for="seller">Vendedor</label><select id="seller"><option value="">Elegir vendedor</option></select></div><div class="field"><label for="priceList">Precios</label><select id="priceList"><option value="3">Minorista</option><option value="2">Intermedio</option><option value="1">Mayorista</option></select></div></div>
+    <div class="customer" data-nav-zone><div class="field"><label for="docType">Documento</label><div class="document-combo"><select id="docType"><option>DNI</option><option>CUIT</option><option>Sin identificar</option></select><input id="docNumber" inputmode="numeric" aria-label="Número de documento" value="00000001000"></div></div><div class="field client-field"><label for="customerName">Cliente</label><input id="customerName" value="CONSUMIDOR FINAL" autocomplete="off" aria-autocomplete="list" aria-expanded="false"><button class="client-drop" id="customerDrop" type="button" tabindex="-1" aria-label="Desplegar clientes">▼</button><div id="clientesSql" class="client-options" role="listbox"></div></div><div class="field"><label for="customerTax">Condición IVA</label><div class="tax-combo"><select id="customerTax"><option>Consumidor final</option><option>Responsable inscripto</option><option>Responsable no inscripto</option><option>No responsable</option><option>Monotributista</option><option>Exento</option></select><span class="tax-short" id="customerTaxShort" aria-hidden="true">CF</span></div></div><input id="customerEmail" type="hidden"><div class="field"><label for="customerAddress">Dirección</label><input id="customerAddress"></div><div class="field"><label for="customerPhone">Teléfono</label><input id="customerPhone" inputmode="tel"></div><div class="field associated-row" id="associatedRow"><label for="invoiceReference">Copiar boleta (opcional)</label><div class="associated-control"><input id="invoiceReference" inputmode="text" placeholder="0000-00000000" maxlength="13" autocomplete="off" aria-autocomplete="list" aria-controls="invoiceOptions" aria-expanded="false"><button id="searchAssociated" type="button">Buscar boleta</button></div><div id="invoiceOptions" class="invoice-options" role="listbox"></div></div></div>
+    <section class="table-card" id="articleCard"><div class="table-scroll article-scroll"><table class="grid" id="articleTable"><colgroup><col style="width:24px"><col style="width:8%"><col style="width:9%"><col><col style="width:8%"><col style="width:10%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:34px"></colgroup><thead><tr><th class="row-selector" data-table-corner></th><th data-col="0" data-sort-key="idart">IDArt</th><th data-col="1" data-sort-key="codProv">Cód. prov.</th><th data-col="2" data-sort-key="descripcion">Artículo</th><th data-col="3" data-sort-key="cantidad">Cantidad</th><th data-col="4" data-sort-key="precio">Precio unit.</th><th data-col="5" data-sort-key="stock">Stock</th><th data-col="6" data-sort-key="margen">% Margen</th><th data-col="7" data-sort-key="descuento">% Dto.</th><th data-col="8">Importe</th><th></th></tr></thead><tbody id="articleBody"></tbody></table></div><div class="recordbar"><span>Registro:</span><b id="articleRecordCount">1 de 1</b><span>Buscar</span><span class="catalog-state" id="catalogStatus">Cargando catálogo…</span></div></section>
+    <div class="lower"><section class="payments"><div class="table-title"><h2>Valores recibidos</h2><span>El total debe coincidir con el comprobante</span></div><div class="table-scroll payment-scroll"><table class="grid" id="paymentTable" style="min-width:1000px"><colgroup><col style="width:145px"><col style="width:130px"><col style="width:145px"><col style="width:75px"><col><col style="width:85px"><col style="width:100px"><col style="width:110px"><col style="width:34px"></colgroup><thead><tr><th data-col="0" data-sort-key="tipo">Tipo de valor</th><th data-col="1" data-sort-key="importe">Importe</th><th data-col="2" data-sort-key="tarjeta">Tarjeta / cuenta</th><th data-col="3" data-sort-key="cuotas">Cuotas</th><th data-col="4" data-sort-key="descripcion">Descripción</th><th data-col="5" data-sort-key="coef">% Dto./Rec.</th><th data-col="6" data-sort-key="impRec">$ Dto./Rec.</th><th data-col="7">Total</th><th></th></tr></thead><tbody id="paymentBody"></tbody></table></div><datalist id="paymentTypesSql"></datalist><datalist id="paymentCardsSql"></datalist><div class="recordbar"><span>Registro:</span><b id="paymentRecordCount">1 de 1</b><span>Buscar</span></div></section><figure class="article-photo" aria-label="Imagen del artículo seleccionado"><button class="article-photo-trigger" id="articlePhotoTrigger" type="button" aria-label="Ampliar imagen del artículo" disabled><img id="articlePhotoImage" alt="" hidden><span id="articlePhotoMessage">Seleccioná un artículo</span></button></figure><aside class="summary"><div class="summary-grid"><span>Neto gravado</span><strong id="netTotal">$ 0,00</strong><span>IVA 21%</span><strong id="iva21">$ 0,00</strong><span>IVA 10,5%</span><strong id="iva105">$ 0,00</strong><span>Otros / exento</span><strong id="otherTax">$ 0,00</strong><span>Valores recibidos</span><strong id="paymentsTotal">$ 0,00</strong><span>Diferencia</span><strong id="difference" class="difference">$ 0,00</strong><span class="total-label">Total</span><strong class="total" id="grandTotal">$ 0,00</strong></div></aside></div>
+    <div class="foot"><div class="field"><label for="note">Nota</label><textarea id="note" placeholder="Observaciones del comprobante"></textarea></div><div class="actions"><button id="cancelEdit" type="button">Reimprimir últ. fact.</button><button id="reprintReceipt" type="button" hidden>Reimprimir comprobante</button><div class="issue-control"><label class="auto-print-label" for="autoPrint"><input id="autoPrint" type="checkbox" checked>Imprimir automáticamente</label><button class="primary" id="issueInvoice" type="button" disabled>Emitir PRES. ESPECIAL</button></div></div></div><div class="message" id="message"></div>
+    <div class="recovery-alert" id="recoveryAlert" role="alert" aria-live="assertive"><strong id="recoveryTitle">ATENCIÓN: esta emisión quedó pendiente</strong><p id="recoveryText">No repitas esta venta ni borres este borrador. Verificá qué pasó con este comprobante.</p><button id="checkRecovery" type="button">Consultar estado</button><button id="recoverInvoice" type="button" hidden>Recuperar este comprobante</button><button id="printPendingCopy" type="button">Imprimir detalle sin confirmar</button><button id="continueNewInvoice" type="button">Guardar pendiente y hacer otra venta</button></div>
   </section>
 </main>
-<div class="suggestions" id="suggestions"></div><div class="modal-wrap" id="draftModal" role="dialog" aria-modal="true"><section class="modal"><header class="modal-head"><h2>Borradores</h2><button id="closeDrafts" type="button">Cerrar</button></header><div class="draft-list" id="draftList"></div></section></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.11"></script><script>
-const FIREBASE_CONFIG={apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',authDomain:'corralon-progreso.firebaseapp.com',projectId:'corralon-progreso',storageBucket:'corralon-progreso.firebasestorage.app',messagingSenderId:'466583614632',appId:'1:466583614632:web:42cb839f83e97475fabe9d'},DB_NAME='corralon_facturacion_v1',STORE='borradores';
-const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=0,suggestionPage=null,suggestionPaging=false,saveTimer=null,paymentReconcileTimer=null;
-function firestore(){if(db)return db;if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CONFIG);return db=firebase.firestore()}function uid(){try{return JSON.parse(localStorage.getItem('corralon_menu_active_user_snapshot_v1')||'{}')}catch{return{}}}function n(v){if(typeof v==='number')return Number.isFinite(v)?v:0;const s=String(v??'').replace(/[^\d,.-]/g,'');if(!s)return 0;if(s.includes(','))return Number(s.replace(/\./g,'').replace(',','.'))||0;if(/^-?\d{1,3}(?:\.\d{3})+$/.test(s))return Number(s.replace(/\./g,''))||0;return Number(s)||0}function money(v){return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',minimumFractionDigits:2}).format(Number(v)||0)}function num(v){return new Intl.NumberFormat('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v)||0)}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function today(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function blankArticle(){return{idart:'',codProv:'',descripcion:'',cantidad:1,precio:0,precioBase:0,stock:0,descuento:0,iva:21}}function blankPayment(tipo='Efectivo',autoDifference=false){return{tipo,importe:0,tarjeta:'Ninguna',cuotas:0,descripcion:'',autoDifference}}function articleStarted(r){return Boolean(String(r?.idart||'').trim()&&n(r?.cantidad)>0)}function paymentStarted(r){return Boolean(n(r?.importe)>0||String(r?.tipo||'Efectivo')!=='Efectivo'||String(r?.tarjeta||'Ninguna')!=='Ninguna'||n(r?.cuotas)>0||String(r?.descripcion||'').trim())}function appendFillerRows(body,dataRows,minimumRows,columns){for(let i=dataRows;i<minimumRows;i++){const tr=document.createElement('tr');tr.className='filler-row';tr.setAttribute('aria-hidden','true');tr.innerHTML='<td></td>'.repeat(columns);body.appendChild(tr)}}function setMsg(t,type=''){$('#message').textContent=t;$('#message').className=`message ${type}`}
-function ensureBlanks(){const valid=articles.filter(r=>String(r?.idart||'').trim()),pending=articles.find(r=>!String(r?.idart||'').trim()&&(String(r?.codProv||'').trim()||String(r?.descripcion||'').trim()||n(r?.precio)>0||n(r?.cantidad)!==1||n(r?.descuento)>0))||articles.find(r=>!String(r?.idart||'').trim())||blankArticle();articles=[...valid,pending];if(!payments.length)payments.push(blankPayment('Efectivo',true));if(payments.length===1&&!paymentStarted(payments[0])&&payments[0].tipo==='Efectivo')payments[0].autoDifference=true}function totals(){let net=0,iva21=0,iva105=0,other=0,total=0;articles.forEach(r=>{if(!String(r.idart||'').trim()||n(r.cantidad)<=0)return;const gross=n(r.cantidad)*n(r.precio),rate=n(r.iva);total+=gross;if(rate>0){const base=gross/(1+rate/100);net+=base;if(Math.abs(rate-21)<.01)iva21+=gross-base;else if(Math.abs(rate-10.5)<.01)iva105+=gross-base;else other+=gross-base}else other+=gross});const paid=payments.reduce((a,r)=>a+n(r.importe),0);return{net,iva21,iva105,other,total,paid,difference:paid-total}}
+<div class="article-photo-lightbox" id="articlePhotoLightbox" role="dialog" aria-modal="true" aria-label="Imagen ampliada del artículo" hidden><button class="article-photo-close" id="articlePhotoClose" type="button" aria-label="Cerrar imagen">×</button><img id="articlePhotoLarge" alt=""></div>
+<div class="suggestions" id="suggestions"></div>
+<div class="modal-wrap" id="draftModal" role="dialog" aria-modal="true" aria-label="Emisiones pendientes"><section class="modal"><header class="modal-head"><h2>Emisiones pendientes</h2><button id="closeDrafts" type="button">Cerrar</button></header><div class="draft-list" id="draftList"></div></section></div>
+<div class="modal-wrap" id="associatedModal" role="dialog" aria-modal="true" aria-label="Elegir factura original"><section class="modal"><header class="modal-head"><h2>Elegir factura original de SQL</h2><button id="closeAssociated" type="button">Cerrar</button></header><div class="associated-search"><input id="associatedQuery" autocomplete="off" placeholder="Buscar por número o cliente"><div class="associated-results" id="associatedResults"></div></div></section></div>
+<div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
+<div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
+<div id="paymentOptions" class="payment-options" role="listbox"></div>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.12"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
+const SQL_CONNECTION_MESSAGE='No hay conexión con la base de datos.';
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=-1,suggestionPage=null,paymentReconcileTimer=null,saveTimer=null,sqlConfig=null,issuedReceipt=null,previewDraft=null,recoveryPending=false,recoveryCanRetry=false,issueInProgress=false,printInProgress=false,printerSelectionPending=false,browserPrintPending=false,recoveryPollBusy=false,stockRefreshBusy=false,stockRefreshAgain=false,localDraftStoreReady=false;const SQL_PREPARACION=`${location.origin}/api/facturacion`,LOCAL_PRINTER_API='http://127.0.0.1:8082',BROWSER_PRINTER='browser:',TICKET_PRINTER_KEY='facturacion_ticket_printer_v1',WORKSTATION_KEY='facturacion_puesto_v1';
+function workstation(){try{return JSON.parse(localStorage.getItem(WORKSTATION_KEY)||'{}')}catch{return{}}}
+function saveWorkstation(){try{localStorage.setItem(WORKSTATION_KEY,JSON.stringify({branch:$('#branch').value,pos:$('#pos').value,seller:$('#seller').value}))}catch{}}
+const API_RESTART_HINT='Avisá al encargado para reiniciar el servicio de facturación del servidor.';
+function uid(){try{return JSON.parse(localStorage.getItem('corralon_menu_active_user_snapshot_v1')||'{}')}catch{return{}}}function n(v){if(typeof v==='number')return Number.isFinite(v)?v:0;const s=String(v??'').replace(/[^\d,.-]/g,'');if(!s)return 0;if(s.includes(','))return Number(s.replace(/\./g,'').replace(',','.'))||0;if(/^-?\d{1,3}(?:\.\d{3})+$/.test(s))return Number(s.replace(/\./g,''))||0;return Number(s)||0}function money(v){return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',minimumFractionDigits:2}).format(Number(v)||0)}function num(v){return new Intl.NumberFormat('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v)||0)}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function today(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function blankArticle(){return{idart:'',codProv:'',descripcion:'',cantidad:1,precio:0,precioBase:0,stock:0,descuento:0,iva:21}}function blankPayment(tipo='Efectivo',autoDifference=false){return{tipo,importe:0,idTarjeta:0,tarjeta:'Ninguna',cuotas:0,coef:0,impRec:0,descripcion:'',autoDifference}}function articleStarted(r){return Boolean(String(r?.idart||'').trim()&&n(r?.cantidad)>0)}function paymentStarted(r){return Boolean(n(r?.importe)>0||String(r?.tipo||'Efectivo')!=='Efectivo'||n(r?.idTarjeta)>0||n(r?.cuotas)>0||n(r?.impRec)!==0||String(r?.descripcion||'').trim())}function appendFillerRows(body,dataRows,minimumRows,columns){for(let i=dataRows;i<minimumRows;i++){const tr=document.createElement('tr');tr.className='filler-row';tr.setAttribute('aria-hidden','true');tr.innerHTML='<td></td>'.repeat(columns);body.appendChild(tr)}}function setMsg(t,type=''){$('#message').textContent=t;$('#message').className=`message ${type}`}
+function roundMoney(v){return Math.round((Number(v)+Number.EPSILON)*100)/100}
+function articleMargin(row){const cost=n(row.costoFinal);return cost>0?roundMoney((n(row.precio)/cost-1)*100):0}
+function recalculateArticle(row,changed){
+  const base=n(row.precioBase),cost=n(row.costoFinal);
+  if(changed==='descuento'&&base>0)row.precio=roundMoney(base*(1-n(row.descuento)/100));
+  if(changed==='margen'&&cost>0)row.precio=roundMoney(cost*(1+n(row.margen)/100));
+  if(changed==='precio'&&base<=0)row.precioBase=n(row.precio);
+  if(changed!=='descuento'&&n(row.precioBase)>0)row.descuento=roundMoney((1-n(row.precio)/n(row.precioBase))*100);
+  row.margen=articleMargin(row);
+}
+function syncArticleCosts(importedFromSql=false){
+  let staleCurrency=false;
+  for(const row of articles){
+    const item=catalog.find(x=>String(x.idart)===String(row.idart));
+    if(!item)continue;
+    row.costoFinal=n(item.costoFinal);row.idMoneda=Number(item.idMoneda)||1;
+    if(row.idMoneda===1||importedFromSql)row.cotizacion=n(item.cotizacion);
+    else if(!n(row.cotizacion)||Math.abs(n(row.cotizacion)-n(item.cotizacion))>.0001)staleCurrency=true;
+    row.margen=articleMargin(row);
+  }
+  if(staleCurrency)setMsg('Hay artículos en moneda extranjera con una cotización anterior o sin convertir. Volvé a seleccionarlos del catálogo antes de emitir.','error');
+}
+function newDraftId(){
+  const bytes=new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6]=(bytes[6]&15)|64;
+  bytes[8]=(bytes[8]&63)|128;
+  const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  return`${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+function fiscalQrPayload(data,receipt,company,type){
+  const digits=value=>String(value||'').replace(/\D/g,'');
+  const number=String(receipt.numero||'').split('-')[1]||'';
+  const payload={ver:1,fecha:data.fecha,cuit:Number(digits(company.cuit)),ptoVta:Number(data.idPuntoVenta),tipoCmp:Number(type.idAfip),nroCmp:Number(number),importe:Number(receipt.totalAbsoluto),moneda:'PES',ctz:1,tipoCodAut:'E',codAut:Number(receipt.cae)};
+  const doc=digits(receipt.documento||data.cliente.numeroDocumento);
+  if(data.cliente.tipoDocumento==='CUIT'&&doc.length===11){payload.tipoDocRec=80;payload.nroDocRec=Number(doc)}
+  else if(data.cliente.tipoDocumento==='DNI'&&doc.length===8){payload.tipoDocRec=96;payload.nroDocRec=Number(doc)}
+  const encoded=btoa(JSON.stringify(payload));
+  return 'https://www.arca.gob.ar/fe/qr/?p='+encodeURIComponent(encoded);
+}
+function ensureBlanks(){const valid=articles.filter(r=>String(r?.idart||'').trim()),pending=articles.find(r=>!String(r?.idart||'').trim()&&(String(r?.codProv||'').trim()||String(r?.descripcion||'').trim()||n(r?.precio)>0||n(r?.cantidad)!==1||n(r?.descuento)>0))||articles.find(r=>!String(r?.idart||'').trim())||blankArticle();articles=[...valid,pending];if(!payments.length)payments.push(blankPayment('Efectivo',true));if(payments.length===1&&!paymentStarted(payments[0])&&payments[0].tipo==='Efectivo')payments[0].autoDifference=true}function totals(){let net=0,iva21=0,iva105=0,other=0,base=0;articles.forEach(r=>{if(!String(r.idart||'').trim()||n(r.cantidad)<=0)return;const gross=roundMoney(n(r.cantidad)*n(r.precio)),rate=n(r.iva),tax=rate>0?roundMoney(gross-gross/(1+rate/100)):0;base+=gross;net+=gross-tax;if(Math.abs(rate-21)<.01)iva21+=tax;else if(Math.abs(rate-10.5)<.01)iva105+=tax;else other+=tax});const adjustment=roundMoney(payments.reduce((a,r)=>a+n(r.impRec),0)),paid=roundMoney(payments.reduce((a,r)=>a+n(r.importe)+n(r.impRec),0)),total=roundMoney(base+adjustment);return{net:roundMoney(net),iva21:roundMoney(iva21),iva105:roundMoney(iva105),other:roundMoney(other),base:roundMoney(base),adjustment,total,paid,difference:roundMoney(paid-total)}}
+const articlePhotoCache=new Map();
+let focusedArticleIndex=-1,articlePhotoRequest=0;
+function closeArticlePhoto(){
+  const lightbox=$('#articlePhotoLightbox');
+  if(lightbox.hidden)return;
+  lightbox.hidden=true;
+  $('#articlePhotoLarge').removeAttribute('src');
+  $('#articlePhotoTrigger').focus();
+}
+$('#articlePhotoTrigger').addEventListener('click',()=>{
+  const photo=$('#articlePhotoImage');
+  if(photo.hidden||!photo.src)return;
+  const large=$('#articlePhotoLarge');
+  large.src=photo.src;
+  large.alt=photo.alt;
+  $('#articlePhotoLightbox').hidden=false;
+  $('#articlePhotoClose').focus();
+});
+$('#articlePhotoClose').addEventListener('click',closeArticlePhoto);
+$('#articlePhotoLightbox').addEventListener('click',event=>{if(event.target===$('#articlePhotoLightbox'))closeArticlePhoto()});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&!$('#articlePhotoLightbox').hidden){
+    event.preventDefault();
+    event.stopPropagation();
+    closeArticlePhoto();
+  }
+},true);
+async function showArticlePhotoForRow(index){
+  focusedArticleIndex=index;
+  const request=++articlePhotoRequest;
+  const photo=$('#articlePhotoImage'),message=$('#articlePhotoMessage');
+  $('#articlePhotoTrigger').disabled=true;
+  photo.hidden=true;
+  photo.removeAttribute('src');
+  const code=String(articles[index]?.idart||'').trim();
+  if(!code){message.textContent='Seleccioná un artículo';message.hidden=false;return}
+  message.textContent='Cargando imagen…';message.hidden=false;
+  let pending=articlePhotoCache.get(code);
+  if(!pending){
+    pending=window.CorralonSystem.catalog.fetchArticle(code);
+    articlePhotoCache.set(code,pending);
+  }
+  try{
+    const article=await pending;
+    if(request!==articlePhotoRequest)return;
+    const candidate=String(article?.imagenes?.find(url=>String(url||'').trim())||article?.fotoUrl||'').trim();
+    const url=candidate?new URL(candidate,location.href):null;
+    if(!url||!['http:','https:'].includes(url.protocol)){message.textContent='Sin imagen en el catálogo';return}
+    photo.alt=`Imagen de ${articles[index]?.descripcion||'artículo'}`;
+    photo.onload=()=>{if(request===articlePhotoRequest){photo.hidden=false;message.hidden=true;$('#articlePhotoTrigger').disabled=false}};
+    photo.onerror=()=>{if(request===articlePhotoRequest){photo.hidden=true;message.textContent='No se pudo cargar la imagen';message.hidden=false}};
+    photo.src=url.href;
+  }catch(error){
+    articlePhotoCache.delete(code);
+    if(request===articlePhotoRequest){message.textContent='No se pudo consultar la imagen';message.hidden=false}
+  }
+}
+$('#articleTable').addEventListener('focusin',event=>{
+  const row=event.target.closest('tr[data-row]');
+  if(row)showArticlePhotoForRow(Number(row.dataset.row));
+});
 function renderArticles(){
   ensureBlanks();
   const body=$('#articleBody');
@@ -110,13 +293,14 @@ function renderArticles(){
   articles.forEach((r,i)=>{
     const sub=n(r.cantidad)*n(r.precio),tr=document.createElement('tr');
     tr.dataset.row=i;
-    tr.innerHTML=`<td class="row-selector" data-row-select="${i}">›</td><td><input data-a="idart" data-row="${i}" data-col="0" value="${esc(r.idart)}"></td><td><input data-a="codProv" data-row="${i}" data-col="1" value="${esc(r.codProv)}"></td><td class="description-cell"><input data-a="descripcion" data-row="${i}" data-col="2" autocomplete="off" placeholder="Buscar artículo…" value="${esc(r.descripcion)}"><button class="combo-toggle" data-open-description="${i}" type="button" tabindex="-1" aria-label="Desplegar artículos">▼</button></td><td><input class="money" data-number data-a="cantidad" data-row="${i}" data-col="3" inputmode="decimal" value="${num(r.cantidad)}"></td><td><input class="money" data-money data-a="precio" data-row="${i}" data-col="4" inputmode="decimal" value="${money(r.precio)}"></td><td><input class="money stock-field" data-number data-a="stock" data-row="${i}" data-col="5" tabindex="-1" value="${num(r.stock)}" readonly></td><td><input class="money" data-number data-percent data-a="descuento" data-row="${i}" data-col="6" inputmode="decimal" value="${num(r.descuento)} %"></td><td><input class="money" data-money data-a="importe" data-row="${i}" data-col="7" inputmode="decimal" value="${money(sub)}"></td><td><button class="remove" data-remove-a="${i}" type="button">×</button></td>`;
+    tr.innerHTML=`<td class="row-selector" data-row-select="${i}">›</td><td><input data-a="idart" data-row="${i}" data-col="0" value="${esc(r.idart)}"></td><td><input data-a="codProv" data-row="${i}" data-col="1" value="${esc(r.codProv)}"></td><td class="description-cell"><input data-a="descripcion" data-row="${i}" data-col="2" autocomplete="off" placeholder="Buscar artículo…" value="${esc(r.descripcion)}"><button class="combo-toggle" data-open-description="${i}" type="button" tabindex="-1" aria-label="Desplegar artículos">▼</button></td><td><input class="money" data-number data-a="cantidad" data-row="${i}" data-col="3" inputmode="decimal" value="${num(r.cantidad)}"></td><td><input class="money" data-money data-a="precio" data-row="${i}" data-col="4" inputmode="decimal" value="${money(r.precio)}"></td><td><input class="money stock-field" data-number data-a="stock" data-row="${i}" data-col="5" tabindex="-1" value="${num(r.stock)}" readonly></td><td><input class="money" data-number data-percent data-a="margen" data-row="${i}" data-col="6" inputmode="decimal" value="${n(r.costoFinal)>0?num(articleMargin(r))+' %':'—'}" ${n(r.costoFinal)>0?'':'disabled title="Sin costo de compra"'}></td><td><input class="money" data-number data-percent data-a="descuento" data-row="${i}" data-col="7" inputmode="decimal" value="${num(r.descuento)} %"></td><td><input class="money" data-money data-a="importe" data-row="${i}" data-col="8" inputmode="decimal" value="${money(sub)}"></td><td><button class="remove" data-remove-a="${i}" type="button">×</button></td>`;
     body.appendChild(tr);
   });
-  appendFillerRows(body,articles.length,8,10);
+  appendFillerRows(body,articles.length,8,11);
   $('#articleRecordCount').textContent=`1 de ${Math.max(1,articles.filter(articleStarted).length)}`;
   bindArticleRows();
   renderTotals();
+  if(focusedArticleIndex>=0)showArticlePhotoForRow(focusedArticleIndex);
 }
 function bindArticleRows(){
   $$('#articleBody [data-a]').forEach(el=>{
@@ -132,16 +316,18 @@ function bindArticleRows(){
         const quantity=$(`#articleBody [data-row="${el.dataset.row}"][data-a="cantidad"]`);
         if(quantity)quantity.value=num(r.cantidad);
       }else{
-        r[key]=['cantidad','precio','descuento','iva'].includes(key)?n(el.value):el.value;
+        r[key]=['cantidad','precio','margen','descuento','iva'].includes(key)?n(el.value):el.value;
       }
-      if(key==='precio')r.precioBase=n(el.value);
-      if(key==='descuento'){
-        if(n(r.precioBase)<=0)r.precioBase=n(r.precio);
-        r.precio=n(r.precioBase)*(1-Math.max(0,Math.min(100,n(r.descuento)))/100);
+      if(['precio','margen','descuento'].includes(key)){
+        recalculateArticle(r,key);
         const price=$(`#articleBody [data-row="${el.dataset.row}"][data-a="precio"]`);
-        if(price)price.value=money(r.precio);
+        const margin=$(`#articleBody [data-row="${el.dataset.row}"][data-a="margen"]`);
+        const discount=$(`#articleBody [data-row="${el.dataset.row}"][data-a="descuento"]`);
+        if(price&&key!=='precio')price.value=money(r.precio);
+        if(margin&&key!=='margen')margin.value=num(r.margen)+' %';
+        if(discount&&key!=='descuento')discount.value=num(r.descuento)+' %';
       }
-      if(['cantidad','precio','descuento'].includes(key)){
+      if(['cantidad','precio','margen','descuento'].includes(key)){
         const amount=$(`#articleBody [data-row="${el.dataset.row}"][data-a="importe"]`);
         if(amount)amount.value=money(n(r.cantidad)*n(r.precio));
       }
@@ -151,7 +337,7 @@ function bindArticleRows(){
     });
     el.addEventListener('change',()=>{
       const r=articles[+el.dataset.row],key=el.dataset.a;
-      if(key!=='importe')r[key]=['cantidad','precio','descuento','iva'].includes(key)?n(el.value):el.value;
+      if(key!=='importe')r[key]=['cantidad','precio','margen','descuento','iva'].includes(key)?n(el.value):el.value;
       if(['idart','codProv','descripcion'].includes(key)){
         renderTotals();
         scheduleDraft();
@@ -186,56 +372,98 @@ function bindArticleRows(){
     scheduleDraft();
   }));
 }
+function paymentType(row){return(sqlConfig?.tiposPago||[]).find(x=>Number(x.id)===Number(row.idTipoPago))||(sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(row.tipo))}
+function cardPlans(row){return(sqlConfig?.tarjetasCuotas||[]).filter(x=>Number(x.idTarjeta)===Number(row.idTarjeta))}
+function updatePaymentAdjustment(row,source){
+  if(source==='coef')row.impRec=roundMoney(n(row.importe)*n(row.coef));
+  else if(source==='impRec')row.coef=n(row.importe)?n(row.impRec)/n(row.importe):0;
+  else row.impRec=roundMoney(n(row.importe)*n(row.coef));
+}
 function renderPayments(){
+  clearTimeout(paymentRenderTimer);paymentRenderTimer=0;
+  commitPaymentEdit();
+  hidePaymentOptions();
   ensureBlanks();
-  const body=$('#paymentBody');
-  body.innerHTML='';
+  const body=$('#paymentBody');body.innerHTML='';
   payments.forEach((r,i)=>{
-    const tr=document.createElement('tr');
-    tr.dataset.row=i;
-    tr.innerHTML=`<td><select data-p="tipo" data-row="${i}" data-col="0"><option value="" ${!r.tipo?'selected':''}>Elegir tipo</option><option ${r.tipo==='Efectivo'?'selected':''}>Efectivo</option><option ${r.tipo==='Transferencia'?'selected':''}>Transferencia</option><option ${r.tipo==='Tarjeta'?'selected':''}>Tarjeta</option><option ${r.tipo==='Cuenta corriente'?'selected':''}>Cuenta corriente</option><option ${r.tipo==='Mercado Pago'?'selected':''}>Mercado Pago</option></select></td><td><input class="money" data-money data-p="importe" data-row="${i}" data-col="1" inputmode="decimal" value="${money(r.importe)}"></td><td><input data-p="tarjeta" data-row="${i}" data-col="2" value="${esc(r.tarjeta)}"></td><td><input class="money" data-number data-p="cuotas" data-row="${i}" data-col="3" inputmode="numeric" value="${n(r.cuotas)}"></td><td><input data-p="descripcion" data-row="${i}" data-col="4" value="${esc(r.descripcion)}"></td><td><input class="money" data-payment-total="${i}" value="${money(r.importe)}" readonly></td><td><button class="remove" data-remove-p="${i}" type="button">×</button></td>`;
+    const tr=document.createElement('tr');tr.dataset.row=i;
+    const chosen=paymentType(r),card=Number(chosen?.clase)===5,transfer=Number(chosen?.clase)===3;
+    const plans=cardPlans(r);
+    tr.innerHTML=`<td><div class="payment-combo"><input data-p="tipo" data-row="${i}" data-col="0" autocomplete="off" placeholder="Elegir tipo" value="${esc(r.tipo||chosen?.nombre||'')}"><button class="payment-drop" data-payment-drop="tipo" type="button" tabindex="-1" aria-label="Desplegar tipos de valor">▼</button></div></td><td><input class="money" data-money data-p="importe" data-row="${i}" data-col="1" inputmode="decimal" value="${money(r.importe)}"></td><td><div class="payment-combo"><input data-p="tarjeta" data-row="${i}" data-col="2" autocomplete="off" value="${esc(r.tarjeta||'Ninguna')}" ${card||transfer?'':'disabled'}><button class="payment-drop" data-payment-drop="tarjeta" type="button" tabindex="-1" aria-label="Desplegar tarjetas" ${card||transfer?'':'disabled'}>▼</button></div></td><td><select data-p="cuotas" data-row="${i}" data-col="3" ${card&&Number(r.idTarjeta)>0?'':'disabled'}><option value="0">—</option>${plans.map(x=>`<option value="${x.cuotas}" ${Number(r.cuotas)===Number(x.cuotas)?'selected':''}>${esc(x.cuotas)}</option>`).join('')}</select></td><td><input data-p="descripcion" data-row="${i}" data-col="4" value="${esc(r.descripcion)}"></td><td><input class="money" data-number data-percent data-p="coef" data-row="${i}" data-col="5" inputmode="decimal" value="${num(n(r.coef)*100)} %"></td><td><input class="money" data-money data-p="impRec" data-row="${i}" data-col="6" inputmode="decimal" value="${money(r.impRec)}"></td><td><input class="money" data-payment-total="${i}" data-col="7" value="${money(n(r.importe)+n(r.impRec))}" readonly></td><td><button class="remove" data-remove-p="${i}" type="button">×</button></td>`;
     body.appendChild(tr);
   });
-  appendFillerRows(body,payments.length,3,7);
+  appendFillerRows(body,payments.length,3,9);
   $('#paymentRecordCount').textContent=`1 de ${Math.max(1,payments.filter(paymentStarted).length)}`;
-  bindPaymentRows();
-  renderTotals();
+  bindPaymentRows();bindPaymentCombos();renderTotals();
+  $('#paymentTable').dispatchEvent(new Event('payment-rendered'));
 }
 function reconcilePaymentRows(){
-  const invoiceTotal=articles.reduce((sum,r)=>sum+(articleStarted(r)?n(r.cantidad)*n(r.precio):0),0);
+  let keptAuto=false;
+  payments=payments.filter(row=>{if(!row.autoDifference)return true;if(keptAuto)return false;keptAuto=true;return true});
+  const invoiceTotal=totals().base;
   const manualTotal=payments.reduce((sum,r)=>sum+(r.autoDifference?0:n(r.importe)),0);
-  const remaining=Math.max(0,invoiceTotal-manualTotal);
+  const remaining=Math.max(0,roundMoney(invoiceTotal-manualTotal));
   let autoIndex=payments.findIndex(r=>r.autoDifference);
   if(remaining>.005){
     if(autoIndex<0){
-      payments.push(blankPayment('',true));
+      payments.push(blankPayment('Efectivo',true));
       autoIndex=payments.length-1;
     }
     payments[autoIndex].importe=remaining;
+    updatePaymentAdjustment(payments[autoIndex],'importe');
   }else if(autoIndex>=0){
     payments.splice(autoIndex,1);
   }
 }
+let paymentRenderTimer=0,paymentAdvanceAfterRender=null;
+function schedulePaymentRender(){
+  clearTimeout(paymentRenderTimer);
+  paymentRenderTimer=setTimeout(()=>{
+    const focused=document.activeElement?.closest?.('#paymentBody [data-p]');
+    const row=focused?.dataset.row,col=focused?.dataset.col,keyboard=focused?.classList.contains('keyboard-focus');
+    const advance=paymentAdvanceAfterRender;paymentAdvanceAfterRender=null;
+    renderPayments();
+    if(advance){
+      const next=[...$$(`#paymentBody [data-row="${advance.row}"][data-col]`)].find(cell=>Number(cell.dataset.col)>advance.col&&!cell.disabled&&!cell.readOnly);
+      if(next){next.focus();if(typeof next.select==='function')next.select();next.classList.add('keyboard-focus')}
+    }else if(row!==undefined&&col!==undefined){
+      const next=$(`#paymentBody [data-row="${row}"][data-col="${col}"]`);
+      if(next&&!next.disabled){next.focus();if(typeof next.select==='function')next.select();if(keyboard)next.classList.add('keyboard-focus')}
+    }
+  },0);
+}
 function bindPaymentRows(){
   $$('#paymentBody [data-p]').forEach(el=>{
-    if(el.dataset.p==='importe')el.addEventListener('focus',()=>setTimeout(()=>el.select(),0));
-    el.addEventListener('input',()=>{
-      const r=payments[+el.dataset.row],key=el.dataset.p;
-      r[key]=['importe','cuotas'].includes(key)?n(el.value):el.value;
+    const key=el.dataset.p;
+    if(el.tagName==='INPUT')el.addEventListener('input',()=>{
+      const r=payments[+el.dataset.row];
+      r[key]=key==='coef'?n(el.value)/100:['importe','impRec'].includes(key)?n(el.value):el.value;
+      if(key==='tipo')r.idTipoPago=0;
+      if(key==='tarjeta')r.idTarjeta=0;
       if(key==='importe'&&r.autoDifference)r.autoDifference=false;
-      renderTotals();
-      scheduleDraft();
+      if(['importe','coef','impRec'].includes(key))updatePaymentAdjustment(r,key);
+      renderTotals();scheduleDraft();
     });
     el.addEventListener('change',()=>{
-      const r=payments[+el.dataset.row],key=el.dataset.p;
-      r[key]=['importe','cuotas'].includes(key)?n(el.value):el.value;
-      if(key==='importe'&&r.autoDifference)r.autoDifference=false;
-      if(key==='importe'){
-        clearTimeout(paymentReconcileTimer);
-        reconcilePaymentRows();
+      const r=payments[+el.dataset.row];
+      if(key==='tipo'){
+        const selected=(sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(el.value)&&[1,3,5,6].includes(Number(x.clase))&&Number(x.id)!==14);
+        r.idTipoPago=Number(selected?.id)||0;r.tipo=selected?.nombre||el.value;
+        r.idTarjeta=0;r.tarjeta='Ninguna';r.cuotas=0;r.coef=n(paymentType(r)?.recargoInicial);updatePaymentAdjustment(r,'coef');
+      }else if(key==='tarjeta'){
+        const selected=(sqlConfig?.tarjetas||[]).find(x=>norm(x.nombre)===norm(el.value));
+        r.idTarjeta=Number(selected?.id)||0;r.tarjeta=selected?.nombre||el.value;
+        r.cuotas=0;r.coef=0;
+        if(Number(paymentType(r)?.clase)===5){const plan=cardPlans(r)[0];if(plan){r.cuotas=Number(plan.cuotas);r.coef=n(plan.coeficiente)}}
+        updatePaymentAdjustment(r,'coef');
+      }else if(key==='cuotas'){
+        r.cuotas=Number(el.value);r.coef=n(cardPlans(r).find(x=>Number(x.cuotas)===r.cuotas)?.coeficiente);updatePaymentAdjustment(r,'coef');
+      }else{
+        r[key]=key==='coef'?n(el.value)/100:['importe','impRec'].includes(key)?n(el.value):el.value;
+        if(['importe','coef','impRec'].includes(key))updatePaymentAdjustment(r,key);
       }
-      renderPayments();
-      scheduleDraft();
+      if(key==='importe'){clearTimeout(paymentReconcileTimer);reconcilePaymentRows()}
+      schedulePaymentRender();scheduleDraft();
     });
   });
   $$('[data-remove-p]').forEach(button=>button.addEventListener('click',()=>{
@@ -245,17 +473,89 @@ function bindPaymentRows(){
     scheduleDraft();
   }));
 }
+const paymentRowIds=new WeakMap(),paymentUndoHistory=[];
+let paymentNextRowId=0,paymentMoveId=0,paymentEditState=null;
+function paymentRowId(row){if(!row)return 0;if(!paymentRowIds.has(row))paymentRowIds.set(row,++paymentNextRowId);return paymentRowIds.get(row)}
+function commitPaymentEdit(){
+  const edit=paymentEditState;if(!edit)return;
+  paymentEditState=null;
+  const current=payments.map(item=>({id:paymentRowId(item),data:item}));
+  if(JSON.stringify(current)!==JSON.stringify(edit.beforeAll)){
+    paymentUndoHistory.push({movement:edit.movement,rowId:edit.rowId,rowIndex:edit.rowIndex,col:edit.col,beforeAll:edit.beforeAll});
+    if(paymentUndoHistory.length>150)paymentUndoHistory.shift();
+  }
+}
+function restorePaymentRow(edit){
+  if(!edit)return;
+  payments=edit.beforeAll.map(entry=>{const restored=structuredClone(entry.data);paymentRowIds.set(restored,entry.id);return restored});
+  paymentEditState=null;
+  reconcilePaymentRows();
+  const index=Math.max(0,payments.findIndex(item=>paymentRowId(item)===edit.rowId));
+  renderPayments();scheduleDraft();
+  const next=$(`#paymentBody [data-row="${index}"][data-col="${edit.col}"]`);
+  if(next&&!next.disabled){next.focus();if(typeof next.select==='function')next.select()}
+}
+let paymentComboInput=null,paymentComboOptions=[],paymentComboActive=-1,paymentComboAnchor=0,paymentComboNavigated=false,paymentComboHasMatch=false;
+function hidePaymentOptions(){const menu=$('#paymentOptions');if(menu)menu.classList.remove('open');paymentComboInput=null;paymentComboOptions=[];paymentComboActive=-1;paymentComboAnchor=0;paymentComboNavigated=false;paymentComboHasMatch=false}
+function comboMatchScore(name,query){const value=norm(name),words=norm(query).split(' ').filter(Boolean);if(!words.length)return 0;const phrase=words.join(' ');if(value===phrase)return 0;if(value.startsWith(phrase))return 1;if(value.startsWith(words[0])&&words.every(word=>value.includes(word)))return 2;if(words.every(word=>value.includes(word)))return 3;if(value.startsWith(words[0]))return 4;return 5}
+function showPaymentOptions(input,all=false){
+  if(!input||input.disabled||issuedReceipt)return;
+  paymentComboInput=input;
+  const kind=input.dataset.p,source=kind==='tipo'?(sqlConfig?.tiposPago||[]).filter(x=>[1,3,5,6].includes(Number(x.clase))&&Number(x.id)!==14):(sqlConfig?.tarjetas||[]);
+  const alphabetic=source.slice().sort((a,b)=>String(a.nombre||'').localeCompare(String(b.nombre||''),'es',{sensitivity:'base'}));
+  const query=all?'':input.value,scores=alphabetic.map(x=>comboMatchScore(x.nombre,query)),best=Math.min(...scores),bestIndex=Math.max(0,scores.indexOf(best));
+  paymentComboHasMatch=best<5;
+  paymentComboOptions=alphabetic.map((item,index)=>({item,index,score:scores[index],group:scores[index]<5?1:index<bestIndex?0:2}))
+    .sort((a,b)=>a.group-b.group||(a.group===1?a.score-b.score:0)||a.index-b.index).map(x=>x.item);
+  paymentComboAnchor=best<5?paymentComboOptions.findIndex(x=>comboMatchScore(x.nombre,query)<5):0;
+  paymentComboActive=-1;
+  paymentComboNavigated=false;
+  const menu=$('#paymentOptions');
+  const enterIndex=paymentComboHasMatch?paymentComboAnchor:-1;
+  menu.innerHTML=paymentComboOptions.map((x,i)=>`<div class="payment-option ${i===enterIndex?'active':''}" data-payment-index="${i}" role="option" aria-selected="${i===enterIndex}">${esc(x.nombre)}</div>`).join('');
+  const rect=input.getBoundingClientRect(),below=innerHeight-rect.bottom-8,above=rect.top-8,up=below<180&&above>below;
+  menu.style.left=`${rect.left}px`;menu.style.width=`${Math.max(rect.width,kind==='tipo'?180:210)}px`;menu.style.maxHeight=`${Math.max(100,Math.min(240,up?above:below))}px`;menu.style.top=up?`${Math.max(8,rect.top-Math.min(240,paymentComboOptions.length*29+2))}px`:`${rect.bottom+2}px`;
+  menu.classList.toggle('open',paymentComboOptions.length>0);
+  const first=menu.querySelector(`[data-payment-index="${paymentComboAnchor}"]`);if(first)menu.scrollTop+=first.getBoundingClientRect().top-menu.getBoundingClientRect().top;
+}
+function pickPaymentOption(index,advance=false){
+  const chosen=paymentComboOptions[index],input=paymentComboInput;if(!chosen||!input)return;
+  if(advance)paymentAdvanceAfterRender={row:Number(input.dataset.row),col:Number(input.dataset.col)};
+  input.value=chosen.nombre;
+  hidePaymentOptions();
+  input.dispatchEvent(new Event('change',{bubbles:true}));
+}
+function bindPaymentCombos(){
+  $$('#paymentBody [data-p="tipo"],#paymentBody [data-p="tarjeta"]').forEach(input=>{
+    input.addEventListener('input',()=>showPaymentOptions(input));
+    input.addEventListener('keydown',event=>{
+      if(event.key==='F4'){event.preventDefault();if(paymentComboInput===input&&$('#paymentOptions').classList.contains('open'))hidePaymentOptions();else showPaymentOptions(input);return}
+      if((event.key==='ArrowDown'||event.key==='ArrowUp')&&!event.ctrlKey&&!event.metaKey&&paymentComboInput===input&&paymentComboOptions.length){event.preventDefault();paymentComboActive=Math.max(0,Math.min(paymentComboOptions.length-1,paymentComboNavigated?paymentComboActive+(event.key==='ArrowDown'?1:-1):paymentComboAnchor+(event.key==='ArrowDown'?0:-1)));paymentComboNavigated=true;$('#paymentOptions').querySelectorAll('.payment-option').forEach((el,i)=>{el.classList.toggle('active',i===paymentComboActive);el.setAttribute('aria-selected',String(i===paymentComboActive))});$('#paymentOptions .active')?.scrollIntoView({block:'nearest'});return}
+      if(event.key==='Enter'&&paymentComboInput===input&&input.value.trim()&&paymentComboOptions.length&&(paymentComboNavigated||paymentComboHasMatch)){event.preventDefault();event.stopImmediatePropagation();pickPaymentOption(paymentComboNavigated?paymentComboActive:paymentComboAnchor,true);return}
+      if(event.key==='Escape')hidePaymentOptions();
+    });
+    input.addEventListener('blur',()=>setTimeout(()=>{if(paymentComboInput===input)hidePaymentOptions()},120));
+  });
+  $$('#paymentBody [data-payment-drop]').forEach(button=>button.addEventListener('mousedown',event=>event.preventDefault()));
+  $$('#paymentBody [data-payment-drop]').forEach(button=>button.addEventListener('click',()=>{const input=button.parentElement.querySelector('input');if(paymentComboInput===input&&$('#paymentOptions').classList.contains('open'))hidePaymentOptions();else{input.focus();showPaymentOptions(input)}}));
+}
+$('#paymentOptions').addEventListener('mousedown',event=>event.preventDefault());
+$('#paymentOptions').addEventListener('click',event=>{const option=event.target.closest('[data-payment-index]');if(option)pickPaymentOption(Number(option.dataset.paymentIndex))});
+document.addEventListener('mousedown',event=>{if(!event.target.closest('.payment-combo,#paymentOptions'))hidePaymentOptions()});
 function renderTotals(){
   let t=totals();
   const autoIndex=payments.findIndex(r=>r.autoDifference);
   if(autoIndex>=0){
     const manualTotal=payments.reduce((sum,r)=>sum+(r.autoDifference?0:n(r.importe)),0);
-    payments[autoIndex].importe=Math.max(0,t.total-manualTotal);
+    payments[autoIndex].importe=Math.max(0,roundMoney(t.base-manualTotal));
+    updatePaymentAdjustment(payments[autoIndex],'importe');
     t=totals();
     const amount=$(`#paymentBody [data-row="${autoIndex}"][data-p="importe"]`);
+    const adjustment=$(`#paymentBody [data-row="${autoIndex}"][data-p="impRec"]`);
     const total=$(`[data-payment-total="${autoIndex}"]`);
     if(amount&&document.activeElement!==amount)amount.value=money(payments[autoIndex].importe);
-    if(total)total.value=money(payments[autoIndex].importe);
+    if(adjustment&&document.activeElement!==adjustment)adjustment.value=money(payments[autoIndex].impRec);
+    if(total)total.value=money(n(payments[autoIndex].importe)+n(payments[autoIndex].impRec));
   }
   $('#netTotal').textContent=money(t.net);
   $('#iva21').textContent=money(t.iva21);
@@ -290,57 +590,62 @@ function validateCatalogInput(input){
   hideSuggestions();
   scheduleDraft();
 }
+function articleDescriptionRank(description,query){
+  const text=norm(description),terms=query.split(' ').filter(Boolean),words=text.split(' ').filter(Boolean);
+  if(!query||!text)return Infinity;
+  if(text===query)return 0;
+  if(text.replace(/\s/g,'')===query.replace(/\s/g,''))return 1;
+  if(text.startsWith(query))return 2;
+  if(` ${text} `.includes(` ${query} `))return 3;
+  if(text.replace(/\s/g,'').includes(query.replace(/\s/g,'')))return 4;
+  if(terms.every(term=>words.some(word=>word.startsWith(term))))return 5;
+  if(terms.every(term=>words.some(word=>word.includes(term))))return 6;
+  return Infinity;
+}
 function showSuggestions(input,force=false){
   const mode=input.dataset.a,q=norm(normalizedLookupValue(input));
   if(!force&&!q){hideSuggestions();return}
   if(activeSuggestionInput&&activeSuggestionInput!==input)activeSuggestionInput.closest('.description-cell')?.classList.remove('combo-open');
-  const terms=q.split(/\s+/).filter(Boolean);
-  const scored=catalog.map(x=>{
-    const idart=norm(x.idart),codProv=norm(x.codProv),descripcion=norm(x.descripcion);
-    const text=`${idart} ${codProv} ${descripcion}`.trim(),words=text.split(/\s+/);
-    if(!q)return{x,score:9};
-    if(mode==='idart'){
-      if(idart===q)return{x,score:0};
-      if(idart.startsWith(q)||idart.includes(q))return{x,score:1};
-      return null;
-    }
-    if(mode==='codProv'){
-      if(codProv===q)return{x,score:0};
-      if(codProv.startsWith(q)||codProv.includes(q))return{x,score:1};
-      return null;
-    }
-    if(idart===q||codProv===q)return{x,score:0};
-    if(descripcion.startsWith(q))return{x,score:1};
-    if(terms.every(term=>words.some(word=>word.startsWith(term))))return{x,score:2};
-    if(terms.every(term=>text.includes(term)))return{x,score:3};
-    return null;
-  }).filter(Boolean);
-  const scoreByItem=new Map(scored.map(item=>[item.x,item.score]));
+  const rank=x=>{
+    const idart=norm(x.idart),codProv=norm(x.codProv);
+    if(!q)return Infinity;
+    if(mode==='idart')return idart===q?0:idart.startsWith(q)?1:idart.includes(q)?2:Infinity;
+    if(mode==='codProv')return codProv===q?0:codProv.startsWith(q)?1:codProv.includes(q)?2:Infinity;
+    return articleDescriptionRank(x.descripcion,q);
+  };
   suggestionPage=CorralonSystem.articleOptionPager.create(catalog,{
-    isMatch:x=>scoreByItem.has(x),
-    rank:x=>scoreByItem.get(x)??99,
-    hasSearch:Boolean(q),
-    beforeCount:20,
-    afterCount:40,
-    matchLimit:100
+    key:x=>String(x.idart),description:x=>x.descripcion,
+    isMatch:x=>Number.isFinite(rank(x)),rank,hasSearch:Boolean(q),
+    beforeCount:20,afterCount:40,matchLimit:100
   });
   suggestionItems=suggestionPage.options;
-  suggestionIndex=suggestionPage.focusIndex;
+  suggestionIndex=q&&suggestionItems.some(x=>Number.isFinite(rank(x)))?suggestionPage.focusIndex:-1;
   activeSuggestionInput=input;
   input.closest('.description-cell')?.classList.add('combo-open');
-  const box=$('#suggestions'),rect=input.getBoundingClientRect();
-  const available=input.closest('.article-scroll')?.clientWidth||window.innerWidth;
-  const dropdownWidth=Math.max(280,Math.min(window.innerWidth-16,available*.6));
-  const dropdownLeft=Math.max(8,Math.min(rect.left,window.innerWidth-dropdownWidth-8));
-  box.style.left=`${dropdownLeft}px`;
-  box.style.top=`${rect.bottom+2}px`;
-  box.style.width=`${dropdownWidth}px`;
+  const box=$('#suggestions'),rect=input.getBoundingClientRect(),gap=3;
+  const width=Math.min(Math.max(rect.width*2,800),window.innerWidth-16);
+  box.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+  box.style.width=`${width}px`;
+  box.style.top='';box.style.bottom='';
+  const below=window.innerHeight-rect.bottom-8,above=rect.top-8,up=below<240&&above>below;
+  box.style.maxHeight=`${Math.max(120,Math.min(340,up?above:below))}px`;
+  if(up)box.style.bottom=`${window.innerHeight-rect.top+gap}px`;
+  else box.style.top=`${rect.bottom+gap}px`;
   renderSuggestionItems();
   box.classList.add('open');
-  requestAnimationFrame(()=>{const active=box.querySelector(`[data-suggestion="${suggestionIndex}"]`);if(active)box.scrollTop=Math.max(0,active.offsetTop)});
+  if(suggestionIndex>=0)requestAnimationFrame(()=>{
+    if(activeSuggestionInput!==input)return;
+    const active=box.querySelector(`[data-suggestion="${suggestionIndex}"]`),header=box.querySelector('.suggestion-head');
+    if(active)box.scrollTop=Math.max(0,active.offsetTop-(header?.offsetHeight||0));
+  });
 }
-function renderSuggestionItems(){const box=$('#suggestions'),mode=activeSuggestionInput?.dataset.a||'descripcion';box.innerHTML=suggestionItems.length?suggestionItems.map((x,i)=>`<div class="suggestion ${i===suggestionIndex?'active':''}" data-suggestion="${i}"><span>${esc(mode==='codProv'?(x.codProv||x.idart):(x.idart||x.codProv))}</span><span>${esc(x.descripcion)}</span><span class="price">${money(x.precioFinal)}</span></div>`).join(''):'<div class="empty">Sin coincidencias</div>';$$('[data-suggestion]').forEach(el=>el.addEventListener('mousedown',event=>{event.preventDefault();pickSuggestion(+el.dataset.suggestion)}))}
-function extendSuggestions(direction){if(suggestionPaging||!suggestionPage||!$('#suggestions').classList.contains('open'))return;suggestionPaging=true;const box=$('#suggestions'),oldHeight=box.scrollHeight,oldTop=box.scrollTop,added=CorralonSystem.articleOptionPager.extend(suggestionPage,direction);if(direction==='up'){suggestionItems=[...added,...suggestionItems];suggestionIndex+=added.length}else suggestionItems=[...suggestionItems,...added];renderSuggestionItems();box.scrollTop=direction==='up'?oldTop+(box.scrollHeight-oldHeight):oldTop;suggestionPaging=false}
+function renderSuggestionItems(){
+  const box=$('#suggestions');
+  box.innerHTML='<div class="suggestion-head"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Precio</span></div>'+
+    (suggestionItems.length?suggestionItems.map((x,i)=>`<div class="suggestion ${i===suggestionIndex?'active':''}" data-suggestion="${i}" role="option" aria-selected="${i===suggestionIndex}"><span>${esc(x.idart)}</span><span>${esc(x.codProv||'')}</span><span title="${esc(x.descripcion)}">${esc(x.descripcion)}</span><span class="price">${money(x.precioFinal)}</span></div>`).join(''):'<div class="empty">Sin artículos disponibles</div>');
+  box.querySelectorAll('[data-suggestion]').forEach(el=>el.addEventListener('mousedown',event=>{event.preventDefault();pickSuggestion(+el.dataset.suggestion)}));
+}
+function extendSuggestions(direction){if(suggestionPaging||!suggestionPage||!$('#suggestions').classList.contains('open'))return;suggestionPaging=true;const box=$('#suggestions'),oldHeight=box.scrollHeight,oldTop=box.scrollTop,added=CorralonSystem.articleOptionPager.extend(suggestionPage,direction);if(direction==='up'){suggestionItems=[...added,...suggestionItems];if(suggestionIndex>=0)suggestionIndex+=added.length}else suggestionItems=[...suggestionItems,...added];renderSuggestionItems();box.scrollTop=direction==='up'?oldTop+(box.scrollHeight-oldHeight):oldTop;suggestionPaging=false}
 function hideSuggestions(){
   activeSuggestionInput?.closest('.description-cell')?.classList.remove('combo-open');
   $('#suggestions').classList.remove('open');
@@ -357,7 +662,8 @@ function pickSuggestion(i){
   const descripcionSeleccionada=String(x.descripcion||'');
   const idartSeleccionado=/^\d+$/.test(String(x.idart||''))?String(x.idart).padStart(6,'0'):String(x.idart||'');
   const valorSeleccionado=campoOrigen==='idart'?idartSeleccionado:campoOrigen==='codProv'?String(x.codProv||''):descripcionSeleccionada;
-  articles[row]={...articles[row],idart:idartSeleccionado,codProv:x.codProv||'',descripcion:descripcionSeleccionada,precio:n(x.precioFinal),precioBase:n(x.precioFinal),descuento:0,stock:n(x.stock),iva:n(x.iva)||21};
+  articles[row]={...articles[row],idart:idartSeleccionado,codProv:x.codProv||'',descripcion:descripcionSeleccionada,precio:roundMoney(n(x.precioFinal)),precioBase:roundMoney(n(x.precioFinal)),costoFinal:n(x.costoFinal),idMoneda:Number(x.idMoneda)||1,cotizacion:n(x.cotizacion),descuento:0,stock:n(x.stock),iva:n(x.iva)||21};
+  articles[row].margen=articleMargin(articles[row]);
   input.value=valorSeleccionado;
   if(row===articles.length-1)articles.push(blankArticle());
   hideSuggestions();
@@ -365,13 +671,291 @@ function pickSuggestion(i){
   const campoRenderizado=$('#articleBody [data-row="'+row+'"][data-a="'+campoOrigen+'"]');
   if(campoRenderizado)campoRenderizado.value=valorSeleccionado;
   scheduleDraft();
+  refreshSelectedStock().catch(console.warn);
   setTimeout(()=>$('#articleBody [data-row="'+row+'"][data-a="cantidad"]')?.focus(),0);
 }
-function formData(){const t=totals(),u=uid();return{id:draftId||crypto.randomUUID(),updatedAt:Date.now(),createdAt:lastSaved?.createdAt||Date.now(),usuarioId:String(u.id||''),usuario:String(u.nombre||u.usuario||''),sucursal:$('#branch').value,puntoVenta:$('#pos').value,tipoComprobante:$('#voucherType').value,fecha:$('#date').value,vendedor:$('#seller').value,listaPrecios:$('#priceList').value,cliente:{tipoDocumento:$('#docType').value,numeroDocumento:$('#docNumber').value,nombre:$('#customerName').value,condicionIva:$('#customerTax').value,telefono:$('#customerPhone').value,direccion:$('#customerAddress').value,email:$('#customerEmail').value},articulos:articles.filter(r=>String(r.idart||'').trim()&&n(r.cantidad)>0),valores:payments.filter(r=>n(r.importe)>0),nota:$('#note').value,totales:t,estado:'borrador'}}
-function applyData(d){draftId=d?.id||'';$('#branch').value=d?.sucursal||'progreso_ruta';$('#voucherType').value=d?.tipoComprobante||'Factura B';$('#date').value=d?.fecha||today();$('#seller').value=d?.vendedor||uid().nombre||uid().usuario||'';$('#priceList').value=d?.listaPrecios||'minorista';$('#docType').value=d?.cliente?.tipoDocumento||'DNI';$('#docNumber').value=d?.cliente?.numeroDocumento||'';$('#customerName').value=d?.cliente?.nombre||'CONSUMIDOR FINAL';$('#customerTax').value=d?.cliente?.condicionIva||'Consumidor final';$('#customerPhone').value=d?.cliente?.telefono||'';$('#customerAddress').value=d?.cliente?.direccion||'';$('#customerEmail').value=d?.cliente?.email||'';$('#note').value=d?.nota||'';articles=(d?.articulos||[]).map(x=>({...blankArticle(),...x}));payments=(d?.valores||[]).map(x=>({...blankPayment(),...x}));renderArticles();renderPayments();lastSaved=d?structuredClone(d):null;$('#pos').value=d?.puntoVenta||$('#pos').value;setMsg(d?'Borrador cargado.':'Nuevo comprobante.','ok')}
+function formData(){const t=totals(),u=uid();return{id:draftId||newDraftId(),updatedAt:Date.now(),createdAt:lastSaved?.createdAt||Date.now(),usuarioId:String(u.id||''),usuario:String(u.nombre||u.usuario||''),sucursal:$('#branch').value,idPuntoVenta:Number($('#pos').value)||0,idCliente:Number($('#customerName').dataset.idCliente??'1'),puntoVenta:$('#pos').selectedOptions[0]?.textContent||'',idComprobante:Number($('#voucherType').value)||0,tipoComprobante:$('#voucherType').selectedOptions[0]?.textContent||'',fecha:$('#date').value,cae:$('#cae').value,facturaAsociada:[5,6,7,8,29].includes(Number($('#voucherType').value))?$('#invoiceReference').value.trim():'',vendedor:$('#seller').value,listaPrecios:$('#priceList').value,cliente:{tipoDocumento:$('#docType').value,numeroDocumento:$('#docNumber').value,nombre:$('#customerName').value,condicionIva:$('#customerTax').value,telefono:$('#customerPhone').value,direccion:$('#customerAddress').value,email:$('#customerEmail').value},articulos:articles.filter(r=>String(r.idart||'').trim()&&n(r.cantidad)>0),valores:payments.filter(r=>n(r.importe)>0).map(r=>({...r,idTipoPago:Number(r.idTipoPago)||Number((sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(r.tipo))?.id)||0})),nota:$('#note').value,totales:t,estado:issuedReceipt?'emitido':'borrador',emision:issuedReceipt,recoveryPending}}
+let associatedReceiptId=0;
+const formDataWithoutAssociation=formData;
+formData=function(){const data=formDataWithoutAssociation(),associate=[5,6,7,8,29].includes(Number(data.idComprobante));return{...data,boletaOrigen:$('#invoiceReference').value.trim(),idBoletaOrigen:associatedReceiptId,idFacturaAsociada:associate?associatedReceiptId:0}};
+function syncCustomerTaxShort(){
+  $('#customerTaxShort').textContent=({'Consumidor final':'CF','Responsable inscripto':'RI','Responsable no inscripto':'RNI','No responsable':'NR','Monotributista':'MT','Exento':'EX'})[$('#customerTax').value]||$('#customerTax').value;
+}
+function lockIssued(){const locked=Boolean(issuedReceipt||recoveryPending);$$('.sheet input:not(#voucherNumber),.sheet select,.sheet textarea,.sheet .remove,.sheet [data-open-description],.sheet .payment-drop,.sheet .client-drop').forEach(el=>{el.disabled=locked});$('#cancelEdit').disabled=Boolean(issueInProgress||printInProgress||!sqlConfig);$('#newInvoice').disabled=Boolean(issueInProgress);$('#voucherNumber').value=issuedReceipt?.numero||'Sin emitir';$('#modeBadge').textContent=issuedReceipt?'Emitido · SQL':issueInProgress?'Confirmando…':recoveryPending?'Emisión pendiente de verificar':'Borrador · sin emisión';$('#recoveryAlert').classList.toggle('open',Boolean(recoveryPending&&!issueInProgress));updateTrialButton()}
+function updateTrialButton(){
+  const id=Number($('#voucherType').value),type=(sqlConfig?.comprobantes||[]).find(x=>Number(x.id)===id);
+  $('#associatedRow label').textContent=[5,6].includes(id)?'Factura asociada (obligatoria)':[7,8,29].includes(id)?'Boleta original (opcional)':'Copiar boleta (opcional)';
+  $('#invoiceReference').title='Escribí el número para buscar una boleta de SQL.';
+  $('#searchAssociated').disabled=Boolean(issuedReceipt||recoveryPending||issueInProgress);
+  const enabled=(sqlConfig?.comprobantesEmitibles||[]).some(value=>Number(value)===id);
+  $('#reprintReceipt').hidden=!issuedReceipt;
+  $('#reprintReceipt').textContent=id===43?'Abrir presupuesto':'Reimprimir comprobante';
+  $('#reprintReceipt').disabled=printInProgress;
+  $('#issueInvoice').textContent=issueInProgress?'Procesando comprobante…':enabled?`Emitir ${type?.nombre||'comprobante'}`:'Emisión pendiente';
+  $('#issueInvoice').classList.toggle('issuing',issueInProgress);
+  const missingOriginal=[5,6].includes(id)&&(!associatedReceiptId||!$('#invoiceReference').value);
+  $('#issueInvoice').title=missingOriginal?'Buscá y seleccioná la factura original de SQL.':enabled?(type?.idAfip?'Solicitar CAE a ARCA y confirmar este comprobante en SQL':'Confirmar este comprobante en SQL'):'Este tipo no está habilitado para emisión';
+  $('#issueInvoice').disabled=Boolean(issuedReceipt||recoveryPending||issueInProgress)||!enabled||missingOriginal||!localDraftStoreReady||!$('#pos').value||!$('#seller').value;
+}
+function renderVoucherTypes(preferred){if(!sqlConfig)return;const point=Number($('#pos').value),types=sqlConfig.comprobantes.filter(x=>Number(x.idPuntoVenta)===point);$('#voucherType').innerHTML=types.map(x=>`<option value="${x.id}">${esc(x.codigo)} · ${esc(x.nombre)}</option>`).join('');const chosen=types.find(x=>String(x.id)===String(preferred))||types.find(x=>Number(x.id)===13)||types[0];if(chosen)$('#voucherType').value=String(chosen.id);updateTrialButton()}
+function applyData(d){paymentUndoHistory.length=0;paymentEditState=null;const station=workstation();issuedReceipt=d?.emision||null;draftId=d?.id||'';$('#branch').value=d?.sucursal||station.branch||'';$('#date').value=d?.fecha||today();$('#cae').value=d?.emision?.cae||d?.cae||'';$('#invoiceReference').value=d?.facturaAsociada||'';$('#seller').value=String((sqlConfig?.vendedores||[]).find(x=>String(x.id)===String(d?.vendedor||station.seller)||norm(x.nombre)===norm(d?.vendedor))?.id||'');const listaAnterior={minorista:'3',intermedio:'2',mayorista:'1'};$('#priceList').value=listaAnterior[d?.listaPrecios]||d?.listaPrecios||'3';$('#docType').value=d?.cliente?.tipoDocumento||'DNI';$('#docNumber').value=d?.cliente?.numeroDocumento||'';$('#customerName').value=d?.cliente?.nombre||'CONSUMIDOR FINAL';$('#customerName').dataset.idCliente=d?.idCliente||(norm(d?.cliente?.nombre||'CONSUMIDOR FINAL')==='consumidor final'?'1':'1');$('#customerTax').value=d?.cliente?.condicionIva||'Consumidor final';$('#customerPhone').value=d?.cliente?.telefono||'';$('#customerAddress').value=d?.cliente?.direccion||'';$('#customerEmail').value=d?.cliente?.email||'';$('#note').value=d?.nota||'';articles=(d?.articulos||[]).map(x=>({...blankArticle(),...x}));payments=(d?.valores||[]).map(x=>({...blankPayment(),...x,idTarjeta:Number(x.idTarjeta)||Number((sqlConfig?.tarjetas||[]).find(t=>norm(t.nombre)===norm(x.tarjeta))?.id)||0,coef:n(x.coef),impRec:n(x.impRec)}));renderArticles();renderPayments();lastSaved=d?structuredClone(d):null;$('#pos').value=String(d?.idPuntoVenta||(sqlConfig?.puntosVenta||[]).find(x=>String(x.id)===String(d?.puntoVenta)||norm(x.nombre)===norm(d?.puntoVenta))?.id||station.pos||'');renderVoucherTypes(d?.idComprobante||(sqlConfig?.comprobantes||[]).find(x=>norm(x.nombre)===norm(d?.tipoComprobante))?.id||13);lockIssued();setMsg(issuedReceipt?'Comprobante emitido en SQL. Podés reimprimirlo.':d?'Borrador cargado.':'Nuevo comprobante.','ok')}
+const applyDataOriginal=applyData;
+applyData=function(d){
+  recoveryPending=Boolean(d?.recoveryPending);recoveryCanRetry=false;
+  associatedReceiptId=Number(d?.idBoletaOrigen||d?.idFacturaAsociada)||0;
+  applyDataOriginal(d);
+  $('#invoiceReference').value=d?.boletaOrigen||d?.facturaAsociada||'';
+  syncCustomerTaxShort();
+  if(!d)$('#docNumber').value='00000001000';
+  try{if(d?.id)localStorage.setItem(ACTIVE_DRAFT_KEY,d.id);else localStorage.removeItem(ACTIVE_DRAFT_KEY)}catch{}
+  if(recoveryPending){setRecoveryAlert('No repitas esta venta ni borres este borrador. Verificá el estado de esta emisión.');verifyRecovery().catch(console.warn)}
+};
 function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,1);req.onupgradeneeded=()=>{const database=req.result;if(!database.objectStoreNames.contains(STORE)){const store=database.createObjectStore(STORE,{keyPath:'id'});store.createIndex('updatedAt','updatedAt')}};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}async function putDraft(data){const database=await openDB();return new Promise((resolve,reject)=>{const tx=database.transaction(STORE,'readwrite');tx.objectStore(STORE).put(data);tx.oncomplete=()=>{database.close();resolve()};tx.onerror=()=>reject(tx.error)})}async function allDrafts(){const database=await openDB();return new Promise((resolve,reject)=>{const req=database.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>{database.close();resolve(req.result.sort((a,b)=>b.updatedAt-a.updatedAt))};req.onerror=()=>reject(req.error)})}async function deleteDraft(id){const database=await openDB();return new Promise((resolve,reject)=>{const tx=database.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>{database.close();resolve()};tx.onerror=()=>reject(tx.error)})}
-async function saveDraft(silent=false){const data=formData();draftId=data.id;await putDraft(data);lastSaved=structuredClone(data);if(!silent)setMsg('Borrador guardado localmente.','ok')}function scheduleDraft(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft(true).catch(console.warn),700)}async function showDrafts(){const list=await allDrafts(),box=$('#draftList');box.innerHTML=list.length?list.map(d=>`<div class="draft"><div><strong>${esc(d.tipoComprobante)} · ${esc(d.cliente?.nombre||'Sin cliente')}</strong><small>${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)}</small></div><button data-open-draft="${d.id}">Abrir</button><button data-delete-draft="${d.id}">Eliminar</button></div>`).join(''):'<div class="empty">No hay borradores.</div>';$('#draftModal').classList.add('open');$$('[data-open-draft]').forEach(b=>b.addEventListener('click',async()=>{const d=list.find(x=>x.id===b.dataset.openDraft);applyData(d);closeDraftModal()}));$$('[data-delete-draft]').forEach(b=>b.addEventListener('click',async()=>{await deleteDraft(b.dataset.deleteDraft);showDrafts()}))}
-async function loadConfig(){try{const snap=await firestore().collection('configuracion').doc('empresa').get(),cfg=snap.exists?snap.data():{};const positions=Array.isArray(cfg.puntosVenta)?cfg.puntosVenta:[],select=$('#pos');select.innerHTML=positions.length?positions.map(p=>`<option value="${esc(p.numero)}" data-branch="${esc(p.sucursal)}">${esc(p.numero)} · ${esc(p.nombre)}</option>`).join(''):'<option value="">Sin configurar</option>';const preferred=positions.find(p=>p.predeterminado);if(preferred){select.value=preferred.numero;$('#branch').value=preferred.sucursal||'progreso_ruta'}const ready=Boolean(cfg.conexionFiscalVerificada&&cfg.apiFiscalUrl&&positions.some(p=>p.numero));$('#issueInvoice').disabled=!ready;$('#modeBadge').textContent=ready?'Conexión fiscal lista':'Modo preparación';$('#issueInvoice').title=ready?'Emitir mediante la API fiscal':'Completá Empresa y verificá la conexión fiscal';window.enterpriseConfig=cfg}catch(e){console.warn(e);setMsg('No se pudo cargar la configuración de empresa.','error')}}async function loadCatalog(){try{const result=await window.CorralonSystem.faltantes.loadCatalog(false,{},false);catalog=Array.isArray(result?.catalog)?result.catalog:[];$('#catalogStatus').textContent=`${catalog.length.toLocaleString('es-AR')} artículos disponibles desde IndexedDB`}catch(e){console.warn(e);$('#catalogStatus').textContent='No se pudo cargar el catálogo';setMsg('El catálogo no está disponible. Podés continuar manualmente.','error')}}
+async function saveDraft(silent=false){const data=formData();draftId=data.id;await putDraft(data);lastSaved=structuredClone(data);if(!silent)setMsg('Borrador guardado localmente.','ok')}function scheduleDraft(){if(issuedReceipt)return;clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft(true).catch(console.warn),700)}async function showDrafts(){const list=await allDrafts(),box=$('#draftList');box.innerHTML=list.length?list.map(d=>`<div class="draft"><div><strong>${esc(d.emision?.numero||d.tipoComprobante)} · ${esc(d.cliente?.nombre||'Sin cliente')}</strong><small>${d.emision?'EMITIDO · ':''}${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)}</small></div><button data-open-draft="${d.id}">Abrir</button><button data-delete-draft="${d.id}">${d.emision?'Quitar de esta PC':'Eliminar borrador'}</button></div>`).join(''):'<div class="empty">No hay borradores.</div>';$('#draftModal').classList.add('open');$$('[data-open-draft]').forEach(b=>b.addEventListener('click',async()=>{const d=list.find(x=>x.id===b.dataset.openDraft);applyData(d);closeDraftModal()}));$$('[data-delete-draft]').forEach(b=>b.addEventListener('click',async()=>{if(b.dataset.deleteDraft===draftId)applyData(null);await deleteDraft(b.dataset.deleteDraft);showDrafts()}))}
+showDrafts=async function(){
+  const drafts=(await allDrafts()).filter(d=>d.recoveryPending&&!d.emision);
+  $('#draftList').innerHTML=drafts.length?drafts.map(d=>`<div class="draft"><div><strong>${esc(d.tipoComprobante||'Comprobante')} · ${esc(d.cliente?.nombre||'Sin cliente')}</strong><small>${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)} · Pendiente de verificar</small></div><button data-open-draft="${d.id}" type="button">Abrir</button></div>`).join(''):'<div class="empty">No hay emisiones pendientes.</div>';
+  $('#draftModal').classList.add('open');
+  $$('[data-open-draft]').forEach(button=>button.addEventListener('click',()=>{if(!sqlConfig){setMsg('La venta sigue guardada. Esperá a que vuelva SQL para abrirla.','error');return}const draft=drafts.find(d=>d.id===button.dataset.openDraft);if(draft){applyData(draft);closeDraftModal()}}));
+};
+async function refreshPendingButton(){const count=(await allDrafts()).filter(d=>d.recoveryPending&&!d.emision).length;$('#openDrafts').hidden=count===0;$('#openDrafts').textContent=`Pendientes (${count})`}
+const saveDraftOriginal=saveDraft;
+saveDraft=async function(silent=false){await saveDraftOriginal(silent);try{localStorage.setItem(ACTIVE_DRAFT_KEY,draftId)}catch{}await refreshPendingButton()};
+async function loadConfig(){
+  let sqlRespondio=false;
+  try{
+    const response=await fetch(`${SQL_PREPARACION}/bootstrap`,{cache:'no-store'}),cfg=await response.json();
+    if(!response.ok||!cfg.ok)throw new Error(cfg.error||'No se pudo consultar SQL');
+    sqlRespondio=true;
+    if(!Array.isArray(cfg.tarjetasCuotas))throw new Error(`La API de facturación está desactualizada. ${API_RESTART_HINT}`);
+    if(cfg.impresionDirecta!==true)throw new Error(`La API de facturación aún no tiene impresión directa. ${API_RESTART_HINT}`);
+    if(cfg.stockEnVivo!==true)throw new Error(`La API de facturación aún no actualiza stock en vivo. ${API_RESTART_HINT}`);
+    sqlConfig=cfg;
+    const station=workstation(),currentPos=$('#pos').value||station.pos;
+    $('#pos').innerHTML='<option value="">Elegir punto de venta</option>'+cfg.puntosVenta.map(x=>`<option value="${x.id}" data-sucursal="${x.idSucursal}">${esc(x.id)} · ${esc(x.nombre)}</option>`).join('');
+    if(station.branch&&!$('#branch').value)$('#branch').value=station.branch;
+    const puntoInicial=cfg.puntosVenta.find(x=>String(x.id)===String(currentPos));
+    if(puntoInicial){$('#pos').value=String(puntoInicial.id);$('#branch').value=Number(puntoInicial.idSucursal)===2?'calle5_espana':'progreso_ruta'}
+    renderVoucherTypes(13);
+    const currentSeller=$('#seller').value||station.seller;
+    $('#seller').innerHTML='<option value="">Elegir vendedor</option>'+cfg.vendedores.map(x=>`<option value="${x.id}">${esc(x.nombre)}</option>`).join('');
+    $('#seller').value=String(cfg.vendedores.find(x=>String(x.id)===String(currentSeller))?.id||'');
+    $('#paymentTypesSql').innerHTML=(cfg.tiposPago||[]).filter(x=>[1,3,5,6].includes(Number(x.clase))&&Number(x.id)!==14).map(x=>`<option value="${esc(x.nombre)}"></option>`).join('');
+    $('#paymentCardsSql').innerHTML=(cfg.tarjetas||[]).map(x=>`<option value="${esc(x.nombre)}"></option>`).join('');
+    updateTrialButton();
+    $('#modeBadge').textContent='Borrador · sin emisión';
+    renderPayments();
+    return true;
+  }catch(e){
+    console.warn(e);$('#issueInvoice').disabled=true;$('#modeBadge').textContent='Facturación central no disponible';$('#catalogStatus').textContent='Servicio de facturación no disponible';
+    setMsg(sqlRespondio?e.message:SQL_CONNECTION_MESSAGE,'error');
+    return false;
+  }
+}
+async function sqlConnectionAvailable(){
+  try{
+    const response=await fetch(`${SQL_PREPARACION}/bootstrap`,{cache:'no-store',signal:AbortSignal.timeout(10000)});
+    if(!response.ok)return false;
+    return (await response.json()).ok===true;
+  }catch{return false}
+}
+async function loadTicketPrinters(){
+  const [central,local]=await Promise.allSettled([
+    fetch(`${SQL_PREPARACION}/impresoras`,{cache:'no-store'}).then(async response=>{const data=await response.json();if(!response.ok||!data.ok)throw new Error('No se pudieron consultar las impresoras del servidor.');return data.impresoras||[]}),
+    fetch(`${LOCAL_PRINTER_API}/impresoras`,{cache:'no-store',signal:AbortSignal.timeout(1200)}).then(async response=>{const data=await response.json();if(!response.ok||!data.ok)throw new Error('Conector local no disponible.');return data.impresoras||[]})
+  ]);
+  const remote=!['localhost','127.0.0.1'].includes(location.hostname);
+  const printers=[BROWSER_PRINTER,...(local.status==='fulfilled'?local.value:[]).map(name=>`local:${name}`),...(central.status==='fulfilled'?central.value:[]).map(name=>`server:${name}`)];
+  let saved='';try{saved=localStorage.getItem(TICKET_PRINTER_KEY)||''}catch{}
+  if(saved&&!saved.includes(':')&&printers.includes(`server:${saved}`))saved=`server:${saved}`;
+  const current=$('#ticketPrinter').value;
+  const selected=printers.includes(saved)?saved:(printers.includes(current)?current:(remote?BROWSER_PRINTER:''));
+  const label=value=>value===BROWSER_PRINTER?'Esta PC · abrir selector de impresión':value.startsWith('local:')?`Esta PC · ${value.slice(6)}`:`Servidor · ${value.slice(7)}`;
+  const options='<option value="">Seleccionar impresora…</option>'+printers.map(value=>`<option value="${esc(value)}">${esc(label(value))}</option>`).join('');
+  for(const select of [$('#ticketPrinter'),$('#previewPrinter'),$('#printerSetupChoice')]){select.innerHTML=options;select.value=selected}
+  $('#doPrintTrial').disabled=Boolean((previewDraft?.emision||issuedReceipt)&&!selected&&$('#trialModal').classList.contains('open'));
+  return printers;
+}
+async function loadSqlCatalog(){
+  if(!sqlConfig)return;
+  const point=$('#pos').value,list=$('#priceList').value;
+  if(!point){catalog=[];$('#catalogStatus').textContent='Elegí sucursal y punto de venta';return}
+  try{
+    const url=`${SQL_PREPARACION}/catalogo?puntoVenta=${encodeURIComponent(point)}&lista=${encodeURIComponent(list)}`;
+    const response=await fetch(url,{cache:'no-store'}),result=await response.json();
+    if(point!==$('#pos').value||list!==$('#priceList').value)return;
+    if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar el catálogo');
+    catalog=result.catalogo||[];
+    syncArticleCosts();
+    renderArticles();
+    stockStatusError=false;
+    $('#catalogStatus').textContent=`${catalog.length.toLocaleString('es-AR')} artículos de SQL Server`;
+    refreshSelectedStock().catch(console.warn);
+  }catch(e){
+    if(point!==$('#pos').value||list!==$('#priceList').value)return;
+    console.warn(e);catalog=[];$('#catalogStatus').textContent='Catálogo SQL no disponible';setMsg(e.message,'error');
+  }
+}
+async function refreshSelectedStock(){
+  if(!sqlConfig||document.visibilityState==='hidden')return;
+  if(stockRefreshBusy){stockRefreshAgain=true;return}
+  const point=$('#pos').value;
+  const ids=[...new Set(articles.map(row=>String(row.idart||'').trim()).filter(Boolean))];
+  if(!point||!ids.length)return;
+  stockRefreshBusy=true;
+  try{
+    const url=`${SQL_PREPARACION}/stock?puntoVenta=${encodeURIComponent(point)}&ids=${encodeURIComponent(ids.join(','))}`;
+    const response=await fetch(url,{cache:'no-store'}),result=await response.json();
+    if(!response.ok||!result.ok||!Array.isArray(result.stock))throw new Error(result.error||'No se pudo actualizar el stock.');
+    if(point!==$('#pos').value)return;
+    const values=new Map(result.stock.map(row=>[String(row.idart||'').trim(),n(row.stock)]));
+    let changed=false;
+    articles.forEach((row,index)=>{
+      const id=String(row.idart||'').trim();
+      if(!values.has(id)||n(row.stock)===values.get(id))return;
+      row.stock=values.get(id);changed=true;
+      const field=$(`#articleBody [data-row="${index}"][data-a="stock"]`);
+      if(field)field.value=num(row.stock);
+    });
+    catalog.forEach(row=>{const id=String(row.idart||'').trim();if(values.has(id))row.stock=values.get(id)});
+    if(stockStatusError){stockStatusError=false;$('#catalogStatus').textContent=`${catalog.length.toLocaleString('es-AR')} artículos de SQL Server`}
+    if(changed)scheduleDraft();
+  }catch(error){
+    console.warn('Stock sin actualizar:',error);
+    if(point===$('#pos').value){stockStatusError=true;$('#catalogStatus').textContent='Stock sin actualizar · revisá SQL'}
+  }
+  finally{
+    stockRefreshBusy=false;
+    if(stockRefreshAgain){stockRefreshAgain=false;setTimeout(()=>refreshSelectedStock().catch(console.warn),0)}
+  }
+}
+function bindCustomerSearch(){
+  const input=$('#customerName'),choices=$('#clientesSql');
+  document.body.appendChild(choices);
+  function positionChoices(){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,360),window.innerWidth-20);choices.style.width=`${width}px`;choices.style.left=`${Math.max(10,Math.min(rect.left,window.innerWidth-width-10))}px`;choices.style.top=`${rect.bottom+2}px`;choices.style.maxHeight=`${Math.max(80,Math.min(220,window.innerHeight-rect.bottom-10))}px`}
+  let results=[],timer=0,sequence=0,active=-1,anchor=0,navigated=false,searchText='',loadingPage=false;
+  function close(){choices.classList.remove('open');input.setAttribute('aria-expanded','false');active=-1;navigated=false}
+  function draw(scrollToMatch=false){positionChoices();choices.innerHTML=results.map((x,i)=>`<div class="client-option ${i===active?'active':''}" data-client-index="${i}" role="option" aria-selected="${i===active}"><span>${esc(x.nombre)}</span><small>${esc(x.documento||'')} · ID ${esc(x.id)}</small></div>`).join('');choices.classList.toggle('open',results.length>0);input.setAttribute('aria-expanded',String(results.length>0));const target=choices.querySelector(`[data-client-index="${scrollToMatch?anchor:active}"]`);if(target)choices.scrollTop+=target.getBoundingClientRect().top-choices.getBoundingClientRect().top}
+  async function loadPage(start,prepend){
+    if(loadingPage||!choices.classList.contains('open'))return;
+    loadingPage=true;const request=sequence,oldHeight=choices.scrollHeight,oldTop=choices.scrollTop;
+    try{
+      const response=await fetch(`${SQL_PREPARACION}/clientes?q=${encodeURIComponent(searchText)}&start=${start}`,{cache:'no-store'}),data=await response.json();
+      if(request!==sequence||!response.ok||!data.ok||!choices.classList.contains('open'))return;
+      const selectedId=results[active]?.id,anchorRow=results[anchor]?.rn,byRow=new Map(results.map(x=>[Number(x.rn),x]));
+      (data.clientes||[]).forEach(x=>byRow.set(Number(x.rn),x));
+      results=[...byRow.values()].sort((a,b)=>Number(a.rn)-Number(b.rn));
+      active=selectedId==null?-1:results.findIndex(x=>String(x.id)===String(selectedId));
+      anchor=anchorRow==null?0:Math.max(0,results.findIndex(x=>Number(x.rn)===Number(anchorRow)));
+      draw();choices.scrollTop=prepend?oldTop+choices.scrollHeight-oldHeight:oldTop;
+    }catch(error){console.warn(error)}finally{loadingPage=false}
+  }
+  function selectClient(chosen){
+    if(!chosen)return;
+    input.value=chosen.nombre||'';
+    input.dataset.idCliente=String(chosen.id);
+    $('#docNumber').value=chosen.documento||'';
+    $('#docType').value=Number(chosen.idTipoDoc)===67?'CUIT':Number(chosen.idTipoDoc)===32?'Sin identificar':'DNI';
+    $('#customerTax').value=({1:'Responsable inscripto',2:'Responsable no inscripto',3:'No responsable',4:'Exento',5:'Consumidor final',6:'Monotributista'})[Number(chosen.idTipoIva)]||'Consumidor final';
+    syncCustomerTaxShort();
+    $('#customerAddress').value=chosen.direccion||'';
+    $('#customerPhone').value=chosen.telefono||'';
+    $('#customerEmail').value=chosen.email||'';
+    scheduleDraft();
+    close();
+  }
+  function search(q){
+    clearTimeout(timer);results=[];active=-1;anchor=0;navigated=false;searchText=q;close();
+    const request=++sequence;
+    timer=setTimeout(async()=>{
+      try{
+        const response=await fetch(`${SQL_PREPARACION}/clientes?q=${encodeURIComponent(q)}`,{cache:'no-store'}),data=await response.json();
+        if(request!==sequence||document.activeElement!==input||!response.ok||!data.ok)return;
+        results=data.clientes||[];anchor=Math.max(0,results.findIndex(x=>Number(x.rn)===Number(results[0]?.firstMatch)));active=-1;draw(true);
+      }catch(error){console.warn(error)}
+    },q?180:0);
+  }
+  input.addEventListener('input',()=>{
+    if(Number(input.dataset.idCliente)>1){
+      $('#docNumber').value='00000001000';$('#docType').value='DNI';$('#customerTax').value='Consumidor final';
+      syncCustomerTaxShort();
+      $('#customerAddress').value='';$('#customerPhone').value='';$('#customerEmail').value='';
+    }
+    input.dataset.idCliente='1';
+    scheduleDraft();search(input.value.trim());
+  });
+  $('#customerDrop').addEventListener('mousedown',event=>event.preventDefault());
+  $('#customerDrop').addEventListener('click',()=>{if(choices.classList.contains('open'))close();else{input.focus();search(input.value.trim())}});
+  input.addEventListener('keydown',event=>{
+    if(event.key==='ArrowDown'&&choices.classList.contains('open')&&results.length){event.preventDefault();active=Math.min(results.length-1,navigated?active+1:anchor);navigated=true;draw();if(active===results.length-1&&Number(results.at(-1).rn)<Number(results[0].total))loadPage(Number(results.at(-1).rn)+1,false)}
+    else if(event.key==='ArrowUp'&&choices.classList.contains('open')&&results.length){event.preventDefault();active=Math.max(0,navigated?active-1:anchor-1);navigated=true;draw();if(active===0&&Number(results[0].rn)>1)loadPage(Math.max(1,Number(results[0].rn)-20),true)}
+    else if(event.key==='Enter'){
+      if(navigated&&active>=0&&results[active]){event.preventDefault();selectClient(results[active])}
+      else close();
+    }else if(event.key==='F4'){event.preventDefault();if(choices.classList.contains('open'))close();else search(input.value.trim())}
+    else if(event.key==='Escape'){event.stopPropagation();close()}
+  });
+  input.addEventListener('blur',()=>{sequence++;setTimeout(close,120)});
+  choices.addEventListener('mousedown',event=>event.preventDefault());
+  choices.addEventListener('click',event=>{const option=event.target.closest('[data-client-index]');if(option)selectClient(results[Number(option.dataset.clientIndex)])});
+  choices.addEventListener('scroll',()=>{if(loadingPage||!results.length)return;const first=results[0],last=results[results.length-1];if(choices.scrollTop<24&&Number(first.rn)>1)loadPage(Math.max(1,Number(first.rn)-20),true);else if(choices.scrollTop+choices.clientHeight>=choices.scrollHeight-24&&Number(last.rn)<Number(first.total))loadPage(Number(last.rn)+1,false)},{passive:true});
+  window.addEventListener('resize',()=>{if(choices.classList.contains('open'))positionChoices()});
+  document.addEventListener('scroll',event=>{if(event.target===choices)return;if(choices.classList.contains('open'))positionChoices()},true);
+}
+function syncPaymentTableFromDom(){
+  $$('#paymentBody tr[data-row]').forEach(tr=>{
+    const row=payments[Number(tr.dataset.row)];if(!row)return;
+    const typeInput=tr.querySelector('[data-p="tipo"]'),cardInput=tr.querySelector('[data-p="tarjeta"]'),plans=tr.querySelector('[data-p="cuotas"]');
+    const type=(sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(typeInput?.value)&&[1,3,5,6].includes(Number(x.clase))&&Number(x.id)!==14);
+    row.tipo=type?.nombre||typeInput?.value||'';row.idTipoPago=Number(type?.id)||0;
+    const card=(sqlConfig?.tarjetas||[]).find(x=>norm(x.nombre)===norm(cardInput?.value));
+    row.tarjeta=card?.nombre||cardInput?.value||'Ninguna';row.idTarjeta=Number(card?.id)||0;
+    row.cuotas=Number(plans?.value)||0;
+  });
+  reconcilePaymentRows();
+}
+function pastePaymentTable(text,startCell){
+  const selected=$('#paymentTable')._selectionController?.getSelectedCells()||[];
+  const first=(selected.length?selected.slice().sort((a,b)=>Number(a.dataset.row)-Number(b.dataset.row)||Number(a.dataset.col)-Number(b.dataset.col))[0]:startCell)?.closest?.('#paymentBody [data-row][data-col]');
+  if(!first)return false;
+  commitPaymentEdit();
+  const rows=String(text).replace(/\r\n?/g,'\n').replace(/\n$/,'').split('\n').map(line=>line.split('\t'));
+  const startRow=Number(first.dataset.row),startCol=Number(first.dataset.col);
+  rows.forEach((values,rowOffset)=>{
+    const rowIndex=startRow+rowOffset;
+    if(rowIndex>=payments.length&&totals().difference>=-.005)return;
+    while(payments.length<=rowIndex)payments.push(blankPayment('Efectivo',false));
+    const row=payments[rowIndex];
+    values.forEach((value,colOffset)=>{
+      const col=startCol+colOffset;
+      if(col<0||col>6)return;
+      const beforeAll=payments.map(item=>({id:paymentRowId(item),data:structuredClone(item)}));
+      if(col===0){
+        const type=(sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(value)&&[1,3,5,6].includes(Number(x.clase))&&Number(x.id)!==14);
+        row.tipo=type?.nombre||value;row.idTipoPago=Number(type?.id)||0;
+        row.idTarjeta=0;row.tarjeta='Ninguna';row.cuotas=0;row.coef=n(type?.recargoInicial);updatePaymentAdjustment(row,'coef');
+      }else if(col===1){row.importe=n(value);row.autoDifference=false;updatePaymentAdjustment(row,'importe')}
+      else if(col===2){
+        if(![3,5].includes(Number(paymentType(row)?.clase)))return;
+        const card=(sqlConfig?.tarjetas||[]).find(x=>norm(x.nombre)===norm(value));
+        row.tarjeta=card?.nombre||value;row.idTarjeta=Number(card?.id)||0;row.cuotas=0;row.coef=0;
+        if(Number(paymentType(row)?.clase)===5){const plan=cardPlans(row)[0];if(plan){row.cuotas=Number(plan.cuotas);row.coef=n(plan.coeficiente)}}
+        updatePaymentAdjustment(row,'coef');
+      }else if(col===3){
+        if(Number(paymentType(row)?.clase)!==5||!row.idTarjeta)return;
+        row.cuotas=Number(n(value));row.coef=n(cardPlans(row).find(x=>Number(x.cuotas)===row.cuotas)?.coeficiente);updatePaymentAdjustment(row,'coef');
+      }else if(col===4)row.descripcion=value;
+      else if(col===5){row.coef=n(value)/100;updatePaymentAdjustment(row,'coef')}
+      else if(col===6){row.impRec=n(value);updatePaymentAdjustment(row,'impRec')}
+      if(JSON.stringify(beforeAll)!==JSON.stringify(payments.map(item=>({id:paymentRowId(item),data:item})))){
+        paymentUndoHistory.push({movement:++paymentMoveId,rowId:paymentRowId(row),rowIndex,col,beforeAll});
+        if(paymentUndoHistory.length>150)paymentUndoHistory.shift();
+      }
+    });
+  });
+  reconcilePaymentRows();renderPayments();scheduleDraft();
+  return true;
+}
 function bindStrictFormatting(){
   function target(event){return event.target?.closest?.('[data-money],[data-number],[data-percent]')}
   function format(el,fixed=false){
@@ -393,7 +977,7 @@ function bindStrictFormatting(){
   document.addEventListener('input',event=>format(target(event),false),true);
   document.addEventListener('focusout',event=>format(target(event),true));
 }
-function bindTableRules(){const F=window.CorralonFunciones,selected={article:new Set(),payment:new Set()},anchor={article:null,payment:null};function info(table){return table.id==='articleTable'?{name:'article',rows:articles,render:renderArticles,body:'#articleBody',headers:['IDArt','Cód. prov.','Artículo','Cantidad','Precio unit.','Stock','% Dto.','IVA','Importe']}:{name:'payment',rows:payments,render:renderPayments,body:'#paymentBody',headers:['Tipo de valor','Importe','Tarjeta / cuenta','Cuotas','Descripción','Total']}}function repaint(table){const x=info(table);table.querySelectorAll('tbody tr[data-row]').forEach(tr=>tr.classList.toggle('selected',selected[x.name].has(+tr.dataset.row)))}function selectRow(table,index,event){const x=info(table),set=selected[x.name];if(event.shiftKey&&anchor[x.name]!==null){if(!event.ctrlKey)set.clear();const a=Math.min(anchor[x.name],index),b=Math.max(anchor[x.name],index);for(let i=a;i<=b;i++)set.add(i)}else if(event.ctrlKey||event.metaKey){set.has(index)?set.delete(index):set.add(index);anchor[x.name]=index}else{set.clear();set.add(index);anchor[x.name]=index}repaint(table)}function sync(table){const x=info(table);table.querySelectorAll('tbody [data-row]').forEach(el=>{const row=x.rows[+el.dataset.row],key=el.dataset.a||el.dataset.p;if(row&&key)row[key]=['cantidad','precio','descuento','iva','importe','cuotas'].includes(key)?n(el.value):el.value});renderTotals();scheduleDraft()}[$('#articleTable'),$('#paymentTable')].forEach(table=>{table.addEventListener('mousedown',e=>{if(e.button!==0)return;const tr=e.target.closest('tbody tr[data-row]');if(tr&&!e.target.closest('button'))selectRow(table,+tr.dataset.row,e)});F?.bindTableSelectPaste?.({root:table,cellSelector:'tbody [data-row][data-col]',columnSelector:'th[data-col]',selectOnCellMouseDown:false,clearOnDelete:false,setCellValue:(cell,value)=>{if(!cell||cell.readOnly)return;cell.value=value;cell.dispatchEvent(new Event('input',{bubbles:true}))},afterPaste:()=>{sync(table);info(table).render()}});F?.bindTableSort?.({root:table,sort:(key,dir)=>{if(!key||!dir)return;const x=info(table),filled=x.rows.filter(r=>x.name==='article'?articleStarted(r):paymentStarted(r)),blank=x.rows.filter(r=>!filled.includes(r));filled.sort((a,b)=>{const av=a[key],bv=b[key],numeric=Number.isFinite(Number(av))&&Number.isFinite(Number(bv)),cmp=numeric?Number(av)-Number(bv):String(av||'').localeCompare(String(bv||''),'es',{numeric:true});return dir==='asc'?cmp:-cmp});x.name==='article'?articles=[...filled,...blank]:payments=[...filled,...blank];x.render()}})});document.addEventListener('keydown',e=>{const table=e.target.closest?.('.grid');if(!table)return;const x=info(table);if(e.key==='Delete'&&selected[x.name].size){e.preventDefault();const indexes=[...selected[x.name]].sort((a,b)=>b-a);indexes.forEach(i=>x.rows.splice(i,1));selected[x.name].clear();x.render();scheduleDraft();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'&&selected[x.name].size){const indexes=[...selected[x.name]].sort((a,b)=>a-b),data=indexes.map(i=>{const r=x.rows[i];return x.name==='article'?[r.idart,r.codProv,r.descripcion,num(r.cantidad),money(r.precio),num(r.stock),num(r.descuento),`${n(r.iva)}%`,money(n(r.cantidad)*n(r.precio)*(1-n(r.descuento)/100))]:[r.tipo,money(r.importe),r.tarjeta,r.cuotas,r.descripcion,money(r.importe)]});e.preventDefault();navigator.clipboard?.writeText(F?.formatClipboardTable?.([x.headers,...data])||[x.headers,...data].map(r=>r.join('\t')).join('\n'));return}if((e.ctrlKey||e.metaKey)&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){const cell=e.target.closest('[data-row][data-col]');if(!cell)return;const value=String(cell.value||''),full=cell.selectionStart===0&&cell.selectionEnd===value.length,atStart=cell.selectionStart===0&&cell.selectionEnd===0,atEnd=cell.selectionStart===value.length&&cell.selectionEnd===value.length;if(e.key==='ArrowLeft'&&!full&&!atStart)return;if(e.key==='ArrowRight'&&!full&&!atEnd)return;e.preventDefault();const row=+cell.dataset.row,col=+cell.dataset.col,targetRow=e.key==='ArrowUp'?0:e.key==='ArrowDown'?x.rows.length-1:row,targetCol=e.key==='ArrowLeft'?0:e.key==='ArrowRight'?Math.max(...[...table.querySelectorAll('tbody [data-col]:not([readonly])')].map(c=>+c.dataset.col)):col;table.querySelector(`tbody [data-row="${targetRow}"][data-col="${targetCol}"]`)?.focus()}})}
+function bindTableRules(){const F=window.CorralonFunciones,selected={article:new Set(),payment:new Set()},anchor={article:null,payment:null};function info(table){return table.id==='articleTable'?{name:'article',rows:articles,render:renderArticles,body:'#articleBody',headers:['IDArt','Cód. prov.','Artículo','Cantidad','Precio unit.','Stock','% Margen','% Dto.','Importe']}:{name:'payment',rows:payments,render:renderPayments,body:'#paymentBody',headers:['Tipo de valor','Importe','Tarjeta / cuenta','Cuotas','Descripción','% Dto./Rec.','$ Dto./Rec.','Total']}}function repaint(table){const x=info(table);table.querySelectorAll('tbody tr[data-row]').forEach(tr=>tr.classList.toggle('selected',selected[x.name].has(+tr.dataset.row)))}function selectRow(table,index,event){const x=info(table),set=selected[x.name];if(x.name==='payment')table._selectionController?.clearSelection();if(event.shiftKey&&anchor[x.name]!==null){if(!event.ctrlKey)set.clear();const a=Math.min(anchor[x.name],index),b=Math.max(anchor[x.name],index);for(let i=a;i<=b;i++)set.add(i)}else if(event.ctrlKey||event.metaKey){set.has(index)?set.delete(index):set.add(index);anchor[x.name]=index}else{set.clear();set.add(index);anchor[x.name]=index}repaint(table)}function sync(table){const x=info(table);if(x.name==='payment'){syncPaymentTableFromDom();renderTotals();scheduleDraft();return}table.querySelectorAll('tbody [data-row]').forEach(el=>{const row=x.rows[+el.dataset.row],key=el.dataset.a||el.dataset.p;if(row&&key)row[key]=key==='coef'?n(el.value)/100:['cantidad','precio','margen','descuento','iva','importe','impRec','cuotas','idTarjeta'].includes(key)?n(el.value):el.value;if(x.name==='payment'&&['importe','coef','impRec'].includes(key))updatePaymentAdjustment(row,key)});renderTotals();scheduleDraft()}[$('#articleTable'),$('#paymentTable')].forEach(table=>{if(table.id==='paymentTable')table.addEventListener('payment-rendered',()=>repaint(table));table.addEventListener('mousedown',e=>{if(e.button!==0)return;const tr=e.target.closest('tbody tr[data-row]');if(tr&&!e.target.closest('button'))selectRow(table,+tr.dataset.row,e)});table._selectionController=F?.bindTableSelectPaste?.({root:table,cellSelector:'tbody [data-row][data-col]',columnSelector:'th[data-col]',selectOnCellMouseDown:false,clearOnDelete:false,pasteText:table.id==='paymentTable'?pastePaymentTable:null,setCellValue:(cell,value)=>{if(!cell||cell.readOnly||cell.disabled)return;cell.value=value;cell.dispatchEvent(new Event('input',{bubbles:true}))},afterPaste:()=>{sync(table);info(table).render()}});F?.bindTableSort?.({root:table,sort:(key,dir)=>{if(!key||!dir)return;const x=info(table),filled=x.rows.filter(r=>x.name==='article'?articleStarted(r):paymentStarted(r)),blank=x.rows.filter(r=>!filled.includes(r));filled.sort((a,b)=>{const av=a[key],bv=b[key],numeric=Number.isFinite(Number(av))&&Number.isFinite(Number(bv)),cmp=numeric?Number(av)-Number(bv):String(av||'').localeCompare(String(bv||''),'es',{numeric:true});return dir==='asc'?cmp:-cmp});x.name==='article'?articles=[...filled,...blank]:payments=[...filled,...blank];x.render()}})});document.addEventListener('keydown',e=>{const table=e.target.closest?.('.grid');if(!table)return;const x=info(table);if(e.key==='Delete'&&selected[x.name].size&&!(x.name==='payment'&&e.target.matches('input:not([readonly]),select')&&!e.target.classList.contains('keyboard-focus'))){e.preventDefault();const indexes=[...selected[x.name]].sort((a,b)=>b-a);indexes.forEach(i=>x.rows.splice(i,1));selected[x.name].clear();if(x.name==='payment')reconcilePaymentRows();x.render();scheduleDraft();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'&&selected[x.name].size&&!(x.name==='payment'&&table._selectionController?.getSelectedCells().length)){const indexes=[...selected[x.name]].sort((a,b)=>a-b),data=indexes.map(i=>{const r=x.rows[i];return x.name==='article'?[r.idart,r.codProv,r.descripcion,num(r.cantidad),money(r.precio),num(r.stock),num(articleMargin(r))+' %',num(r.descuento)+' %',money(n(r.cantidad)*n(r.precio))]:[r.tipo,money(r.importe),r.tarjeta,r.cuotas,r.descripcion,num(n(r.coef)*100)+' %',money(r.impRec),money(n(r.importe)+n(r.impRec))]});e.preventDefault();navigator.clipboard?.writeText(F?.formatClipboardTable?.([x.headers,...data])||[x.headers,...data].map(r=>r.join('\t')).join('\n'));return}if((e.ctrlKey||e.metaKey)&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){const cell=e.target.closest('[data-row][data-col]');if(!cell)return;const value=String(cell.value||''),full=cell.selectionStart===0&&cell.selectionEnd===value.length,atStart=cell.selectionStart===0&&cell.selectionEnd===0,atEnd=cell.selectionStart===value.length&&cell.selectionEnd===value.length;if(e.key==='ArrowLeft'&&!full&&!atStart)return;if(e.key==='ArrowRight'&&!full&&!atEnd)return;e.preventDefault();const row=+cell.dataset.row,col=+cell.dataset.col,targetRow=e.key==='ArrowUp'?0:e.key==='ArrowDown'?x.rows.length-1:row,targetCol=e.key==='ArrowLeft'?0:e.key==='ArrowRight'?Math.max(...[...table.querySelectorAll('tbody [data-col]:not([readonly])')].map(c=>+c.dataset.col)):col;table.querySelector(`tbody [data-row="${targetRow}"][data-col="${targetCol}"]`)?.focus()}})}
 
 function bindArticleGridNavigation(){
   const table=$('#articleTable'),selector='tbody [data-a]:not([readonly]):not([data-a="iva"])';
@@ -430,10 +1014,10 @@ function bindArticleGridNavigation(){
     const input=event.target.closest('[data-a="idart"],[data-a="codProv"],[data-a="descripcion"]');
     if(!input||event.key!=='Enter'||!String(input.value||'').trim())return;
     if(activeSuggestionInput!==input||!$('#suggestions').classList.contains('open'))showSuggestions(input);
-    if(!suggestionItems.length)return;
+    if(suggestionIndex<0||!suggestionItems[suggestionIndex])return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    pickSuggestion(0);
+    pickSuggestion(suggestionIndex);
   },true);
 
   table.addEventListener('mousedown',event=>{
@@ -503,15 +1087,98 @@ function bindArticleGridNavigation(){
     focusCell(target,true);
   });
 }
+function bindPaymentGridNavigation(){
+  const table=$('#paymentTable'),selector='#paymentBody [data-p]:not([disabled])';
+  const cells=()=>[...table.querySelectorAll(selector)];
+  const rowCells=row=>cells().filter(cell=>Number(cell.dataset.row)===row).sort((a,b)=>Number(a.dataset.col)-Number(b.dataset.col));
+  const cellAt=(row,col)=>cells().find(cell=>Number(cell.dataset.row)===row&&Number(cell.dataset.col)===col);
+  function focusCell(cell,keyboard=true){
+    if(!cell)return false;
+    table.querySelectorAll('.keyboard-focus').forEach(el=>el.classList.remove('keyboard-focus'));
+    cell.focus();if(typeof cell.select==='function')cell.select();
+    if(keyboard)cell.classList.add('keyboard-focus');
+    cell.scrollIntoView({block:'nearest',inline:'nearest'});
+    return true;
+  }
+  function caret(cell){
+    if(cell.tagName==='SELECT')return{full:true,start:true,end:true};
+    const value=String(cell.value||''),start=cell.selectionStart??0,end=cell.selectionEnd??start;
+    return{full:start===0&&end===value.length,start:start===0&&end===0,end:start===value.length&&end===value.length};
+  }
+  table.addEventListener('mousedown',event=>{
+    const cell=event.target.closest(selector);
+    if(!cell||event.target.closest('.payment-drop'))return;
+    cell.classList.remove('keyboard-focus');
+    if(document.activeElement!==cell){event.preventDefault();focusCell(cell,true)}
+  });
+  table.addEventListener('focusin',event=>{
+    const cell=event.target.closest(selector);if(!cell)return;
+    if(paymentEditState?.cell===cell)return;
+    commitPaymentEdit();
+    const index=Number(cell.dataset.row),row=payments[index];if(!row)return;
+    paymentEditState={cell,rowId:paymentRowId(row),rowIndex:index,col:Number(cell.dataset.col),movement:++paymentMoveId,beforeAll:payments.map(item=>({id:paymentRowId(item),data:structuredClone(item)}))};
+    if(typeof cell.select==='function')cell.select();
+  });
+  table.addEventListener('focusout',event=>{if(paymentEditState?.cell===event.target)commitPaymentEdit()});
+  table.addEventListener('keydown',event=>{
+    const cell=event.target.closest(selector);if(!cell)return;
+    const ctrl=event.ctrlKey||event.metaKey,row=Number(cell.dataset.row),col=Number(cell.dataset.col);
+    if(event.key==='Tab'&&!event.shiftKey&&!ctrl&&paymentComboInput===cell&&$('#paymentOptions').classList.contains('open')&&paymentComboOptions.length&&(paymentComboNavigated||paymentComboHasMatch)){
+      event.preventDefault();event.stopImmediatePropagation();
+      pickPaymentOption(paymentComboNavigated?paymentComboActive:paymentComboAnchor,true);
+      return;
+    }
+    if(ctrl&&String(event.key).toLowerCase()==='z'){
+      event.preventDefault();event.stopImmediatePropagation();
+      const edit=paymentEditState,current=edit&&payments.map(item=>({id:paymentRowId(item),data:item}));
+      if(edit&&JSON.stringify(current)!==JSON.stringify(edit.beforeAll)){restorePaymentRow(edit);return}
+      restorePaymentRow(paymentUndoHistory.pop());return;
+    }
+    if(event.key==='Escape'){
+      event.preventDefault();event.stopImmediatePropagation();
+      hidePaymentOptions();restorePaymentRow(paymentEditState);return;
+    }
+    if(event.key==='F2'){
+      event.preventDefault();event.stopImmediatePropagation();
+      if(cell.tagName==='SELECT')return;
+      if(caret(cell).full){cell.setSelectionRange(cell.value.length,cell.value.length);cell.classList.remove('keyboard-focus')}
+      else{cell.select();cell.classList.add('keyboard-focus')}
+      return;
+    }
+    if(event.key.length===1&&!ctrl&&!event.altKey)cell.classList.remove('keyboard-focus');
+    if(!ctrl&&paymentComboInput===cell&&$('#paymentOptions').classList.contains('open')&&(['ArrowUp','ArrowDown'].includes(event.key)||(event.key==='Enter'&&cell.value.trim()&&(paymentComboNavigated||paymentComboHasMatch))))return;
+    const state=caret(cell),list=rowCells(row),index=list.indexOf(cell),direction=event.shiftKey?-1:1;
+    let target=null,targetRow=row;
+    if(event.key==='Enter'||event.key==='Tab'){
+      target=list[index+direction];
+      if(!target){targetRow=row+direction;target=direction>0?rowCells(targetRow)[0]:rowCells(targetRow).at(-1)}
+      if(!target&&direction>0&&paymentStarted(payments[row])&&row===payments.length-1&&totals().difference<-.005){
+        event.preventDefault();event.stopPropagation();cell.blur();
+        payments.push(blankPayment('Efectivo',false));renderPayments();
+        focusCell(cellAt(row+1,0));return;
+      }
+    }else if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+      targetRow=ctrl?(event.key==='ArrowDown'?payments.length-1:0):row+(event.key==='ArrowDown'?1:-1);
+      target=cellAt(targetRow,col)||rowCells(targetRow).find(item=>Number(item.dataset.col)>col)||rowCells(targetRow).at(-1);
+    }else if(event.key==='ArrowLeft'&&(state.full||state.start))target=ctrl?list[0]:list[index-1];
+    else if(event.key==='ArrowRight'&&(state.full||state.end))target=ctrl?list.at(-1):list[index+1];
+    if(!target)return;
+    const nextRow=Number(target.dataset.row),nextCol=Number(target.dataset.col);
+    event.preventDefault();event.stopPropagation();
+    cell.blur();
+    focusCell(cellAt(nextRow,nextCol)||rowCells(nextRow)[0]);
+  },true);
+}
 
 function bindFunctions(){
   const F=window.CorralonFunciones;
+  document.addEventListener('keydown',event=>{if(event.key!=='F1'||event.ctrlKey||event.altKey||event.metaKey)return;event.preventDefault();const input=$('#customerName');if(!input.disabled){input.focus();input.select()}},true);
   bindStrictFormatting();
   bindTableRules();
   bindArticleGridNavigation();
   F?.bindLabelSelect?.({root:document});
   F?.bindLinearNavigation?.({root:document,selector:'.top-context select,.meta input,.meta select,.customer input,.customer select,#note',selectOnFocus:true,smartCaret:true,selectOnFirstPointerFocus:true});
-  F?.bindGridNavigation?.({root:$('#paymentTable'),cellSelector:'input:not([readonly]),select',navigateLeftRight:true});
+  bindPaymentGridNavigation();
 
   const originals=new WeakMap(),rowOriginals=new WeakMap();
   let activeEditRow=null;
@@ -576,11 +1243,12 @@ function bindFunctions(){
       if(activeSuggestionInput===el&&$('#suggestions').classList.contains('open'))hideSuggestions();
       else showSuggestions(el,true);
     }
-    if(['idart','codProv','descripcion'].includes(el?.dataset.a)&&$('#suggestions').classList.contains('open')){
+    if(['idart','codProv','descripcion'].includes(el?.dataset.a)&&activeSuggestionInput===el&&$('#suggestions').classList.contains('open')){
       if(event.key==='ArrowDown'||event.key==='ArrowUp'){
         event.preventDefault();
-        suggestionIndex=Math.max(0,Math.min(suggestionItems.length-1,suggestionIndex+(event.key==='ArrowDown'?1:-1)));
-        $$('[data-suggestion]').forEach((x,i)=>x.classList.toggle('active',i===suggestionIndex));
+        suggestionIndex=Math.max(0,Math.min(suggestionItems.length-1,suggestionIndex<0?0:suggestionIndex+(event.key==='ArrowDown'?1:-1)));
+        $$('[data-suggestion]').forEach((x,i)=>{x.classList.toggle('active',i===suggestionIndex);x.setAttribute('aria-selected',String(i===suggestionIndex))});
+        $('#suggestions [data-suggestion].active')?.scrollIntoView({block:'nearest'});
       }
     }
   });
@@ -589,33 +1257,645 @@ function bindFunctions(){
   });
   $$('[data-nav-zone] input,[data-nav-zone] select,#note').forEach(el=>el.addEventListener('input',scheduleDraft));
 }
-function scheduleDraft(){
-  clearTimeout(saveTimer);
-  saveTimer=setTimeout(()=>saveDraft(true).catch(console.warn),75);
+async function importServerDrafts(){
+  try{
+    let activeId='';try{activeId=localStorage.getItem(ACTIVE_DRAFT_KEY)||''}catch{}
+    const response=await fetch(`${SQL_PREPARACION}/borradores-fiscales`,{cache:'no-store'});
+    const result=await response.json();
+    if(!response.ok||!result.ok||!Array.isArray(result.borradores))return;
+    const stored=await allDrafts();
+    for(const backup of result.borradores){
+      const draft=backup.comprobante,id=String(draft?.id||'');
+      if(!/^[0-9a-f-]{36}$/i.test(id)||!Array.isArray(draft?.articulos)||!Array.isArray(draft?.valores))continue;
+      const existing=stored.find(item=>item.id===id);
+      // La copia central no debe abrir ventas de otro puesto en una PC nueva.
+      if(!existing&&id!==activeId)continue;
+      if(existing?.emision||existing?.recoveryPending)continue;
+      await putDraft({...draft,recoveryPending:true,emision:null,updatedAt:existing?.updatedAt||draft.updatedAt||Date.now()});
+    }
+  }catch(error){console.warn('No se pudieron restaurar copias locales del servicio:',error)}
 }
 async function restoreLastLocalState(){
+  await importServerDrafts();
   const drafts=await allDrafts();
-  applyData(drafts[0]||null);
+  localDraftStoreReady=true;
+  let activeId='';try{activeId=localStorage.getItem(ACTIVE_DRAFT_KEY)||''}catch{}
+  if(sqlConfig)applyData(drafts.find(d=>d.id===activeId)||drafts[0]||null);
+  else if(drafts.length){
+    $('#modeBadge').textContent='Borrador guardado localmente · esperando SQL';
+    setMsg('La venta sigue guardada en esta PC. Se restaurará cuando vuelva la conexión SQL.','error');
+  }
+  await refreshPendingButton();
 }
 function persistCurrentState(){
+  if(!sqlConfig)return;
   clearTimeout(saveTimer);
   saveDraft(true).catch(console.warn);
 }
 window.addEventListener('pagehide',persistCurrentState);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persistCurrentState()});
-async function issue(){const cfg=window.enterpriseConfig||{};if(!cfg.conexionFiscalVerificada||!cfg.apiFiscalUrl){setMsg('La emisión está bloqueada: completá Configuración > Empresa y verificá la API fiscal.','error');return}const data=formData();if(!data.articulos.length){setMsg('Agregá al menos un artículo.','error');return}if(Math.abs(data.totales.difference)>.01){setMsg('Los valores recibidos no coinciden con el total.','error');return}if(!confirm('¿Emitir este comprobante fiscal?'))return;try{$('#issueInvoice').disabled=true;const res=await fetch(`${cfg.apiFiscalUrl.replace(/\/$/,'')}/comprobantes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),payload=await res.json().catch(()=>({}));if(!res.ok||!payload?.ok)throw new Error(payload?.message||`HTTP ${res.status}`);setMsg(`Comprobante emitido. CAE ${payload.cae||''}`,'ok');$('#voucherNumber').value=payload.numero||'Emitido';if(draftId)await deleteDraft(draftId)}catch(e){console.warn(e);setMsg(`No se pudo emitir: ${e.message}`,'error')}finally{$('#issueInvoice').disabled=false}}
+function setRecoveryAlert(message){
+  const fiscal=[1,2,5,6,7,8].includes(Number($('#voucherType').value));
+  $('#recoveryTitle').textContent=fiscal?'Esta factura está en error y quedó pendiente':'ATENCIÓN: esta venta quedó pendiente de verificar en SQL';
+  $('#checkRecovery').textContent=fiscal?'Consultar ARCA y SQL':'Consultar SQL';
+  $('#printPendingCopy').textContent=fiscal?'Imprimir detalle sin guardar comprobante':'Imprimir detalle sin confirmar';
+  $('#recoveryText').textContent=message;
+  $('#recoveryAlert').classList.toggle('open',Boolean(recoveryPending&&!issueInProgress));
+  $('#recoverInvoice').textContent=fiscal?'Recuperar este comprobante':'Reintentar guardado en SQL';
+  $('#recoverInvoice').hidden=!recoveryCanRetry;
+}
+async function verifyRecovery(force=false){
+  if(!recoveryPending||!draftId)return;
+  const fiscal=[1,2,5,6,7,8].includes(Number($('#voucherType').value));
+  const checkedDraftId=draftId;
+  recoveryCanRetry=false;
+  setRecoveryAlert(fiscal?'Verificando este borrador en SQL y ARCA. No repitas esta venta.':'Verificando esta venta en SQL. No la repitas.');
+  try{
+    const response=await fetch(`${SQL_PREPARACION}/estado-emision?id=${encodeURIComponent(checkedDraftId)}&tipo=${Number($('#voucherType').value)}${force?'&consultarArca=1':''}`,{cache:'no-store'});
+    const state=await response.json();
+    if(draftId!==checkedDraftId)return;
+    if(!response.ok||!state.ok)throw new Error(state.error||`HTTP ${response.status}`);
+    if(state.estado==='emitido'){
+      const receiptResponse=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(state.idRecibo)}`,{cache:'no-store'});
+      const receipt=await receiptResponse.json();
+      if(draftId!==checkedDraftId)return;
+      if(!receiptResponse.ok||!receipt.ok)throw new Error('No se pudo leer el comprobante ya emitido.');
+      issuedReceipt={idRecibo:state.idRecibo,numero:state.numero,total:Number(receipt.comprobante.totalAbsoluto),idComprobante:Number(receipt.comprobante.idComprobante),cae:String(receipt.comprobante.cae||''),caeExpiry:String(receipt.comprobante.caeExpiry||'')};
+      recoveryPending=false;$('#cae').value=issuedReceipt.cae;
+      await saveDraft(true);lockIssued();$('#recoveryAlert').classList.remove('open');
+      setMsg(`Comprobante ${state.numero} recuperado desde SQL. Podés reimprimirlo.`,'ok');
+      return;
+    }
+    if(state.estado==='reintentable'&&!fiscal){
+      recoveryCanRetry=true;
+      setRecoveryAlert('SQL volvió y esta venta no figura guardada. Se reintentará con el mismo borrador; no cargues los artículos de nuevo.');
+    }else if(state.estado==='recuperable'){
+      recoveryCanRetry=true;
+      setRecoveryAlert(`ARCA ya autorizó ${state.numero||'este comprobante'}. Todavía falta guardarlo en SQL. Usá “Recuperar este comprobante”; no repitas esta venta.`);
+    }else setRecoveryAlert(state.detalle||(fiscal?'ARCA todavía no confirmó este número. La venta sigue guardada; no la cargues de nuevo. Volvé a consultar o avisá al encargado.':'SQL todavía no confirmó esta venta. El borrador sigue guardado en esta PC; no la cargues de nuevo. Volvé a consultar o avisá al encargado.'));
+  }catch(error){if(draftId!==checkedDraftId)return;setRecoveryAlert(`No se pudo verificar el estado: ${error.message}. No repitas esta venta; avisá al encargado.`)}
+  lockIssued();
+}
+async function reconcileBackgroundPending(){
+  const drafts=(await allDrafts()).filter(d=>d.recoveryPending&&!d.emision&&d.id!==draftId);
+  for(const draft of drafts){
+    try{
+      const statusResponse=await fetch(`${SQL_PREPARACION}/estado-emision?id=${encodeURIComponent(draft.id)}&tipo=${Number(draft.idComprobante)}`,{cache:'no-store'});
+      const status=await statusResponse.json();
+      if(!statusResponse.ok||!status.ok)continue;
+      let receiptId=status.estado==='emitido'?status.idRecibo:0;
+      if(status.estado==='recuperable'){
+        const recoveryResponse=await fetch(`${SQL_PREPARACION}/emitir`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comprobante:draft,recuperarSolo:true})});
+        const recovery=await recoveryResponse.json().catch(()=>({}));
+        if(recoveryResponse.ok&&recovery.ok)receiptId=recovery.idRecibo;
+      }
+      if(!receiptId)continue;
+      const receiptResponse=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(receiptId)}`,{cache:'no-store'});
+      const receipt=await receiptResponse.json().catch(()=>({}));
+      const header=receipt.comprobante;
+      if(!receiptResponse.ok||!receipt.ok||Number(header?.confirmado)!==-1||Number(header?.anulada)!==0||
+         Number(header?.idComprobante)!==Number(draft.idComprobante)||
+         Math.abs(Number(header?.totalAbsoluto)-Number(draft.totales?.total))>.01||
+         receipt.articulos?.length!==draft.articulos?.length||receipt.valores?.length!==draft.valores?.length)continue;
+      await putDraft({...draft,recoveryPending:false,emision:{idRecibo:receiptId,numero:header.numero,total:Number(header.totalAbsoluto),
+        idComprobante:Number(header.idComprobante),cae:String(header.cae||''),caeExpiry:String(header.caeExpiry||'')},updatedAt:Date.now()});
+    }catch(error){console.warn('No se pudo verificar una emisión pendiente:',error)}
+  }
+  await refreshPendingButton();
+}
+async function retryPendingOnReconnect(){
+  if(recoveryPollBusy||issueInProgress)return;
+  recoveryPollBusy=true;
+  try{
+    if(!sqlConfig){
+      if(!await loadConfig())return;
+      await restoreLastLocalState();
+      await loadSqlCatalog();
+    }
+    else if(!localDraftStoreReady)await restoreLastLocalState();
+    if(recoveryPending){
+      await verifyRecovery();
+      if(recoveryPending&&recoveryCanRetry&&!issueInProgress)await issue();
+    }
+    await reconcileBackgroundPending();
+  }catch(error){console.warn('Reintento de facturación pendiente:',error)}
+  finally{recoveryPollBusy=false}
+}
+window.addEventListener('online',()=>retryPendingOnReconnect());
+setInterval(retryPendingOnReconnect,15000);
+setInterval(()=>refreshSelectedStock().catch(console.warn),15000);
+window.addEventListener('focus',()=>refreshSelectedStock().catch(console.warn));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshSelectedStock().catch(console.warn)});
+function reserveBudgetPreview(){
+  const popup=window.open('','_blank');
+  if(popup){popup.document.title='Preparando presupuesto';popup.document.body.textContent='Generando presupuesto…'}
+  return popup;
+}
+async function openBudgetPreview(data,receipt,popup=null){
+  if(Number(data?.idComprobante)!==43||!Number(receipt?.idRecibo))throw new Error('No hay un presupuesto confirmado para mostrar.');
+  if(!window.jspdf?.jsPDF||!window.PresupuestoShared?.generarPDFPresupuestoDoc)throw new Error('No se cargó el generador de presupuestos.');
+  const response=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(receipt.idRecibo)}`,{cache:'no-store'});
+  const result=await response.json().catch(()=>({})),header=result.comprobante;
+  if(!response.ok||!result.ok||Number(header?.confirmado)!==-1||Number(header?.anulada)!==0||Number(header?.idComprobante)!==43||String(header.numero)!==String(receipt.numero)||Math.abs(Number(header.totalAbsoluto)-Number(data.totales?.total))>.01||result.articulos?.length!==data.articulos?.length)
+    throw new Error('El presupuesto guardado no coincide con SQL. No se abrió la vista previa.');
+  const logoDataUrl=await window.PresupuestoShared.ensureLogoDataUrl(new URL('logo-corralon.png',location.href).href);
+  const clientName=String(header.cliente||data.cliente?.nombre||'').trim();
+  const doc=window.PresupuestoShared.generarPDFPresupuestoDoc({
+    tipo:'Presupuesto',headerName:'Presupuesto',subtitle:clientName,
+    numero:header.numero,numberLabel:'Presupuesto N°: ',fecha:header.fecha,total:Number(header.totalAbsoluto),
+    footerNote:[data.nota&&`Nota: ${data.nota}`,'Los precios y el total ya tienen todos los impuestos incluidos'].filter(Boolean).join('\n'),
+    items:result.articulos.map(row=>({codigo:String(row.idart||''),nombre:String(row.descripcion||''),cantidad:Number(row.cantidad)||0,precio:Number(row.precio)||0})),
+    logoDataUrl
+  });
+  doc.setProperties?.({title:`Presupuesto ${header.numero}`,subject:clientName});
+  const pdfUrl=URL.createObjectURL(doc.output('blob',{type:'application/pdf'}));
+  const opened=popup&&!popup.closed?popup:window.open(pdfUrl,'_blank');
+  if(!opened){URL.revokeObjectURL(pdfUrl);throw new Error('Permití las ventanas emergentes para abrir el presupuesto.')}
+  if(opened===popup)opened.location.href=pdfUrl;
+  setTimeout(()=>URL.revokeObjectURL(pdfUrl),60000);
+  return opened;
+}
+async function issue(){
+  if(issuedReceipt||issueInProgress)return;
+  if(recoveryPending&&!recoveryCanRetry)return;
+  issueInProgress=true;
+  lockIssued();
+  const wasRecoveryAttempt=recoveryPending;
+  const autoPrint=$('#autoPrint').checked;
+  let requestStarted=false;
+  let data;
+  try{data=formData()}catch(error){const message=`No se pudo preparar el comprobante: ${error.message}`;issueInProgress=false;lockIssued();setMsg(message,'error');alert(message);return}
+  if(!(sqlConfig?.comprobantesEmitibles||[]).some(id=>Number(id)===Number(data.idComprobante))){setMsg('Este comprobante necesita autorización fiscal antes de emitir.','error');issueInProgress=false;lockIssued();return}
+  if(!data.articulos.length){setMsg('Agregá al menos un artículo.','error');issueInProgress=false;lockIssued();return}
+  const budgetPopup=Number(data.idComprobante)===43?reserveBudgetPreview():null;
+  if(!await sqlConnectionAvailable()){
+    budgetPopup?.close();
+    await saveDraft(true).catch(console.warn);
+    issueInProgress=false;lockIssued();setMsg(SQL_CONNECTION_MESSAGE,'error');alert(SQL_CONNECTION_MESSAGE);return;
+  }
+  try{
+    recoveryPending=true;
+    lockIssued();
+    draftId=data.id;
+    data.recoveryPending=recoveryPending;
+    await putDraft(data);
+    await refreshPendingButton();
+    lastSaved=structuredClone(data);
+    requestStarted=true;
+    const response=await fetch(`${SQL_PREPARACION}/emitir`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comprobante:data,recuperarSolo:wasRecoveryAttempt})});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok||!payload.ok){const e=new Error(payload.error||`HTTP ${response.status}`);e.safeToRetry=Boolean(payload.safeToRetry)||(response.status===409&&!payload.recoveryRequired);e.fiscalRejected=Boolean(payload.fiscalRejected);e.arcaUnavailable=Boolean(payload.arcaUnavailable);e.sqlUnavailable=response.status===503&&!e.arcaUnavailable;throw e}
+    recoveryPending=false;recoveryCanRetry=false;
+    issuedReceipt={idRecibo:payload.idRecibo,numero:payload.numero,total:payload.total,idComprobante:data.idComprobante};
+    lockIssued();
+    await saveDraft(true);
+    const checkResponse=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(payload.idRecibo)}`,{cache:'no-store'});
+    const check=await checkResponse.json().catch(()=>({}));
+    if(!checkResponse.ok||!check.ok||Number(check.comprobante?.confirmado)!==-1||Number(check.comprobante?.anulada)!==0||Number(check.comprobante?.idComprobante)!==Number(data.idComprobante)||check.articulos?.length!==data.articulos.length||check.valores?.length!==data.valores.length||Math.abs(Number(check.comprobante?.totalAbsoluto)-Number(data.totales.total))>.01)throw new Error('La boleta fue emitida, pero falló la lectura posterior. Consultá el número en Access antes de continuar.');
+    issuedReceipt.total=Number(check.comprobante.totalAbsoluto);
+    issuedReceipt.cae=String(check.comprobante.cae||'');
+    issuedReceipt.caeExpiry=String(check.comprobante.caeExpiry||'');
+    $('#cae').value=issuedReceipt.cae;
+    await saveDraft(true);
+    setMsg(`${data.tipoComprobante} ${payload.numero} confirmado en SQL. Artículos y valores guardados.`,'ok');
+    const issuedNumber=issuedReceipt.numero;
+    if(Number(data.idComprobante)===43){
+      await openBudgetPreview(data,issuedReceipt,budgetPopup);
+      closeTrial();
+      setMsg(`Presupuesto ${issuedNumber} confirmado en SQL. Vista previa abierta en otra pestaña.`,'ok');
+      loadSqlCatalog().catch(console.warn);
+      return;
+    }
+    let printer=null;
+    if(autoPrint){
+      let printers=[];
+      try{printers=await loadTicketPrinters()}catch(error){console.warn('No se pudieron consultar las ticketeras:',error)}
+      if(!printers.includes($('#ticketPrinter').value)){
+        await openPrinterSelectionPreview('Elegí una ticketera instalada para imprimir este comprobante.');
+        setMsg(`${data.tipoComprobante} ${issuedNumber} confirmado en SQL. Elegí la impresora en la vista previa; no se emitirá otra boleta.`,'ok');
+        loadSqlCatalog().catch(console.warn);
+        return;
+      }
+      try{printer=await printReceiptDirect()}catch(error){
+        if(!/ticketera elegida no está instalada/i.test(error.message))throw error;
+        await openPrinterSelectionPreview('La ticketera guardada ya no está instalada. Elegí otra.');
+        setMsg(`${data.tipoComprobante} ${issuedNumber} confirmado en SQL. Elegí otra impresora en la vista previa.`,'ok');
+        loadSqlCatalog().catch(console.warn);
+        return;
+      }
+    }
+    if(printer===BROWSER_PRINTER){setMsg(`${data.tipoComprobante} ${issuedNumber} confirmado en SQL. Elegí la impresora de esta PC en el panel del navegador.`,'ok');return}
+    closeTrial();
+    setMsg(`${data.tipoComprobante} ${issuedNumber} confirmado en SQL. ${printer?`Ticket enviado a ${printer}.`:'Sin impresión.'} Nueva venta lista.`,'ok');
+    loadSqlCatalog().catch(console.warn);
+  }catch(error){
+    console.warn(error);
+    if(budgetPopup&&!budgetPopup.closed&&Number(data.idComprobante)===43)budgetPopup.close();
+    if(issuedReceipt){
+      refreshSelectedStock().catch(console.warn);
+      const message=Number(data.idComprobante)===43?`El presupuesto ${issuedReceipt.numero} quedó confirmado en SQL, pero no se pudo abrir el PDF: ${error.message}. Usá “Reimprimir últ. fact.”; no vuelvas a emitirlo.`:`La boleta ${issuedReceipt.numero} ya quedó emitida en SQL, pero el ticket no se pudo enviar: ${error.message}. Revisá la ticketera y usá “Reimprimir comprobante”; no vuelvas a emitir la venta.`;
+      setMsg(message,'error');alert(message);
+    }
+    else if(!requestStarted&&!wasRecoveryAttempt){
+      recoveryPending=false;recoveryCanRetry=false;
+      await saveDraft(true).catch(console.warn);
+      const message=`No se confirmó la venta porque no se pudo guardar el borrador local: ${error.message}`;
+      setMsg(message,'error');alert(message);
+    }
+    else if(recoveryPending&&error.safeToRetry&&(!wasRecoveryAttempt||[13,29,43].includes(Number(data.idComprobante)))){
+      recoveryPending=false;recoveryCanRetry=false;
+      await saveDraft(true).catch(console.warn);
+      setMsg(`No se emitió: ${error.message}`,'error');
+      if(error.sqlUnavailable)alert(SQL_CONNECTION_MESSAGE);
+      else if(error.arcaUnavailable)alert(error.message);
+      else if(error.fiscalRejected||wasRecoveryAttempt)alert(`No se emitió esta venta. El borrador sigue guardado para corregirlo. ${error.message}`);
+      else if(Number(data.idComprobante)!==13&&Number(data.idComprobante)!==29&&Number(data.idComprobante)!==43)
+        alert(`Error al facturar. No se emitió esta factura. ${error.message}`);
+    }else if(recoveryPending){
+      setRecoveryAlert(`${error.sqlUnavailable?SQL_CONNECTION_MESSAGE+' ':''}No repitas esta venta. ${error.message} Verificá el estado de esta emisión. Podés imprimir el detalle sin confirmar la factura.`);
+      setMsg('Esta emisión quedó pendiente de verificar. No la repitas.','error');
+      if(error.sqlUnavailable)alert(SQL_CONNECTION_MESSAGE);
+      await verifyRecovery().catch(console.warn);
+    }else setMsg(`No se pudo completar: ${error.message}`,'error');
+  }finally{issueInProgress=false;lockIssued()}
+}
+async function showTrial(openPreview=true,saveUnissuedDraft=true,source=null){
+  const data=source||formData(),receipt=source?.emision?{...source.emision}:issuedReceipt;
+  if(!data.articulos.length){setMsg('Agregá al menos un artículo para imprimir la prueba.','error');return}
+  let receiptData=null;
+  if(receipt){
+    const response=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(receipt.idRecibo)}`,{cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||!result.ok||Number(result.comprobante?.confirmado)!==-1||Number(result.comprobante?.anulada)!==0||Number(result.comprobante?.idComprobante)!==Number(data.idComprobante))
+      throw new Error('El comprobante ya no está confirmado y vigente en SQL; no se puede reimprimir.');
+    if(source&&(String(result.comprobante.numero)!==String(receipt.numero)||Math.abs(Number(result.comprobante.totalAbsoluto)-Number(data.totales.total))>.01||result.articulos?.length!==data.articulos.length||result.valores?.length!==data.valores.length))
+      throw new Error('La copia guardada no coincide con el comprobante de SQL. No se imprimió.');
+    receiptData=result.comprobante;
+    receipt.numero=result.comprobante.numero;
+    receipt.total=Number(result.comprobante.totalAbsoluto);
+    receipt.cae=String(result.comprobante.cae||'');
+    receipt.caeExpiry=String(result.comprobante.caeExpiry||'');
+    if(!source)$('#cae').value=receipt.cae;
+  }
+  if(!receipt&&saveUnissuedDraft)await saveDraft(true);
+  const dateParts=String(data.fecha||'').split('-'),dateText=dateParts.length===3?`${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`:data.fecha;
+  const items=data.articulos.map(row=>`<div class="ticket-item-main"><span>${esc(num(n(row.cantidad)))}</span><span>${esc(row.idart)}-${esc(row.descripcion||row.idart)}</span></div><div class="ticket-item-price"><span>P.U.: ${esc(money(n(row.precio)))}</span><span>Importe: ${esc(money(n(row.cantidad)*n(row.precio)))}</span></div>`).join('');
+  const payments=data.valores.map(row=>`<div class="ticket-payment-row"><span>${esc(row.tipo)}${row.tarjeta&&row.tarjeta!=='Ninguna'?` · ${esc(row.tarjeta)}`:''}${n(row.cuotas)>0?` · ${esc(row.cuotas)} cuotas`:''}</span><span>${esc(money(n(row.importe)+n(row.impRec)))}</span></div>`).join('');
+  const company=sqlConfig?.empresa?.[0]||{},point=(sqlConfig?.puntosVenta||[]).find(x=>Number(x.id)===Number(data.idPuntoVenta)),branchInfo=(sqlConfig?.sucursales||[]).find(x=>Number(x.id)===Number(point?.idSucursal||$('#pos').selectedOptions[0]?.dataset.sucursal))||{};
+  const clientDocument=receiptData?.documento||data.cliente.numeroDocumento;
+  const ivaClient=data.cliente.condicionIva==='Consumidor final'?'Cons. Final':data.cliente.condicionIva;
+  const companyRows=[
+    company.razonSocial&&`<div>${esc(company.razonSocial)}</div>`,
+    (branchInfo.domicilio||company.domicilio)&&`<div>${esc(branchInfo.domicilio||company.domicilio)}</div>`,
+    `<div class="ticket-pair"><span>CUIT: ${esc(company.cuit||'')}</span><span>Inicio de actividades: ${esc(company.inicioActividades||'')}</span></div>`,
+    (company.telefono||branchInfo.telefono)&&`<div>Tel.: ${esc(company.telefono||branchInfo.telefono)}</div>`,
+    (company.email||branchInfo.email)&&`<div>${esc(company.email||branchInfo.email)}</div>`,
+    `<div class="ticket-pair"><span>IVA: ${esc(company.ivaEmpresa||'')}</span><span>IIBB: ${esc(company.ingresosBrutos||'')}</span></div>`
+  ].filter(Boolean).join('');
+  $('#trialTicket').innerHTML=`<div class="ticket-company"><h2>${esc(company.nombre||'CORRALÓN PROGRESO')}</h2>${companyRows}</div><div class="ticket-type"><strong>${esc((data.tipoComprobante||'').split(' · ').slice(1).join(' · ')||data.tipoComprobante)}${receipt?'':' · PRUEBA'}</strong><span>${receipt?'':'NO EMITIDO'}</span></div><div class="ticket-facts"><div class="ticket-pair"><span class="ticket-number">N° ${esc(receipt?.numero||'Sin asignar')}</span><span>Fecha: ${esc(dateText)}</span></div></div><div class="ticket-client"><div><strong>R.S.: ${esc(data.cliente.nombre||'Sin nombre')}</strong></div><div>Dom.: ${esc(data.cliente.direccion||'')}</div><div class="ticket-client-bottom"><span>IVA: ${esc(ivaClient||'Cons. Final')}</span><span>CUIT/DNI N°: ${esc(clientDocument||'')}</span></div></div><div class="ticket-items"><div class="ticket-items-head"><span>Cant.</span><span>Artículo</span></div>${items}</div><div class="ticket-payment-head"><span>Tipo de Pago</span><span>Importe</span></div>${payments}<div class="ticket-total"><span>Total:</span><span>${esc(money(receipt?.total??data.totales.total))}</span></div>${receiptData?.cae?`<div class="ticket-fiscal"><div>CAE Nº ${esc(receiptData.cae)}</div></div>`:''}${data.nota?`<div class="ticket-extra">${esc(data.nota)}</div>`:''}${company.notaFactura?`<div class="ticket-legal">${esc(company.notaFactura)}</div>`:''}${receipt?'':'<div class="ticket-legal">PRUEBA · No guardado en SQL. No modifica caja ni stock.</div>'}`;
+  const selectedType=(sqlConfig?.comprobantes||[]).find(x=>Number(x.id)===Number(data.idComprobante));
+  if(data.facturaAsociada||receiptData?.facturaAsociada)
+    $('#trialTicket .ticket-facts').insertAdjacentHTML('beforeend',`<div><span>Asociado</span><strong>${esc(receiptData?.facturaAsociada||data.facturaAsociada)}</strong></div>`);
+  if([1,5,7].includes(Number(data.idComprobante))){
+    const totalsForPrint=data.totales;
+    $('#trialTicket .ticket-total').insertAdjacentHTML('beforebegin',`<div class="ticket-tax-lines"><div><span>Neto gravado</span><strong>${esc(money(totalsForPrint.net))}</strong></div><div><span>IVA 21%</span><strong>${esc(money(totalsForPrint.iva21))}</strong></div>${totalsForPrint.iva105?`<div><span>IVA 10,5%</span><strong>${esc(money(totalsForPrint.iva105))}</strong></div>`:''}</div>`);
+  }
+  if(receipt&&selectedType?.idAfip){
+    if(!receiptData?.cae||!/^[0-9]{8}$/.test(String(receiptData.caeExpiry||'')))throw new Error('Faltan CAE o vencimiento fiscal en SQL; no se puede imprimir esta factura.');
+    if(typeof qrcode!=='function')throw new Error('No se cargó el generador local de QR fiscal.');
+    const qr=qrcode(0,'M'),qrUrl=fiscalQrPayload(data,receiptData,company,selectedType);
+    qr.addData(qrUrl);qr.make();
+    const expiry=receiptData.caeExpiry;
+    $('#trialTicket .ticket-fiscal').insertAdjacentHTML('beforeend',`<div>Vto. CAE: ${esc(expiry.slice(6,8)+'/'+expiry.slice(4,6)+'/'+expiry.slice(0,4))}</div>`);
+    $('#trialTicket').insertAdjacentHTML('beforeend',`<div class="ticket-qr"><img src="${qr.createDataURL(8,0)}" alt="QR fiscal"><small>Comprobante autorizado · Consultá en ARCA</small></div>`);
+  }
+  $('#trialModal .modal-head h2').textContent=receipt?'Comprobante emitido · '+receipt.numero:'Vista previa de prueba';
+  $('#trialModal').setAttribute('aria-label',receipt?'Comprobante emitido '+receipt.numero:'Vista previa del comprobante de prueba');
+  $('#previewPrinterWrap').hidden=!receipt;
+  $('#refreshPrinters').hidden=!receipt;
+  $('#doPrintTrial').textContent=receipt?'Imprimir ticket':'Imprimir';
+  $('#doPrintTrial').disabled=Boolean(receipt&&!$('#previewPrinter').value);
+  hideSuggestions();
+  if(openPreview){previewDraft=source;$('#trialModal').classList.add('open');(receipt&&!$('#previewPrinter').value?$('#previewPrinter'):$('#doPrintTrial')).focus()}
+}
+async function openPrinterSelectionPreview(message){
+  printerSelectionPending=true;
+  await showTrial(true);
+  $('#previewPrinter').value='';
+  $('#doPrintTrial').disabled=true;
+  $('#previewPrinterError').textContent=message;
+  $('#previewPrinter').focus();
+}
+async function printReceiptDirect(printer=$('#ticketPrinter').value,source=null){
+  if(printInProgress)throw new Error('Ya se está enviando este ticket.');
+  printInProgress=true;
+  $('#reprintReceipt').disabled=true;
+  $('#cancelEdit').disabled=true;
+  try{
+  const receipt=source?.emision||issuedReceipt;
+  if(!receipt)throw new Error('Todavía no hay un comprobante confirmado para imprimir.');
+  if(!printer)throw new Error('Elegí la ticketera de esta PC.');
+  if(printer===BROWSER_PRINTER){await showTrial(true,false,source);browserPrintPending=true;try{window.print()}catch(error){browserPrintPending=false;throw error}return BROWSER_PRINTER}
+  if(typeof html2canvas!=='function')throw new Error('No se cargó el motor local de impresión.');
+  await showTrial(false,false,source);
+  const canvas=await html2canvas($('#trialTicket'),{
+    backgroundColor:'#fff',scale:2.15,logging:false,useCORS:false,
+    onclone:documentCopy=>{
+      const modal=documentCopy.getElementById('trialModal');
+      modal.classList.add('open');
+      modal.style.cssText='display:block;position:static;padding:0;background:#fff;transform:none';
+      modal.querySelector('.trial-modal').style.cssText='display:block;width:70mm;max-height:none;overflow:visible;border:0;box-shadow:none';
+      modal.querySelector('.trial-preview').style.cssText='display:block;width:70mm;overflow:visible;padding:0;background:#fff';
+      const ticket=documentCopy.getElementById('trialTicket');
+      ticket.style.cssText='width:70mm;max-width:none;margin:0;padding:0;box-shadow:none;background:#fff';
+    }
+  });
+  if(canvas.width<150||canvas.height<100)throw new Error('El ticket no se pudo generar completo.');
+  const local=printer.startsWith('local:'),name=printer.replace(/^(local|server):/,'');
+  const response=await fetch(`${local?LOCAL_PRINTER_API:SQL_PREPARACION}/imprimir`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({idRecibo:receipt.idRecibo,impresora:name,imagen:canvas.toDataURL('image/png').split(',')[1]})});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||!result.ok)throw new Error(result.error||`Error de impresión HTTP ${response.status}`);
+  return printer;
+  }finally{printInProgress=false;$('#reprintReceipt').disabled=false;$('#cancelEdit').disabled=Boolean(issueInProgress||!sqlConfig)}
+}
+async function showPendingCopy(){
+  if(!recoveryPending||issuedReceipt)return;
+  const fiscal=[1,2,5,6,7,8].includes(Number($('#voucherType').value));
+  await showTrial(true,false);
+  $('#trialTicket .ticket-type').innerHTML=fiscal?'<strong>DETALLE PROVISIONAL</strong><span>NO ES FACTURA · SIN CAE</span>':'<strong>DETALLE SIN CONFIRMAR</strong><span>NO ES COMPROBANTE</span>';
+  $('#trialTicket .ticket-number')?.remove();
+  $('#trialTicket .ticket-fiscal')?.remove();
+  $('#trialTicket .ticket-legal:last-child')?.remove();
+  $('#trialTicket').insertAdjacentHTML('afterbegin',fiscal?'<div class="ticket-legal"><strong>VENTA PENDIENTE DE VERIFICACIÓN EN ARCA · NO ES FACTURA</strong></div>':'<div class="ticket-legal"><strong>VENTA PENDIENTE DE VERIFICACIÓN EN SQL · NO ES COMPROBANTE</strong></div>');
+  $('#trialTicket').insertAdjacentHTML('beforeend',fiscal?'<div class="ticket-legal"><strong>Conservá este detalle. El comprobante fiscal se entrega después de confirmar la autorización y el guardado en SQL.</strong></div>':'<div class="ticket-legal"><strong>Conservá este detalle. El PRES. ESPECIAL se entrega después de verificar su confirmación en SQL.</strong></div>');
+  $('#trialModal .modal-head h2').textContent=fiscal?'Detalle provisional · no fiscal':'Detalle sin confirmar';
+  $('#trialModal').setAttribute('aria-label',fiscal?'Detalle provisional no fiscal':'Detalle sin confirmar');
+}
+function closeTrial(){
+  $('#trialModal').classList.remove('open');
+  if(previewDraft){previewDraft=null;printerSelectionPending=false;$('#cancelEdit').focus();return}
+  if(printerSelectionPending&&issuedReceipt){printerSelectionPending=false;$('#reprintReceipt').focus();return}
+  if(issuedReceipt){
+    const branch=$('#branch').value,point=$('#pos').value,seller=$('#seller').value,priceList=$('#priceList').value;
+    applyData(null);
+    $('#branch').value=branch;
+    $('#pos').value=point;
+    $('#seller').value=seller;
+    $('#priceList').value=priceList;
+    renderVoucherTypes(13);
+    saveDraft(true).catch(console.warn);
+    $('#customerName').focus();
+  }else $('#customerName').focus();
+}
 function closeDraftModal(){$('#draftModal').classList.remove('open');$('#openDrafts').focus()}
 $('#date').value=today();
-$('#seller').value=uid().nombre||uid().usuario||'';
-$('#newInvoice').addEventListener('click',async()=>{applyData(null);await saveDraft(true)});
-$('#openDrafts').addEventListener('click',showDrafts);
+$('#seller').value='';
+$('#newInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true)});
+$('#continueNewInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true)});
+$('#openDrafts').addEventListener('click',()=>showDrafts().catch(error=>setMsg(error.message,'error')));
 $('#closeDrafts').addEventListener('click',closeDraftModal);
-$('#draftModal').addEventListener('mousedown',e=>{if(e.target===$('#draftModal'))closeDraftModal()});
-$('#saveDraft').addEventListener('click',()=>saveDraft());
-$('#cancelEdit').addEventListener('click',()=>{if(lastSaved)applyData(lastSaved);else applyData(null)});
+$('#checkRecovery').addEventListener('click',async()=>{
+  await verifyRecovery(true);
+  if(recoveryPending&&recoveryCanRetry&&![1,2,5,6,7,8].includes(Number($('#voucherType').value))&&!issueInProgress)await issue();
+});
+$('#printPendingCopy').addEventListener('click',()=>showPendingCopy().catch(error=>setMsg(`No se pudo imprimir el detalle: ${error.message}`,'error')));
+$('#recoverInvoice').addEventListener('click',()=>{if(recoveryCanRetry&&!issueInProgress)issue()});
+$('#cancelEdit').addEventListener('click',async()=>{
+  if(issueInProgress||printInProgress||!sqlConfig)return;
+  $('#cancelEdit').disabled=true;
+  try{
+    const latest=(await allDrafts()).find(d=>d.emision?.idRecibo&&d.articulos?.length&&d.totales);
+    if(!latest){setMsg('No hay un comprobante emitido guardado en esta PC para reimprimir.','error');return}
+    if(Number(latest.idComprobante)===43){
+      const popup=reserveBudgetPreview();
+      try{await openBudgetPreview(latest,latest.emision,popup);setMsg(`Presupuesto ${latest.emision.numero} abierto en otra pestaña.`,'ok')}
+      catch(error){popup?.close();throw error}
+      return;
+    }
+    await loadTicketPrinters();
+    await showTrial(true,false,latest);
+  }catch(error){setMsg(`No se pudo abrir la última factura: ${error.message}`,'error')}
+  finally{$('#cancelEdit').disabled=false}
+});
 $('#issueInvoice').addEventListener('click',issue);
-$('#branch').addEventListener('change',()=>{const option=[...$('#pos').options].find(o=>o.dataset.branch===$('#branch').value);if(option)$('#pos').value=option.value;scheduleDraft()});
+$('#reprintReceipt').addEventListener('click',async()=>{
+  try{
+    if(Number($('#voucherType').value)===43&&issuedReceipt){
+      const popup=reserveBudgetPreview();
+      try{await openBudgetPreview(formData(),issuedReceipt,popup);setMsg(`Presupuesto ${issuedReceipt.numero} abierto en otra pestaña.`,'ok')}
+      catch(error){popup?.close();throw error}
+      return;
+    }
+    let printers=[];
+    try{printers=await loadTicketPrinters()}catch(error){console.warn(error)}
+    if(!printers.includes($('#ticketPrinter').value)){await openPrinterSelectionPreview('Elegí una ticketera instalada para reimprimir.');return}
+    const printer=await printReceiptDirect();
+    setMsg(`Ticket enviado a ${printer}.`,'ok');
+  }catch(error){setMsg(`No se pudo reimprimir: ${error.message}`,'error')}
+});
+$('#previewPrinter').addEventListener('change',()=>{$('#doPrintTrial').disabled=!$('#previewPrinter').value;$('#previewPrinterError').textContent=''});
+$('#refreshPrinters').addEventListener('click',async()=>{try{const printers=await loadTicketPrinters();$('#previewPrinterError').textContent=printers.length?'':'No hay ticketeras configuradas en el servidor.'}catch(error){$('#previewPrinterError').textContent=error.message}});
+$('#doPrintTrial').addEventListener('click',async()=>{
+  const source=previewDraft,receipt=source?.emision||issuedReceipt;
+  if(!receipt){window.print();return}
+  const printer=$('#previewPrinter').value;
+  if(!printer){$('#previewPrinterError').textContent='Elegí una ticketera antes de imprimir.';return}
+  $('#doPrintTrial').disabled=true;
+  try{
+    const printed=await printReceiptDirect(printer,source),number=receipt.numero;
+    $('#ticketPrinter').value=printed;
+    try{localStorage.setItem(TICKET_PRINTER_KEY,printed)}catch{}
+    printerSelectionPending=false;
+    if(printed===BROWSER_PRINTER)return;
+    closeTrial();
+    setMsg(`Comprobante ${number} enviado a ${printed}. Esta ticketera quedó guardada para las próximas impresiones.`,'ok');
+  }catch(error){$('#previewPrinterError').textContent=`No se pudo imprimir: ${error.message}`;setMsg(`La boleta ya está emitida en SQL. ${error.message}`,'error')}
+  finally{$('#doPrintTrial').disabled=Boolean(receipt&&!$('#previewPrinter').value)}
+});
+window.addEventListener('afterprint',()=>{if(browserPrintPending){const number=previewDraft?.emision?.numero||issuedReceipt?.numero||'';browserPrintPending=false;printerSelectionPending=false;if(previewDraft)closeTrial();else $('#trialModal').classList.remove('open');setMsg(`Comprobante ${number} enviado al selector de impresión. Si no salió en papel, usá “Reimprimir últ. fact.”`,'ok');return}if((previewDraft||issuedReceipt)&&$('#trialModal').classList.contains('open'))closeTrial()});
+$('#closeTrial').addEventListener('click',closeTrial);
+$('#closeTrialBottom').addEventListener('click',closeTrial);
+$('#trialModal').addEventListener('mousedown',event=>{if(event.target===$('#trialModal'))closeTrial()});
+$('#voucherType').addEventListener('pointerdown',event=>{
+  if(event.button!==0||typeof event.currentTarget.showPicker!=='function')return;
+  try{event.currentTarget.showPicker();event.preventDefault()}catch{}
+});
+let associatedSearchTimer=0,associatedSearchSequence=0;
+let invoiceOptionsTimer=0,invoiceOptionsSequence=0,invoiceOptionsRows=[],invoiceOptionsActive=-1;
+document.body.appendChild($('#invoiceOptions'));
+function positionInvoiceOptions(){
+  const anchor=$('#associatedRow').getBoundingClientRect(),box=$('#invoiceOptions'),width=Math.min(450,window.innerWidth-20);
+  box.style.width=`${width}px`;
+  box.style.left=`${Math.max(10,Math.min(anchor.right-width,window.innerWidth-width-10))}px`;
+  box.style.top=`${anchor.bottom+2}px`;
+  box.style.maxHeight=`${Math.max(80,Math.min(250,window.innerHeight-anchor.bottom-10))}px`;
+}
+function closeInvoiceOptions(){
+  clearTimeout(invoiceOptionsTimer);
+  invoiceOptionsSequence++;
+  invoiceOptionsRows=[];
+  invoiceOptionsActive=-1;
+  $('#invoiceOptions').classList.remove('open');
+  $('#invoiceReference').setAttribute('aria-expanded','false');
+}
+function renderInvoiceOptions(message=''){
+  const box=$('#invoiceOptions');
+  positionInvoiceOptions();
+  box.innerHTML=invoiceOptionsRows.length?invoiceOptionsRows.map((x,i)=>`<div class="invoice-option ${i===invoiceOptionsActive?'active':''}" data-invoice-index="${i}" role="option" aria-selected="${i===invoiceOptionsActive}"><strong>${esc(x.numero)}</strong><small>${esc(x.fecha||'')}</small><span>${esc(x.tipoOriginal||'')}</span><span class="invoice-client">${esc(x.cliente||'Sin nombre de cliente')}</span></div>`).join(''):`<div class="empty">${esc(message||'No se encontraron boletas.')}</div>`;
+  box.classList.add('open');
+  $('#invoiceReference').setAttribute('aria-expanded','true');
+  box.querySelector('.invoice-option.active')?.scrollIntoView({block:'nearest'});
+}
+async function searchInvoiceOptions(){
+  const input=$('#invoiceReference'),q=input.value.trim(),type=Number($('#voucherType').value),sequence=++invoiceOptionsSequence;
+  if(!q||associatedReceiptId){closeInvoiceOptions();return}
+  renderInvoiceOptions('Buscando boletas en SQL…');
+  try{
+    const response=await fetch(`${SQL_PREPARACION}/facturas-asociables?tipo=${type}&q=${encodeURIComponent(q)}`,{cache:'no-store'});
+    const data=await response.json();
+    if(sequence!==invoiceOptionsSequence||document.activeElement!==input)return;
+    if(!response.ok||!data.ok)throw new Error(data.error||`HTTP ${response.status}`);
+    invoiceOptionsRows=(data.facturas||[]).filter(x=>Number(x.idRecibo)>0);
+    invoiceOptionsActive=-1;
+    renderInvoiceOptions();
+  }catch(error){if(sequence===invoiceOptionsSequence){invoiceOptionsRows=[];renderInvoiceOptions(error.message)}}
+}
+function scheduleInvoiceOptions(){
+  clearTimeout(invoiceOptionsTimer);
+  if(!$('#invoiceReference').value.trim()){closeInvoiceOptions();return}
+  invoiceOptionsSequence++;
+  invoiceOptionsRows=[];
+  invoiceOptionsActive=-1;
+  renderInvoiceOptions('Buscando boletas en SQL…');
+  invoiceOptionsTimer=setTimeout(searchInvoiceOptions,180);
+}
+async function selectInvoiceOption(index){
+  const receipt=Number(invoiceOptionsRows[index]?.idRecibo);
+  if(!receipt)return;
+  closeInvoiceOptions();
+  try{await chooseAssociatedInvoice(receipt)}catch(error){setMsg(error.message,'error')}
+}
+async function loadAssociatedInvoices(){
+  const sequence=++associatedSearchSequence,type=Number($('#voucherType').value),q=$('#associatedQuery').value.trim(),box=$('#associatedResults');
+  box.innerHTML='<div class="empty">Buscando facturas en SQL…</div>';
+  try{
+    const response=await fetch(`${SQL_PREPARACION}/facturas-asociables?tipo=${type}&q=${encodeURIComponent(q)}`,{cache:'no-store'});
+    const data=await response.json();
+    if(sequence!==associatedSearchSequence||!$('#associatedModal').classList.contains('open'))return;
+    if(!response.ok||!data.ok)throw new Error(data.error||`HTTP ${response.status}`);
+    const rows=data.facturas||[];
+    box.innerHTML=rows.length?rows.map(x=>`<button class="associated-result" type="button" data-associated-id="${Number(x.idRecibo)}"><strong>${esc(x.numero)}</strong><small>${esc(x.fecha)}${x.tipoOriginal?' · '+esc(x.tipoOriginal):''}</small><span>${esc(x.cliente)}</span><strong>${money(x.total)}</strong></button>`).join(''):'<div class="empty">No se encontraron boletas disponibles de este tipo.</div>';
+  }catch(error){if(sequence===associatedSearchSequence)box.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+}
+function openAssociatedInvoices(){
+  if(issuedReceipt||recoveryPending)return;
+  closeInvoiceOptions();
+  const currentName=$('#customerName').value.trim();
+  $('#associatedQuery').value=norm(currentName)==='consumidor final'?'':currentName;
+  $('#associatedModal').classList.add('open');$('#associatedQuery').focus();loadAssociatedInvoices();
+}
+async function chooseAssociatedInvoice(receipt){
+  const type=Number($('#voucherType').value);
+  const response=await fetch(`${SQL_PREPARACION}/factura-asociable?id=${receipt}&tipo=${type}`,{cache:'no-store'}),data=await response.json();
+  if(!response.ok||!data.ok)throw new Error(data.error||`HTTP ${response.status}`);
+  const original=data.factura,lines=data.articulos||[];
+  if(!lines.length)throw new Error('La boleta no tiene artículos para cargar.');
+  if(lines.length>200)throw new Error('La boleta tiene más de 200 renglones; consultá al encargado.');
+  associatedReceiptId=Number(original.idRecibo);
+  $('#invoiceReference').value=String(original.numero||'');
+  closeInvoiceOptions();
+  $('#customerName').value=String(original.cliente||'');
+  $('#customerName').dataset.idCliente=String(original.idCliente||1);
+  const originalDocument=String(original.documento||''),documentDigits=originalDocument.replace(/\D/g,'');
+  $('#docType').value=documentDigits.length===11&&documentDigits!=='00000001000'?'CUIT':Number(original.idTipoDoc)===67?'CUIT':Number(original.idTipoDoc)===32?'Sin identificar':'DNI';
+  $('#docNumber').value=originalDocument;
+  $('#customerTax').value=({1:'Responsable inscripto',2:'Responsable no inscripto',3:'No responsable',4:'Exento',5:'Consumidor final',6:'Monotributista'})[Number(original.idTipoIva)]||'Consumidor final';
+  syncCustomerTaxShort();
+  $('#customerAddress').value=String(original.direccion||'');
+  $('#customerPhone').value=String(original.telefono||'');
+  $('#customerEmail').value=String(original.email||'');
+  articles=lines.map(x=>({...blankArticle(),idart:String(x.idart||''),descripcion:String(x.descripcion||''),cantidad:n(x.cantidad),precio:n(x.precio),precioBase:n(x.precioBase)||n(x.precio),descuento:n(x.descuento),iva:n(x.iva)}));
+  syncArticleCosts(true);
+  articles.push(blankArticle());
+  const originalValues=(data.valores||[]).filter(x=>n(x.importe)>0);
+  payments=originalValues.length?originalValues.map(x=>({...blankPayment(String(x.tipo||'')),tipo:String(x.tipo||''),idTipoPago:Number(x.idTipoPago)||0,importe:n(x.importe),idTarjeta:Number(x.idTarjeta)||0,tarjeta:String(x.tarjeta||'Ninguna'),cuotas:Number(x.cuotas)||0,coef:n(x.coef),impRec:n(x.impRec),descripcion:String(x.descripcion||''),autoDifference:false})):[blankPayment('',false)];
+  renderArticles();renderPayments();
+  $('#associatedModal').classList.remove('open');
+  updateTrialButton();
+  scheduleDraft();refreshSelectedStock().catch(console.warn);
+  const missingAccount=payments.some(x=>[3,5].includes(Number(paymentType(x)?.clase))&&!Number(x.idTarjeta));
+  setMsg(`Boleta ${original.numero} cargada desde SQL. Revisá cantidades y medio de ${[5,6,29].includes(type)?'devolución':'pago'}${missingAccount?'; elegí la tarjeta o cuenta faltante':''} antes de emitir.`,'ok');
+}
+$('#searchAssociated').addEventListener('click',openAssociatedInvoices);
+$('#closeAssociated').addEventListener('click',()=>$('#associatedModal').classList.remove('open'));
+$('#associatedModal').addEventListener('mousedown',event=>{if(event.target===$('#associatedModal'))$('#associatedModal').classList.remove('open')});
+$('#associatedQuery').addEventListener('input',()=>{clearTimeout(associatedSearchTimer);associatedSearchTimer=setTimeout(loadAssociatedInvoices,180)});
+$('#associatedResults').addEventListener('click',async event=>{const button=event.target.closest('[data-associated-id]');if(!button)return;button.disabled=true;try{await chooseAssociatedInvoice(Number(button.dataset.associatedId))}catch(error){setMsg(error.message,'error');button.disabled=false}});
+$('#invoiceOptions').addEventListener('mousedown',event=>{const option=event.target.closest('[data-invoice-index]');if(!option)return;event.preventDefault();selectInvoiceOption(Number(option.dataset.invoiceIndex))});
+window.addEventListener('resize',()=>{if($('#invoiceOptions').classList.contains('open'))positionInvoiceOptions()});
+document.addEventListener('scroll',()=>{if($('#invoiceOptions').classList.contains('open'))positionInvoiceOptions()},true);
+$('#invoiceReference').addEventListener('keydown',event=>{
+  if(event.key==='Escape'){closeInvoiceOptions();return}
+  if(!invoiceOptionsRows.length||!$('#invoiceOptions').classList.contains('open'))return;
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    event.preventDefault();
+    invoiceOptionsActive=event.key==='ArrowDown'?Math.min(invoiceOptionsActive+1,invoiceOptionsRows.length-1):invoiceOptionsActive<0?invoiceOptionsRows.length-1:Math.max(invoiceOptionsActive-1,0);
+    renderInvoiceOptions();
+  }else if(event.key==='Enter'){
+    event.preventDefault();selectInvoiceOption(invoiceOptionsActive<0?0:invoiceOptionsActive);
+  }
+});
+$('#voucherType').addEventListener('change',()=>{closeInvoiceOptions();associatedReceiptId=0;$('#invoiceReference').value='';updateTrialButton();scheduleDraft()});
+$('#customerTax').addEventListener('change',()=>{syncCustomerTaxShort();scheduleDraft()});
+$('#invoiceReference').addEventListener('blur',event=>{
+  closeInvoiceOptions();
+  const raw=event.target.value.trim(),parts=raw.match(/^(\d{1,4})\s*-\s*(\d{1,8})$/);
+  if(parts)event.target.value=parts[1].padStart(4,'0')+'-'+parts[2].padStart(8,'0');
+  scheduleDraft();
+});
+$('#invoiceReference').addEventListener('input',()=>{associatedReceiptId=0;updateTrialButton();scheduleDraft();scheduleInvoiceOptions()});
+$('#branch').addEventListener('change',()=>{$('#pos').value='';renderVoucherTypes($('#voucherType').value);saveWorkstation();loadSqlCatalog();scheduleDraft()});
+$('#pos').addEventListener('change',()=>{const suc=Number($('#pos').selectedOptions[0]?.dataset.sucursal);$('#branch').value=suc===1?'progreso_ruta':suc===2?'calle5_espana':'';renderVoucherTypes($('#voucherType').value);saveWorkstation();loadSqlCatalog();scheduleDraft()});
+$('#seller').addEventListener('change',()=>{saveWorkstation();updateTrialButton();scheduleDraft()});
+$('#priceList').addEventListener('change',()=>{loadSqlCatalog();scheduleDraft()});
+$('#ticketPrinter').addEventListener('change',()=>{try{localStorage.setItem(TICKET_PRINTER_KEY,$('#ticketPrinter').value)}catch{}});
+async function updatePrinterSetup(){
+  $('#printerSetupError').textContent='';
+  try{
+    const printers=await loadTicketPrinters();
+    if(!printers.some(name=>name.startsWith('local:')))$('#printerSetupError').textContent='Para imprimir directo en esta PC, instalá el conector local. El selector del navegador funciona sin instalarlo.';
+  }catch(error){
+    $('#printerSetupChoice').innerHTML='<option value="">No se pudieron consultar las impresoras</option>';
+    $('#printerSetupError').textContent='No se pudieron consultar las impresoras.';
+  }
+}
+$('#chooseTicketPrinter').addEventListener('click',()=>{$('#printerSetupModal').classList.add('open');updatePrinterSetup().then(()=>$('#printerSetupChoice').focus())});
+$('#reloadPrinterSetup').addEventListener('click',updatePrinterSetup);
+$('#closePrinterSetup').addEventListener('click',()=>$('#printerSetupModal').classList.remove('open'));
+$('#printerSetupModal').addEventListener('mousedown',event=>{if(event.target===$('#printerSetupModal'))$('#printerSetupModal').classList.remove('open')});
+$('#savePrinterSetup').addEventListener('click',async()=>{
+  const selected=$('#printerSetupChoice').value;
+  if(!selected){$('#printerSetupError').textContent='Elegí una ticketera antes de guardar.';return}
+  try{
+    const printers=await loadTicketPrinters();
+    if(!printers.includes(selected)){ $('#printerSetupError').textContent='Esa ticketera ya no está disponible. Elegí otra.';return }
+    $('#ticketPrinter').value=selected;
+    $('#previewPrinter').value=selected;
+    try{localStorage.setItem(TICKET_PRINTER_KEY,selected)}catch{}
+    $('#printerSetupModal').classList.remove('open');
+    setMsg(`Ticketera ${selected} guardada en este navegador. Las próximas impresiones saldrán por ahí.`,'ok');
+  }catch(error){$('#printerSetupError').textContent='No se pudo comprobar si la impresora sigue disponible.'}
+});
+try{$('#autoPrint').checked=localStorage.getItem('facturacion_auto_print_v1')!=='false'}catch{}
+$('#autoPrint').addEventListener('change',()=>{try{localStorage.setItem('facturacion_auto_print_v1',String($('#autoPrint').checked))}catch{}});
 bindFunctions();
-Promise.all([loadConfig(),loadCatalog()]).finally(()=>restoreLastLocalState().catch(error=>{console.warn(error);applyData(null)}));
+bindCustomerSearch();
+loadTicketPrinters().catch(error=>{console.warn(error);$('#ticketPrinter').innerHTML='<option value="">Ticketera no disponible</option>';$('#previewPrinter').innerHTML='<option value="">Ticketera no disponible</option>'});
+loadConfig().then(async ready=>{
+  await restoreLastLocalState();
+  if(ready)await loadSqlCatalog();
+  else setMsg(`${SQL_CONNECTION_MESSAGE} Los borradores siguen guardados en esta PC.`,'error');
+}).catch(error=>{console.warn(error);localDraftStoreReady=false;updateTrialButton();setMsg('No se pudieron leer los borradores guardados en esta PC. No se habilita la emisión hasta recuperarlos.','error')});
 </script><script src="recargar-deslizando.js" defer></script>
 </body></html>

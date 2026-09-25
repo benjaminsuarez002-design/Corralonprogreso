@@ -519,6 +519,7 @@ internal sealed class ServerForm : Form
     {
         try
         {
+            if (!EnsureFacturacionApi()) throw new InvalidOperationException("No se pudo iniciar la API de facturación. El servidor web no se inició.");
             listener = new HttpListener();
             listener.Prefixes.Add("http://+:" + Port + "/");
             listener.Start();
@@ -529,19 +530,130 @@ internal sealed class ServerForm : Form
         }
         catch (Exception ex)
         {
+            try { if (listener != null) listener.Close(); } catch { }
+            listener = null;
+            StopFacturacionApi();
             status.Text = "Estado: error al iniciar";
             Log(ex.ToString());
             MessageBox.Show(ex.Message, "No pude iniciar el servidor");
         }
     }
 
-    private void StopServer()
+    private bool EnsureFacturacionApi()
     {
+        string executable = Path.Combine(root, ".codex-staging", "FacturacionCopiaApi.exe");
+        if (!File.Exists(executable))
+        {
+            Log("Facturación central: falta " + executable);
+            return false;
+        }
+        foreach (Process running in Process.GetProcessesByName("FacturacionCopiaApi"))
+        {
+            try
+            {
+                if (String.Equals(running.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase) && !running.HasExited) return FacturacionApiReady();
+            }
+            catch { }
+            finally { running.Dispose(); }
+        }
+        try
+        {
+            var start = new ProcessStartInfo(executable);
+            start.WorkingDirectory = root;
+            start.UseShellExecute = false;
+            start.CreateNoWindow = true;
+            start.WindowStyle = ProcessWindowStyle.Hidden;
+            using (Process process = Process.Start(start))
+            {
+                if (process == null || process.WaitForExit(500))
+                {
+                    Log("Facturación central: la API terminó al intentar iniciarse.");
+                    return false;
+                }
+            }
+            return FacturacionApiReady();
+        }
+        catch (Exception ex) { Log("Facturación central: no se pudo iniciar la API. " + ex); return false; }
+    }
+
+    private bool FacturacionApiReady()
+    {
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                var request = (HttpWebRequest)WebRequest.Create("http://localhost:8081/health");
+                request.Proxy = null;
+                request.Timeout = 500;
+                using (var reply = (HttpWebResponse)request.GetResponse())
+                    if (reply.StatusCode == HttpStatusCode.OK) return true;
+            }
+            catch { }
+            Thread.Sleep(100);
+        }
+        Log("Facturación central: la API no respondió al control de inicio.");
+        return false;
+    }
+
+    private bool StopFacturacionApi()
+    {
+        string executable = Path.Combine(root, ".codex-staging", "FacturacionCopiaApi.exe");
+        foreach (Process running in Process.GetProcessesByName("FacturacionCopiaApi"))
+        {
+            using (running)
+            {
+                try
+                {
+                    if (!String.Equals(running.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase) || running.HasExited) continue;
+                    var request = (HttpWebRequest)WebRequest.Create("http://localhost:8081/shutdown");
+                    request.Proxy = null;
+                    request.Method = "POST";
+                    request.ContentLength = 0;
+                    request.Timeout = 5000;
+                    using (var reply = (HttpWebResponse)request.GetResponse())
+                    {
+                        if (reply.StatusCode != HttpStatusCode.OK) return false;
+                    }
+                    if (!running.WaitForExit(5000))
+                    {
+                        Log("Facturación central: la API recibió el apagado, pero no terminó a tiempo.");
+                        return false;
+                    }
+                }
+                catch (WebException ex)
+                {
+                    if (running.WaitForExit(2000)) return true;
+                    string detail = "";
+                    if (ex.Response != null)
+                    {
+                        try { using (var reader = new StreamReader(ex.Response.GetResponseStream())) detail = reader.ReadToEnd(); }
+                        catch { }
+                        ex.Response.Dispose();
+                    }
+                    Log("Facturación central: no se apagó la API. " + detail + " " + ex.Message);
+                    return false;
+                }
+                catch (Exception ex) { Log("Facturación central: no se apagó la API. " + ex); return false; }
+            }
+        }
+        return true;
+    }
+
+    private bool StopServer()
+    {
+        if (listener == null) return StopFacturacionApi();
+        if (!StopFacturacionApi())
+        {
+            status.Text = "Estado: activo; facturación está terminando o no pudo apagarse";
+            MessageBox.Show("La API de facturación sigue trabajando o no respondió al apagado. El servidor continúa activo; intentá detenerlo de nuevo cuando termine.", "Corralón Web", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
         try { listener.Stop(); } catch { }
         try { listener.Close(); } catch { }
         listener = null;
         status.Text = "Estado: detenido";
         startStopButton.Text = "Iniciar";
+        return true;
     }
 
     private void Listen()
@@ -568,6 +680,11 @@ internal sealed class ServerForm : Form
             if (string.Equals(requestPath, "updates/manifest.json", StringComparison.OrdinalIgnoreCase))
             {
                 WriteJson(context, 200, BuildUpdateManifest());
+                return;
+            }
+            if (requestPath.StartsWith("api/facturacion/", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleFacturacionProxy(context, requestPath);
                 return;
             }
             if (requestPath.StartsWith("api/", StringComparison.OrdinalIgnoreCase))
@@ -644,6 +761,86 @@ internal sealed class ServerForm : Form
             return factFile;
         }
         return Path.GetFullPath(Path.Combine(root, normalized));
+    }
+
+    private void HandleFacturacionProxy(HttpListenerContext context, string requestPath)
+    {
+        string route = requestPath.Substring("api/facturacion/".Length).ToLowerInvariant();
+        string method = context.Request.HttpMethod;
+        bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "catalogo", "stock", "clientes", "comprobante", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras" }, route) >= 0)
+            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir" }, route) >= 0);
+        if (!allowed) { WriteJson(context, 404, "{\"ok\":false,\"error\":\"Ruta de facturación no disponible.\"}"); return; }
+
+        IPAddress address = context.Request.RemoteEndPoint == null ? null : context.Request.RemoteEndPoint.Address;
+        if (address != null && address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        byte[] ip = address != null && address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? address.GetAddressBytes() : null;
+        bool trustedNetwork = address != null && (IPAddress.IsLoopback(address)
+            || (ip != null && ip[0] == 192 && ip[1] == 168 && ip[2] == 100)
+            || (ip != null && ip[0] == 100 && ip[1] >= 64 && ip[1] <= 127));
+        string origin = context.Request.Headers["Origin"];
+        string expectedOrigin = context.Request.Url.GetLeftPart(UriPartial.Authority);
+        if (!trustedNetwork || (origin != null && !String.Equals(origin, expectedOrigin, StringComparison.OrdinalIgnoreCase))
+            || String.Equals(context.Request.Headers["Sec-Fetch-Site"], "cross-site", StringComparison.OrdinalIgnoreCase))
+        { WriteJson(context, 403, "{\"ok\":false,\"error\":\"Facturación disponible solo desde la red local o Tailscale.\"}"); return; }
+
+        try
+        {
+            if (method == "POST" && context.Request.ContentLength64 > 8500000)
+            { WriteJson(context, 413, "{\"ok\":false,\"error\":\"Solicitud de facturación demasiado grande.\"}"); return; }
+            string url = "http://localhost:8081/" + route + (context.Request.Url.Query ?? "");
+            var request = (HttpWebRequest)WebRequest.Create(url);
+            request.Proxy = null;
+            request.Method = method;
+            request.Timeout = 180000;
+            request.ReadWriteTimeout = 180000;
+            request.KeepAlive = false;
+            if (method == "POST")
+            {
+                request.ContentType = context.Request.ContentType ?? "application/json";
+                byte[] body;
+                using (var buffer = new MemoryStream())
+                {
+                    byte[] chunk = new byte[8192];
+                    int count;
+                    while ((count = context.Request.InputStream.Read(chunk, 0, chunk.Length)) > 0)
+                    {
+                        if (buffer.Length + count > 8500000)
+                        { WriteJson(context, 413, "{\"ok\":false,\"error\":\"Solicitud de facturación demasiado grande.\"}"); return; }
+                        buffer.Write(chunk, 0, count);
+                    }
+                    body = buffer.ToArray();
+                }
+                request.ContentLength = body.Length;
+                using (Stream output = request.GetRequestStream())
+                    output.Write(body, 0, body.Length);
+            }
+            HttpWebResponse reply;
+            try { reply = (HttpWebResponse)request.GetResponse(); }
+            catch (WebException ex)
+            {
+                reply = ex.Response as HttpWebResponse;
+                if (reply == null) throw;
+            }
+            using (reply)
+            using (Stream source = reply.GetResponseStream())
+            using (var buffer = new MemoryStream())
+            {
+                source.CopyTo(buffer);
+                byte[] bytes = buffer.ToArray();
+                context.Response.StatusCode = (int)reply.StatusCode;
+                context.Response.ContentType = reply.ContentType ?? "application/json; charset=utf-8";
+                context.Response.Headers["Cache-Control"] = "no-store";
+                context.Response.ContentLength64 = bytes.Length;
+                context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log("Facturación central: " + ex.ToString());
+            WriteJson(context, 503, route == "emitir"
+                ? "{\"ok\":false,\"recoveryRequired\":true,\"error\":\"No se pudo confirmar la respuesta del servidor. Verificá esta venta antes de intentar emitir otra vez.\"}"
+                : "{\"ok\":false,\"error\":\"No se pudo contactar el servicio central de facturación.\"}");
+        }
     }
 
     private void HandleFacturasApi(HttpListenerContext context)
@@ -1882,7 +2079,12 @@ internal sealed class ServerForm : Form
             HideToTray();
             return;
         }
-        StopServer();
+        if (!StopServer() && e.CloseReason != CloseReason.WindowsShutDown)
+        {
+            e.Cancel = true;
+            exiting = false;
+            return;
+        }
         if (trayIcon != null)
         {
             trayIcon.Visible = false;

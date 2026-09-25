@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot 'facturacion-copia-api.cs'
 $output = Join-Path $PSScriptRoot '.codex-staging\FacturacionCopiaApi.exe'
 [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($output)) | Out-Null
-$url = 'http://localhost:8080/facturacion%20-%20copia.html'
+$url = 'http://localhost:8080/facturacion.html'
 $apiUrl = 'http://localhost:8081/bootstrap'
 $apiDisponible = $false
 $necesitaCompilar = -not (Test-Path -LiteralPath $output) -or (Get-Item -LiteralPath $source).LastWriteTimeUtc -gt (Get-Item -LiteralPath $output -ErrorAction SilentlyContinue).LastWriteTimeUtc
@@ -19,7 +19,7 @@ if ($necesitaCompilar -and $apiDisponible) {
     Start-Sleep -Milliseconds 350
 }
 if ($necesitaCompilar -or $SoloCompilar) {
-    & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe "/out:$output" /reference:System.Data.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $source
+    & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe "/out:$output" /reference:System.Data.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $source
     if ($LASTEXITCODE -ne 0) { throw 'No se pudo compilar la API de facturación.' }
 }
 if ($SoloCompilar) { Write-Output $output; return }

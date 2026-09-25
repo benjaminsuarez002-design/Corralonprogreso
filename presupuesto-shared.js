@@ -12,6 +12,14 @@
     if (!fecha) return '-';
     if (typeof fecha !== 'string') return String(fecha);
 
+    const fechaSql = fecha.trim().match(/^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/);
+    if (fechaSql) {
+      const parsed = new Date(Number(fechaSql[1]));
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', year: 'numeric' });
+      }
+    }
+
     // Prioridad formato local: dd/mm/yyyy (o d/m/yy, con / o -)
     const m = fecha.trim().match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
     if (m) {
