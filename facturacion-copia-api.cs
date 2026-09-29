@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.OleDb;
 using System.Data.SqlClient;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -773,29 +774,19 @@ internal static class FacturacionCopiaApi
     private static int LocalOperator()
     {
         // Config es local del MDB; Access usa este valor como IDOper, distinto del vendedor.
-        object engine = null, database = null, recordset = null;
         try
         {
-            Type dao = Type.GetTypeFromProgID("DAO.DBEngine.120");
-            if (dao == null) throw new InvalidOperationException("No está disponible DAO de Access para leer el operador local.");
-            engine = Activator.CreateInstance(dao);
-            database = dao.InvokeMember("OpenDatabase", System.Reflection.BindingFlags.InvokeMethod, null, engine,
-                new object[] { @"C:\Update\Ariel2App.mdb", false, true });
-            recordset = database.GetType().InvokeMember("OpenRecordset", System.Reflection.BindingFlags.InvokeMethod, null, database,
-                new object[] { "SELECT TOP 1 IDOper FROM Config" });
-            object fields = recordset.GetType().InvokeMember("Fields", System.Reflection.BindingFlags.GetProperty, null, recordset, null);
-            object field = fields.GetType().InvokeMember("Item", System.Reflection.BindingFlags.GetProperty, null, fields, new object[] { "IDOper" });
-            object value = field.GetType().InvokeMember("Value", System.Reflection.BindingFlags.GetProperty, null, field, null);
-            return Id(value);
+            using (var connection = new OleDbConnection("Provider=Microsoft.ACE.OLEDB.12.0;Data Source=C:\\Update\\Ariel2App.mdb;Mode=Read;Persist Security Info=False;"))
+            using (var command = new OleDbCommand("SELECT TOP 1 IDOper FROM Config", connection))
+            {
+                connection.Open();
+                int operatorId = Id(command.ExecuteScalar());
+                if (operatorId <= 0) throw new InvalidOperationException("El MDB local no tiene un IDOper válido en Config.");
+                return operatorId;
+            }
         }
         catch (InvalidOperationException) { throw; }
         catch (Exception ex) { throw new InvalidOperationException("No se pudo leer IDOper del MDB local: " + ex.Message); }
-        finally
-        {
-            if (recordset != null) { try { recordset.GetType().InvokeMember("Close", System.Reflection.BindingFlags.InvokeMethod, null, recordset, null); } catch { } System.Runtime.InteropServices.Marshal.FinalReleaseComObject(recordset); }
-            if (database != null) { try { database.GetType().InvokeMember("Close", System.Reflection.BindingFlags.InvokeMethod, null, database, null); } catch { } System.Runtime.InteropServices.Marshal.FinalReleaseComObject(database); }
-            if (engine != null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(engine);
-        }
     }
     private static object Emit(SqlConnection connection, Dictionary<string, object> invoice, bool dryRun, bool recoveryOnly)
     {
