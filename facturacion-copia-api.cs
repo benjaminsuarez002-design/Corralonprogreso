@@ -311,6 +311,44 @@ internal static class FacturacionCopiaApi
     {
         writer.WriteElementString("ar", name, WsfeNamespace, Convert.ToString(value, CultureInfo.InvariantCulture));
     }
+    // El descuento/recargo de los medios de pago cambia el total del comprobante.
+    // Distribuirlo en centavos entre las alicuotas evita que ImpTotal difiera de neto + IVA.
+    private static decimal[] FiscalAmounts(decimal gross, decimal finalTotal, decimal net21, decimal iva21,
+        decimal net105, decimal iva105)
+    {
+        decimal gross21 = net21 + iva21, gross105 = net105 + iva105;
+        decimal untaxed = gross - gross21 - gross105;
+        if (gross <= 0 || finalTotal <= 0 || untaxed < 0)
+            throw new InvalidOperationException("No se puede distribuir el total fiscal entre las alícuotas.");
+        if (finalTotal == gross)
+            return new decimal[] { net21 + net105, iva21 + iva105, untaxed, net21, iva21, net105, iva105 };
+        decimal[] buckets = { gross21, gross105, untaxed };
+        long totalCents = decimal.ToInt64(finalTotal * 100m);
+        long[] cents = new long[3];
+        decimal[] fractions = new decimal[3];
+        long assigned = 0;
+        for (int i = 0; i < buckets.Length; i++)
+        {
+            decimal exact = totalCents * buckets[i] / gross;
+            cents[i] = decimal.ToInt64(decimal.Floor(exact));
+            fractions[i] = exact - cents[i];
+            assigned += cents[i];
+        }
+        while (assigned < totalCents)
+        {
+            int best = -1;
+            for (int i = 0; i < buckets.Length; i++)
+                if (buckets[i] > 0 && (best < 0 || fractions[i] > fractions[best])) best = i;
+            cents[best]++; fractions[best] = -1; assigned++;
+        }
+        decimal adjusted21 = cents[0] / 100m, adjusted105 = cents[1] / 100m;
+        decimal adjustedNet21 = Decimal.Round(adjusted21 / 1.21m, 2, MidpointRounding.AwayFromZero);
+        decimal adjustedNet105 = Decimal.Round(adjusted105 / 1.105m, 2, MidpointRounding.AwayFromZero);
+        decimal adjustedIva21 = adjusted21 - adjustedNet21;
+        decimal adjustedIva105 = adjusted105 - adjustedNet105;
+        return new decimal[] { adjustedNet21 + adjustedNet105, adjustedIva21 + adjustedIva105,
+            cents[2] / 100m, adjustedNet21, adjustedIva21, adjustedNet105, adjustedIva105 };
+    }
     private static byte[] FiscalSoapRequest(string token, string sign, string cuit, int afipType, int point,
         int sequence, DateTime date, int documentType, string document, int conditionIvaId,
         decimal gross, decimal net, decimal tax, decimal untaxed, decimal net21, decimal iva21,
@@ -618,6 +656,100 @@ internal static class FacturacionCopiaApi
             return command.ExecuteNonQuery();
         }
     }
+    private static List<Dictionary<string, object>> CustomerDetail(SqlConnection connection, int id)
+    {
+        return Rows(connection,
+            "SELECT c.IDCliente AS id,c.[RazónSocial] AS nombre,c.Contacto AS contacto,c.[Dirección] AS direccion," +
+            "c.IDLocalidad AS idDepartamento,c.IDProvincia AS idProvincia,c.IDRegión AS idRegion," +
+            "c.LocalidadCli AS localidad,c.CodPostal AS codigoPostal,c.[Teléfono] AS telefono,c.Fax AS celular," +
+            "c.IDTipoIVA AS idTipoIva,c.IDTipoDoc AS idTipoDoc,c.CUIT AS documento,c.TipoCli AS idLista," +
+            "c.IDTipoIB AS idTipoIb,c.NroIIBB AS numeroIibb,CONVERT(varchar(10),c.FechaVtoExIB,23) AS vencimientoIibb," +
+            "c.IDTipoComer AS idTipoComercio,CONVERT(varchar(10),c.FechaAlta,103) AS fechaAlta," +
+            "c.IDVend AS idVendedor,c.IDTipoPago AS idTipoPago,c.PorcDto*100 AS descuento,c.ImpCred AS limiteCredito," +
+            "c.SaldoCC AS saldoSql,c.Email AS email,c.Web AS web,c.CBU AS cbu,c.CBUAlias AS cbuAlias," +
+            "CONVERT(nvarchar(4000),c.Nota) AS nota,c.Suspendido AS suspendido," +
+            "ISNULL(c.ImpCred,0)-ISNULL(c.SaldoCC,0)-" +
+            "ISNULL((SELECT SUM(v.ImpEnt*tc.ImpPor) FROM dbo.FacturasATP h JOIN dbo.FacturasTSVal v ON v.IDRecibo=h.IDRecibo JOIN dbo.TipoComprobantes tc ON tc.IDComprob=h.IDComprob WHERE h.IDCliente=c.IDCliente AND h.IDEmp=1 AND h.Anulada=0 AND h.Confirmado=-1 AND v.IDTipoPago=3 AND tc.IDTipoAcred>0),0)+" +
+            "ISNULL((SELECT SUM(r.Total) FROM dbo.RecibosXTP r WHERE r.IDCliente=c.IDCliente AND r.IDEmp=1 AND r.Anulado=0 AND r.Confirmado=1),0) AS cupoDisponible " +
+            "FROM dbo.Clientes c WHERE c.IDCliente=@p0", id);
+    }
+    private static object SaveCustomer(SqlConnection connection, Dictionary<string, object> data)
+    {
+        int id = 0;
+        if (Value(data, "id") != null && Text(Value(data, "id")) != "0") id = Id(Value(data, "id"));
+        if (id == 1) throw new InvalidOperationException("No se puede modificar Consumidor Final desde Facturación.");
+        string name = Limited(Value(data, "nombre"), 100, "Razón social");
+        if (name.Length < 2) throw new InvalidOperationException("Ingresá la razón social del cliente.");
+        string document = Limited(Value(data, "documento"), 13, "Documento");
+        string contact = Limited(Value(data, "contacto"), 35, "Contacto");
+        string address = Limited(Value(data, "direccion"), 100, "Dirección");
+        string locality = Limited(Value(data, "localidad"), 50, "Localidad");
+        string zip = Limited(Value(data, "codigoPostal"), 20, "Código postal");
+        string phone = Limited(Value(data, "telefono"), 50, "Teléfono");
+        string mobile = Limited(Value(data, "celular"), 50, "Celular");
+        string email = Limited(Value(data, "email"), 150, "Email");
+        string web = Limited(Value(data, "web"), 150, "Web");
+        string cbu = Limited(Value(data, "cbu"), 22, "CBU");
+        string alias = Limited(Value(data, "cbuAlias"), 100, "Alias");
+        string note = Limited(Value(data, "nota"), 4000, "Nota");
+        string iibbNumber = Limited(Value(data, "numeroIibb"), 20, "Número de Ingresos Brutos");
+        DateTime dueDate;
+        object iibbDue = Text(Value(data, "vencimientoIibb")).Length == 0 ? null :
+            (DateTime.TryParseExact(Text(Value(data, "vencimientoIibb")), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out dueDate)
+                ? (object)dueDate : null);
+        if (Text(Value(data, "vencimientoIibb")).Length > 0 && iibbDue == null)
+            throw new InvalidOperationException("La fecha de vencimiento de Ingresos Brutos no es válida.");
+        int department, province, region, iibb;
+        if (!Int32.TryParse(Text(Value(data, "idDepartamento")), out department) || department < 0) department = 0;
+        if (!Int32.TryParse(Text(Value(data, "idProvincia")), out province) || province < 0) province = 0;
+        if (!Int32.TryParse(Text(Value(data, "idRegion")), out region) || region < 0) region = 0;
+        if (!Int32.TryParse(Text(Value(data, "idTipoIb")), out iibb) || iibb < 0) iibb = 0;
+        int commerce = RequiredId(Value(data, "idTipoComercio"), "el tipo de comercio");
+        bool suspended = Text(Value(data, "suspendido")).Equals("True", StringComparison.OrdinalIgnoreCase);
+        int iva = RequiredId(Value(data, "idTipoIva"), "la condición de IVA");
+        int docType = RequiredId(Value(data, "idTipoDoc"), "el tipo de documento");
+        int list = RequiredId(Value(data, "idLista"), "la lista de precios");
+        int seller = RequiredId(Value(data, "idVendedor"), "el vendedor");
+        int payment = RequiredId(Value(data, "idTipoPago"), "el tipo de pago");
+        decimal limit = Number(Value(data, "limiteCredito"));
+        decimal discount = Number(Value(data, "descuento"));
+        if (limit < 0 || limit > 999999999 || discount < 0 || discount > 100)
+            throw new InvalidOperationException("El límite de crédito o descuento no es válido.");
+        using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+        {
+            try
+            {
+                if (id > 0 && Scalar(connection, transaction, "SELECT 1 FROM dbo.Clientes WITH (UPDLOCK,HOLDLOCK) WHERE IDCliente=@p0", id) == null)
+                    throw new InvalidOperationException("El cliente ya no existe en SQL.");
+                object sameName = Scalar(connection, transaction,
+                    "SELECT TOP 1 IDCliente FROM dbo.Clientes WITH (UPDLOCK,HOLDLOCK) WHERE [RazónSocial]=@p0 AND IDCliente<>@p1", name, id);
+                if (sameName != null)
+                    throw new InvalidOperationException("Ya existe un cliente con esa razón social (ID " + Text(sameName) + "). Buscalo en el campo Cliente y elegí Ver cliente para modificarlo.");
+                if (document.Length > 0 && Scalar(connection, transaction,
+                    "SELECT TOP 1 IDCliente FROM dbo.Clientes WITH (UPDLOCK,HOLDLOCK) WHERE REPLACE(REPLACE(CUIT,'-',''),' ','')=REPLACE(REPLACE(@p0,'-',''),' ','') AND IDCliente<>@p1", document, id) != null)
+                    throw new InvalidOperationException("Ya existe otro cliente con ese documento.");
+                if (id == 0) id = Convert.ToInt32(Scalar(connection, transaction, "SELECT ISNULL(MAX(IDCliente),0)+1 FROM dbo.Clientes WITH (TABLOCKX,HOLDLOCK)"));
+                string sql;
+                if (Value(data, "id") == null || Text(Value(data, "id")) == "0")
+                    sql = "INSERT INTO dbo.Clientes (IDCliente,[RazónSocial],Contacto,[Dirección],LocalidadCli,CodPostal,[Teléfono],Fax,IDTipoIVA,IDTipoDoc,CUIT,TipoCli,IDVend,IDTipoPago,PorcDto,ImpCred,Email,Web,CBU,CBUAlias,Nota,IDLocalidad,IDProvincia,IDRegión,IDTipoIB,NroIIBB,FechaVtoExIB,IDTipoComer,Suspendido,FechaAlta,FechaIng) VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,@p22,@p23,@p24,@p25,@p26,@p27,@p28,GETDATE(),GETDATE())";
+                else
+                    sql = "UPDATE dbo.Clientes SET [RazónSocial]=@p1,Contacto=@p2,[Dirección]=@p3,LocalidadCli=@p4,CodPostal=@p5,[Teléfono]=@p6,Fax=@p7,IDTipoIVA=@p8,IDTipoDoc=@p9,CUIT=@p10,TipoCli=@p11,IDVend=@p12,IDTipoPago=@p13,PorcDto=@p14,ImpCred=@p15,Email=@p16,Web=@p17,CBU=@p18,CBUAlias=@p19,Nota=@p20,IDLocalidad=@p21,IDProvincia=@p22,IDRegión=@p23,IDTipoIB=@p24,NroIIBB=@p25,FechaVtoExIB=@p26,IDTipoComer=@p27,Suspendido=@p28 WHERE IDCliente=@p0";
+                Execute(connection, transaction, sql, id, name, contact, address, locality, zip, phone, mobile, iva, docType, document, list, seller, payment, discount / 100m, limit, email, web, cbu, alias, note,
+                    department == 0 ? null : (object)department, province == 0 ? null : (object)province, region == 0 ? null : (object)region, iibb == 0 ? null : (object)iibb,
+                    iibbNumber, iibbDue, commerce, suspended);
+                transaction.Commit();
+            }
+            catch (SqlException ex)
+            {
+                transaction.Rollback();
+                if (ex.Number == 2601 || ex.Number == 2627)
+                    throw new InvalidOperationException("Ya existe un cliente con esos datos. Buscalo en el campo Cliente y elegí Ver cliente para modificarlo.");
+                throw;
+            }
+            catch { transaction.Rollback(); throw; }
+        }
+        return new { ok = true, cliente = CustomerDetail(connection, id)[0] };
+    }
     private static string Limited(object value, int max, string label)
     {
         string result = Text(value);
@@ -910,7 +1042,7 @@ internal static class FacturacionCopiaApi
                         "ISNULL((SELECT SUM(v.ImpEnt*tc.ImpPor) FROM dbo.FacturasATP h JOIN dbo.FacturasTSVal v ON v.IDRecibo=h.IDRecibo JOIN dbo.TipoComprobantes tc ON tc.IDComprob=h.IDComprob WHERE h.IDCliente=c.IDCliente AND h.IDEmp=1 AND h.Anulada=0 AND h.Confirmado=-1 AND v.IDTipoPago=3 AND tc.IDTipoAcred>0),0)+" +
                         "ISNULL((SELECT SUM(r.Total) FROM dbo.RecibosXTP r WHERE r.IDCliente=c.IDCliente AND r.IDEmp=1 AND r.Anulado=0 AND r.Confirmado=1),0) FROM dbo.Clientes c WHERE c.IDCliente=@p0",
                         customer);
-                    if (credit == null || Convert.ToDecimal(credit) < account) throw new InvalidOperationException("La cuenta corriente supera el crédito disponible.");
+                    if (credit == null || Convert.ToDecimal(credit) < account) throw new InvalidOperationException("Cupo excedido. La cuenta corriente supera el crédito disponible.");
                 }
                 // Access usa DMax por comprobante y punto. TABLOCKX evita carreras también con altas desde Access.
                 object maxObj = Scalar(connection, tx,
@@ -973,10 +1105,12 @@ internal static class FacturacionCopiaApi
                     }
                     else
                     {
+                        decimal[] fiscalAmounts = FiscalAmounts(gross, grandTotal, net21, iva21, net105, iva105);
                         authorization = FiscalAuthorize(afipType, point, number, date,
                             docId == 67 ? 80 : docId == 50 ? 96 : 99, docId == 32 ? "0" : doc.Replace(".", "").Replace(" ", ""), conditionIvaId,
-                            grandTotal, net21 + net105, iva21 + iva105, net - net21 - net105,
-                            net21, iva21, net105, iva105, companyCuit, associatedType, associatedNumber, associatedDate,
+                            grandTotal, fiscalAmounts[0], fiscalAmounts[1], fiscalAmounts[2],
+                            fiscalAmounts[3], fiscalAmounts[4], fiscalAmounts[5], fiscalAmounts[6],
+                            companyCuit, associatedType, associatedNumber, associatedDate,
                             () => { fiscalCallStarted = true; });
                         string recovery = Json.Serialize(new { number, total = grandTotal, typeId, point,
                             cae = authorization.Cae, expiration = authorization.Expiration });
@@ -1305,7 +1439,7 @@ internal static class FacturacionCopiaApi
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/bootstrap")
                 {
-                    Reply(context, 200, new { ok = true, impresionDirecta = true, stockEnVivo = true,
+                    Reply(context, 200, new { ok = true, impresionDirecta = true, stockEnVivo = true, clientesEdicion = true,
                         comprobantes = Rows(connection, "SELECT tc.IDComprob AS id, tc.Abreviatura AS codigo, tc.Descripcion AS nombre, tc.IDTipoAFIP AS idAfip, tc.EnLibroIVA AS libroIva, tc.ImpFis AS impresoraFiscal, tc.IDTipoMovStock AS tipoMovimientoStock, xp.IDPtoVta AS idPuntoVenta FROM dbo.TipoComprobantes tc INNER JOIN dbo.TiposCompXPV xp ON xp.IDComprob=tc.IDComprob WHERE tc.EnVtas=1 ORDER BY xp.IDPtoVta,tc.Abreviatura"),
                         puntosVenta = Rows(connection, "SELECT IDDepósito AS id, [Descripción] AS nombre, IDSucAsoc AS idSucursal, IDEmp AS idEmpresa, FE AS electronica, ImpFis AS impresoraFiscal FROM dbo.[Depósitos] ORDER BY IDDepósito"),
                         tiposPago = Rows(connection, "SELECT IDTipoPago AS id, TipoPago AS nombre, IDClasePago AS clase, PorcRec1C AS recargoInicial, CuotasPlan AS cuotasPlan FROM dbo.TiposPagos WHERE EnCaja=1 ORDER BY TipoPago"),
@@ -1364,6 +1498,24 @@ internal static class FacturacionCopiaApi
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/clientes")
                 {
+                    if (Text(request.QueryString["opciones"]) == "1")
+                    {
+                        Reply(context, 200, new { ok = true,
+                            departamentos = Rows(connection, "SELECT IDLocal AS id,Localidad AS nombre FROM dbo.Localidades ORDER BY Localidad"),
+                            provincias = Rows(connection, "SELECT IDProvincia AS id,Provincia AS nombre FROM dbo.Provincias ORDER BY Provincia"),
+                            regiones = Rows(connection, "SELECT IDRegión AS id,[Descripción] AS nombre FROM dbo.Regiones ORDER BY [Descripción]"),
+                            tiposIb = Rows(connection, "SELECT IDTipoIB AS id,TipoIB AS nombre FROM dbo.TiposIB ORDER BY TipoIB"),
+                            tiposComercio = Rows(connection, "SELECT IDTipoCom AS id,DescCom AS nombre FROM dbo.TipoComer ORDER BY DescCom") });
+                        return;
+                    }
+                    if (!String.IsNullOrEmpty(request.QueryString["id"]))
+                    {
+                        int customerId = Id(request.QueryString["id"]);
+                        var detail = CustomerDetail(connection, customerId);
+                        if (detail.Count == 0) { Reply(context, 404, new { ok = false, error = "El cliente no existe en SQL." }); return; }
+                        Reply(context, 200, new { ok = true, cliente = detail[0] });
+                        return;
+                    }
                     if (Text(request.QueryString["catalogo"]) == "1")
                     {
                         Reply(context, 200, new { ok = true, catalogoCompleto = true, clientes = Rows(connection,
@@ -1410,6 +1562,16 @@ internal static class FacturacionCopiaApi
                        .Append(" WHERE rn BETWEEN startRow AND startRow+60 ORDER BY rn");
                     var clients = Rows(connection, sql.ToString(), patterns);
                     Reply(context, 200, new { ok = true, clientes = clients });
+                    return;
+                }
+                if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/clientes")
+                {
+                    if (!(request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Se esperaba un cliente JSON.");
+                    string body;
+                    using (var reader = new StreamReader(request.InputStream, Encoding.UTF8)) body = reader.ReadToEnd();
+                    if (body.Length > 20000) throw new InvalidOperationException("La ficha de cliente es demasiado grande.");
+                    Reply(context, 200, SaveCustomer(connection, Object(Json.DeserializeObject(body))));
                     return;
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/facturas-asociables")

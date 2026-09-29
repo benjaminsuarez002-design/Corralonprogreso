@@ -45,6 +45,7 @@
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const pageId = document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile];
+  const loginPage = pageId === 'facturacion' ? 'menu.html' : 'index.html';
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));
 
@@ -175,14 +176,14 @@
     const id = persistent ? activeUserId() : String(temporary?.usuario?.id || '').trim();
     if (!id) {
       clearSession();
-      redirectTo('index.html');
+      redirectTo(loginPage);
       return;
     }
     try {
       const user = await getRemoteUser(id);
       if (!user) {
         clearSession();
-        redirectTo('index.html');
+        redirectTo(loginPage);
         return;
       }
       saveActiveUser(user, persistent, temporary);
@@ -202,7 +203,7 @@
     } catch (error) {
       console.warn('No se pudo validar el usuario', error);
       clearSession();
-      redirectTo('index.html');
+      redirectTo(loginPage);
     }
   }
 

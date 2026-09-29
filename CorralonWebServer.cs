@@ -804,7 +804,7 @@ internal sealed class ServerForm : Form
         string route = requestPath.Substring("api/facturacion/".Length).ToLowerInvariant();
         string method = context.Request.HttpMethod;
         bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "catalogo", "stock", "stock-ingreso", "clientes", "comprobante", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras" }, route) >= 0)
-            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso" }, route) >= 0);
+            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso", "clientes" }, route) >= 0);
         if (!allowed) { WriteJson(context, 404, "{\"ok\":false,\"error\":\"Ruta de facturación no disponible.\"}"); return; }
 
         IPAddress address = context.Request.RemoteEndPoint == null ? null : context.Request.RemoteEndPoint.Address;

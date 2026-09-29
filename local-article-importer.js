@@ -295,7 +295,11 @@ export async function open(options) {
   function searchRubro(input,row) {
     hideMenu(); menuInput = input; menuKind = 'rubro';
     const query = normalize(input.value);
-    matches = rubros.filter(item => normalize(item.nombre).includes(query)).slice(0,80);
+    const firstWord = query.split(/\s+/)[0];
+    matches = rubros.filter(item => normalize(item.nombre).includes(query))
+      .map((item,index) => ({item,index,priority: normalize(item.nombre).split(/\s+/)[0].startsWith(firstWord) ? 0 : 1}))
+      .sort((a,b) => a.priority - b.priority || a.index - b.index)
+      .slice(0,80).map(({item}) => item);
     menu = document.createElement('div'); menu.className = 'local-articles-search'; menu.setAttribute('role','listbox');
     const rect = input.getBoundingClientRect();
     menu.style.left = `${Math.max(8,Math.min(rect.left,innerWidth-320))}px`;
@@ -340,6 +344,7 @@ export async function open(options) {
   });
   backdrop.addEventListener('focusin', e => {
     if (e.target.matches('[data-field]')) beginFieldEdit(e.target);
+    if (e.target.matches('[data-field="rubro"], [data-field="margen"]')) e.target.select();
     if (e.target.matches('[data-field="descripcion"]')) {
       const snapshot = fieldSnapshots.get(e.target);
       const row = rowAt(e.target);

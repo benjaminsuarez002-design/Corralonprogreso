@@ -1,38 +1,71 @@
 param([switch]$SoloCompilar)
 $ErrorActionPreference = 'Stop'
-$source = Join-Path $PSScriptRoot 'facturacion-copia-api.cs'
-$output = Join-Path $PSScriptRoot '.codex-staging\FacturacionCopiaApi.exe'
-[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($output)) | Out-Null
-$url = 'http://localhost:8080/facturacion.html'
-$apiUrl = 'http://localhost:8081/bootstrap'
-$apiDisponible = $false
-$necesitaCompilar = -not (Test-Path -LiteralPath $output) -or (Get-Item -LiteralPath $source).LastWriteTimeUtc -gt (Get-Item -LiteralPath $output -ErrorAction SilentlyContinue).LastWriteTimeUtc
-try {
-    $respuesta = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 3
-    $apiDisponible = $respuesta.ok -eq $true
-} catch { }
-if ($necesitaCompilar -and $apiDisponible) {
-    $servicioAnterior = Get-CimInstance Win32_Process -Filter "Name='FacturacionCopiaApi.exe'" | Where-Object { $_.ExecutablePath -eq $output }
-    if (-not $servicioAnterior) { throw 'El puerto 8081 está ocupado por otro proceso. Cerralo antes de actualizar la copia.' }
-    $servicioAnterior | ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction Stop }
-    $apiDisponible = $false
-    Start-Sleep -Milliseconds 350
+$apiSource = Join-Path $PSScriptRoot 'facturacion-copia-api.cs'
+$serverSource = Join-Path $PSScriptRoot 'CorralonWebServer.cs'
+$apiOutput = Join-Path $PSScriptRoot '.codex-staging\FacturacionCopiaApi.exe'
+$serverOutput = Join-Path $PSScriptRoot 'CorralonWebServer.exe'
+$apiNext = Join-Path $PSScriptRoot '.codex-staging\FacturacionCopiaApi.next.exe'
+$serverNext = Join-Path $PSScriptRoot '.codex-staging\CorralonWebServer.next.exe'
+[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($apiOutput)) | Out-Null
+$compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+$apiChanged = -not (Test-Path -LiteralPath $apiOutput) -or (Get-Item -LiteralPath $apiSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $apiOutput -ErrorAction SilentlyContinue).LastWriteTimeUtc
+$serverChanged = -not (Test-Path -LiteralPath $serverOutput) -or (Get-Item -LiteralPath $serverSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $serverOutput -ErrorAction SilentlyContinue).LastWriteTimeUtc
+
+# Compilar antes de interrumpir el servicio: un error deja la versión actual funcionando.
+if ($apiChanged -or $SoloCompilar) {
+    & $compiler /nologo /target:exe "/out:$apiNext" /reference:System.Data.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $apiSource
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo compilar la API de facturación. La versión actual sigue activa.' }
 }
-if ($necesitaCompilar -or $SoloCompilar) {
-    & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe "/out:$output" /reference:System.Data.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $source
-    if ($LASTEXITCODE -ne 0) { throw 'No se pudo compilar la API de facturación.' }
+if ($serverChanged -or $SoloCompilar) {
+    & $compiler /nologo /target:winexe "/out:$serverNext" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Data.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $serverSource
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo compilar el servidor web. La versión actual sigue activa.' }
 }
-if ($SoloCompilar) { Write-Output $output; return }
-if (-not $apiDisponible) {
-    Start-Process -FilePath $output -WindowStyle Hidden | Out-Null
-    for ($intento = 0; $intento -lt 20; $intento++) {
-        Start-Sleep -Milliseconds 250
-        try {
-            $respuesta = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 3
-            if ($respuesta.ok -eq $true) { $apiDisponible = $true; break }
-        } catch { }
+if ($SoloCompilar) { Write-Output $apiNext; Write-Output $serverNext; return }
+
+function Get-OwnProcess([string]$name,[string]$path) {
+    $all = @(Get-CimInstance Win32_Process -Filter "Name='$name'")
+    $own = @($all | Where-Object { $_.ExecutablePath -eq $path })
+    if ($all.Count -gt $own.Count) { throw "Hay otro proceso $name abierto desde otra carpeta. Cerralo antes de actualizar." }
+    return $own
+}
+function Stop-OwnApi {
+    $running = @(Get-OwnProcess 'FacturacionCopiaApi.exe' $apiOutput)
+    if ($running.Count -eq 0) { return }
+    try {
+        $reply = Invoke-RestMethod -Uri 'http://localhost:8081/shutdown' -Method Post -TimeoutSec 7
+        if ($reply.ok -ne $true) { throw 'La API no aceptó el apagado.' }
+    } catch { throw "No se pudo detener la API sin riesgo de cortar una emisión o impresión. Reintentá cuando termine. $($_.Exception.Message)" }
+    foreach ($process in $running) {
+        try { Wait-Process -Id $process.ProcessId -Timeout 8 -ErrorAction Stop }
+        catch { throw 'La API recibió el apagado, pero aún está abierta. Reintentá luego.' }
     }
 }
-if (-not $apiDisponible) { throw 'La API local no pudo arrancar o no pudo consultar SQL. Revisá la conexión local.' }
-Start-Process -FilePath $url
-Write-Host 'Copia de facturación abierta. La API local quedó en segundo plano.'
+
+$mainRunning = @(Get-OwnProcess 'CorralonWebServer.exe' $serverOutput)
+$apiRunning = @(Get-OwnProcess 'FacturacionCopiaApi.exe' $apiOutput)
+if ($apiChanged -or $serverChanged) {
+    if ($apiRunning.Count -gt 0) { Stop-OwnApi }
+    foreach ($process in $mainRunning) {
+        Stop-Process -Id $process.ProcessId -ErrorAction Stop
+        Wait-Process -Id $process.ProcessId -Timeout 8 -ErrorAction SilentlyContinue
+    }
+    # El supervisor puede haber reabierto la API justo antes de cerrar el servidor.
+    Stop-OwnApi
+    if ($apiChanged) { Copy-Item -LiteralPath $apiNext -Destination $apiOutput -Force }
+    if ($serverChanged) { Copy-Item -LiteralPath $serverNext -Destination $serverOutput -Force }
+    $mainRunning = @()
+}
+if ($mainRunning.Count -eq 0) {
+    Start-Process -FilePath $serverOutput -ArgumentList '--tray' -WorkingDirectory $PSScriptRoot -WindowStyle Hidden | Out-Null
+}
+$ready = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    Start-Sleep -Milliseconds 350
+    try {
+        $reply = Invoke-RestMethod -Uri 'http://localhost:8080/api/facturacion/bootstrap' -TimeoutSec 3
+        if ($reply.ok -eq $true) { $ready = $true; break }
+    } catch { }
+}
+if (-not $ready) { throw 'Facturación no pudo volver a consultar SQL. Revisá CorralonWebServer.log.' }
+Start-Process -FilePath 'http://localhost:8080/facturacion.html' | Out-Null
+Write-Host 'Facturación actualizada y conectada con SQL.'
