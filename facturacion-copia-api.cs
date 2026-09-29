@@ -1364,6 +1364,14 @@ internal static class FacturacionCopiaApi
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/clientes")
                 {
+                    if (Text(request.QueryString["catalogo"]) == "1")
+                    {
+                        Reply(context, 200, new { ok = true, catalogoCompleto = true, clientes = Rows(connection,
+                            "SELECT IDCliente AS id,[RazónSocial] AS nombre,CUIT AS documento,IDTipoIVA AS idTipoIva,IDTipoDoc AS idTipoDoc," +
+                            "[Dirección] AS direccion,[Teléfono] AS telefono,Email AS email " +
+                            "FROM dbo.Clientes WHERE Suspendido=0 ORDER BY [RazónSocial],IDCliente") });
+                        return;
+                    }
                     string query = Text(request.QueryString["q"]);
                     if (query.Length > 80) throw new InvalidOperationException("Búsqueda demasiado larga.");
                     string[] words = query.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
@@ -1674,9 +1682,11 @@ internal static class FacturacionCopiaApi
     {
         using (var listener = new HttpListener())
         {
-            listener.Prefixes.Add("http://localhost:8081/");
+            int port;
+            if (!Int32.TryParse(Environment.GetEnvironmentVariable("CORRALON_FACTURACION_TEST_PORT"), out port) || port < 1 || port > 65535) port = 8081;
+            listener.Prefixes.Add("http://localhost:" + port + "/");
             listener.Start();
-            Console.WriteLine("Facturación copia: API de preparación en http://localhost:8081/");
+            Console.WriteLine("Facturación copia: API de preparación en http://localhost:" + port + "/");
             while (true)
             {
                 HttpListenerContext context;

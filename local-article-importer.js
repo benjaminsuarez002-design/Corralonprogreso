@@ -9,15 +9,15 @@ const normalizeIndexFilter = value => String(value ?? '')
   .replace(/\s+/g, ' ')
   .trim();
 const compactIndexFilter = value => normalizeIndexFilter(value).replace(/\s+/g, '');
-function indexDescriptionFilterRank(description, queryText) {
-  const query = normalizeIndexFilter(queryText);
+function indexDescriptionFilterRank(description, queryText, prepared) {
+  const query = prepared?.query ?? normalizeIndexFilter(queryText);
   if (!query) return 0;
-  const text = normalizeIndexFilter(description);
+  const text = prepared?.text ?? normalizeIndexFilter(description);
   if (!text) return Number.POSITIVE_INFINITY;
-  const compactQuery = compactIndexFilter(query);
-  const compactText = compactIndexFilter(text);
-  const terms = query.split(' ').filter(Boolean);
-  const words = text.split(' ').filter(Boolean);
+  const compactQuery = prepared?.compactQuery ?? compactIndexFilter(query);
+  const compactText = prepared?.compactText ?? compactIndexFilter(text);
+  const terms = prepared?.terms ?? query.split(' ').filter(Boolean);
+  const words = prepared?.words ?? text.split(' ').filter(Boolean);
   if (text === query) return 0;
   if (compactQuery && compactText === compactQuery) return 1;
   if (text.startsWith(query)) return 2;
@@ -32,7 +32,7 @@ const money = value => Number(value || 0).toLocaleString('es-AR', { style:'curre
 let active = false;
 const draftKey = providerId => `corralon_local_article_import_draft_v1_${providerId}`;
 export function hasDraft(providerId) {
-  try { return Boolean(localStorage.getItem(draftKey(providerId))); } catch { return false; }
+  try { return Boolean(window.localStorage.getItem(draftKey(providerId))); } catch { return false; }
 }
 
 async function api(path, options = {}) {
@@ -61,7 +61,7 @@ export async function open(options) {
   const reconnect = backdrop.querySelector('[data-reconnect]'), apply = backdrop.querySelector('[data-apply]');
   const providerId = Number(options.provider.id_proveedor || options.provider.idProveedor);
   let busy = false, rows = [], catalog = [], catalogSorted = [], rubros = [], token = '', operation = crypto.randomUUID();
-  let catalogReady = false;
+  let catalogReady = false, draftSaveTimer = 0;
   let menu = null, menuInput = null, menuIndex = -1, menuKind = '', matches = [];
   let articlePage = null, articleHasMatch = false;
   const fieldSnapshots = new Map(), undoStack = [];
@@ -74,25 +74,34 @@ export async function open(options) {
   function saveDraft() {
     if (!catalogReady) return;
     if (!rows.length) { clearDraft(); return; }
-    try { localStorage.setItem(draftKey(providerId), JSON.stringify({ operation, rows })); } catch (error) { console.warn('No se pudo guardar el borrador del importador.', error); }
+    try { window.localStorage.setItem(draftKey(providerId), JSON.stringify({ operation, rows })); } catch (error) { console.warn('No se pudo guardar el borrador del importador.', error); }
   }
   function clearDraft() {
-    try { localStorage.removeItem(draftKey(providerId)); } catch (error) { console.warn('No se pudo borrar el borrador del importador.', error); }
+    clearTimeout(draftSaveTimer); draftSaveTimer = 0;
+    try { window.localStorage.removeItem(draftKey(providerId)); } catch (error) { console.warn('No se pudo borrar el borrador del importador.', error); }
   }
+  function flushDraft() { clearTimeout(draftSaveTimer); draftSaveTimer = 0; saveDraft(); }
   function loadDraft() {
     try {
-      const draft = JSON.parse(localStorage.getItem(draftKey(providerId)) || 'null');
+      const draft = JSON.parse(window.localStorage.getItem(draftKey(providerId)) || 'null');
       return draft && Array.isArray(draft.rows) && draft.rows.length && draft.rows.every(row => row && typeof row.codigo === 'string' && typeof row.descripcion === 'string') ? draft : null;
     } catch { return null; }
   }
   function hideMenu() { menu?.remove(); menu = null; menuInput = null; menuIndex = -1; menuKind = ''; }
   function close(discard = false) {
     if (busy) return;
+    clearTimeout(draftSaveTimer); draftSaveTimer = 0;
     if (discard) clearDraft(); else saveDraft();
+    window.removeEventListener('pagehide', flushDraft);
     hideMenu(); window.removeEventListener('keydown', handleDialogKeydown, true);
     backdrop.remove(); active = false; returnFocus?.focus?.({ preventScroll:true });
   }
-  function changed() { operation = crypto.randomUUID(); saveDraft(); }
+  function changed() {
+    operation = crypto.randomUUID();
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => { draftSaveTimer = 0; saveDraft(); }, 500);
+  }
+  window.addEventListener('pagehide', flushDraft);
   const rowCopy = row => ({ ...row, ...(row.original ? { original:{ ...row.original } } : {}) });
   const rowAt = element => rows[Number(element?.closest('[data-row]')?.dataset.row)];
   function beginFieldEdit(input) {
@@ -200,19 +209,27 @@ export async function open(options) {
     hideMenu(); menuInput = input; menuKind = 'article';
     const queryText = input.value;
     const query = normalize(queryText);
+    const normalizedQuery = normalizeIndexFilter(queryText);
+    const queryFilter = { query:normalizedQuery, compactQuery:compactIndexFilter(normalizedQuery), terms:normalizedQuery.split(' ').filter(Boolean) };
     const rowCode = normalize(row?.codigo);
-    const sameProviderCode = article => Boolean(rowCode) && normalize(article.codigo) === rowCode;
-    const hasSameProviderCode = catalogSorted.some(sameProviderCode);
-    const filterRank = article => sameProviderCode(article) ? -2 : normalize(article.codigo) === query ? -1 : indexDescriptionFilterRank(article.descripcion, queryText);
+    const hasSameProviderCode = Boolean(rowCode) && catalogSorted.some(article => article.searchCode === rowCode);
+    const ranks = new Map();
+    const filterRank = article => {
+      if (ranks.has(article)) return ranks.get(article);
+      const value = rowCode && article.searchCode === rowCode ? -2 : article.searchCode === query ? -1 :
+        indexDescriptionFilterRank(article.descripcion, queryText, { ...queryFilter, text:article.searchDescription, compactText:article.searchCompact, words:article.searchWords });
+      ranks.set(article,value);
+      return value;
+    };
     const isMatch = article => Number.isFinite(filterRank(article));
-    articleHasMatch = (Boolean(query) || hasSameProviderCode) && catalogSorted.some(isMatch);
     articlePage = window.CorralonSystem.articleOptionPager.create(catalogSorted, {
       key: article => String(article.id),
       description: article => article.descripcion,
       isMatch,
       rank: filterRank,
-      hasSearch: Boolean(query) || hasSameProviderCode, beforeCount:hasSameProviderCode ? 0 : 20, afterCount:40, matchLimit:100
+      hasSearch: Boolean(query) || hasSameProviderCode, beforeCount:hasSameProviderCode ? 0 : 20, afterCount:40, matchLimit:100, preordered:true
     });
+    articleHasMatch = articlePage.options.some(isMatch);
     menu = document.createElement('div'); menu.className = 'local-articles-search article'; menu.setAttribute('role','listbox');
     const rect = input.getBoundingClientRect();
     const width = Math.min(Math.max(rect.width * 2, 1000), innerWidth - 16);
@@ -491,6 +508,7 @@ export async function open(options) {
     for (const row of rows) if (!confirmNew(row, true)) return;
     const invalid = rows.find(r => (r.mode==='update'&&!r.id) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
     if(invalid) { setStatus('Completá artículo, rubro, costo y margen en todas las filas.',true); return; }
+    flushDraft();
     busy=true; hideMenu(); backdrop.querySelectorAll('button,input,select').forEach(el=>el.disabled=true); apply.textContent='Aplicando…';
     setStatus('Validando y guardando todo el lote en la base local…');
     const payload={ operation, provider:Number(options.provider.id_proveedor || options.provider.idProveedor), rows:rows.map(r=>({ mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen })) };
@@ -517,7 +535,11 @@ export async function open(options) {
     try {
       const data=await api('catalog');
       if (!backdrop.isConnected) return;
-      token=data.token; catalog=data.articles.map(a=>({...a,search:normalize(`${a.id} ${a.codigo} ${a.descripcion}`)})); rubros=data.rubros;
+      token=data.token; catalog=data.articles.map(a=>{
+        const searchDescription=normalizeIndexFilter(a.descripcion);
+        return {...a, searchCode:normalize(a.codigo), searchDescription,
+          searchCompact:searchDescription.replace(/\s+/g,''), searchWords:searchDescription.split(' ').filter(Boolean)};
+      }); rubros=data.rubros;
       catalogSorted=catalog.slice().sort((a,b)=>String(a.descripcion || '').localeCompare(String(b.descripcion || ''),'es',{sensitivity:'base'}) || String(a.id).localeCompare(String(b.id)));
       backdrop.querySelector('[data-provider]').textContent=`${options.provider.proveedor || options.provider.nombre || ''} · ${catalog.length.toLocaleString('es-AR')} artículos leídos desde SQL Server`;
       if (!catalogReady) {

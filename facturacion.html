@@ -185,10 +185,10 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.13"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.14"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 const SQL_CONNECTION_MESSAGE='No hay conexión con la base de datos.';
-const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=-1,suggestionPage=null,suggestionPaging=false,paymentReconcileTimer=null,saveTimer=null,sqlConfig=null,issuedReceipt=null,previewDraft=null,recoveryPending=false,recoveryCanRetry=false,issueInProgress=false,printInProgress=false,printerSelectionPending=false,browserPrintPending=false,recoveryPollBusy=false,stockRefreshBusy=false,stockRefreshAgain=false,localDraftStoreReady=false;const SQL_PREPARACION=`${location.origin}/api/facturacion`,LOCAL_PRINTER_API='http://127.0.0.1:8082',BROWSER_PRINTER='browser:',TICKET_PRINTER_KEY='facturacion_ticket_printer_v1',WORKSTATION_KEY='facturacion_puesto_v1';
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],catalogOrdered=[],customerCatalog=[],customerCatalogReady=false,articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=-1,suggestionPage=null,suggestionPaging=false,paymentReconcileTimer=null,saveTimer=null,sqlConfig=null,issuedReceipt=null,previewDraft=null,recoveryPending=false,recoveryCanRetry=false,issueInProgress=false,printInProgress=false,printerSelectionPending=false,browserPrintPending=false,recoveryPollBusy=false,stockRefreshBusy=false,stockRefreshAgain=false,localDraftStoreReady=false;const SQL_PREPARACION=`${location.origin}/api/facturacion`,LOCAL_PRINTER_API='http://127.0.0.1:8082',BROWSER_PRINTER='browser:',TICKET_PRINTER_KEY='facturacion_ticket_printer_v1',WORKSTATION_KEY='facturacion_puesto_v1';
 function workstation(){try{return JSON.parse(localStorage.getItem(WORKSTATION_KEY)||'{}')}catch{return{}}}
 function saveWorkstation(){try{localStorage.setItem(WORKSTATION_KEY,JSON.stringify({branch:$('#branch').value,pos:$('#pos').value,seller:$('#seller').value}))}catch{}}
 const API_RESTART_HINT='Avisá al encargado para reiniciar el servicio de facturación del servidor.';
@@ -371,14 +371,13 @@ function bindArticleRows(){
         if(amount)amount.value=money(n(r.cantidad)*n(r.precio));
       }
       if(['idart','codProv','descripcion'].includes(key))showSuggestions(el);
-      renderTotals();
+      else renderTotals();
       scheduleDraft();
     });
     el.addEventListener('change',()=>{
       const r=articles[+el.dataset.row],key=el.dataset.a;
       if(key!=='importe')r[key]=['cantidad','precio','margen','descuento','iva'].includes(key)?n(el.value):el.value;
       if(['idart','codProv','descripcion'].includes(key)){
-        renderTotals();
         scheduleDraft();
         return;
       }
@@ -606,6 +605,15 @@ function renderTotals(){
   $('#difference').className=`difference ${Math.abs(t.difference)<.01?'ok':'bad'}`;
 }
 function norm(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}
+function prepareCatalogSearch(){
+  catalog.forEach(x=>{
+    x.searchIdart=norm(x.idart);x.searchCodProv=norm(x.codProv);
+    x.searchDescription=norm(x.descripcion);
+    x.searchCompact=x.searchDescription.replace(/\s/g,'');
+    x.searchWords=x.searchDescription.split(' ').filter(Boolean);
+  });
+  catalogOrdered=CorralonSystem.articleOptionPager.prepare(catalog,x=>String(x.idart),x=>x.descripcion);
+}
 function normalizedLookupValue(input){
   const raw=String(input.value||'').trim();
   return input.dataset.a==='idart'&&/^\d+$/.test(raw)?raw.padStart(6,'0'):raw;
@@ -629,14 +637,15 @@ function validateCatalogInput(input){
   hideSuggestions();
   scheduleDraft();
 }
-function articleDescriptionRank(description,query){
-  const text=norm(description),terms=query.split(' ').filter(Boolean),words=text.split(' ').filter(Boolean);
+function articleDescriptionRank(description,query,terms=query.split(' ').filter(Boolean),compactQuery=query.replace(/\s/g,'')){
+  const text=typeof description==='string'?norm(description):description.searchDescription;
+  const words=typeof description==='string'?text.split(' ').filter(Boolean):description.searchWords;
   if(!query||!text)return Infinity;
   if(text===query)return 0;
-  if(text.replace(/\s/g,'')===query.replace(/\s/g,''))return 1;
+  if((typeof description==='string'?text.replace(/\s/g,''):description.searchCompact)===compactQuery)return 1;
   if(text.startsWith(query))return 2;
   if(` ${text} `.includes(` ${query} `))return 3;
-  if(text.replace(/\s/g,'').includes(query.replace(/\s/g,'')))return 4;
+  if((typeof description==='string'?text.replace(/\s/g,''):description.searchCompact).includes(compactQuery))return 4;
   if(terms.every(term=>words.some(word=>word.startsWith(term))))return 5;
   if(terms.every(term=>words.some(word=>word.includes(term))))return 6;
   return Infinity;
@@ -680,19 +689,24 @@ function refreshVisibleSuggestionStock(){
 }
 function showSuggestions(input,force=false){
   const mode=input.dataset.a,q=norm(normalizedLookupValue(input));
+  const terms=q.split(' ').filter(Boolean),compactQuery=q.replace(/\s/g,'');
   if(!force&&!q){hideSuggestions();return}
   if(activeSuggestionInput&&activeSuggestionInput!==input)activeSuggestionInput.closest('.description-cell')?.classList.remove('combo-open');
+  const ranks=new Map();
   const rank=x=>{
-    const idart=norm(x.idart),codProv=norm(x.codProv);
+    if(ranks.has(x))return ranks.get(x);
+    const idart=x.searchIdart,codProv=x.searchCodProv;
     if(!q)return Infinity;
-    if(mode==='idart')return idart===q?0:idart.startsWith(q)?1:idart.includes(q)?2:Infinity;
-    if(mode==='codProv')return codProv===q?0:codProv.startsWith(q)?1:codProv.includes(q)?2:Infinity;
-    return articleDescriptionRank(x.descripcion,q);
+    let result;
+    if(mode==='idart')result=idart===q?0:idart.startsWith(q)?1:idart.includes(q)?2:Infinity;
+    else if(mode==='codProv')result=codProv===q?0:codProv.startsWith(q)?1:codProv.includes(q)?2:Infinity;
+    else result=articleDescriptionRank(x,q,terms,compactQuery);
+    ranks.set(x,result);return result;
   };
-  suggestionPage=CorralonSystem.articleOptionPager.create(catalog,{
+  suggestionPage=CorralonSystem.articleOptionPager.create(catalogOrdered,{
     key:x=>String(x.idart),description:x=>x.descripcion,
     isMatch:x=>Number.isFinite(rank(x)),rank,hasSearch:Boolean(q),
-    beforeCount:20,afterCount:40,matchLimit:100
+    beforeCount:20,afterCount:40,matchLimit:100,preordered:true
   });
   suggestionItems=suggestionPage.options;
   suggestionIndex=q&&suggestionItems.some(x=>Number.isFinite(rank(x)))?suggestionPage.focusIndex:-1;
@@ -940,13 +954,14 @@ async function loadTicketPrinters(){
 async function loadSqlCatalog(){
   if(!sqlConfig)return;
   const point=$('#pos').value,list=$('#priceList').value;
-  if(!point){catalog=[];$('#catalogStatus').textContent='Elegí sucursal y punto de venta';return}
+  if(!point){catalog=[];catalogOrdered=[];$('#catalogStatus').textContent='Elegí sucursal y punto de venta';return}
   try{
     const url=`${SQL_PREPARACION}/catalogo?puntoVenta=${encodeURIComponent(point)}&lista=${encodeURIComponent(list)}`;
     const response=await fetch(url,{cache:'no-store'}),result=await response.json();
     if(point!==$('#pos').value||list!==$('#priceList').value)return;
     if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar el catálogo');
     catalog=result.catalogo||[];
+    prepareCatalogSearch();
     syncArticleCosts();
     renderArticles();
     stockStatusError=false;
@@ -954,7 +969,7 @@ async function loadSqlCatalog(){
     refreshSelectedStock().catch(console.warn);
   }catch(e){
     if(point!==$('#pos').value||list!==$('#priceList').value)return;
-    console.warn(e);catalog=[];$('#catalogStatus').textContent='Catálogo SQL no disponible';setMsg(e.message,'error');
+    console.warn(e);catalog=[];catalogOrdered=[];$('#catalogStatus').textContent='Catálogo SQL no disponible';setMsg(e.message,'error');
   }
 }
 async function refreshSelectedStock(){
@@ -990,21 +1005,37 @@ async function refreshSelectedStock(){
     if(stockRefreshAgain){stockRefreshAgain=false;setTimeout(()=>refreshSelectedStock().catch(console.warn),0)}
   }
 }
+async function loadSqlCustomers(){
+  try{
+    const response=await fetch(`${SQL_PREPARACION}/clientes?catalogo=1`,{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok||!data.ok||data.catalogoCompleto!==true||!Array.isArray(data.clientes))throw new Error(data.error||'La API todavía no ofrece el catálogo completo de clientes');
+    customerCatalog=data.clientes.map(x=>({...x,searchName:norm(x.nombre),searchDoc:norm(x.documento)}));
+    customerCatalogReady=true;
+  }catch(error){customerCatalogReady=false;console.warn('Lista local de clientes no disponible:',error)}
+}
 function bindCustomerSearch(){
   const input=$('#customerName'),choices=$('#clientesSql');
   document.body.appendChild(choices);
   function positionChoices(){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,360),window.innerWidth-20);choices.style.width=`${width}px`;choices.style.left=`${Math.max(10,Math.min(rect.left,window.innerWidth-width-10))}px`;choices.style.top=`${rect.bottom+2}px`;choices.style.maxHeight=`${Math.max(80,Math.min(220,window.innerHeight-rect.bottom-10))}px`}
-  let results=[],timer=0,sequence=0,active=-1,anchor=0,navigated=false,searchText='',loadingPage=false;
+  let results=[],localMatches=[],timer=0,sequence=0,active=-1,anchor=0,navigated=false,searchText='',loadingPage=false;
   function close(){choices.classList.remove('open');input.setAttribute('aria-expanded','false');active=-1;navigated=false}
   function draw(scrollToMatch=false){positionChoices();choices.innerHTML=results.map((x,i)=>`<div class="client-option ${i===active?'active':''}" data-client-index="${i}" role="option" aria-selected="${i===active}"><span>${esc(x.nombre)}</span><small>${esc(x.documento||'')} · ID ${esc(x.id)}</small></div>`).join('');choices.classList.toggle('open',results.length>0);input.setAttribute('aria-expanded',String(results.length>0));const target=choices.querySelector(`[data-client-index="${scrollToMatch?anchor:active}"]`);if(target)choices.scrollTop+=target.getBoundingClientRect().top-choices.getBoundingClientRect().top}
   async function loadPage(start,prepend){
     if(loadingPage||!choices.classList.contains('open'))return;
     loadingPage=true;const request=sequence,oldHeight=choices.scrollHeight,oldTop=choices.scrollTop;
     try{
-      const response=await fetch(`${SQL_PREPARACION}/clientes?q=${encodeURIComponent(searchText)}&start=${start}`,{cache:'no-store'}),data=await response.json();
-      if(request!==sequence||!response.ok||!data.ok||!choices.classList.contains('open'))return;
+      let page;
+      if(customerCatalogReady){
+        page=localMatches.slice(start-1,start+60).map((x,i)=>({...x,rn:start+i,total:localMatches.length,firstMatch:1}));
+      }else{
+        const response=await fetch(`${SQL_PREPARACION}/clientes?q=${encodeURIComponent(searchText)}&start=${start}`,{cache:'no-store'}),data=await response.json();
+        if(!response.ok||!data.ok)return;
+        page=data.clientes||[];
+      }
+      if(request!==sequence||!choices.classList.contains('open'))return;
       const selectedId=results[active]?.id,anchorRow=results[anchor]?.rn,byRow=new Map(results.map(x=>[Number(x.rn),x]));
-      (data.clientes||[]).forEach(x=>byRow.set(Number(x.rn),x));
+      page.forEach(x=>byRow.set(Number(x.rn),x));
       results=[...byRow.values()].sort((a,b)=>Number(a.rn)-Number(b.rn));
       active=selectedId==null?-1:results.findIndex(x=>String(x.id)===String(selectedId));
       anchor=anchorRow==null?0:Math.max(0,results.findIndex(x=>Number(x.rn)===Number(anchorRow)));
@@ -1028,6 +1059,15 @@ function bindCustomerSearch(){
   function search(q){
     clearTimeout(timer);results=[];active=-1;anchor=0;navigated=false;searchText=q;close();
     const request=++sequence;
+    if(customerCatalogReady){
+      const query=norm(q),terms=query.split(' ').filter(Boolean);
+      const rank=x=>!query?0:x.searchName===query?0:x.searchName.startsWith(query)?1:
+        terms.every(term=>x.searchName.includes(term))?2:x.searchDoc.includes(query)?3:Infinity;
+      localMatches=query?customerCatalog.map(x=>({x,score:rank(x)})).filter(entry=>Number.isFinite(entry.score))
+        .sort((a,b)=>a.score-b.score||a.x.searchName.localeCompare(b.x.searchName,'es')).map(entry=>entry.x):customerCatalog;
+      results=localMatches.slice(0,61).map((x,i)=>({...x,rn:i+1,total:localMatches.length,firstMatch:1}));
+      draw(true);return;
+    }
     timer=setTimeout(async()=>{
       try{
         const response=await fetch(`${SQL_PREPARACION}/clientes?q=${encodeURIComponent(q)}`,{cache:'no-store'}),data=await response.json();
@@ -1534,7 +1574,7 @@ async function retryPendingOnReconnect(){
     if(!sqlConfig){
       if(!await loadConfig())return;
       await restoreLastLocalState();
-      await loadSqlCatalog();
+      await Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()]);
     }
     else if(!localDraftStoreReady)await restoreLastLocalState();
     if(recoveryPending){
@@ -1622,6 +1662,7 @@ async function issue(){
     if(!response.ok||!payload.ok){const e=new Error(payload.error||`HTTP ${response.status}`);e.safeToRetry=Boolean(payload.safeToRetry)||(response.status===409&&!payload.recoveryRequired);e.fiscalRejected=Boolean(payload.fiscalRejected);e.arcaUnavailable=Boolean(payload.arcaUnavailable);e.sqlUnavailable=response.status===503&&!e.arcaUnavailable;throw e}
     recoveryPending=false;recoveryCanRetry=false;
     issuedReceipt={idRecibo:payload.idRecibo,numero:payload.numero,total:payload.total,idComprobante:data.idComprobante};
+    loadSqlCustomers().catch(console.warn);
     lockIssued();
     await saveDraft(true);
     const checkResponse=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(payload.idRecibo)}`,{cache:'no-store'});
@@ -1827,8 +1868,8 @@ function closeDraftModal(){$('#draftModal').classList.remove('open');$('#openDra
 $('#date').value=today();
 window.addEventListener('pageshow',()=>{if(!issuedReceipt&&!recoveryPending)$('#date').value=today()});
 $('#seller').value='';
-$('#newInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true)});
-$('#continueNewInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true)});
+$('#newInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true);Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()])});
+$('#continueNewInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true);Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()])});
 $('#openDrafts').addEventListener('click',()=>showDrafts().catch(error=>setMsg(error.message,'error')));
 $('#closeDrafts').addEventListener('click',closeDraftModal);
 $('#checkRecovery').addEventListener('click',async()=>{
@@ -2070,7 +2111,7 @@ bindCustomerSearch();
 loadTicketPrinters().catch(error=>{console.warn(error);$('#ticketPrinter').innerHTML='<option value="">Ticketera no disponible</option>';$('#previewPrinter').innerHTML='<option value="">Ticketera no disponible</option>'});
 loadConfig().then(async ready=>{
   await restoreLastLocalState();
-  if(ready)await loadSqlCatalog();
+  if(ready)await Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()]);
   else setMsg(`${SQL_CONNECTION_MESSAGE} Los borradores siguen guardados en esta PC.`,'error');
 }).catch(error=>{console.warn(error);localDraftStoreReady=false;updateTrialButton();setMsg('No se pudieron leer los borradores guardados en esta PC. No se habilita la emisión hasta recuperarlos.','error')});
 </script><script src="recargar-deslizando.js" defer></script>
