@@ -691,7 +691,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.26"></script>
+<script src="corralon-system.js?v=1.0.27"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -830,6 +830,7 @@
     const MENU_ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
     const MENU_ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
     const MENU_ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
+    const MENU_SHARED_SESSION_KEY = 'corralon_menu_shared_session_v1';
     const MENU_SESSION_DURATION_MS = 60 * 60 * 1000;
     const MENU_USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
     const MENU_USERS_COLLECTION = 'menuUsuarios';
@@ -1388,22 +1389,28 @@
       const expiresAt = Date.now() + MENU_SESSION_DURATION_MS;
       const snapshot = usuarioSnapshot(usuario);
       try {
-        sessionStorage.setItem(MENU_ACTIVE_USER_SESSION_KEY, JSON.stringify({ ...snapshot, usuario: snapshot, expiresAt }));
+        const serialized = JSON.stringify({ ...snapshot, usuario: snapshot, expiresAt });
+        sessionStorage.setItem(MENU_ACTIVE_USER_SESSION_KEY, serialized);
+        localStorage.setItem(MENU_SHARED_SESSION_KEY, serialized);
       } catch {}
       programarVencimientoSesion(expiresAt);
     }
 
     function obtenerSesionTemporal() {
       try {
-        const data = JSON.parse(sessionStorage.getItem(MENU_ACTIVE_USER_SESSION_KEY) || 'null');
+        const data = JSON.parse(sessionStorage.getItem(MENU_ACTIVE_USER_SESSION_KEY) || localStorage.getItem(MENU_SHARED_SESSION_KEY) || 'null');
         if (!data?.usuario?.id || Number(data.expiresAt || 0) <= Date.now()) {
           sessionStorage.removeItem(MENU_ACTIVE_USER_SESSION_KEY);
+          localStorage.removeItem(MENU_SHARED_SESSION_KEY);
           return null;
         }
+        sessionStorage.setItem(MENU_ACTIVE_USER_SESSION_KEY, JSON.stringify(data));
+        localStorage.setItem(MENU_SHARED_SESSION_KEY, JSON.stringify(data));
         programarVencimientoSesion(Number(data.expiresAt));
         return data.usuario;
       } catch {
         sessionStorage.removeItem(MENU_ACTIVE_USER_SESSION_KEY);
+        localStorage.removeItem(MENU_SHARED_SESSION_KEY);
         return null;
       }
     }
@@ -1478,6 +1485,7 @@
         guardarUsuarioActivo(usuario);
         clearTimeout(sessionExpiryTimer);
         try { sessionStorage.removeItem(MENU_ACTIVE_USER_SESSION_KEY); } catch {}
+        localStorage.removeItem(MENU_SHARED_SESSION_KEY);
       } else {
         localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
         localStorage.removeItem(MENU_ACTIVE_USER_KEY);
@@ -1545,6 +1553,7 @@
       localStorage.removeItem(MENU_ACTIVE_USER_KEY);
       localStorage.removeItem(MENU_ACTIVE_USER_SNAPSHOT_KEY);
       try { sessionStorage.removeItem(MENU_ACTIVE_USER_SESSION_KEY); } catch {}
+      localStorage.removeItem(MENU_SHARED_SESSION_KEY);
       appContent.style.display = 'none';
       loginBg.style.display = 'flex';
       loginUserInput.value = '';
@@ -2624,7 +2633,7 @@
       }
       validarSesionEnSegundoPlano().catch((error) => {
         console.error('No se pudo validar la sesión del menú', error);
-        if (!tieneSesionRecordada()) cerrarSesion();
+        loginError.textContent = 'No se pudo actualizar la lista de usuarios. La sesión actual continúa activa.';
       });
     }
 

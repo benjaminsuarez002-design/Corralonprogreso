@@ -546,6 +546,7 @@ internal static class FacturacionCopiaApi
     }
 
     private static string Text(object value) { return value == null || value == DBNull.Value ? "" : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture).Trim(); }
+    private static string Upper(object value) { return Text(value).ToUpper(new CultureInfo("es-AR")); }
     private static Dictionary<string, object> Object(object value) { return value as Dictionary<string, object> ?? new Dictionary<string, object>(); }
     private static object Value(Dictionary<string, object> data, string key) { object value; return data.TryGetValue(key, out value) ? value : null; }
     private static decimal Number(object value)
@@ -678,21 +679,22 @@ internal static class FacturacionCopiaApi
         int id = 0;
         if (Value(data, "id") != null && Text(Value(data, "id")) != "0") id = Id(Value(data, "id"));
         if (id == 1) throw new InvalidOperationException("No se puede modificar Consumidor Final desde Facturación.");
-        string name = Limited(Value(data, "nombre"), 100, "Razón social");
+        string name = Limited(Upper(Value(data, "nombre")), 100, "Razón social");
         if (name.Length < 2) throw new InvalidOperationException("Ingresá la razón social del cliente.");
-        string document = Limited(Value(data, "documento"), 13, "Documento");
-        string contact = Limited(Value(data, "contacto"), 35, "Contacto");
-        string address = Limited(Value(data, "direccion"), 100, "Dirección");
-        string locality = Limited(Value(data, "localidad"), 50, "Localidad");
-        string zip = Limited(Value(data, "codigoPostal"), 20, "Código postal");
-        string phone = Limited(Value(data, "telefono"), 50, "Teléfono");
-        string mobile = Limited(Value(data, "celular"), 50, "Celular");
-        string email = Limited(Value(data, "email"), 150, "Email");
-        string web = Limited(Value(data, "web"), 150, "Web");
-        string cbu = Limited(Value(data, "cbu"), 22, "CBU");
-        string alias = Limited(Value(data, "cbuAlias"), 100, "Alias");
-        string note = Limited(Value(data, "nota"), 4000, "Nota");
-        string iibbNumber = Limited(Value(data, "numeroIibb"), 20, "Número de Ingresos Brutos");
+        string document = Limited(Upper(Value(data, "documento")), 13, "Documento");
+        if (document.Length == 0) throw new InvalidOperationException("Ingresá el número de documento o CUIT del cliente.");
+        string contact = Limited(Upper(Value(data, "contacto")), 35, "Contacto");
+        string address = Limited(Upper(Value(data, "direccion")), 100, "Dirección");
+        string locality = Limited(Upper(Value(data, "localidad")), 50, "Localidad");
+        string zip = Limited(Upper(Value(data, "codigoPostal")), 20, "Código postal");
+        string phone = Limited(Upper(Value(data, "telefono")), 50, "Teléfono");
+        string mobile = Limited(Upper(Value(data, "celular")), 50, "Celular");
+        string email = Limited(Upper(Value(data, "email")), 150, "Email");
+        string web = Limited(Upper(Value(data, "web")), 150, "Web");
+        string cbu = Limited(Upper(Value(data, "cbu")), 22, "CBU");
+        string alias = Limited(Upper(Value(data, "cbuAlias")), 100, "Alias");
+        string note = Limited(Upper(Value(data, "nota")), 4000, "Nota");
+        string iibbNumber = Limited(Upper(Value(data, "numeroIibb")), 20, "Número de Ingresos Brutos");
         DateTime dueDate;
         object iibbDue = Text(Value(data, "vencimientoIibb")).Length == 0 ? null :
             (DateTime.TryParseExact(Text(Value(data, "vencimientoIibb")), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out dueDate)
@@ -724,10 +726,11 @@ internal static class FacturacionCopiaApi
                 object sameName = Scalar(connection, transaction,
                     "SELECT TOP 1 IDCliente FROM dbo.Clientes WITH (UPDLOCK,HOLDLOCK) WHERE [RazónSocial]=@p0 AND IDCliente<>@p1", name, id);
                 if (sameName != null)
-                    throw new InvalidOperationException("Ya existe un cliente con esa razón social (ID " + Text(sameName) + "). Buscalo en el campo Cliente y elegí Ver cliente para modificarlo.");
-                if (document.Length > 0 && Scalar(connection, transaction,
-                    "SELECT TOP 1 IDCliente FROM dbo.Clientes WITH (UPDLOCK,HOLDLOCK) WHERE REPLACE(REPLACE(CUIT,'-',''),' ','')=REPLACE(REPLACE(@p0,'-',''),' ','') AND IDCliente<>@p1", document, id) != null)
-                    throw new InvalidOperationException("Ya existe otro cliente con ese documento.");
+                    throw new InvalidOperationException("Ya existe el cliente " + name + ".");
+                object duplicateDocumentName = Scalar(connection, transaction,
+                    "SELECT TOP 1 [RazónSocial] FROM dbo.Clientes WITH (UPDLOCK,HOLDLOCK) WHERE REPLACE(REPLACE(CUIT,'-',''),' ','')=REPLACE(REPLACE(@p0,'-',''),' ','') AND IDCliente<>@p1", document, id);
+                if (duplicateDocumentName != null)
+                    throw new InvalidOperationException("Ya existe el cliente " + Text(duplicateDocumentName) + " con ese documento.");
                 if (id == 0) id = Convert.ToInt32(Scalar(connection, transaction, "SELECT ISNULL(MAX(IDCliente),0)+1 FROM dbo.Clientes WITH (TABLOCKX,HOLDLOCK)"));
                 string sql;
                 if (Value(data, "id") == null || Text(Value(data, "id")) == "0")

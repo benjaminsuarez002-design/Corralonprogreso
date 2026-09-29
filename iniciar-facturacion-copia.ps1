@@ -67,5 +67,11 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
     } catch { }
 }
 if (-not $ready) { throw 'Facturación no pudo volver a consultar SQL. Revisá CorralonWebServer.log.' }
-Start-Process -FilePath 'http://localhost:8080/facturacion.html' | Out-Null
+$facturacionUrl = 'http://localhost:8080/facturacion.html'
+$shortcut = Join-Path $PSScriptRoot 'Facturacion.url'
+if (Test-Path -LiteralPath $shortcut) {
+    $shortcutUrl = Get-Content -LiteralPath $shortcut | Where-Object { $_ -like 'URL=*' } | Select-Object -First 1
+    if ($shortcutUrl) { $facturacionUrl = $shortcutUrl.Substring(4).Trim() }
+}
+Start-Process -FilePath $facturacionUrl | Out-Null
 Write-Host 'Facturación actualizada y conectada con SQL.'

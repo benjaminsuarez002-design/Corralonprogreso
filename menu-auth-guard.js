@@ -3,6 +3,7 @@
   const ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
   const ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';
   const ACTIVE_USER_SESSION_KEY = 'corralon_menu_active_user_session_v1';
+  const SHARED_SESSION_KEY = 'corralon_menu_shared_session_v1';
   const USERS_CACHE_KEY = 'corralon_menu_users_cache_v1';
   const USERS_COLLECTION = 'menuUsuarios';
   const CATALOG_EDITOR_LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
@@ -73,6 +74,7 @@
     localStorage.removeItem(ACTIVE_USER_SNAPSHOT_KEY);
     localStorage.removeItem(CATALOG_EDITOR_LOCAL_KEY);
     try { sessionStorage.removeItem(ACTIVE_USER_SESSION_KEY); } catch (_) {}
+    localStorage.removeItem(SHARED_SESSION_KEY);
     try { sessionStorage.removeItem(CATALOG_EDITOR_SESSION_KEY); } catch (_) {}
   }
 
@@ -110,15 +112,17 @@
 
   function temporarySession() {
     try {
-      const data = JSON.parse(sessionStorage.getItem(ACTIVE_USER_SESSION_KEY) || 'null');
+      const data = JSON.parse(sessionStorage.getItem(ACTIVE_USER_SESSION_KEY) || localStorage.getItem(SHARED_SESSION_KEY) || 'null');
       const usuario = data?.usuario?.id ? data.usuario : data?.id ? data : null;
       if (!usuario?.id || Number(data.expiresAt || 0) <= Date.now()) {
         sessionStorage.removeItem(ACTIVE_USER_SESSION_KEY);
+        localStorage.removeItem(SHARED_SESSION_KEY);
         return null;
       }
       return { ...data, usuario };
     } catch (_) {
       sessionStorage.removeItem(ACTIVE_USER_SESSION_KEY);
+      localStorage.removeItem(SHARED_SESSION_KEY);
       return null;
     }
   }
@@ -131,7 +135,9 @@
       return;
     }
     try {
-      sessionStorage.setItem(ACTIVE_USER_SESSION_KEY, JSON.stringify({ ...user, usuario: user, expiresAt: temporary.expiresAt }));
+      const serialized = JSON.stringify({ ...user, usuario: user, expiresAt: temporary.expiresAt });
+      sessionStorage.setItem(ACTIVE_USER_SESSION_KEY, serialized);
+      localStorage.setItem(SHARED_SESSION_KEY, serialized);
     } catch (_) {}
   }
 
@@ -202,6 +208,16 @@
       document.documentElement.style.visibility = '';
     } catch (error) {
       console.warn('No se pudo validar el usuario', error);
+      let cachedUser = temporary?.usuario || null;
+      if (persistent) {
+        try { cachedUser = JSON.parse(localStorage.getItem(ACTIVE_USER_SNAPSHOT_KEY) || 'null'); } catch (_) {}
+      }
+      cachedUser = normalizeUser(cachedUser || {});
+      if (cachedUser.id === id && canAccess(cachedUser)) {
+        window.dispatchEvent(new CustomEvent('menu-user-validated', { detail: { user: cachedUser, offline: true } }));
+        document.documentElement.style.visibility = '';
+        return;
+      }
       clearSession();
       redirectTo(loginPage);
     }
