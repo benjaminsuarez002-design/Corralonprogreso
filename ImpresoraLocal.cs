@@ -22,6 +22,8 @@ internal static class ImpresoraLocal
     private static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CorralonProgreso");
     private static readonly string InstalledExe = Path.Combine(Folder, "ImpresoraLocal.exe");
     private static readonly string OriginFile = Path.Combine(Folder, "impresora-origen.txt");
+    private const string LocalOrigin = "http://192.168.100.28:8080";
+    private const string TailscaleOrigin = "http://100.125.178.53:8080";
     private const int Port = 8082;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -50,7 +52,10 @@ internal static class ImpresoraLocal
         using (var form = new Form { Text = "Impresora local de Facturación", Width = 440, Height = 220, StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false })
         {
             var label = new Label { Text = "Dirección de Facturación que abrís en esta PC:", Left = 18, Top = 22, Width = 390 };
-            var input = new TextBox { Text = File.Exists(OriginFile) ? File.ReadAllText(OriginFile).Trim() : "http://192.168.100.28:8080", Left = 18, Top = 47, Width = 385 };
+            string savedOrigin = File.Exists(OriginFile) ? File.ReadAllText(OriginFile).Trim() : "";
+            string initialOrigin = savedOrigin.Length == 0 || String.Equals(savedOrigin, LocalOrigin, StringComparison.OrdinalIgnoreCase)
+                ? TailscaleOrigin : savedOrigin;
+            var input = new TextBox { Text = initialOrigin, Left = 18, Top = 47, Width = 385 };
             var explanation = new Label { Text = "Instalá este conector una sola vez. Después, en Facturación, tocá Elegir impresora y Actualizar lista.", Left = 18, Top = 83, Width = 390, Height = 43 };
             var button = new Button { Text = "Instalar y conectar", Left = 224, Top = 135, Width = 178, Height = 32 };
             button.Click += (sender, e) =>
@@ -59,7 +64,7 @@ internal static class ImpresoraLocal
                 {
                     Uri uri;
                     if (!Uri.TryCreate(input.Text.Trim().TrimEnd('/'), UriKind.Absolute, out uri) || uri.Scheme != "http" || uri.Port != 8080 || uri.UserInfo.Length > 0 || uri.AbsolutePath != "/")
-                        throw new InvalidOperationException("Ingresá una dirección como http://192.168.100.28:8080");
+                        throw new InvalidOperationException("Ingresá una dirección como " + TailscaleOrigin);
                     string origin = uri.GetLeftPart(UriPartial.Authority);
                     Directory.CreateDirectory(Folder);
                     foreach (var process in Process.GetProcessesByName("ImpresoraLocal"))
@@ -87,7 +92,7 @@ internal static class ImpresoraLocal
                         catch { }
                     }
                     if (!connected) throw new InvalidOperationException("El conector no pudo iniciar en el puerto 8082 de esta PC.");
-                    MessageBox.Show("Conector instalado para " + origin + ". Volvé a Facturación y actualizá la lista de impresoras.", "Listo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("Conector instalado. Acepta Facturación por red local o Tailscale. Volvé a Facturación y actualizá la lista de impresoras.", "Listo", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     form.Close();
                 }
                 catch (Exception ex) { MessageBox.Show(ex.Message, "No se pudo instalar", MessageBoxButtons.OK, MessageBoxIcon.Error); }
@@ -111,6 +116,13 @@ internal static class ImpresoraLocal
             catch { break; }
             ThreadPool.QueueUserWorkItem(state => Handle((TcpClient)state, allowedOrigin), client);
         }
+    }
+
+    private static bool IsAllowedOrigin(string origin, string configuredOrigin)
+    {
+        return String.Equals(origin, configuredOrigin, StringComparison.OrdinalIgnoreCase) ||
+            String.Equals(origin, LocalOrigin, StringComparison.OrdinalIgnoreCase) ||
+            String.Equals(origin, TailscaleOrigin, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void Handle(TcpClient client, string allowedOrigin)
@@ -145,7 +157,7 @@ internal static class ImpresoraLocal
                         if (colon > 0) fields[lines[i].Substring(0, colon)] = lines[i].Substring(colon + 1).Trim();
                     }
                     fields.TryGetValue("Origin", out origin);
-                    if (!String.Equals(origin, allowedOrigin, StringComparison.OrdinalIgnoreCase))
+                    if (!IsAllowedOrigin(origin, allowedOrigin))
                     { Reply(stream, 403, new { ok = false, error = "Origen de Facturación no autorizado en esta PC." }, ""); return; }
                     if (method == "OPTIONS") { Reply(stream, 200, new { ok = true }, origin); return; }
                     if (method == "GET" && path == "/impresoras")
@@ -162,7 +174,7 @@ internal static class ImpresoraLocal
                         if (data == null || !data.ContainsKey("idRecibo") || Convert.ToInt32(data["idRecibo"]) <= 0)
                             throw new InvalidOperationException("Falta el comprobante emitido.");
                         int receipt = Convert.ToInt32(data["idRecibo"]);
-                        VerifyReceipt(allowedOrigin, receipt);
+                        VerifyReceipt(origin, receipt);
                         string printer = Convert.ToString(data["impresora"]), image = Convert.ToString(data["imagen"]);
                         PrintRawTicket(printer, image, "Corralón Progreso " + receipt);
                         Reply(stream, 200, new { ok = true, impresora = printer }, origin);

@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.21"></script>
+<script src="corralon-system.js?v=1.0.22"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -192,6 +192,23 @@
     .copy-warning-descriptions{margin:4px 0 9px 2px;padding-left:16px;color:#6f2940;font:700 15px Barlow}
     .copy-warning-descriptions li{margin:2px 0}
     .copy-result-actions{display:flex;justify-content:flex-end;padding:12px 20px;border-top:1px solid #cfe8ff}
+    .stock-ingreso-modal{width:min(1040px,96vw);max-height:92dvh;display:grid;grid-template-rows:auto auto minmax(130px,1fr) auto;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 70px #0005;overflow:hidden}
+    .stock-ingreso-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--soft);border-bottom:1px solid #cfe8ff}
+    .stock-ingreso-head h2{margin:0;color:#3b2fa3;font:900 25px 'Barlow Condensed'}
+    .stock-ingreso-head button{margin-left:auto}
+    .stock-ingreso-fields{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:14px 16px;border-bottom:1px solid #cfe8ff}
+    .stock-ingreso-fields label{min-width:0;font-size:16px}
+    .stock-ingreso-fields .stock-ingreso-note{grid-column:1/-1}
+    .stock-ingreso-list{min-height:0;overflow:auto;padding:10px 16px}
+    .stock-ingreso-list table{width:100%;border-collapse:collapse;font:700 14px Barlow}
+    .stock-ingreso-list th,.stock-ingreso-list td{padding:6px 7px;border-bottom:1px solid #d9edff;text-align:left}
+    .stock-ingreso-list th{position:sticky;top:0;background:var(--soft);z-index:1}
+    .stock-ingreso-list .num{text-align:right;white-space:nowrap}
+    .stock-ingreso-foot{display:flex;align-items:center;gap:9px;padding:12px 16px;border-top:1px solid #cfe8ff}
+    .stock-ingreso-message{flex:1;color:var(--muted);font:700 14px Barlow}
+    .stock-ingreso-message.error{color:#b31637}.stock-ingreso-message.ok{color:#087a43}
+    .stock-ingreso-foot button:disabled{opacity:.55;cursor:not-allowed}
+    @media(max-width:700px){.stock-ingreso-fields{grid-template-columns:1fr 1fr}.stock-ingreso-fields .stock-ingreso-note{grid-column:1/-1}.stock-ingreso-foot{flex-wrap:wrap}.stock-ingreso-message{flex-basis:100%}}
     #compareStockBackdrop{padding:0;background:#fff;align-items:stretch;justify-content:stretch}
     .compare-stock-modal{width:100vw;height:100dvh;max-width:none;max-height:none;background:#fff;border:0;border-radius:0;overflow:hidden;box-shadow:none;display:grid;grid-template-rows:auto auto 1fr}
     .compare-stock-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--soft);border-bottom:1px solid #cfe8ff}
@@ -281,6 +298,7 @@
       <button id="viewProviderBtn" type="button">Proveedor</button>
       <button id="priceComparatorBtn" type="button">Comparador <span class="price-comparator-count" id="priceComparatorCount">0</span></button>
       <button id="applyPricesBtn" type="button" disabled>Aplicar precios</button>
+      <button id="openStockIngresoBtn" type="button">Ingresar stock en SQL</button>
       <button data-nav-url="menu.html" type="button">Menu</button>
     </div>
   </header>
@@ -506,6 +524,19 @@
     </div>
   </div>
 </div>
+<div class="modal-backdrop" id="stockIngresoBackdrop">
+  <section class="stock-ingreso-modal" role="dialog" aria-modal="true" aria-labelledby="stockIngresoTitle">
+    <div class="stock-ingreso-head"><h2 id="stockIngresoTitle">Ingreso de mercadería en SQL</h2><button id="closeStockIngresoBtn" type="button">Cerrar</button></div>
+    <div class="stock-ingreso-fields">
+      <label>Sucursal que recibe<select id="stockIngresoSucursal"><option value="">Elegir sucursal</option></select></label>
+      <label>Punto de venta de Access<select id="stockIngresoPunto"><option value="">Elegir punto de venta</option></select></label>
+      <label>Nº factura del proveedor (opcional)<input id="stockIngresoFactura" maxlength="20" autocomplete="off" placeholder="0000-00000000"></label>
+      <label class="stock-ingreso-note">Nota (opcional)<input id="stockIngresoNota" maxlength="500" autocomplete="off"></label>
+    </div>
+    <div class="stock-ingreso-list" id="stockIngresoList">Elegí sucursal y punto de venta para verificar los artículos en SQL.</div>
+    <div class="stock-ingreso-foot"><span class="stock-ingreso-message" id="stockIngresoMessage" role="status" aria-live="polite"></span><button id="previewStockIngresoBtn" type="button">Verificar en SQL</button><button id="confirmStockIngresoBtn" class="primary" type="button" disabled>Confirmar ingreso</button></div>
+  </section>
+</div>
 <div class="article-provider-menu" id="articleProviderMenu"></div>
 <div class="toast" id="toast"></div>
 
@@ -582,7 +613,10 @@ let mouseEditTarget = null;
 let activeToolbarField = null;
 let providerMouseEdit = false;
 let providerArticles = [];
+let providerArticlesOrdered = [];
 let providerArticlesLoadSeq = 0;
+let providerArticleSearch = new WeakMap();
+let articleProviderInputTimer = null;
 let articleProviderCell = null;
 let articleProviderButtonCell = null;
 let articleProviderOptions = [];
@@ -763,11 +797,25 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault();
   focusable[nextIndex].focus({ preventScroll: true });
 }, true);
-function saveRows() {
-  window.CorralonCacheDB.set(CACHE_KEY, rowsData).then(() => {
+let rowsSaveTimer = null;
+let rowsSavePromise = Promise.resolve();
+function flushRowsSave() {
+  clearTimeout(rowsSaveTimer);
+  rowsSaveTimer = null;
+  const snapshot = rowsData.map(row => ({ ...row }));
+  rowsSavePromise = rowsSavePromise.catch(() => {}).then(() => window.CorralonCacheDB.set(CACHE_KEY, snapshot)).then(() => {
     try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
   }).catch((error) => console.warn('No se pudo guardar la carga en IndexedDB', error));
+  return rowsSavePromise;
 }
+function saveRows() {
+  clearTimeout(rowsSaveTimer);
+  rowsSaveTimer = setTimeout(flushRowsSave, 250);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && rowsSaveTimer) flushRowsSave();
+});
+window.addEventListener('pagehide', () => { if (rowsSaveTimer) flushRowsSave(); });
 async function loadRows() {
   try {
     const parsed = await window.CorralonCacheDB.migrateLocalStorage(CACHE_KEY);
@@ -1355,6 +1403,8 @@ function filteredProviders() {
   return source.slice(0, 40);
 }
 function closeArticleProviderList() {
+  clearTimeout(articleProviderInputTimer);
+  articleProviderInputTimer = null;
   el.articleProviderMenu.classList.remove('open');
   articleProviderCell = null;
   articleProviderOptions = [];
@@ -1377,6 +1427,8 @@ function hideArticleProviderToggle() {
 async function loadProviderArticles(nextProvider) {
   const seq = ++providerArticlesLoadSeq;
   providerArticles = [];
+  providerArticlesOrdered = [];
+  providerArticleSearch = new WeakMap();
   closeArticleProviderList();
   if (!nextProvider?.id_proveedor) return;
   el.status.textContent = `Cargando lista de ${providerLabel(nextProvider)}...`;
@@ -1384,6 +1436,12 @@ async function loadProviderArticles(nextProvider) {
     const loaded = await CorralonSystem.faltantes.syncSingleProviderJson(providerLabel(nextProvider), nextProvider.id_proveedor);
     if (seq !== providerArticlesLoadSeq) return;
     providerArticles = Array.isArray(loaded) ? loaded : [];
+    providerArticlesOrdered = CorralonSystem.articleOptionPager.prepare(providerArticles,
+      CorralonSystem.articleOptionPager.defaultKey, CorralonSystem.articleOptionPager.defaultDescription);
+    providerArticlesOrdered.forEach(item => providerArticleSearch.set(item, {
+      text: norm(`${item.codProv || ''} ${item.idart || ''} ${item.descripcion || ''}`),
+      code: codeKey(item.codProv), id: codeKey(item.idart)
+    }));
     el.status.textContent = `${providerArticles.length.toLocaleString('es-AR')} artículos de ${providerLabel(nextProvider)} disponibles`;
   } catch (error) {
     if (seq !== providerArticlesLoadSeq) return;
@@ -1396,12 +1454,16 @@ function filteredProviderArticles(cell) {
   const row = rowsData[rowIndex] || {};
   const terms = norm(cell?.textContent || '').split(' ').filter(Boolean);
   const descriptionMatches = (item) => {
-    const hay = norm(`${item.codProv || ''} ${item.idart || ''} ${item.descripcion || ''}`);
+    const hay = providerArticleSearch.get(item)?.text || '';
     return terms.every((term) => hay.includes(term));
   };
   const typedCode = codeKey(row.codigo);
-  const exactRank = (item) => codeKey(item.codProv) === typedCode ? 0 : codeKey(item.idart) === typedCode ? 1 : 10;
-  articleProviderPage = CorralonSystem.articleOptionPager.create(providerArticles, {
+  const exactRank = (item) => {
+    const indexed = providerArticleSearch.get(item);
+    return indexed?.code === typedCode ? 0 : indexed?.id === typedCode ? 1 : 10;
+  };
+  articleProviderPage = CorralonSystem.articleOptionPager.create(providerArticlesOrdered, {
+    preordered: true,
     isMatch: item => (typedCode && exactRank(item) < 10) || descriptionMatches(item),
     rank: exactRank,
     hasSearch: Boolean(typedCode || terms.length),
@@ -1418,6 +1480,8 @@ function renderArticleProviderList() {
 }
 function openArticleProviderList(cell) {
   if (!cell || !provider) return;
+  clearTimeout(articleProviderInputTimer);
+  articleProviderInputTimer = null;
   articleProviderCell = cell;
   articleProviderOptions = filteredProviderArticles(cell);
   articleProviderActive = articleProviderPage?.focusIndex || 0;
@@ -1444,6 +1508,13 @@ function openArticleProviderList(cell) {
     const active = el.articleProviderMenu.querySelector(`[data-article-option="${articleProviderActive}"]`);
     if (active) el.articleProviderMenu.scrollTop = Math.max(0, active.offsetTop);
   });
+}
+function scheduleArticleProviderList(cell) {
+  clearTimeout(articleProviderInputTimer);
+  articleProviderInputTimer = setTimeout(() => {
+    articleProviderInputTimer = null;
+    if (cell.isConnected && document.activeElement === cell) openArticleProviderList(cell);
+  }, 80);
 }
 function extendArticleProviderList(direction) {
   if (articleProviderPaging || !articleProviderPage || !el.articleProviderMenu.classList.contains('open')) return;
@@ -2462,18 +2533,28 @@ function render() {
   el.copySummary.textContent = `${okCount.toLocaleString('es-AR')} listos para copiar`;
   applyTableSelectionMarks();
 }
-function updateCalculatedCells() {
-  rowsData.forEach((row, index) => {
-    const finalCell = editableCellAt(index, 5);
+let calculatedTotalsFrame = null;
+function updateCalculatedCells(rowIndex = null) {
+  const refreshRow = (row, rowEl) => {
+    if (!rowEl) return;
+    const finalCell = rowEl.querySelector('[data-col="5"]');
     if (finalCell && document.activeElement !== finalCell) finalCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinal(row));
-    const finalQuantityCell = editableCellAt(index, 6);
+    const finalQuantityCell = rowEl.querySelector('[data-col="6"]');
     if (finalQuantityCell && document.activeElement !== finalQuantityCell) finalQuantityCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinalCantidad(row));
+  };
+  if (rowIndex === null) rowsData.forEach((row, index) => refreshRow(row, el.rows.children[index]));
+  else refreshRow(rowsData[rowIndex], el.rows.children[rowIndex]);
+  if (calculatedTotalsFrame !== null) return;
+  calculatedTotalsFrame = requestAnimationFrame(() => {
+    calculatedTotalsFrame = null;
+    const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
+    const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
+    el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
+    el.totalFinal.textContent = `Costo final: ${money(totalFinal)}`;
+    el.totalDescuentoSobreTotal.textContent = `Subtotal factura: ${money(calcSubtotalFactura())}`;
+    el.copySummary.textContent = `${rowsData.filter(isGreen).length.toLocaleString('es-AR')} listos para copiar`;
+    el.totalRows.textContent = `${rowsData.filter((row) => !isBlankStockRow(row)).length.toLocaleString('es-AR')} filas`;
   });
-  const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
-  const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
-  el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
-  el.totalFinal.textContent = `Costo final: ${money(totalFinal)}`;
-  el.totalDescuentoSobreTotal.textContent = `Subtotal factura: ${money(calcSubtotalFactura())}`;
 }
 async function pasteAll() {
   const text = await navigator.clipboard.readText();
@@ -3423,7 +3504,8 @@ function placeCaretEnd(cell) {
 function rowFromCell(cell) {
   const rowEl = cell?.closest?.('.row');
   if (!rowEl) return null;
-  return rowsData.find((item) => item.id === rowEl.dataset.id) || null;
+  const row = rowsData[Number(rowEl.dataset.row)];
+  return row?.id === rowEl.dataset.id ? row : rowsData.find((item) => item.id === rowEl.dataset.id) || null;
 }
 function getEditableCellValue(cell) {
   const row = rowFromCell(cell);
@@ -3887,7 +3969,10 @@ el.providerInput.addEventListener('input', () => {
   providerMouseEdit = true;
   provider = null;
   el.applyPricesBtn.disabled = true;
+  providerArticlesLoadSeq += 1;
   providerArticles = [];
+  providerArticlesOrdered = [];
+  providerArticleSearch = new WeakMap();
   closeArticleProviderList();
   openProviderList();
 });
@@ -4210,6 +4295,158 @@ document.getElementById('closeProviderModalActionBtn').addEventListener('click',
 document.getElementById('providerModal').addEventListener('mousedown', (event) => {
   if (event.target === document.getElementById('providerModal')) closeProviderModal();
 });
+const STOCK_INGRESO_DRAFT_KEY = 'corralon_stock_ingreso_sql_v1';
+let stockIngresoPreview = null;
+let stockIngresoBusy = false;
+function stockIngresoMessage(message, type = '') {
+  const element = document.getElementById('stockIngresoMessage');
+  element.textContent = message;
+  element.className = `stock-ingreso-message ${type}`;
+}
+function stockIngresoUuid() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const value = [...bytes].map(part => part.toString(16).padStart(2, '0')).join('');
+  return `${value.slice(0,8)}-${value.slice(8,12)}-${value.slice(12,16)}-${value.slice(16,20)}-${value.slice(20)}`;
+}
+function stockIngresoData() {
+  const selected = selectedProvider();
+  const providerCode = String(CorralonSystem.providerIdentity.externalId(selected) || '').trim();
+  if (!/^\d+$/.test(providerCode) || Number(providerCode) <= 0) throw new Error('Elegí un proveedor que tenga ID en SQL.');
+  const sucursal = Number(document.getElementById('stockIngresoSucursal').value);
+  const puntoVenta = Number(document.getElementById('stockIngresoPunto').value);
+  if (!sucursal || !puntoVenta) throw new Error('Elegí la sucursal que recibe y el punto de venta de Access.');
+  const rows = rowsData.filter(row => !isBlankStockRow(row));
+  if (!rows.length) throw new Error('Cargá al menos un artículo.');
+  if (rows.length > 200) throw new Error('Ingresá hasta 200 artículos por movimiento.');
+  const articulos = rows.map((row, index) => {
+    const codigo = String(row.codigo || '').trim();
+    if (!codigo) throw new Error(`Falta el código de proveedor en la fila ${index + 1}.`);
+    const cantidad = quantityNumber(row.cantidad);
+    const precioUnitario = Number(calcPrecioFinal(row));
+    if (!Number.isFinite(cantidad) || cantidad <= 0 || !Number.isFinite(precioUnitario) || precioUnitario < 0)
+      throw new Error(`Revisá la cantidad y el precio de la fila ${index + 1}.`);
+    return { codigo, cantidad, precioUnitario: Math.round(precioUnitario * 10000) / 10000 };
+  });
+  return { proveedor: Number(providerCode), sucursal, puntoVenta,
+    numeroFactura: document.getElementById('stockIngresoFactura').value.trim(),
+    nota: document.getElementById('stockIngresoNota').value.trim(), articulos };
+}
+function stockIngresoRequest(data) {
+  const fingerprint = JSON.stringify(data);
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY) || 'null'); } catch (_) {}
+  if (!pending || pending.fingerprint !== fingerprint || !pending.id) {
+    pending = { id: stockIngresoUuid(), fingerprint, status: 'pending' };
+    try { localStorage.setItem(STOCK_INGRESO_DRAFT_KEY, JSON.stringify(pending)); } catch (_) {}
+  }
+  return pending;
+}
+async function stockIngresoCall(data, action) {
+  const response = await fetch('/api/facturacion/stock-ingreso', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...data, accion: action })
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error(result.error || 'No respondió la base de datos.');
+  return result;
+}
+function renderStockIngresoPreview(result) {
+  const lines = result.articulos || [];
+  document.getElementById('stockIngresoList').innerHTML =
+    `<p><strong>${escapeHtml(result.proveedor)}</strong> · ${escapeHtml(result.sucursal)} · ${lines.length} artículos · Total ${money(result.total)}</p>` +
+    `<table><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo en SQL</th><th class="num">Cantidad</th><th class="num">Costo unit.</th><th class="num">Stock actual</th><th class="num">Stock nuevo</th></tr></thead><tbody>` +
+    lines.map(line => `<tr><td>${escapeHtml(line.idart)}</td><td>${escapeHtml(line.codigo)}</td><td>${escapeHtml(line.descripcion)}</td><td class="num">${escapeHtml(rawNumber(line.cantidad))}</td><td class="num">${money(line.precioUnitario)}</td><td class="num">${escapeHtml(rawNumber(line.stockAntes))}</td><td class="num">${escapeHtml(rawNumber(line.stockDespues))}</td></tr>`).join('') +
+    '</tbody></table>';
+}
+function invalidateStockIngresoPreview() {
+  stockIngresoPreview = null;
+  document.getElementById('confirmStockIngresoBtn').disabled = true;
+  if (!stockIngresoBusy) stockIngresoMessage('Volvé a verificar los datos antes de confirmar.');
+}
+async function openStockIngreso() {
+  if (stockIngresoBusy) return;
+  const backdrop = document.getElementById('stockIngresoBackdrop');
+  backdrop.classList.add('visible');
+  stockIngresoMessage('Consultando sucursales y puntos de venta de SQL...');
+  document.getElementById('stockIngresoList').textContent = 'La verificación no modifica el stock.';
+  document.getElementById('confirmStockIngresoBtn').disabled = true;
+  stockIngresoPreview = null;
+  try {
+    const response = await fetch('/api/facturacion/stock-ingreso', { cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || 'No hay conexión con SQL.');
+    const branchSelect = document.getElementById('stockIngresoSucursal');
+    const pointSelect = document.getElementById('stockIngresoPunto');
+    branchSelect.innerHTML = '<option value="">Elegir sucursal</option>' +
+      result.sucursales.map(item => `<option value="${Number(item.id)}">${escapeHtml(item.nombre)}</option>`).join('');
+    pointSelect.innerHTML = '<option value="">Elegir punto de venta</option>' +
+      result.puntosVenta.map(item => `<option value="${Number(item.id)}">${escapeHtml(item.id)} · ${escapeHtml(item.nombre)}</option>`).join('');
+    let saved = {}; try { saved = JSON.parse(localStorage.getItem('facturacion_puesto_v1') || '{}'); } catch (_) {}
+    if (!branchSelect.value) branchSelect.value = saved.branch === 'calle5_espana' ? '2' : saved.branch === 'progreso_ruta' ? '1' : '';
+    if (!pointSelect.value) pointSelect.value = String(saved.pos || '');
+    stockIngresoMessage('Elegí la sucursal y el punto de venta; después verificá las filas en SQL.');
+  } catch (error) { stockIngresoMessage(error.message || 'No hay conexión con SQL.', 'error'); }
+}
+function closeStockIngreso() {
+  if (stockIngresoBusy) return;
+  document.getElementById('stockIngresoBackdrop').classList.remove('visible');
+  document.getElementById('openStockIngresoBtn').focus();
+}
+async function previewStockIngreso() {
+  if (stockIngresoBusy) return;
+  stockIngresoBusy = true;
+  const button = document.getElementById('previewStockIngresoBtn');
+  button.disabled = true;
+  document.getElementById('confirmStockIngresoBtn').disabled = true;
+  try {
+    const data = stockIngresoData();
+    const pending = stockIngresoRequest(data);
+    stockIngresoMessage('Verificando los artículos y el stock actual en SQL...');
+    const result = await stockIngresoCall({ ...data, id: pending.id }, 'previsualizar');
+    stockIngresoPreview = { data, id: pending.id, fingerprint: pending.fingerprint };
+    renderStockIngresoPreview(result);
+    if (result.yaCargado) {
+      stockIngresoMessage(`Este ingreso ya está confirmado: movimiento Nº ${result.numeroMovimiento}.`, 'ok');
+    } else {
+      stockIngresoMessage('Revisá el proveedor, la sucursal, los artículos y las cantidades antes de confirmar.');
+      document.getElementById('confirmStockIngresoBtn').disabled = false;
+    }
+  } catch (error) { stockIngresoPreview = null; stockIngresoMessage(error.message || 'No se pudo verificar la carga.', 'error'); }
+  finally { stockIngresoBusy = false; button.disabled = false; }
+}
+async function confirmStockIngreso() {
+  if (stockIngresoBusy || !stockIngresoPreview) return;
+  let data;
+  try {
+    data = stockIngresoData();
+    if (JSON.stringify(data) !== stockIngresoPreview.fingerprint) throw new Error('Los datos cambiaron. Volvé a verificar antes de confirmar.');
+  } catch (error) { invalidateStockIngresoPreview(); stockIngresoMessage(error.message, 'error'); return; }
+  stockIngresoBusy = true;
+  const button = document.getElementById('confirmStockIngresoBtn');
+  button.disabled = true;
+  document.getElementById('previewStockIngresoBtn').disabled = true;
+  stockIngresoMessage('Confirmando el movimiento y actualizando el stock en SQL...');
+  try {
+    const result = await stockIngresoCall({ ...data, id: stockIngresoPreview.id }, 'confirmar');
+    try { localStorage.setItem(STOCK_INGRESO_DRAFT_KEY, JSON.stringify({ id: stockIngresoPreview.id, fingerprint: stockIngresoPreview.fingerprint, status: 'confirmed' })); } catch (_) {}
+    renderStockIngresoPreview(result);
+    stockIngresoMessage(`Ingreso confirmado en SQL: movimiento Nº ${result.numeroMovimiento}. Stock actualizado.`, 'ok');
+    el.status.textContent = `Stock ingresado en SQL · movimiento Nº ${result.numeroMovimiento}`;
+    stockIngresoPreview = null;
+  } catch (error) {
+    stockIngresoMessage(`${error.message || 'No se pudo confirmar.'} Si no hubo respuesta, verificá el mismo ingreso antes de repetirlo.`, 'error');
+    button.disabled = false;
+  } finally { stockIngresoBusy = false; document.getElementById('previewStockIngresoBtn').disabled = false; }
+}
+document.getElementById('openStockIngresoBtn').addEventListener('click', openStockIngreso);
+document.getElementById('closeStockIngresoBtn').addEventListener('click', closeStockIngreso);
+document.getElementById('previewStockIngresoBtn').addEventListener('click', previewStockIngreso);
+document.getElementById('confirmStockIngresoBtn').addEventListener('click', confirmStockIngreso);
+document.getElementById('stockIngresoBackdrop').addEventListener('mousedown', event => { if (event.target === event.currentTarget) closeStockIngreso(); });
+for (const field of document.querySelectorAll('#stockIngresoSucursal,#stockIngresoPunto,#stockIngresoFactura,#stockIngresoNota'))
+  field.addEventListener('input', invalidateStockIngresoPreview);
 document.getElementById('compareStockBtn').addEventListener('click', openStockComparison);
 el.applyPricesBtn.addEventListener('click', () => {
   applyPricesToAccess().catch((error) => {
@@ -4635,8 +4872,9 @@ el.rows.addEventListener('input', (event) => {
   const rowEl = event.target.closest('.row');
   if (!cell || !rowEl) return;
   cell.dataset.fullSelected = '0';
-  const row = rowsData.find((item) => item.id === rowEl.dataset.id);
-  if (!row) return;
+  const rowIndex = Number(rowEl.dataset.row);
+  const row = rowsData[rowIndex];
+  if (!row || row.id !== rowEl.dataset.id) return;
   const field = cell.dataset.field;
   if (field === 'precio') {
     row.precio = moneyNumber(cell.textContent);
@@ -4647,7 +4885,6 @@ el.rows.addEventListener('input', (event) => {
   else if (field === 'cantidad') row.cantidad = String(cell.textContent || '').trim();
   else if (field === 'descuento') row.descuentoAdicional = parsePercent(cell.textContent);
   else row[field] = String(cell.textContent || '').trim();
-  const rowIndex = Number(rowEl.dataset.row);
   const blank = isBlankStockRow(row);
   rowEl.classList.toggle('blank', blank);
   rowEl.classList.toggle('ok', !blank && isGreen(row));
@@ -4657,13 +4894,9 @@ el.rows.addEventListener('input', (event) => {
     rowsData.push(nextRow);
     el.rows.insertAdjacentHTML('beforeend', stockRowHtml(nextRow, rowsData.length - 1));
   }
-  if (field === 'codigo') {
-    el.copySummary.textContent = `${rowsData.filter(isGreen).length.toLocaleString('es-AR')} listos para copiar`;
-  }
-  el.totalRows.textContent = `${rowsData.filter((item) => !isBlankStockRow(item)).length.toLocaleString('es-AR')} filas`;
   saveRows();
-  if (field === 'descuento' || field === 'precio' || field === 'cantidad') updateCalculatedCells();
-  if (field === 'descripcion') openArticleProviderList(cell);
+  updateCalculatedCells(rowIndex);
+  if (field === 'descripcion') scheduleArticleProviderList(cell);
 });
 function finalizeQuantityCell(cell) {
   if (!cell?.matches?.('[data-field="cantidad"]')) return false;
@@ -4673,7 +4906,7 @@ function finalizeQuantityCell(cell) {
   row.cantidad = rawNumber(result);
   cell.textContent = row.cantidad;
   saveRows();
-  updateCalculatedCells();
+  updateCalculatedCells(Number(cell.dataset.row));
   return true;
 }
 el.rows.addEventListener('keydown', (event) => {
@@ -4694,13 +4927,14 @@ el.rows.addEventListener('keydown', (event) => {
     }
     return;
   }
-  if (event.key === 'Escape' && el.articleProviderMenu.classList.contains('open')) {
+  if (event.key === 'Escape' && (el.articleProviderMenu.classList.contains('open') || articleProviderInputTimer)) {
     event.preventDefault();
     event.stopPropagation();
     closeArticleProviderList();
     return;
   }
   if (event.key === 'Tab') closeArticleProviderList();
+  if (articleProviderInputTimer && ['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) openArticleProviderList(cell);
   if (!el.articleProviderMenu.classList.contains('open') || articleProviderCell !== cell) return;
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();

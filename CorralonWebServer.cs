@@ -244,6 +244,10 @@ internal sealed class ServerForm : Form
     private readonly string root;
     private HttpListener listener;
     private Thread listenThread;
+    private System.Windows.Forms.Timer facturacionWatchdog;
+    private readonly object facturacionLifecycle = new object();
+    private int facturacionWatchdogBusy;
+    private volatile bool facturacionStopping;
     private Label status;
     private TextBox urlBox;
     private TextBox networkUrlBox;
@@ -275,6 +279,8 @@ internal sealed class ServerForm : Form
         if (File.Exists(iconPath)) Icon = new Icon(iconPath);
         BuildUi();
         BuildTrayIcon();
+        facturacionWatchdog = new System.Windows.Forms.Timer { Interval = 10000 };
+        facturacionWatchdog.Tick += (s, e) => CheckFacturacionApiInBackground();
         StartServer();
         if (startInTray) Shown += (s, e) => HideToTray();
     }
@@ -519,6 +525,7 @@ internal sealed class ServerForm : Form
     {
         try
         {
+            facturacionStopping = false;
             if (!EnsureFacturacionApi()) throw new InvalidOperationException("No se pudo iniciar la API de facturación. El servidor web no se inició.");
             listener = new HttpListener();
             listener.Prefixes.Add("http://+:" + Port + "/");
@@ -527,11 +534,13 @@ internal sealed class ServerForm : Form
             listenThread.Start();
             status.Text = "Estado: activo en http://localhost:8080/ y red local";
             startStopButton.Text = "Detener";
+            facturacionWatchdog.Start();
         }
         catch (Exception ex)
         {
             try { if (listener != null) listener.Close(); } catch { }
             listener = null;
+            facturacionWatchdog.Stop();
             StopFacturacionApi();
             status.Text = "Estado: error al iniciar";
             Log(ex.ToString());
@@ -574,6 +583,27 @@ internal sealed class ServerForm : Form
             return FacturacionApiReady();
         }
         catch (Exception ex) { Log("Facturación central: no se pudo iniciar la API. " + ex); return false; }
+    }
+
+    private void CheckFacturacionApiInBackground()
+    {
+        if (facturacionStopping || listener == null || !listener.IsListening ||
+            Interlocked.CompareExchange(ref facturacionWatchdogBusy, 1, 0) != 0) return;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                lock (facturacionLifecycle)
+                {
+                    if (facturacionStopping || listener == null || !listener.IsListening) return;
+                    if (FacturacionApiReady()) return;
+                    Log("Facturación central: la API no respondió; comprobando reinicio automático.");
+                    if (EnsureFacturacionApi()) Log("Facturación central: API recuperada automáticamente.");
+                }
+            }
+            catch (Exception ex) { Log("Facturación central: falló la supervisión de la API. " + ex.Message); }
+            finally { Interlocked.Exchange(ref facturacionWatchdogBusy, 0); }
+        });
     }
 
     private bool FacturacionApiReady()
@@ -641,13 +671,19 @@ internal sealed class ServerForm : Form
 
     private bool StopServer()
     {
-        if (listener == null) return StopFacturacionApi();
-        if (!StopFacturacionApi())
+        facturacionStopping = true;
+        facturacionWatchdog.Stop();
+        bool apiStopped;
+        lock (facturacionLifecycle) apiStopped = StopFacturacionApi();
+        if (!apiStopped)
         {
+            facturacionStopping = false;
+            if (listener != null && listener.IsListening) facturacionWatchdog.Start();
             status.Text = "Estado: activo; facturación está terminando o no pudo apagarse";
             MessageBox.Show("La API de facturación sigue trabajando o no respondió al apagado. El servidor continúa activo; intentá detenerlo de nuevo cuando termine.", "Corralón Web", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return false;
         }
+        if (listener == null) return true;
         try { listener.Stop(); } catch { }
         try { listener.Close(); } catch { }
         listener = null;
@@ -767,8 +803,8 @@ internal sealed class ServerForm : Form
     {
         string route = requestPath.Substring("api/facturacion/".Length).ToLowerInvariant();
         string method = context.Request.HttpMethod;
-        bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "catalogo", "stock", "clientes", "comprobante", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras" }, route) >= 0)
-            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir" }, route) >= 0);
+        bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "catalogo", "stock", "stock-ingreso", "clientes", "comprobante", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras" }, route) >= 0)
+            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso" }, route) >= 0);
         if (!allowed) { WriteJson(context, 404, "{\"ok\":false,\"error\":\"Ruta de facturación no disponible.\"}"); return; }
 
         IPAddress address = context.Request.RemoteEndPoint == null ? null : context.Request.RemoteEndPoint.Address;

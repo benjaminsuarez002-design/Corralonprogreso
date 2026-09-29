@@ -69,11 +69,18 @@
     .recordbar b{color:#222}.recordbar .catalog-state{margin-left:auto}
     .suggestions{position:fixed;z-index:40;display:none;max-height:340px;overflow:auto;border:1px solid #888;border-radius:7px;background:#fff;box-shadow:0 12px 32px rgba(0,0,0,.25)}
     .suggestions.open{display:block}
-    .suggestion-head,.suggestion{display:grid;grid-template-columns:90px 120px minmax(0,1fr) 115px;gap:9px;padding:6px 8px;border-bottom:1px solid var(--line);font-size:75%;font-weight:800}
+    .suggestion-head,.suggestion{display:grid;grid-template-columns:70px 105px minmax(0,1fr) 105px 65px 85px;gap:6px;padding:6px 8px;border-bottom:1px solid var(--line);font-size:75%;font-weight:800}
     .suggestion-head{position:sticky;top:0;z-index:1;background:#eee;color:#333}.suggestion{cursor:pointer}.suggestion span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .suggestion:hover{background:#e8e8e5}.suggestion.active,.suggestion.active:hover{background:#b7192b;color:#fff}
     .suggestion .price{text-align:right;color:#d00008}
+    .suggestion .stock{text-align:right}
+    .suggestion .updated{text-align:right}
     .suggestion.active .price{color:#fff}
+    .suggestion-context{position:fixed;z-index:90;display:none;min-width:190px;padding:4px;border:1px solid #aaa;border-radius:6px;background:#fff;box-shadow:0 8px 24px #0004}
+    .suggestion-context.open{display:block}
+    .suggestion-context button{display:block;width:100%;padding:8px 10px;border:0;border-radius:4px;background:#fff;text-align:left;font:700 13px Barlow,Arial;cursor:pointer}
+    .suggestion-context button:hover,.suggestion-context button:focus{background:#ef1015;color:#fff}
+    .suggestion-context button:disabled{opacity:.55;cursor:wait}
     #voucherType{appearance:none;padding-right:28px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23222' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;background-size:12px 8px}
     .client-field{position:relative}.client-field input{padding-right:28px}.client-drop,.payment-drop{position:absolute;right:2px;top:2px;width:23px;height:23px;border:1px solid #aaa;border-radius:5px;background:#fff;cursor:pointer}.client-drop{top:20px;display:block;border:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23222' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 8px no-repeat;font-size:0}.client-options{position:fixed;z-index:60;display:none;max-height:220px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;background:#fff;box-shadow:0 8px 24px #0003}.client-options.open{display:block}.client-option{padding:5px 8px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;cursor:pointer}.client-option:hover{background:#e8e8e5}.client-option.active,.client-option.active:hover{background:#b7192b;color:#fff}.client-option small{display:block;color:#666}.client-option.active small{color:#fff}
     .payment-combo{position:relative}.payment-combo input{padding-right:27px}.payment-combo:hover .payment-drop,.payment-combo:focus-within .payment-drop{display:block}.payment-drop{display:none;z-index:3}.payment-options{position:fixed;z-index:45;display:none;max-height:240px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;background:#fff;box-shadow:0 8px 24px #0003}.payment-options.open{display:block}.payment-option{padding:6px 9px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;cursor:pointer}.payment-option:hover{background:#e8e8e5}.payment-option.active,.payment-option.active:hover{background:#b7192b;color:#fff}
@@ -155,6 +162,7 @@
     @media screen and (max-height:700px){.article-scroll{min-height:150px}}
     body[data-page-theme] :is(#suggestions,#clientesSql,#paymentOptions) :is(.suggestion,.client-option,.payment-option):is(:hover,.active,[aria-selected="true"]){background:#ef1015!important;background-color:#ef1015!important;color:#111!important}
     body[data-page-theme] #suggestions .suggestion .price{color:#111!important}
+    body[data-page-theme] #suggestions .suggestion:is(:hover,.active,[aria-selected="true"]),body[data-page-theme] #suggestions .suggestion:is(:hover,.active,[aria-selected="true"]) span{color:#fff!important}
     body[data-page-theme] #clientesSql .client-option small{color:#333!important}
   </style>
 </head>
@@ -164,26 +172,57 @@
     <div class="meta" data-nav-zone><div class="field"><label for="voucherType">Comprobante</label><select id="voucherType"><option value="">Cargando comprobantes…</option></select></div><div class="field"><label for="voucherNumber">Número</label><input id="voucherNumber" value="Sin emitir" readonly></div><div class="field"><label for="date">Fecha</label><input id="date" type="date"></div><div class="field"><label for="cae">CAE</label><input id="cae" placeholder="Sin CAE" readonly></div><div class="field"><label for="seller">Vendedor</label><select id="seller"><option value="">Elegir vendedor</option></select></div><div class="field"><label for="priceList">Precios</label><select id="priceList"><option value="3">Minorista</option><option value="2">Intermedio</option><option value="1">Mayorista</option></select></div></div>
     <div class="customer" data-nav-zone><div class="field"><label for="docType">Documento</label><div class="document-combo"><select id="docType"><option>DNI</option><option>CUIT</option><option>Sin identificar</option></select><input id="docNumber" inputmode="numeric" aria-label="Número de documento" value="00000001000"></div></div><div class="field client-field"><label for="customerName">Cliente</label><input id="customerName" value="CONSUMIDOR FINAL" autocomplete="off" aria-autocomplete="list" aria-expanded="false"><button class="client-drop" id="customerDrop" type="button" tabindex="-1" aria-label="Desplegar clientes">▼</button><div id="clientesSql" class="client-options" role="listbox"></div></div><div class="field"><label for="customerTax">Condición IVA</label><div class="tax-combo"><select id="customerTax"><option>Consumidor final</option><option>Responsable inscripto</option><option>Responsable no inscripto</option><option>No responsable</option><option>Monotributista</option><option>Exento</option></select><span class="tax-short" id="customerTaxShort" aria-hidden="true">CF</span></div></div><input id="customerEmail" type="hidden"><div class="field"><label for="customerAddress">Dirección</label><input id="customerAddress"></div><div class="field"><label for="customerPhone">Teléfono</label><input id="customerPhone" inputmode="tel"></div><div class="field associated-row" id="associatedRow"><label for="invoiceReference">Copiar boleta (opcional)</label><div class="associated-control"><input id="invoiceReference" inputmode="text" placeholder="0000-00000000" maxlength="13" autocomplete="off" aria-autocomplete="list" aria-controls="invoiceOptions" aria-expanded="false"><button id="searchAssociated" type="button">Buscar boleta</button></div><div id="invoiceOptions" class="invoice-options" role="listbox"></div></div></div>
     <section class="table-card" id="articleCard"><div class="table-scroll article-scroll"><table class="grid" id="articleTable"><colgroup><col style="width:24px"><col style="width:8%"><col style="width:9%"><col><col style="width:8%"><col style="width:10%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:34px"></colgroup><thead><tr><th class="row-selector" data-table-corner></th><th data-col="0" data-sort-key="idart">IDArt</th><th data-col="1" data-sort-key="codProv">Cód. prov.</th><th data-col="2" data-sort-key="descripcion">Artículo</th><th data-col="3" data-sort-key="cantidad">Cantidad</th><th data-col="4" data-sort-key="precio">Precio unit.</th><th data-col="5" data-sort-key="stock">Stock</th><th data-col="6" data-sort-key="margen">% Margen</th><th data-col="7" data-sort-key="descuento">% Dto.</th><th data-col="8">Importe</th><th></th></tr></thead><tbody id="articleBody"></tbody></table></div><div class="recordbar"><span>Registro:</span><b id="articleRecordCount">1 de 1</b><span>Buscar</span><span class="catalog-state" id="catalogStatus">Cargando catálogo…</span></div></section>
-    <div class="lower"><section class="payments"><div class="table-title"><h2>Valores recibidos</h2><span>El total debe coincidir con el comprobante</span></div><div class="table-scroll payment-scroll"><table class="grid" id="paymentTable" style="min-width:1000px"><colgroup><col style="width:145px"><col style="width:130px"><col style="width:145px"><col style="width:75px"><col><col style="width:85px"><col style="width:100px"><col style="width:110px"><col style="width:34px"></colgroup><thead><tr><th data-col="0" data-sort-key="tipo">Tipo de valor</th><th data-col="1" data-sort-key="importe">Importe</th><th data-col="2" data-sort-key="tarjeta">Tarjeta / cuenta</th><th data-col="3" data-sort-key="cuotas">Cuotas</th><th data-col="4" data-sort-key="descripcion">Descripción</th><th data-col="5" data-sort-key="coef">% Dto./Rec.</th><th data-col="6" data-sort-key="impRec">$ Dto./Rec.</th><th data-col="7">Total</th><th></th></tr></thead><tbody id="paymentBody"></tbody></table></div><datalist id="paymentTypesSql"></datalist><datalist id="paymentCardsSql"></datalist><div class="recordbar"><span>Registro:</span><b id="paymentRecordCount">1 de 1</b><span>Buscar</span></div></section><figure class="article-photo" aria-label="Imagen del artículo seleccionado"><button class="article-photo-trigger" id="articlePhotoTrigger" type="button" aria-label="Ampliar imagen del artículo" disabled><img id="articlePhotoImage" alt="" hidden><span id="articlePhotoMessage">Seleccioná un artículo</span></button></figure><aside class="summary"><div class="summary-grid"><span>Neto gravado</span><strong id="netTotal">$ 0,00</strong><span>IVA 21%</span><strong id="iva21">$ 0,00</strong><span>IVA 10,5%</span><strong id="iva105">$ 0,00</strong><span>Otros / exento</span><strong id="otherTax">$ 0,00</strong><span>Valores recibidos</span><strong id="paymentsTotal">$ 0,00</strong><span>Diferencia</span><strong id="difference" class="difference">$ 0,00</strong><span class="total-label">Total</span><strong class="total" id="grandTotal">$ 0,00</strong></div></aside></div>
+    <div class="lower"><section class="payments"><div class="table-title"><h2>Valores recibidos</h2><span>El total debe coincidir con el comprobante</span></div><div class="table-scroll payment-scroll"><table class="grid" id="paymentTable" style="width:100%;min-width:850px"><colgroup><col style="width:125px"><col style="width:110px"><col style="width:135px"><col style="width:55px"><col style="width:120px"><col style="width:85px"><col style="width:90px"><col style="width:100px"><col style="width:30px"></colgroup><thead><tr><th data-col="0" data-sort-key="tipo">Tipo de valor</th><th data-col="1" data-sort-key="importe">Importe</th><th data-col="2" data-sort-key="tarjeta">Tarjeta / cuenta</th><th data-col="3" data-sort-key="cuotas">Cuotas</th><th data-col="4" data-sort-key="descripcion">Descripción</th><th data-col="5" data-sort-key="coef">% Dto./Rec.</th><th data-col="6" data-sort-key="impRec">$ Dto./Rec.</th><th data-col="7">Total</th><th></th></tr></thead><tbody id="paymentBody"></tbody></table></div><datalist id="paymentTypesSql"></datalist><datalist id="paymentCardsSql"></datalist><div class="recordbar"><span>Registro:</span><b id="paymentRecordCount">1 de 1</b><span>Buscar</span></div></section><figure class="article-photo" aria-label="Imagen del artículo seleccionado"><button class="article-photo-trigger" id="articlePhotoTrigger" type="button" aria-label="Ampliar imagen del artículo" disabled><img id="articlePhotoImage" alt="" hidden><span id="articlePhotoMessage">Seleccioná un artículo</span></button></figure><aside class="summary"><div class="summary-grid"><span>Neto gravado</span><strong id="netTotal">$ 0,00</strong><span>IVA 21%</span><strong id="iva21">$ 0,00</strong><span>IVA 10,5%</span><strong id="iva105">$ 0,00</strong><span>Otros / exento</span><strong id="otherTax">$ 0,00</strong><span>Valores recibidos</span><strong id="paymentsTotal">$ 0,00</strong><span>Diferencia</span><strong id="difference" class="difference">$ 0,00</strong><span class="total-label">Total</span><strong class="total" id="grandTotal">$ 0,00</strong></div></aside></div>
     <div class="foot"><div class="field"><label for="note">Nota</label><textarea id="note" placeholder="Observaciones del comprobante"></textarea></div><div class="actions"><button id="cancelEdit" type="button">Reimprimir últ. fact.</button><button id="reprintReceipt" type="button" hidden>Reimprimir comprobante</button><div class="issue-control"><label class="auto-print-label" for="autoPrint"><input id="autoPrint" type="checkbox" checked>Imprimir automáticamente</label><button class="primary" id="issueInvoice" type="button" disabled>Emitir PRES. ESPECIAL</button></div></div></div><div class="message" id="message"></div>
     <div class="recovery-alert" id="recoveryAlert" role="alert" aria-live="assertive"><strong id="recoveryTitle">ATENCIÓN: esta emisión quedó pendiente</strong><p id="recoveryText">No repitas esta venta ni borres este borrador. Verificá qué pasó con este comprobante.</p><button id="checkRecovery" type="button">Consultar estado</button><button id="recoverInvoice" type="button" hidden>Recuperar este comprobante</button><button id="printPendingCopy" type="button">Imprimir detalle sin confirmar</button><button id="continueNewInvoice" type="button">Guardar pendiente y hacer otra venta</button></div>
   </section>
 </main>
 <div class="article-photo-lightbox" id="articlePhotoLightbox" role="dialog" aria-modal="true" aria-label="Imagen ampliada del artículo" hidden><button class="article-photo-close" id="articlePhotoClose" type="button" aria-label="Cerrar imagen">×</button><img id="articlePhotoLarge" alt=""></div>
 <div class="suggestions" id="suggestions"></div>
+<div class="suggestion-context" id="suggestionContextMenu" role="menu"><button id="sendSuggestionToMissing" type="button" role="menuitem">Enviar a Faltantes</button></div>
 <div class="modal-wrap" id="draftModal" role="dialog" aria-modal="true" aria-label="Emisiones pendientes"><section class="modal"><header class="modal-head"><h2>Emisiones pendientes</h2><button id="closeDrafts" type="button">Cerrar</button></header><div class="draft-list" id="draftList"></div></section></div>
 <div class="modal-wrap" id="associatedModal" role="dialog" aria-modal="true" aria-label="Elegir factura original"><section class="modal"><header class="modal-head"><h2>Elegir factura original de SQL</h2><button id="closeAssociated" type="button">Cerrar</button></header><div class="associated-search"><input id="associatedQuery" autocomplete="off" placeholder="Buscar por número o cliente"><div class="associated-results" id="associatedResults"></div></div></section></div>
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.12"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.13"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 const SQL_CONNECTION_MESSAGE='No hay conexión con la base de datos.';
-const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=-1,suggestionPage=null,paymentReconcileTimer=null,saveTimer=null,sqlConfig=null,issuedReceipt=null,previewDraft=null,recoveryPending=false,recoveryCanRetry=false,issueInProgress=false,printInProgress=false,printerSelectionPending=false,browserPrintPending=false,recoveryPollBusy=false,stockRefreshBusy=false,stockRefreshAgain=false,localDraftStoreReady=false;const SQL_PREPARACION=`${location.origin}/api/facturacion`,LOCAL_PRINTER_API='http://127.0.0.1:8082',BROWSER_PRINTER='browser:',TICKET_PRINTER_KEY='facturacion_ticket_printer_v1',WORKSTATION_KEY='facturacion_puesto_v1';
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=-1,suggestionPage=null,suggestionPaging=false,paymentReconcileTimer=null,saveTimer=null,sqlConfig=null,issuedReceipt=null,previewDraft=null,recoveryPending=false,recoveryCanRetry=false,issueInProgress=false,printInProgress=false,printerSelectionPending=false,browserPrintPending=false,recoveryPollBusy=false,stockRefreshBusy=false,stockRefreshAgain=false,localDraftStoreReady=false;const SQL_PREPARACION=`${location.origin}/api/facturacion`,LOCAL_PRINTER_API='http://127.0.0.1:8082',BROWSER_PRINTER='browser:',TICKET_PRINTER_KEY='facturacion_ticket_printer_v1',WORKSTATION_KEY='facturacion_puesto_v1';
 function workstation(){try{return JSON.parse(localStorage.getItem(WORKSTATION_KEY)||'{}')}catch{return{}}}
 function saveWorkstation(){try{localStorage.setItem(WORKSTATION_KEY,JSON.stringify({branch:$('#branch').value,pos:$('#pos').value,seller:$('#seller').value}))}catch{}}
 const API_RESTART_HINT='Avisá al encargado para reiniciar el servicio de facturación del servidor.';
 function uid(){try{return JSON.parse(localStorage.getItem('corralon_menu_active_user_snapshot_v1')||'{}')}catch{return{}}}function n(v){if(typeof v==='number')return Number.isFinite(v)?v:0;const s=String(v??'').replace(/[^\d,.-]/g,'');if(!s)return 0;if(s.includes(','))return Number(s.replace(/\./g,'').replace(',','.'))||0;if(/^-?\d{1,3}(?:\.\d{3})+$/.test(s))return Number(s.replace(/\./g,''))||0;return Number(s)||0}function money(v){return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',minimumFractionDigits:2}).format(Number(v)||0)}function num(v){return new Intl.NumberFormat('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v)||0)}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function today(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function blankArticle(){return{idart:'',codProv:'',descripcion:'',cantidad:1,precio:0,precioBase:0,stock:0,descuento:0,iva:21}}function blankPayment(tipo='Efectivo',autoDifference=false){return{tipo,importe:0,idTarjeta:0,tarjeta:'Ninguna',cuotas:0,coef:0,impRec:0,descripcion:'',autoDifference}}function articleStarted(r){return Boolean(String(r?.idart||'').trim()&&n(r?.cantidad)>0)}function paymentStarted(r){return Boolean(n(r?.importe)>0||String(r?.tipo||'Efectivo')!=='Efectivo'||n(r?.idTarjeta)>0||n(r?.cuotas)>0||n(r?.impRec)!==0||String(r?.descripcion||'').trim())}function appendFillerRows(body,dataRows,minimumRows,columns){for(let i=dataRows;i<minimumRows;i++){const tr=document.createElement('tr');tr.className='filler-row';tr.setAttribute('aria-hidden','true');tr.innerHTML='<td></td>'.repeat(columns);body.appendChild(tr)}}function setMsg(t,type=''){$('#message').textContent=t;$('#message').className=`message ${type}`}
+async function copyArticlesForAccess(){
+  const items=articles.filter(row=>String(row?.idart||'').trim()&&Number(row?.cantidad));
+  if(!items.length){setMsg('No hay artículos para copiar a Access.','error');return}
+  const lines=items.map(row=>`IDART=${String(row.idart).trim()}\tCANTIDAD=${Number(row.cantidad).toLocaleString('es-AR',{useGrouping:false,maximumFractionDigits:3})}`);
+  const text=['CORRALON_IMPORT_V1','MODO=IDART',...lines].join('\n');
+  try{
+    if(!navigator.clipboard?.writeText)throw new Error('Portapapeles no disponible');
+    await navigator.clipboard.writeText(text);
+  }catch{
+    const previousFocus=document.activeElement;
+    const area=document.createElement('textarea');
+    area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);
+    area.focus();area.select();
+    let copied=false;
+    try{copied=document.execCommand('copy')}finally{area.remove();previousFocus?.focus?.({preventScroll:true})}
+    if(!copied){setMsg('No se pudieron copiar los artículos para Access.','error');return}
+  }
+  setMsg(`${items.length} artículo${items.length===1?'':'s'} copiado${items.length===1?'':'s'} para Access.`,'ok');
+}
+document.addEventListener('keydown',event=>{
+  if(!(event.ctrlKey||event.metaKey)||!event.shiftKey||event.altKey||String(event.key||'').toLowerCase()!=='c')return;
+  event.preventDefault();event.stopImmediatePropagation();
+  copyArticlesForAccess().catch(error=>{console.error('No se pudieron copiar los artículos para Access',error);setMsg('No se pudieron copiar los artículos para Access.','error')});
+},true);
+document.addEventListener('keydown',event=>{
+  if(!(event.ctrlKey||event.metaKey)||event.shiftKey||event.altKey||String(event.key||'').toLowerCase()!=='c')return;
+  const target=event.target;
+  const editingText=target?.matches?.('input:not([readonly]),textarea,[contenteditable="true"]');
+  if(editingText||window.getSelection()?.toString())event.stopImmediatePropagation();
+},true);
 function roundMoney(v){return Math.round((Number(v)+Number.EPSILON)*100)/100}
 function articleMargin(row){const cost=n(row.costoFinal);return cost>0?roundMoney((n(row.precio)/cost-1)*100):0}
 function recalculateArticle(row,changed){
@@ -602,6 +641,43 @@ function articleDescriptionRank(description,query){
   if(terms.every(term=>words.some(word=>word.includes(term))))return 6;
   return Infinity;
 }
+let suggestionStockTimer=0;
+async function refreshSuggestionStock(items){
+  const box=$('#suggestions'),point=$('#pos').value,currentCatalog=catalog;
+  if(!point||!box.classList.contains('open')||!items?.length)return;
+  const byId=new Map(items.map(item=>[String(item.idart||'').trim(),item]));
+  const ids=[...byId.keys()].filter(Boolean);
+  if(!ids.length)return;
+  for(let start=0;start<ids.length;start+=200){
+    const batch=ids.slice(start,start+200);
+    const response=await fetch(`${SQL_PREPARACION}/stock?puntoVenta=${encodeURIComponent(point)}&ids=${encodeURIComponent(batch.join(','))}`,{cache:'no-store'});
+    const result=await response.json();
+    if(!response.ok||!result.ok||!Array.isArray(result.stock))throw new Error(result.error||'No se pudo actualizar el stock del listado.');
+    if(point!==$('#pos').value||currentCatalog!==catalog)return;
+    let changed=false;
+    result.stock.forEach(row=>{
+      const item=byId.get(String(row.idart||'').trim());
+      if(!item)return;
+      const stock=n(row.stock),updated=String(row.ultimaActualizacion||'');
+      if(n(item.stock)===stock&&String(item.ultimaActualizacion||'')===updated)return;
+      item.stock=stock;item.ultimaActualizacion=updated;changed=true;
+    });
+    if(changed&&box.classList.contains('open')){
+      const scrollTop=box.scrollTop;
+      renderSuggestionItems();
+      box.scrollTop=scrollTop;
+    }
+  }
+}
+function refreshVisibleSuggestionStock(){
+  const box=$('#suggestions');
+  if(!box.classList.contains('open'))return Promise.resolve();
+  const bounds=box.getBoundingClientRect();
+  const visible=[...box.querySelectorAll('[data-suggestion]')]
+    .filter(element=>{const rect=element.getBoundingClientRect();return rect.bottom>bounds.top&&rect.top<bounds.bottom})
+    .map(element=>suggestionItems[Number(element.dataset.suggestion)]).filter(Boolean);
+  return refreshSuggestionStock(visible);
+}
 function showSuggestions(input,force=false){
   const mode=input.dataset.a,q=norm(normalizedLookupValue(input));
   if(!force&&!q){hideSuggestions();return}
@@ -623,9 +699,11 @@ function showSuggestions(input,force=false){
   activeSuggestionInput=input;
   input.closest('.description-cell')?.classList.add('combo-open');
   const box=$('#suggestions'),rect=input.getBoundingClientRect(),gap=3;
-  const width=Math.min(Math.max(rect.width*2,800),window.innerWidth-16);
-  box.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
-  box.style.width=`${width}px`;
+  const rightEdge=Math.min(window.innerWidth-8,$('#articleCard').getBoundingClientRect().right-4);
+  const minimumWidth=Math.min(600,rightEdge-8);
+  const left=Math.max(8,Math.min(rect.left,rightEdge-minimumWidth));
+  box.style.left=`${left}px`;
+  box.style.width=`${Math.max(0,rightEdge-left)}px`;
   box.style.top='';box.style.bottom='';
   const below=window.innerHeight-rect.bottom-8,above=rect.top-8,up=below<240&&above>below;
   box.style.maxHeight=`${Math.max(120,Math.min(340,up?above:below))}px`;
@@ -633,6 +711,8 @@ function showSuggestions(input,force=false){
   else box.style.top=`${rect.bottom+gap}px`;
   renderSuggestionItems();
   box.classList.add('open');
+  clearTimeout(suggestionStockTimer);
+  suggestionStockTimer=setTimeout(()=>refreshSuggestionStock(suggestionItems).catch(console.warn),180);
   if(suggestionIndex>=0)requestAnimationFrame(()=>{
     if(activeSuggestionInput!==input)return;
     const active=box.querySelector(`[data-suggestion="${suggestionIndex}"]`),header=box.querySelector('.suggestion-head');
@@ -641,18 +721,97 @@ function showSuggestions(input,force=false){
 }
 function renderSuggestionItems(){
   const box=$('#suggestions');
-  box.innerHTML='<div class="suggestion-head"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Precio</span></div>'+
-    (suggestionItems.length?suggestionItems.map((x,i)=>`<div class="suggestion ${i===suggestionIndex?'active':''}" data-suggestion="${i}" role="option" aria-selected="${i===suggestionIndex}"><span>${esc(x.idart)}</span><span>${esc(x.codProv||'')}</span><span title="${esc(x.descripcion)}">${esc(x.descripcion)}</span><span class="price">${money(x.precioFinal)}</span></div>`).join(''):'<div class="empty">Sin artículos disponibles</div>');
-  box.querySelectorAll('[data-suggestion]').forEach(el=>el.addEventListener('mousedown',event=>{event.preventDefault();pickSuggestion(+el.dataset.suggestion)}));
+  box.innerHTML='<div class="suggestion-head"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Precio</span><span title="Stock de la sucursal seleccionada">Stock suc.</span><span title="Última actualización del precio">Actualizado</span></div>'+
+    (suggestionItems.length?suggestionItems.map((x,i)=>`<div class="suggestion ${i===suggestionIndex?'active':''}" data-suggestion="${i}" role="option" aria-selected="${i===suggestionIndex}"><span>${esc(x.idart)}</span><span>${esc(x.codProv||'')}</span><span title="${esc(x.descripcion)}">${esc(x.descripcion)}</span><span class="price">${money(x.precioFinal)}</span><span class="stock">${num(x.stock)}</span><span class="updated" title="Última actualización del precio">${esc(x.ultimaActualizacion||'—')}</span></div>`).join(''):'<div class="empty">Sin artículos disponibles</div>');
+  box.querySelectorAll('[data-suggestion]').forEach(el=>el.addEventListener('mousedown',event=>{if(event.button!==0)return;event.preventDefault();pickSuggestion(+el.dataset.suggestion)}));
 }
-function extendSuggestions(direction){if(suggestionPaging||!suggestionPage||!$('#suggestions').classList.contains('open'))return;suggestionPaging=true;const box=$('#suggestions'),oldHeight=box.scrollHeight,oldTop=box.scrollTop,added=CorralonSystem.articleOptionPager.extend(suggestionPage,direction);if(direction==='up'){suggestionItems=[...added,...suggestionItems];if(suggestionIndex>=0)suggestionIndex+=added.length}else suggestionItems=[...suggestionItems,...added];renderSuggestionItems();box.scrollTop=direction==='up'?oldTop+(box.scrollHeight-oldHeight):oldTop;suggestionPaging=false}
+let contextSuggestionItem=null,faltantesFirebaseLoading=null;
+function closeSuggestionContextMenu(){
+  $('#suggestionContextMenu').classList.remove('open');
+  contextSuggestionItem=null;
+}
+function loadFaltantesScript(src){
+  return new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src=src;
+    script.onload=resolve;
+    script.onerror=()=>{script.remove();reject(new Error('No se pudo cargar la conexión con Faltantes.'))};
+    document.head.appendChild(script);
+  });
+}
+function ensureFaltantesFirebase(){
+  if(window.firebase?.firestore)return Promise.resolve();
+  if(!faltantesFirebaseLoading)faltantesFirebaseLoading=(async()=>{
+    if(!window.firebase?.initializeApp)await loadFaltantesScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
+    if(!window.firebase?.firestore)await loadFaltantesScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js');
+    if(!window.firebase?.firestore)throw new Error('No se pudo conectar con Faltantes.');
+  })().catch(error=>{faltantesFirebaseLoading=null;throw error});
+  return faltantesFirebaseLoading;
+}
+function openArticleContextMenu(article,event){
+  event.preventDefault();
+  contextSuggestionItem={...article};
+  const menu=$('#suggestionContextMenu');
+  menu.classList.add('open');
+  menu.style.left=`${Math.max(4,Math.min(event.clientX,innerWidth-menu.offsetWidth-4))}px`;
+  menu.style.top=`${Math.max(4,Math.min(event.clientY,innerHeight-menu.offsetHeight-4))}px`;
+}
+$('#suggestions').addEventListener('contextmenu',event=>{
+  const row=event.target.closest('[data-suggestion]');
+  if(!row)return;
+  const article=suggestionItems[Number(row.dataset.suggestion)];
+  if(!article)return;
+  openArticleContextMenu(article,event);
+});
+$('#articleBody').addEventListener('contextmenu',event=>{
+  const row=event.target.closest('tr[data-row]');
+  if(!row)return;
+  const article=articles[Number(row.dataset.row)];
+  if(!String(article?.idart||'').trim())return;
+  const catalogArticle=catalog.find(item=>String(item.idart)===String(article.idart));
+  openArticleContextMenu({...catalogArticle,...article,
+    idProveedor:catalogArticle?.idProveedor||article.idProveedor||'',
+    proveedor:catalogArticle?.proveedor||article.proveedor||'',
+    precioFinal:n(article.precioBase)||n(article.precio)},event);
+});
+$('#suggestionContextMenu').addEventListener('mousedown',event=>event.stopPropagation());
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeSuggestionContextMenu()});
+window.addEventListener('blur',closeSuggestionContextMenu);
+window.addEventListener('resize',closeSuggestionContextMenu);
+$('#sendSuggestionToMissing').addEventListener('click',async()=>{
+  const article=contextSuggestionItem;
+  const branch=CorralonSystem.BRANCHES.find(item=>item.id===$('#branch').value);
+  closeSuggestionContextMenu();
+  if(!article)return;
+  if(!branch){setMsg('Elegí una sucursal para enviar el artículo a Faltantes.','error');return}
+  if(!String(article.proveedor||'').trim()){setMsg('Este artículo no tiene proveedor en el catálogo SQL. Actualizá la página y volvé a intentar.','error');return}
+  const button=$('#sendSuggestionToMissing');
+  button.disabled=true;
+  try{
+    await ensureFaltantesFirebase();
+    await CorralonSystem.faltantes.addRow({
+      source:'index',idart:String(article.idart||''),codProv:String(article.codProv||''),
+      idProveedor:String(article.idProveedor||''),proveedor:String(article.proveedor||''),
+      descripcion:String(article.descripcion||''),cantidad:'',
+      precioCosto:n(article.costoFinal),precioFinal:n(article.precioFinal),
+      sucursalId:branch.id,sucursal:branch.label
+    });
+    setMsg(`${article.descripcion} enviado a Faltantes (${branch.label}).`,'ok');
+  }catch(error){
+    console.error('No se pudo enviar el artículo a Faltantes',error);
+    setMsg('No se pudo sincronizar el artículo con Faltantes. Revisá la conexión e intentá de nuevo.','error');
+  }finally{button.disabled=false}
+});
+function extendSuggestions(direction){if(suggestionPaging||!suggestionPage||!$('#suggestions').classList.contains('open'))return;suggestionPaging=true;const box=$('#suggestions'),oldHeight=box.scrollHeight,oldTop=box.scrollTop,added=CorralonSystem.articleOptionPager.extend(suggestionPage,direction);if(!added.length){suggestionPaging=false;return}if(direction==='up'){suggestionItems=[...added,...suggestionItems];if(suggestionIndex>=0)suggestionIndex+=added.length}else suggestionItems=[...suggestionItems,...added];renderSuggestionItems();box.scrollTop=direction==='up'?oldTop+(box.scrollHeight-oldHeight):oldTop;suggestionPaging=false;refreshSuggestionStock(added).catch(console.warn)}
 function hideSuggestions(){
+  closeSuggestionContextMenu();
+  clearTimeout(suggestionStockTimer);
   activeSuggestionInput?.closest('.description-cell')?.classList.remove('combo-open');
   $('#suggestions').classList.remove('open');
   activeSuggestionInput=null;
   suggestionPage=null;
 }
-$('#suggestions').addEventListener('scroll',()=>{const box=$('#suggestions');if(box.scrollTop<=18)extendSuggestions('up');if(box.scrollTop+box.clientHeight>=box.scrollHeight-18)extendSuggestions('down')},{passive:true});
+$('#suggestions').addEventListener('scroll',()=>{closeSuggestionContextMenu();const box=$('#suggestions');if(box.scrollTop<=18)extendSuggestions('up');if(box.scrollTop+box.clientHeight>=box.scrollHeight-18)extendSuggestions('down')},{passive:true});
 function pickSuggestion(i){
   const x=suggestionItems[i];
   if(!x||!activeSuggestionInput)return;
@@ -704,6 +863,8 @@ applyData=function(d){
   recoveryPending=Boolean(d?.recoveryPending);recoveryCanRetry=false;
   associatedReceiptId=Number(d?.idBoletaOrigen||d?.idFacturaAsociada)||0;
   applyDataOriginal(d);
+  if(!issuedReceipt&&!recoveryPending)$('#date').value=today();
+  if(d&&!String(d.cliente?.nombre??'').trim())$('#customerName').value='';
   $('#invoiceReference').value=d?.boletaOrigen||d?.facturaAsociada||'';
   syncCustomerTaxShort();
   if(!d)$('#docNumber').value='00000001000';
@@ -1246,6 +1407,8 @@ function bindFunctions(){
     if(['idart','codProv','descripcion'].includes(el?.dataset.a)&&activeSuggestionInput===el&&$('#suggestions').classList.contains('open')){
       if(event.key==='ArrowDown'||event.key==='ArrowUp'){
         event.preventDefault();
+        if(event.key==='ArrowDown'&&suggestionIndex>=suggestionItems.length-1)extendSuggestions('down');
+        if(event.key==='ArrowUp'&&suggestionIndex<=0)extendSuggestions('up');
         suggestionIndex=Math.max(0,Math.min(suggestionItems.length-1,suggestionIndex<0?0:suggestionIndex+(event.key==='ArrowDown'?1:-1)));
         $$('[data-suggestion]').forEach((x,i)=>{x.classList.toggle('active',i===suggestionIndex);x.setAttribute('aria-selected',String(i===suggestionIndex))});
         $('#suggestions [data-suggestion].active')?.scrollIntoView({block:'nearest'});
@@ -1253,7 +1416,8 @@ function bindFunctions(){
     }
   });
   document.addEventListener('mousedown',event=>{
-    if(!event.target.closest('#suggestions')&&!event.target.matches('[data-a="idart"],[data-a="codProv"],[data-a="descripcion"]'))hideSuggestions();
+    if(!event.target.closest('#suggestionContextMenu'))closeSuggestionContextMenu();
+    if(!event.target.closest('#suggestions,#suggestionContextMenu')&&!event.target.matches('[data-a="idart"],[data-a="codProv"],[data-a="descripcion"]'))hideSuggestions();
   });
   $$('[data-nav-zone] input,[data-nav-zone] select,#note').forEach(el=>el.addEventListener('input',scheduleDraft));
 }
@@ -1384,6 +1548,7 @@ async function retryPendingOnReconnect(){
 window.addEventListener('online',()=>retryPendingOnReconnect());
 setInterval(retryPendingOnReconnect,15000);
 setInterval(()=>refreshSelectedStock().catch(console.warn),15000);
+setInterval(()=>refreshVisibleSuggestionStock().catch(console.warn),15000);
 window.addEventListener('focus',()=>refreshSelectedStock().catch(console.warn));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshSelectedStock().catch(console.warn)});
 function reserveBudgetPreview(){
@@ -1418,6 +1583,16 @@ async function openBudgetPreview(data,receipt,popup=null){
 async function issue(){
   if(issuedReceipt||issueInProgress)return;
   if(recoveryPending&&!recoveryCanRetry)return;
+  const customerInput=$('#customerName');
+  const customerName=customerInput.value.trim();
+  if(customerName.length<2||norm(customerName)==='consumidor final'){
+    setMsg('Ingresá el nombre del cliente antes de emitir.','error');
+    alert('Ingresá el nombre del cliente antes de emitir.');
+    customerInput.focus();
+    customerInput.select();
+    return;
+  }
+  if(!recoveryPending)$('#date').value=today();
   issueInProgress=true;
   lockIssued();
   const wasRecoveryAttempt=recoveryPending;
@@ -1650,6 +1825,7 @@ function closeTrial(){
 }
 function closeDraftModal(){$('#draftModal').classList.remove('open');$('#openDrafts').focus()}
 $('#date').value=today();
+window.addEventListener('pageshow',()=>{if(!issuedReceipt&&!recoveryPending)$('#date').value=today()});
 $('#seller').value='';
 $('#newInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true)});
 $('#continueNewInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true)});

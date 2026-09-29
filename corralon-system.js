@@ -7236,7 +7236,7 @@
     function create(source, options = {}) {
       const key = typeof options.key === 'function' ? options.key : defaultKey;
       const description = typeof options.description === 'function' ? options.description : defaultDescription;
-      const ordered = sortedUnique(source, key, description);
+      const ordered = options.preordered ? source : sortedUnique(source, key, description);
       const hasSearch = options.hasSearch !== false;
       const isMatch = typeof options.isMatch === 'function' ? options.isMatch : (() => false);
       const rank = typeof options.rank === 'function' ? options.rank : (() => 0);
@@ -7275,7 +7275,7 @@
       }
       return added;
     }
-    return { create, take, extend, defaultKey, defaultDescription };
+    return { create, take, extend, prepare: sortedUnique, defaultKey, defaultDescription };
   })();
 
   const WEB_VERSION_NOTIFIER = (() => {
