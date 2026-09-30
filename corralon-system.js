@@ -2703,6 +2703,17 @@
     const id = String(providerId ?? '').trim();
     return id && Number.isFinite(Number(id)) ? [id, Number(id)] : [id];
   }
+  function providerJsonIsNewer(entry, lastSyncAt, localEntry = null) {
+    const time = (value) => {
+      const parsed = Date.parse(String(value || '').replace(/^(\d{4}-\d{2}-\d{2})\s+/, '$1T'));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const cursor = time(lastSyncAt);
+    if (!cursor) return true;
+    const updated = time(entry?.fecha_actualizacion || entry?.updated_at) || (Number(entry?.version) > 1000000000000 ? Number(entry.version) : 0);
+    const saved = time(localEntry?.fecha_actualizacion || localEntry?.updated_at);
+    return updated > cursor && (!localEntry || updated > saved || Number(entry?.version || 0) > Number(localEntry.version || 0));
+  }
   function queueProviderCacheReplacement(store, providerId, rows, previousIds = []) {
     const id = String(providerId ?? '').trim();
     const indexed = store.indexNames.contains('id_proveedor');
@@ -5321,6 +5332,42 @@
       });
     }
 
+    async function removeProviderCatalogCache(providerId) {
+      const id = cleanId(providerId);
+      if (!id) return false;
+      const database = await openListDb();
+      let savedMeta = null;
+      await new Promise((resolve, reject) => {
+        const tx = database.transaction(['articulos', 'meta'], 'readwrite');
+        queueProviderCacheReplacement(tx.objectStore('articulos'), id, []);
+        const metaStore = tx.objectStore('meta');
+        const request = metaStore.get('principal');
+        request.onsuccess = () => {
+          const current = request.result || { id: 'principal' };
+          const manifest = { ...localProviderJsonManifest(current) };
+          delete manifest[id];
+          savedMeta = {
+            ...current,
+            id: 'principal',
+            provider_json_manifest: manifest,
+            last_provider_updates: (current.last_provider_updates || []).filter((item) => cleanId(item.id_proveedor) !== id)
+          };
+          metaStore.put(savedMeta);
+        };
+        tx.oncomplete = resolve;
+        tx.onerror = tx.onabort = () => reject(tx.error || new Error('No se pudo eliminar la lista local del proveedor'));
+      });
+      const local = localProviderListMeta() || {};
+      const localManifest = { ...localProviderJsonManifest(local) };
+      delete localManifest[id];
+      setLocalProviderListMeta({
+        ...local,
+        provider_json_manifest: localManifest,
+        last_provider_updates: (local.last_provider_updates || []).filter((item) => cleanId(item.id_proveedor) !== id)
+      });
+      return Boolean(savedMeta);
+    }
+
     async function fetchProvidersUpdatedAfter(lastSyncAt) {
       const providers = await fetchAll(TABLES.providers, 'select=id_proveedor,proveedor,ultima_actualizacion,updated_at&order=updated_at.asc');
       const lastValue = timestampValue(lastSyncAt);
@@ -5434,6 +5481,7 @@
     }
 
     async function syncProviderJsonBlocks(meta, options = {}) {
+      const syncStartedAt = new Date().toISOString();
       const manifest = await fetchProviderJsonManifest(meta).catch((error) => {
         console.warn(error);
         return null;
@@ -5442,16 +5490,15 @@
       const local = localProviderListMeta() || {};
       const localManifest = localProviderJsonManifest(local);
       const entries = providerJsonManifestEntries(manifest);
-      const counts = await providerCacheCounts(await openListDb(), entries);
-      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest) || counts.get(String(entry.id_proveedor)) !== Number(entry.total_articulos));
-      if (!changed.length) {
+      const remoteIds = new Set(entries.map((entry) => cleanId(entry.id_proveedor)).filter(Boolean));
+      const removedIds = options.clearBeforeImport ? [] : Object.keys(localManifest).filter((id) => !remoteIds.has(cleanId(id)));
+      const changed = options.forceAll ? entries : entries.filter((entry) => providerJsonIsNewer(entry, local.last_provider_sync_at, localManifest[cleanId(entry.id_proveedor)]));
+      if (!changed.length && !removedIds.length) {
         if (options.updateWhenNoChanges !== false) {
           setLocalProviderListMeta({
             ...local,
             ...meta,
-            provider_json_manifest: manifest.providers,
-            last_provider_sync_at: new Date().toISOString(),
-            last_provider_sync_date: today()
+            provider_json_manifest: localManifest
           });
         }
         return false;
@@ -5464,6 +5511,9 @@
           request.onsuccess = () => resolve();
           request.onerror = () => reject(request.error);
         });
+      }
+      for (const removedId of removedIds) {
+        await replaceProviderArticlesCacheBlock(removedId, []);
       }
       for (const entry of changed) {
         const rows = await fetchProviderJsonRows(entry);
@@ -5483,7 +5533,7 @@
         ...local,
         ...meta,
         provider_json_manifest: nextLocalManifest,
-        last_provider_sync_at: new Date().toISOString(),
+        last_provider_sync_at: changed.length ? syncStartedAt : local.last_provider_sync_at,
         last_provider_sync_date: today()
       });
       return sortCatalogByDescription(await readProviderArticlesCache());
@@ -5551,7 +5601,7 @@
       if (!lastSyncAt) return downloadProviderArticlesCloud(meta);
       const changedProviders = await fetchProvidersUpdatedAfter(lastSyncAt);
       if (!changedProviders.length) {
-        setLocalProviderListMeta({ ...local, ...meta, last_provider_sync_at: new Date().toISOString(), last_provider_sync_date: today() });
+        setLocalProviderListMeta({ ...local, ...meta });
         return null;
       }
       for (const provider of changedProviders) {
@@ -5842,6 +5892,7 @@
       loadProviderCatalogWithProgress,
       loadSingleProviderCached,
       syncSingleProviderJson,
+      removeProviderCatalogCache,
       loadCatalog,
       syncCatalogInBackground,
       catalogFilter,
@@ -7513,7 +7564,7 @@
     catalog: CATALOG,
     catalogRealtime: CATALOG_REALTIME,
     providerIdentity: { internalId: providerInternalId, externalId: providerExternalId, newId: newProviderId, resolveText: resolveProviderText, mergeImport: mergeProviderImport },
-    providerCache: { currentEntries: currentProviderCacheEntries, keys: providerCacheKeys, replace: queueProviderCacheReplacement, counts: providerCacheCounts },
+    providerCache: { currentEntries: currentProviderCacheEntries, keys: providerCacheKeys, replace: queueProviderCacheReplacement, counts: providerCacheCounts, jsonIsNewer: providerJsonIsNewer },
     faltantes: FALTANTES,
     versionNotifier: WEB_VERSION_NOTIFIER
   };

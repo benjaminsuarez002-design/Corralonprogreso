@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.19"></script>
+<script src="corralon-system.js?v=1.0.20"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -1522,6 +1522,13 @@
 
       if (data.type === 'cerrar-otras-pestanas') {
         cerrarEstaPestanaListasProveedores();
+        return;
+      }
+      if (data.type === 'provider-json-unlinked') {
+        removeUnlinkedProviderFromLocalCache(data.providerId, data.providerName).catch((error) => {
+          console.error(error);
+          showToast('El JSON se desvinculó, pero no pude limpiar su lista local.');
+        });
       }
     }
 
@@ -3322,6 +3329,22 @@
         tx.onerror = () => reject(tx.error);
       });
     }
+    async function removeUnlinkedProviderFromLocalCache(providerId, providerName = '') {
+      const id = String(providerId || '').trim();
+      if (!id || !state.db) return false;
+      await idbDeleteProviderArticles(id);
+      replaceProviderInWorker(id, []);
+      const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
+      const nextManifest = { ...localProviderManifest(local) };
+      delete nextManifest[id];
+      const nextUpdates = (local.last_provider_updates || []).filter((item) => String(item.id_proveedor || '') !== id);
+      await idbSet('meta', { ...local, id: 'principal', provider_json_manifest: nextManifest, last_provider_updates: nextUpdates });
+      state.latestUpdates = state.latestUpdates.filter((item) => String(item.id_proveedor || '') !== id);
+      const label = String(providerName || id).trim();
+      setStatus(`Lista de ${label} desvinculada.`);
+      showToast(`${label} ya no aparece en Listas proveedores.`);
+      return true;
+    }
     function idbPutArticleChunk(rows) {
       return new Promise((resolve, reject) => {
         const tx = state.db.transaction('articulos', 'readwrite');
@@ -3360,14 +3383,15 @@
       updateCounts();
       return next;
     }
-    async function markSyncFinished(metaPatch = {}) {
+    async function markSyncFinished(metaPatch = {}, syncedAt = new Date().toISOString()) {
       return saveLocalSyncMeta({
         ...metaPatch,
-        last_provider_sync_at: new Date().toISOString(),
+        last_provider_sync_at: syncedAt,
         last_provider_sync_date: todayDate()
       });
     }
     async function syncProviderJsonManifest(meta, options = {}) {
+      const syncStartedAt = new Date().toISOString();
       state.providerJsonAvailable = false;
       const manifest = await fetchProviderManifest(meta, options.manifestUrl || '').catch((error) => {
         console.warn(error);
@@ -3378,14 +3402,14 @@
       const local = (await idbGet('meta', 'principal')) || { id: 'principal' };
       const localManifest = localProviderManifest(local);
       const entries = providerManifestEntries(manifest);
-      const fallbackIds = new Set((local.last_provider_updates || []).filter(item => !Number(item.version)).map(item => String(item.id_proveedor)));
-      const counts = await CorralonSystem.providerCache.counts(state.db, entries);
-      const changed = options.forceAll ? entries : entries.filter((entry) => needsProviderJsonSync(entry, localManifest) || fallbackIds.has(String(entry.id_proveedor)) || counts.get(String(entry.id_proveedor)) !== expectedProviderJsonRows(entry));
-      if (!changed.length) {
+      const remoteIds = new Set(entries.map((entry) => String(entry.id_proveedor || '').trim()).filter(Boolean));
+      const removedIds = options.clearBeforeImport ? [] : Object.keys(localManifest).filter((id) => !remoteIds.has(String(id)));
+      const changed = options.forceAll ? entries : entries.filter((entry) => CorralonSystem.providerCache.jsonIsNewer(entry, local.last_provider_sync_at, localManifest[String(entry.id_proveedor)]));
+      if (!changed.length && !removedIds.length) {
         if (options.updateWhenNoChanges !== false) {
-          await markSyncFinished({
+          await saveLocalSyncMeta({
             ...meta,
-            provider_json_manifest: manifest.providers
+            provider_json_manifest: localManifest
           });
         }
         return false;
@@ -3398,6 +3422,10 @@
       if (options.clearBeforeImport) {
         setStatus('Limpiando base local...');
         await idbClear('articulos');
+      }
+      for (const removedId of removedIds) {
+        await idbDeleteProviderArticles(removedId);
+        replaceProviderInWorker(removedId, []);
       }
       for (let index = 0; index < changed.length; index += 1) {
         const entry = changed[index];
@@ -3454,16 +3482,19 @@
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
       setSyncProgress(96);
-      await markSyncFinished({
+      await saveLocalSyncMeta({
         ...meta,
         provider_json_manifest: nextLocalManifest,
-        last_provider_updates: updatedProviders
+        last_provider_updates: updatedProviders,
+        last_provider_sync_at: changed.length ? syncStartedAt : local.last_provider_sync_at,
+        last_provider_sync_date: changed.length ? syncStartedAt.slice(0, 10) : local.last_provider_sync_date
       });
       state.latestUpdates = sortUpdates(updatedProviders);
       if (!state.worker || !state.loaded) await loadCacheIntoWorker();
       setSyncProgress(100);
       hideSyncProgress();
-      showToast(syncToastMessage(updatedProviders));
+      if (removedIds.length && !updatedProviders.length) showToast(`${removedIds.length === 1 ? 'La lista desvinculada fue eliminada' : `${removedIds.length} listas desvinculadas fueron eliminadas`} de esta computadora.`);
+      else showToast(syncToastMessage(updatedProviders));
       return true;
     }
     async function syncProvidersUpdatedAfterLocalMeta(remoteMeta = null) {
@@ -3478,7 +3509,7 @@
       const candidates = await fetchProvidersUpdatedAfter(lastSyncAt);
       const changed = candidates.filter(provider => !jsonIds.has(String(provider.id_proveedor)));
       if (!changed.length) {
-        if (remoteMeta) await markSyncFinished(remoteMeta);
+        if (remoteMeta) await saveLocalSyncMeta(remoteMeta);
         else state.lastSyncAt = local.last_provider_sync_at || state.lastSyncAt;
         updateCounts();
         return false;
@@ -3569,10 +3600,10 @@
         }
         const jsonUpdated = await syncProviderJsonManifest(meta, { updateWhenNoChanges: false });
         if (jsonUpdated) return true;
-        if (state.providerJsonAvailable) { await markSyncFinished(meta); return false; }
+        if (state.providerJsonAvailable) { await saveLocalSyncMeta(meta); return false; }
         const updated = await syncProvidersUpdatedAfterLocalMeta(meta);
         if (updated) return true;
-        await markSyncFinished(meta);
+        await saveLocalSyncMeta(meta);
         return true;
       }
       if (options.skipSameVersionBackground) return false;
