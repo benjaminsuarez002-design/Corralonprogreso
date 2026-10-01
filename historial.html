@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.16"></script>
+<script src="corralon-system.js?v=1.0.17"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -2976,6 +2976,12 @@ async function guardarEdicionPresupuestoRemota(presupuesto) {
     })
   });
   if(!response.ok) throw new Error(await response.text());
+  // Invalidar sólo este presupuesto en las cachés incrementales internas.
+  try {
+    await histDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(historialNotifId('presupuesto', presupuesto.numero_original || presupuesto.numero)).update({
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (error) { console.warn('Presupuesto guardado; no se pudo actualizar su marca de sincronización', error); }
   cargarPresupuestos();
 }
 

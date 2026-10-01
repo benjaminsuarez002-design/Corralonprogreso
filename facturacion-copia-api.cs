@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.OleDb;
 using System.Data.SqlClient;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -771,22 +770,19 @@ internal static class FacturacionCopiaApi
         int check = 11 - sum % 11;
         return check != 10 && digits[10] - '0' == (check == 11 ? 0 : check);
     }
-    private static int LocalOperator()
+    private static int LocalOperator(SqlConnection connection, SqlTransaction tx = null)
     {
-        // Config es local del MDB; Access usa este valor como IDOper, distinto del vendedor.
-        try
-        {
-            using (var connection = new OleDbConnection("Provider=Microsoft.ACE.OLEDB.12.0;Data Source=C:\\Update\\Ariel2App.mdb;Mode=Read;Persist Security Info=False;"))
-            using (var command = new OleDbCommand("SELECT TOP 1 IDOper FROM Config", connection))
-            {
-                connection.Open();
-                int operatorId = Id(command.ExecuteScalar());
-                if (operatorId <= 0) throw new InvalidOperationException("El MDB local no tiene un IDOper válido en Config.");
-                return operatorId;
-            }
-        }
-        catch (InvalidOperationException) { throw; }
-        catch (Exception ex) { throw new InvalidOperationException("No se pudo leer IDOper del MDB local: " + ex.Message); }
+        // Configuración local de la API, independiente del MDB y del vendedor elegido.
+        int operatorId;
+        string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "facturacion-operador.json");
+        if (!File.Exists(path))
+            throw new InvalidOperationException("Falta facturacion-operador.json junto a la API de facturación.");
+        var settings = Object(Json.DeserializeObject(File.ReadAllText(path, Encoding.UTF8)));
+        if (!Int32.TryParse(Text(Value(settings, "IDOper")), out operatorId) || operatorId <= 0)
+            throw new InvalidOperationException("Configurá un IDOper válido en facturacion-operador.json.");
+        if (Scalar(connection, tx, "SELECT IDEmpleado FROM dbo.Empleados WHERE IDEmpleado=@p0 AND Susp=0", operatorId) == null)
+            throw new InvalidOperationException("El operador configurado en la API no existe en SQL o está suspendido.");
+        return operatorId;
     }
     private static object Emit(SqlConnection connection, Dictionary<string, object> invoice, bool dryRun, bool recoveryOnly)
     {
@@ -816,7 +812,7 @@ internal static class FacturacionCopiaApi
         Guid draftId;
         if (!Guid.TryParse(draft, out draftId)) throw new InvalidOperationException("El borrador no tiene un identificador válido.");
         string fiscalRecovery = RecoveryPath(draftId);
-        int oper = LocalOperator();
+        int oper = LocalOperator(connection);
         var client = Object(Value(invoice, "cliente"));
         string docType = Text(Value(client, "tipoDocumento"));
         int docId = docType == "CUIT" ? 67 : docType == "DNI" ? 50 : docType == "Sin identificar" ? 32 : 0;
@@ -1208,139 +1204,172 @@ internal static class FacturacionCopiaApi
             }
         }
     }
+    private static object StockActualizarCosto(SqlConnection connection, Dictionary<string, object> input)
+    {
+        LocalOperator(connection);
+        string id = Limited(Value(input, "idart"), 30, "IDArt");
+        decimal cost = Math.Round(Number(Value(input, "costo")), 4, MidpointRounding.AwayFromZero);
+        decimal previous = Number(Value(input, "costoAnterior"));
+        if (id.Length == 0 || cost <= 0 || cost > 100000000) throw new InvalidOperationException("Costo o artículo inválido.");
+        using (var tx = connection.BeginTransaction(IsolationLevel.Serializable))
+        {
+            var found = RowsTx(connection, tx, "SELECT ISNULL(PrecioCpraSI,0) AS costo,ISNULL(PorcIVA1,0) AS iva FROM dbo.[Artículos] WITH (UPDLOCK,HOLDLOCK) WHERE IDArt=@p0 AND Suspendido=0", id);
+            if (found.Count != 1) throw new InvalidOperationException("El artículo no existe o está suspendido.");
+            if (Math.Abs(Convert.ToDecimal(found[0]["costo"]) - previous) > .0001m) throw new InvalidOperationException("El costo cambió desde otra PC. Recargá el stock antes de actualizarlo.");
+            decimal costWithIva = Math.Round(cost * (1 + Convert.ToDecimal(found[0]["iva"])), 4, MidpointRounding.AwayFromZero);
+            if (Execute(connection, tx, "UPDATE dbo.[Artículos] SET PrecioCpraSISDto=@p1,PrecioCpraSI=@p1,PrecioCpraCI=@p2,FechaActPrec=GETDATE() WHERE IDArt=@p0", id, cost, costWithIva) != 1) throw new InvalidOperationException("No se pudo actualizar el costo del artículo.");
+            tx.Commit();
+            return new { ok = true, idart = id, precioCosto = cost, costoFinal = costWithIva };
+        }
+    }
     private static object StockIngreso(SqlConnection connection, Dictionary<string, object> input, bool confirmar)
     {
         Guid requestId;
-        if (!Guid.TryParse(Text(Value(input, "id")), out requestId)) throw new InvalidOperationException("La carga no tiene un identificador válido. Volvé a previsualizarla.");
+        if (!Guid.TryParse(Text(Value(input, "id")), out requestId)) throw new InvalidOperationException("La carga no tiene un identificador válido.");
         int sucursal = RequiredId(Value(input, "sucursal"), "la sucursal");
         int puntoVenta = RequiredId(Value(input, "puntoVenta"), "el punto de venta");
-        int proveedor = RequiredId(Value(input, "proveedor"), "un proveedor de SQL");
-        string numeroFactura = Limited(Value(input, "numeroFactura"), 20, "Número de factura del proveedor");
-        string nota = Limited(Value(input, "nota"), 500, "Nota");
+        int movimiento = Value(input, "tipoMovimiento") == null ? 23 : RequiredId(Value(input, "tipoMovimiento"), "el movimiento");
+        int proveedor = 0; Int32.TryParse(Text(Value(input, "proveedor")), out proveedor);
+        int destino = 0; Int32.TryParse(Text(Value(input, "sucursalDestino")), out destino);
+        int compra = 0; Int32.TryParse(Text(Value(input, "idFactura")), out compra);
+        int relacionado = 0; Int32.TryParse(Text(Value(input, "idRelacionado")), out relacionado);
+        string numeroFactura = Limited(Value(input, "numeroFactura"), 20, "Número de factura");
+        string remito = Limited(Value(input, "numeroRemito"), 20, "Número de remito");
+        string nota = Limited(Value(input, "nota"), 300, "Nota");
         var articulos = new List<object>();
-        var articulosRaw = Value(input, "articulos");
-        if (articulosRaw is object[])
-            articulos.AddRange((object[])articulosRaw);
-        else if (articulosRaw is System.Collections.ArrayList)
-            foreach (object articulo in (System.Collections.ArrayList)articulosRaw) articulos.Add(articulo);
-        if (articulos == null || articulos.Count == 0 || articulos.Count > 200)
-            throw new InvalidOperationException("Cargá entre 1 y 200 artículos para ingresar stock.");
+        object rawItems = Value(input, "articulos");
+        if (rawItems is object[]) articulos.AddRange((object[])rawItems);
+        else if (rawItems is System.Collections.ArrayList) foreach (object item in (System.Collections.ArrayList)rawItems) articulos.Add(item);
+        if (articulos.Count == 0 || articulos.Count > 5000) throw new InvalidOperationException("Cargá entre 1 y 5000 artículos.");
         string marker = "[WEBSTOCK:" + requestId.ToString("N") + "]";
+        var fingerprintInput = new Dictionary<string, object>(input); fingerprintInput.Remove("accion");
+        string fingerprint;
+        using (var sha = SHA256.Create()) fingerprint = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(fingerprintInput)))).Replace("-", "");
+        string hashMarker = "[HASH:" + fingerprint + "]";
+        int operador = LocalOperator(connection);
         SqlTransaction tx = confirmar ? connection.BeginTransaction(IsolationLevel.Serializable) : null;
         try
         {
-            if (confirmar)
+            if (confirmar && Convert.ToInt32(Scalar(connection, tx,
+                "DECLARE @r int; EXEC @r=sp_getapplock @Resource=@p0,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=10000; SELECT @r", "CorralonWeb.StockIngreso." + requestId.ToString("N"))) < 0)
+                throw new InvalidOperationException("Otra carga está en curso. Reintentá.");
+            var saved = RowsTx(connection, tx, "SELECT TOP 1 IDRecibo,NroMov,IDSuc,IDTipoMov,Total,Nota FROM dbo.RecibosTP WHERE CHARINDEX(@p0,CONVERT(nvarchar(max),Nota))>0 AND Confirmado=1 ORDER BY IDRecibo DESC", marker);
+            if (saved.Count > 0)
             {
-                int lockResult = Convert.ToInt32(Scalar(connection, tx,
-                    "DECLARE @result int; EXEC @result=sp_getapplock @Resource=@p0,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=10000; SELECT @result",
-                    "CorralonWeb.StockIngreso." + requestId.ToString("N")));
-                if (lockResult < 0) throw new InvalidOperationException("Otra carga de stock está en curso. Volvé a intentar.");
+                if (Text(saved[0]["Nota"]).IndexOf(hashMarker, StringComparison.Ordinal) < 0)
+                    throw new InvalidOperationException("Este ingreso ya se confirmó con otros datos. Consultalo antes de continuar.");
+                var savedLines = RowsTx(connection, tx, "SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,d.Cantidad AS cantidad,d.PrecioUni AS precioUnitario,d.Importe AS importe,d.Stock AS stockAntes,s.StockAct AS stockDespues FROM dbo.RecibosTS d INNER JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt LEFT JOIN dbo.ArtsStock s ON s.IDArt=d.IDArt AND s.IDSuc=@p1 WHERE d.IDRecibo=@p0 ORDER BY d.IDOrden", saved[0]["IDRecibo"], sucursal);
+                if (tx != null) tx.Commit();
+                return new { ok = true, yaCargado = true, idRecibo = saved[0]["IDRecibo"], numeroMovimiento = saved[0]["NroMov"], total = saved[0]["Total"], articulos = savedLines };
             }
-            var tipo = RowsTx(connection, tx, "SELECT IDComprob FROM dbo.TipoComprobantes WHERE IDComprob=23 AND EnStk=1 AND IDTipoMovStock=1");
-            if (tipo.Count != 1) throw new InvalidOperationException("El movimiento Compras de Mercadería no está habilitado en SQL.");
-            var sucursalRows = RowsTx(connection, tx, "SELECT IDSuc,Sucursal FROM dbo.Sucursales WHERE IDSuc=@p0", sucursal);
-            var puntoRows = RowsTx(connection, tx, "SELECT IDDepósito,[Descripción],IDEmp FROM dbo.[Depósitos] WHERE IDDepósito=@p0", puntoVenta);
-            var proveedorRows = RowsTx(connection, tx, "SELECT IDProveedor,[RazónSocial] AS nombre FROM dbo.Proveedores WHERE IDProveedor=@p0 AND Suspendido=0", proveedor);
-            if (sucursalRows.Count != 1 || puntoRows.Count != 1 || proveedorRows.Count != 1)
-                throw new InvalidOperationException("La sucursal, el punto de venta o el proveedor no están disponibles en SQL.");
-            int empresa = Convert.ToInt32(puntoRows[0]["IDEmp"]);
-            if (empresa <= 0) throw new InvalidOperationException("El punto de venta no tiene empresa configurada.");
-            var detalle = new List<Dictionary<string, object>>();
-            var codigos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            decimal total = 0;
+            var types = RowsTx(connection, tx, "SELECT IDComprob,IDTipoMovStock,StkPor,ImpPor,GenNS,ConReceta FROM dbo.TipoComprobantes WHERE IDComprob=@p0 AND EnStk=1", movimiento);
+            if (types.Count != 1) throw new InvalidOperationException("El tipo de movimiento no está habilitado para stock.");
+            if (Convert.ToBoolean(types[0]["GenNS"] == DBNull.Value || types[0]["GenNS"] == null ? false : types[0]["GenNS"]) || Convert.ToBoolean(types[0]["ConReceta"] == null ? false : types[0]["ConReceta"]))
+                throw new InvalidOperationException("Este movimiento requiere series o producción de Access.");
+            int stockType = Convert.ToInt32(types[0]["IDTipoMovStock"]);
+            int stockSign = stockType == 0 ? 0 : (stockType == 2 ? -1 : 1);
+            int amountSign = types[0]["ImpPor"] == null ? 1 : Convert.ToInt32(types[0]["ImpPor"]);
+            if (movimiento == 57 && (destino <= 0 || destino == sucursal)) throw new InvalidOperationException("Elegí una sucursal de destino distinta del origen.");
+            if (movimiento != 57 && destino > 0) throw new InvalidOperationException("La sucursal destino sólo corresponde a transferencias.");
+            if (movimiento == 57 && RowsTx(connection, tx, "SELECT IDSuc FROM dbo.Sucursales WHERE IDSuc=@p0", destino).Count != 1) throw new InvalidOperationException("Sucursal destino inexistente.");
+            if ((movimiento == 23 || movimiento == 28) && proveedor <= 0) throw new InvalidOperationException("Seleccioná un proveedor de SQL.");
+            var branches = RowsTx(connection, tx, "SELECT IDSuc FROM dbo.Sucursales WHERE IDSuc=@p0", sucursal);
+            var points = RowsTx(connection, tx, "SELECT IDEmp FROM dbo.[Depósitos] WHERE IDDepósito=@p0 AND IDSucAsoc=@p1", puntoVenta, sucursal);
+            if (branches.Count != 1 || points.Count != 1) throw new InvalidOperationException("La sucursal y el punto de venta no coinciden.");
+            int empresa = Convert.ToInt32(points[0]["IDEmp"]);
+            if (proveedor > 0 && RowsTx(connection, tx, "SELECT IDProveedor FROM dbo.Proveedores WHERE IDProveedor=@p0 AND Suspendido=0", proveedor).Count != 1) throw new InvalidOperationException("Proveedor inexistente o suspendido.");
+            if (compra == 0 && movimiento == 23 && proveedor > 0 && numeroFactura.Length > 0)
+            {
+                var matchingPurchases = RowsTx(connection, tx, "SELECT IDRecibo FROM dbo.ComprasTP WHERE IDProveedor=@p0 AND NroFactura=@p1 AND Confirmado=1 AND EnMovStk=1 AND IDMovStk IS NULL", proveedor, numeroFactura);
+                if (matchingPurchases.Count > 1) throw new InvalidOperationException("Hay varias compras con ese número. Elegí la factura en el desplegable.");
+                if (matchingPurchases.Count == 1) compra = Convert.ToInt32(matchingPurchases[0]["IDRecibo"]);
+            }
+            if (compra > 0 && (movimiento != 23 || RowsTx(connection, tx, "SELECT IDRecibo FROM dbo.ComprasTP WHERE IDRecibo=@p0 AND IDProveedor=@p1 AND Confirmado=1 AND EnMovStk=1 AND IDMovStk IS NULL", compra, proveedor).Count != 1)) throw new InvalidOperationException("La factura de compra ya tiene ingreso o no corresponde al proveedor.");
+            if (relacionado > 0 && RowsTx(connection, tx, "SELECT IDRecibo FROM dbo.RecibosTP WHERE IDRecibo=@p0 AND IDSuc=@p1 AND Confirmado=1 AND Anulado=0", relacionado, sucursal).Count != 1) throw new InvalidOperationException("Comprobante relacionado inválido.");
+            if (numeroFactura.Length > 0 && proveedor > 0 && Convert.ToInt32(Scalar(connection, tx, "SELECT COUNT(*) FROM dbo.RecibosTP WHERE IDTipoMov=@p0 AND IDProveedor=@p1 AND NroFactura=@p2 AND Confirmado=1 AND Anulado=0", movimiento, proveedor, numeroFactura)) > 0) throw new InvalidOperationException("Esa factura del proveedor ya tiene un movimiento confirmado.");
+            var lines = new List<Dictionary<string, object>>(); var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase); decimal total = 0;
             foreach (object raw in articulos)
             {
-                var row = Object(raw);
-                string codigo = Limited(Value(row, "codigo"), 30, "Código de proveedor");
-                if (codigo.Length == 0 || !codigos.Add(codigo)) throw new InvalidOperationException("Hay códigos vacíos o repetidos en la carga.");
-                decimal cantidad = Number(Value(row, "cantidad"));
-                decimal precio = Number(Value(row, "precioUnitario"));
-                if (cantidad <= 0 || cantidad > 100000 || precio < 0 || precio > 100000000)
-                    throw new InvalidOperationException("Cantidad o precio fuera de rango para " + codigo + ".");
-                cantidad = Math.Round(cantidad, 4, MidpointRounding.AwayFromZero);
-                precio = Math.Round(precio, 4, MidpointRounding.AwayFromZero);
-                if (cantidad <= 0) throw new InvalidOperationException("La cantidad de " + codigo + " debe ser positiva.");
-                var found = RowsTx(connection, tx,
-                    "SELECT a.IDArt AS idart,a.[Descripción] AS descripcion,s.StockAct AS stock " +
-                    "FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s ON s.IDArt=a.IDArt AND s.IDSuc=@p2 " +
-                    "WHERE a.IDProveedor=@p0 AND LTRIM(RTRIM(a.IDArtProv))=@p1 AND a.Suspendido=0",
-                    proveedor, codigo, sucursal);
-                if (found.Count != 1 || found[0]["stock"] == null)
-                    throw new InvalidOperationException("El artículo " + codigo + " no tiene una coincidencia única y stock en la sucursal elegida.");
-                decimal antes = Convert.ToDecimal(found[0]["stock"]);
-                decimal importe = Math.Round(cantidad * precio, 4, MidpointRounding.AwayFromZero);
-                total += importe;
-                detalle.Add(new Dictionary<string, object> {
-                    { "idart", Text(found[0]["idart"]) }, { "codigo", codigo }, { "descripcion", Text(found[0]["descripcion"]) },
-                    { "cantidad", cantidad }, { "precioUnitario", precio }, { "importe", importe },
-                    { "stockAntes", antes }, { "stockDespues", antes + cantidad }
-                });
+                var row = Object(raw); string codigo = Limited(Value(row, "codigo"), 30, "Código proveedor"); string id = Limited(Value(row, "idart"), 30, "IDArt");
+                if (id.Length == 0 && (proveedor <= 0 || codigo.Length == 0)) throw new InvalidOperationException("Identificá cada artículo por IDArt o código de proveedor.");
+                var found = RowsTx(connection, tx, "SELECT a.IDArt,a.IDArtProv,a.[Descripción] AS descripcion,a.UniMed,ISNULL(a.PrecioCpraSI,0) AS precioCosto,ISNULL(s.StockAct,0) AS stock FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s ON s.IDArt=a.IDArt AND s.IDSuc=@p2 WHERE a.Suspendido=0 AND ((@p3<>'' AND a.IDArt=@p3) OR (@p3='' AND a.IDProveedor=@p0 AND LTRIM(RTRIM(a.IDArtProv))=@p1))", proveedor, codigo, sucursal, id);
+                if (found.Count != 1) throw new InvalidOperationException("El código " + codigo + " no tiene una coincidencia única en SQL.");
+                id = Text(found[0]["IDArt"]); if (!ids.Add(id)) throw new InvalidOperationException("El artículo " + id + " está repetido. Unificá sus cantidades.");
+                decimal before = Convert.ToDecimal(found[0]["stock"]), qty = Math.Round(Number(Value(row, "cantidad")), 4, MidpointRounding.AwayFromZero);
+                if (Value(row, "conteo") != null)
+                {
+                    if (movimiento != 35) throw new InvalidOperationException("El conteo de inventario requiere Ajuste de Stock.");
+                    decimal count = Number(Value(row, "conteo")); if (count < 0 || count > 100000) throw new InvalidOperationException("Conteo fuera de rango.");
+                    qty = Math.Round(count - before, 4, MidpointRounding.AwayFromZero);
+                }
+                decimal price = Math.Round(Convert.ToDecimal(found[0]["precioCosto"]), 4, MidpointRounding.AwayFromZero);
+                if (Math.Abs(qty) > 100000 || (movimiento != 35 && qty <= 0) || price < 0 || price > 100000000) throw new InvalidOperationException("Cantidad o precio fuera de rango para " + id + ".");
+                decimal amount = Math.Round(qty * price, 4, MidpointRounding.AwayFromZero); total += amount;
+                lines.Add(new Dictionary<string, object> { { "idart", id }, { "codigo", Text(found[0]["IDArtProv"]) }, { "descripcion", found[0]["descripcion"] }, { "cantidad", qty }, { "precioUnitario", price }, { "importe", amount }, { "stockAntes", before }, { "stockDespues", before + qty * stockSign }, { "unidad", found[0]["UniMed"] } });
             }
-            total = Math.Round(total, 4, MidpointRounding.AwayFromZero);
-            if (numeroFactura.Length > 0 && Convert.ToInt32(Scalar(connection, tx,
-                "SELECT COUNT(*) FROM dbo.RecibosTP WHERE IDTipoMov=23 AND IDProveedor=@p0 AND NroFactura=@p1 AND Confirmado=1 AND Anulado=0 AND CHARINDEX(@p2,CONVERT(nvarchar(max),Nota))=0",
-                proveedor, numeroFactura, marker)) > 0)
-                throw new InvalidOperationException("Esa factura del proveedor ya tiene un ingreso de stock confirmado en SQL.");
-            var existing = RowsTx(connection, tx,
-                "SELECT TOP 1 IDRecibo,NroMov,IDSuc,IDProveedor,Total FROM dbo.RecibosTP WHERE IDTipoMov=23 AND CHARINDEX(@p0,CONVERT(nvarchar(max),Nota))>0 ORDER BY IDRecibo DESC",
-                marker);
-            if (existing.Count > 0)
+            total = Math.Round(total * amountSign, 4, MidpointRounding.AwayFromZero);
+            if (!confirmar) return new { ok = true, yaCargado = false, total, articulos = lines };
+            int number = Convert.ToInt32(Scalar(connection, tx, "SELECT ISNULL(MAX(NroMov),0)+1 FROM dbo.RecibosTP WITH (UPDLOCK,HOLDLOCK) WHERE IDTipoMov=@p0 AND IDSuc=@p1", movimiento, sucursal));
+            int receipt = Convert.ToInt32(Scalar(connection, tx, "INSERT dbo.RecibosTP (IDTipoMov,NroMov,Fecha,IDDepósito,IDVend,IDOper,IDProveedor,IDSuc,IDEmp,NroFactura,NroRemito,IDFactura,IDRemito,IDDepDes,Total,SubTSDto,Confirmado,Anulado,Nota,FechaYHora) OUTPUT INSERTED.IDRecibo VALUES (@p0,@p1,@p2,@p3,@p4,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p13,1,0,@p14,GETDATE())", movimiento, number, DateTime.Today, puntoVenta, operador, proveedor == 0 ? (object)DBNull.Value : proveedor, sucursal, empresa, numeroFactura.Length == 0 ? (object)DBNull.Value : numeroFactura, remito.Length == 0 ? (object)DBNull.Value : remito, compra == 0 ? (object)DBNull.Value : compra, relacionado == 0 ? (object)DBNull.Value : relacionado, destino, total, marker + hashMarker + " " + nota));
+            foreach (var line in lines)
             {
-                var saved = existing[0];
-                int savedId = Convert.ToInt32(saved["IDRecibo"]);
-                if (Convert.ToInt32(saved["IDSuc"]) != sucursal || Convert.ToInt32(saved["IDProveedor"]) != proveedor ||
-                    Math.Abs(Convert.ToDecimal(saved["Total"]) - total) > .01m ||
-                    Convert.ToInt32(Scalar(connection, tx, "SELECT COUNT(*) FROM dbo.RecibosTS WHERE IDRecibo=@p0", savedId)) != detalle.Count)
-                    throw new InvalidOperationException("Este identificador ya pertenece a otra carga. Revisá el ingreso antes de continuar.");
-                foreach (var line in detalle) line["stockDespues"] = line["stockAntes"];
-                if (tx != null) tx.Commit();
-                return new { ok = true, yaCargado = true, idRecibo = savedId, numeroMovimiento = saved["NroMov"], total, articulos = detalle,
-                    sucursal = sucursalRows[0]["Sucursal"], proveedor = proveedorRows[0]["nombre"] };
+                Execute(connection, tx, "INSERT dbo.RecibosTS (IDRecibo,IDArt,Cantidad,PrecioUni,Importe,Stock,UniMed) VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6)", receipt, line["idart"], line["cantidad"], line["precioUnitario"], line["importe"], line["stockAntes"], line["unidad"] ?? DBNull.Value);
+                if (stockSign != 0)
+                {
+                    Execute(connection, tx, "IF NOT EXISTS (SELECT 1 FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1) INSERT dbo.ArtsStock (IDArt,IDSuc,StockAct) VALUES (@p0,@p1,0)", line["idart"], sucursal);
+                    if (Execute(connection, tx, "UPDATE dbo.ArtsStock SET StockAct=ISNULL(StockAct,0)+@p0 WHERE IDArt=@p1 AND IDSuc=@p2", Convert.ToDecimal(line["cantidad"]) * stockSign, line["idart"], sucursal) != 1) throw new InvalidOperationException("Stock no único para " + line["idart"]);
+                }
             }
-            if (!confirmar) return new { ok = true, yaCargado = false, total, articulos = detalle,
-                sucursal = sucursalRows[0]["Sucursal"], proveedor = proveedorRows[0]["nombre"], puntoVenta = puntoRows[0]["Descripción"] };
-            if (Convert.ToInt32(Scalar(connection, tx,
-                "SELECT CASE WHEN HAS_PERMS_BY_NAME('dbo.RecibosTP','OBJECT','INSERT')=1 AND HAS_PERMS_BY_NAME('dbo.RecibosTS','OBJECT','INSERT')=1 AND HAS_PERMS_BY_NAME('dbo.ArtsStock','OBJECT','UPDATE')=1 THEN 1 ELSE 0 END")) != 1)
-                throw new InvalidOperationException("El usuario SQL no tiene permisos para ingresar stock.");
-            int operador = LocalOperator();
-            if (operador <= 0) throw new InvalidOperationException("No se pudo identificar al operador de Access.");
-            int numeroMovimiento = Convert.ToInt32(Scalar(connection, tx,
-                "SELECT ISNULL(MAX(NroMov),0)+1 FROM dbo.RecibosTP WITH (UPDLOCK,HOLDLOCK) WHERE IDTipoMov=23 AND IDSuc=@p0", sucursal));
-            int recibo = Convert.ToInt32(Scalar(connection, tx,
-                "INSERT dbo.RecibosTP (IDTipoMov,NroMov,Fecha,IDDepósito,IDVend,IDOper,IDProveedor,IDSuc,IDEmp,NroFactura,Total,SubTSDto,Confirmado,Anulado,Nota) " +
-                "OUTPUT INSERTED.IDRecibo VALUES (23,@p0,@p1,@p2,@p3,@p3,@p4,@p5,@p6,@p7,@p8,@p8,1,0,@p9)",
-                numeroMovimiento, DateTime.Today, puntoVenta, operador, proveedor, sucursal, empresa,
-                numeroFactura.Length == 0 ? (object)DBNull.Value : numeroFactura, total,
-                marker + (nota.Length == 0 ? "" : " " + nota)));
-            foreach (var line in detalle)
+            Execute(connection, tx, "UPDATE dbo.TipoComprobantes SET UltNroComp=@p0 WHERE IDComprob=@p1", number, movimiento);
+            if (compra > 0 && Execute(connection, tx, "UPDATE dbo.ComprasTP SET IDMovStk=@p0 WHERE IDRecibo=@p1 AND IDMovStk IS NULL", number, compra) != 1) throw new InvalidOperationException("La compra fue ingresada desde otra PC.");
+            if (movimiento == 57)
             {
-                Execute(connection, tx,
-                    "INSERT dbo.RecibosTS (IDRecibo,IDArt,Cantidad,PrecioUni,Importe,Stock) VALUES (@p0,@p1,@p2,@p3,@p4,@p5)",
-                    recibo, line["idart"], line["cantidad"], line["precioUnitario"], line["importe"], line["stockAntes"]);
-                if (Execute(connection, tx, "UPDATE dbo.ArtsStock SET StockAct=StockAct+@p0 WHERE IDArt=@p1 AND IDSuc=@p2",
-                    line["cantidad"], line["idart"], sucursal) != 1)
-                    throw new InvalidOperationException("No se pudo actualizar el stock de " + line["idart"] + ".");
+                if (RowsTx(connection, tx, "SELECT IDComprob FROM dbo.TipoComprobantes WHERE IDComprob=58", new object[0]).Count != 1) throw new InvalidOperationException("Falta el tipo de entrada de transferencia 58 en SQL.");
+                int destinationNumber = Convert.ToInt32(Scalar(connection, tx, "SELECT ISNULL(MAX(NroMov),0)+1 FROM dbo.RecibosTP WITH (UPDLOCK,HOLDLOCK) WHERE IDTipoMov=58 AND IDSuc=@p0", destino));
+                int destinationReceipt = Convert.ToInt32(Scalar(connection, tx, "INSERT dbo.RecibosTP (IDTipoMov,NroMov,Fecha,IDDepósito,IDVend,IDOper,IDProveedor,IDSuc,IDEmp,IDDepDes,IDRecDes,Total,SubTSDto,Confirmado,Anulado,Nota,FechaYHora) OUTPUT INSERTED.IDRecibo VALUES (58,@p0,@p1,@p2,@p3,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p9,1,0,@p10,GETDATE())", destinationNumber, DateTime.Today, puntoVenta, operador, proveedor == 0 ? (object)DBNull.Value : proveedor, destino, empresa, sucursal, receipt, total, "Entrada relacionada: " + receipt + " " + nota));
+                foreach (var line in lines)
+                {
+                    Execute(connection, tx, "IF NOT EXISTS (SELECT 1 FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1) INSERT dbo.ArtsStock (IDArt,IDSuc,StockAct) VALUES (@p0,@p1,0)", line["idart"], destino);
+                    decimal destinationBefore = Convert.ToDecimal(Scalar(connection, tx, "SELECT ISNULL(StockAct,0) FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], destino));
+                    Execute(connection, tx, "INSERT dbo.RecibosTS (IDRecibo,IDArt,Cantidad,PrecioUni,Importe,Stock,UniMed) VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6)", destinationReceipt, line["idart"], line["cantidad"], line["precioUnitario"], line["importe"], destinationBefore, line["unidad"] ?? DBNull.Value);
+                    if (Execute(connection, tx, "UPDATE dbo.ArtsStock SET StockAct=ISNULL(StockAct,0)+@p0 WHERE IDArt=@p1 AND IDSuc=@p2", line["cantidad"], line["idart"], destino) != 1) throw new InvalidOperationException("Stock destino no único.");
+                    decimal destinationAfter = Convert.ToDecimal(Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], destino));
+                    if (Math.Abs(destinationAfter - destinationBefore - Convert.ToDecimal(line["cantidad"])) > .0001m) throw new InvalidOperationException("El stock de destino no coincide con la transferencia.");
+                }
+                Execute(connection, tx, "UPDATE dbo.RecibosTP SET IDRecDes=@p0 WHERE IDRecibo=@p1", destinationReceipt, receipt);
+                Execute(connection, tx, "UPDATE dbo.TipoComprobantes SET UltNroComp=@p0 WHERE IDComprob=58", destinationNumber);
             }
-            if (Convert.ToInt32(Scalar(connection, tx, "SELECT COUNT(*) FROM dbo.RecibosTS WHERE IDRecibo=@p0", recibo)) != detalle.Count)
-                throw new InvalidOperationException("El movimiento no guardó todos sus artículos.");
-            foreach (var line in detalle)
+            if (Convert.ToInt32(Scalar(connection, tx, "SELECT COUNT(*) FROM dbo.RecibosTS WHERE IDRecibo=@p0", receipt)) != lines.Count) throw new InvalidOperationException("El movimiento no guardó todos sus artículos.");
+            if (stockSign != 0) foreach (var line in lines)
             {
-                decimal actual = Convert.ToDecimal(Scalar(connection, tx,
-                    "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], sucursal));
-                if (Math.Abs(actual - Convert.ToDecimal(line["stockDespues"])) > .01m)
-                    throw new InvalidOperationException("El stock final de " + line["idart"] + " no coincide.");
+                decimal actual = Convert.ToDecimal(Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], sucursal));
+                if (Math.Abs(actual - Convert.ToDecimal(line["stockDespues"])) > .0001m) throw new InvalidOperationException("El stock final no coincide para " + line["idart"]);
             }
             tx.Commit();
-            return new { ok = true, yaCargado = false, idRecibo = recibo, numeroMovimiento, total, articulos = detalle,
-                sucursal = sucursalRows[0]["Sucursal"], proveedor = proveedorRows[0]["nombre"] };
+            return new { ok = true, yaCargado = false, idRecibo = receipt, numeroMovimiento = number, total, articulos = lines };
         }
-        catch
-        {
-            if (tx != null) try { tx.Rollback(); } catch { }
-            throw;
-        }
+        catch { if (tx != null) try { tx.Rollback(); } catch { } throw; }
         finally { if (tx != null) tx.Dispose(); }
     }
+    private static object StockConsulta(SqlConnection connection, HttpListenerRequest request)
+    {
+        int branch = 0, provider = 0, receipt = 0;
+        Int32.TryParse(request.QueryString["sucursal"], out branch); Int32.TryParse(request.QueryString["proveedor"], out provider); Int32.TryParse(request.QueryString["recibo"], out receipt);
+        string query = request.QueryString["consulta"] ?? "";
+        if (query == "proveedores") return new { ok = true, proveedores = Rows(connection, "SELECT IDProveedor AS id,[RazónSocial] AS nombre FROM dbo.Proveedores WHERE ISNULL(Suspendido,0)=0 ORDER BY [RazónSocial]") };
+        if (query == "articulos") return new { ok = true, articulos = Rows(connection, "SELECT a.IDArt AS idart,a.IDArtProv AS codProv,a.[Descripción] AS descripcion,a.IDProveedor AS proveedor,ISNULL(s.StockAct,0) AS stock,a.PrecioCpraSI AS precioCosto,a.PrecioCpraCI * CASE WHEN a.IDMoneda=1 THEN CONVERT(decimal(18,4),1) ELSE m.ImpCotiz END AS costoFinal FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s ON s.IDArt=a.IDArt AND s.IDSuc=@p0 LEFT JOIN dbo.Monedas m ON m.IDMoneda=a.IDMoneda WHERE a.Suspendido=0 ORDER BY a.[Descripción]", branch) };
+        if (query == "compras") return new { ok = true, compras = Rows(connection, "SELECT IDRecibo AS id,NroFactura AS numero,CONVERT(varchar(10),Fecha,103) AS fecha,Total AS total FROM dbo.ComprasTP WHERE IDProveedor=@p0 AND Fecha>=DATEADD(day,-90,GETDATE()) AND Confirmado=1 AND EnMovStk=1 AND IDMovStk IS NULL ORDER BY Fecha DESC", provider) };
+        if (query == "movimientos") return new { ok = true, movimientos = Rows(connection, "SELECT TOP 200 r.IDRecibo AS id,r.NroMov AS numero,r.IDTipoMov AS tipo,r.IDProveedor AS proveedor,r.IDDepósito AS puntoVenta,r.IDDepDes AS destino,r.IDFactura AS compra,r.IDRemito AS relacionado,r.NroFactura AS factura,r.NroRemito AS remito,CONVERT(varchar(10),r.Fecha,103) AS fecha,t.Descripcion AS nombre,p.[RazónSocial] AS proveedorNombre,r.Total AS total,r.Nota AS nota FROM dbo.RecibosTP r INNER JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Proveedores p ON p.IDProveedor=r.IDProveedor WHERE r.IDSuc=@p0 AND r.Confirmado=1 AND r.Anulado=0 ORDER BY r.IDRecibo DESC", branch) };
+        if (query == "detalle") return new { ok = true, articulos = Rows(connection, "SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,d.Cantidad AS cantidad,d.PrecioUni AS precioUnitario,d.Importe AS importe,ISNULL(s.StockAct,0) AS stock FROM dbo.RecibosTS d INNER JOIN dbo.RecibosTP r ON r.IDRecibo=d.IDRecibo INNER JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt LEFT JOIN dbo.ArtsStock s ON s.IDArt=d.IDArt AND s.IDSuc=r.IDSuc WHERE d.IDRecibo=@p0 AND r.IDSuc=@p1 AND r.Confirmado=1 AND r.Anulado=0 ORDER BY d.IDOrden", receipt, branch) };
+        if (query == "relacionados") return new { ok = true, relacionados = Rows(connection, "SELECT TOP 200 r.IDRecibo AS id,r.NroMov AS numero,t.Abreviatura AS tipo,CONVERT(varchar(10),r.Fecha,103) AS fecha FROM dbo.RecibosTP r INNER JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov WHERE r.IDSuc=@p0 AND r.Confirmado=1 AND r.Anulado=0 AND r.Completo=0 AND r.Fecha>=DATEADD(day,-30,GETDATE()) ORDER BY r.IDRecibo DESC", branch) };
+        if (query == "pendientes") return new { ok = true, articulos = Rows(connection, "SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,SUM(d.Cantidad)-ISNULL((SELECT SUM(e.Cantidad) FROM dbo.RecibosTS e INNER JOIN dbo.RecibosTP h ON h.IDRecibo=e.IDRecibo WHERE h.IDRemito=@p0 AND h.Confirmado=1 AND h.Anulado=0 AND e.IDArt=d.IDArt),0) AS cantidad,MAX(d.PrecioUni) AS precioUnitario FROM dbo.RecibosTS d INNER JOIN dbo.RecibosTP r ON r.IDRecibo=d.IDRecibo INNER JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=@p0 AND r.IDSuc=@p1 AND r.Confirmado=1 AND r.Anulado=0 GROUP BY d.IDArt,a.IDArtProv,a.[Descripción] HAVING SUM(d.Cantidad)>ISNULL((SELECT SUM(e.Cantidad) FROM dbo.RecibosTS e INNER JOIN dbo.RecibosTP h ON h.IDRecibo=e.IDRecibo WHERE h.IDRemito=@p0 AND h.Confirmado=1 AND h.Anulado=0 AND e.IDArt=d.IDArt),0)", receipt, branch) };
+        int oper = LocalOperator(connection);
+        return new { ok = true, operador = Rows(connection, "SELECT IDEmpleado AS id,Nombre AS nombre FROM dbo.Empleados WHERE IDEmpleado=@p0", oper),
+            sucursales = Rows(connection, "SELECT IDSuc AS id,Sucursal AS nombre FROM dbo.Sucursales ORDER BY IDSuc"),
+            puntosVenta = Rows(connection, "SELECT IDDepósito AS id,[Descripción] AS nombre,IDSucAsoc AS idSucursal FROM dbo.[Depósitos] ORDER BY IDDepósito"),
+            tiposMovimiento = Rows(connection, "SELECT IDComprob AS id,Abreviatura AS codigo,Descripcion AS nombre,IDTipoMovStock AS stock,StkPor AS signo FROM dbo.TipoComprobantes WHERE EnStk=1 AND ISNULL(GenNS,0)=0 AND ISNULL(ConReceta,0)=0 ORDER BY Abreviatura") };
+    }
+
     private static void Reply(HttpListenerContext context, int status, object data)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(data));
@@ -1413,9 +1442,7 @@ internal static class FacturacionCopiaApi
             {
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/stock-ingreso")
                 {
-                    Reply(context, 200, new { ok = true,
-                        sucursales = Rows(connection, "SELECT IDSuc AS id,Sucursal AS nombre FROM dbo.Sucursales ORDER BY IDSuc"),
-                        puntosVenta = Rows(connection, "SELECT IDDepósito AS id,[Descripción] AS nombre,IDSucAsoc AS idSucursal FROM dbo.[Depósitos] ORDER BY IDDepósito") });
+                    Reply(context, 200, StockConsulta(connection, request));
                     return;
                 }
                 if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/stock-ingreso")
@@ -1424,9 +1451,10 @@ internal static class FacturacionCopiaApi
                         throw new InvalidOperationException("Se esperaba una carga de stock JSON.");
                     string body;
                     using (var reader = new StreamReader(request.InputStream, Encoding.UTF8)) body = reader.ReadToEnd();
-                    if (body.Length > 200000) throw new InvalidOperationException("La carga de stock es demasiado grande.");
+                    if (body.Length > 2000000) throw new InvalidOperationException("La carga de stock es demasiado grande.");
                     var data = Object(Json.DeserializeObject(body));
                     string action = Text(Value(data, "accion"));
+                    if (action == "actualizar-costo") { Reply(context, 200, StockActualizarCosto(connection, data)); return; }
                     if (action != "previsualizar" && action != "confirmar") throw new InvalidOperationException("Acción de stock inválida.");
                     Reply(context, 200, StockIngreso(connection, data, action == "confirmar"));
                     return;
