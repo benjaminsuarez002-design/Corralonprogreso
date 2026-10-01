@@ -191,7 +191,11 @@
       cursor: pointer;
     }
     .date-nav-label {
+      width: 118px;
       min-width: 118px;
+      border: 0;
+      padding: 3px 0;
+      background: transparent;
       color: var(--violeta-oscuro);
       font-size: 13px;
       font-weight: 900;
@@ -1517,7 +1521,7 @@
     #diffModal .diff-modal{flex:0 0 auto;width:125vw;height:125dvh;min-width:0;min-height:0;max-width:none;max-height:none;zoom:1;transform:scale(.8);transform-origin:top left;resize:none;border:0;border-radius:0;box-shadow:none}
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
-<script src="corralon-system.js?v=1.0.18"></script>
+<script src="corralon-system.js?v=1.0.19"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -1538,7 +1542,7 @@
       </div>
       <div class="date-nav" aria-label="Navegar dias de caja">
         <button class="date-nav-btn" id="prevCajaDayBtn" type="button" aria-label="Dia anterior">&lt;</button>
-        <span class="date-nav-label" id="cajaDateLabel"></span>
+        <input class="date-nav-label" id="cajaDateLabel" type="text" aria-label="Fecha de Caja" autocomplete="off" placeholder="dd/mm/aaaa" title="Escribí día, día y mes, fecha completa o un día de la semana">
         <button class="date-nav-btn" id="nextCajaDayBtn" type="button" aria-label="Dia siguiente">&gt;</button>
       </div>
       <div class="branch-combo" id="cajaBranchCombo">
@@ -1915,7 +1919,7 @@
 
     let cajaRestricted = false;
     let cajaRestrictedBranchId = '';
-    const CAJA_RESTRICTED_SELECTORS = '#prevCajaDayBtn,#nextCajaDayBtn,#cajaBranchButton';
+    const CAJA_RESTRICTED_SELECTORS = '#prevCajaDayBtn,#nextCajaDayBtn,#cajaDateLabel,#cajaBranchButton';
 
     function cajaSessionUser() {
       try {
@@ -2049,8 +2053,14 @@
     let diffContextIndex = -1;
     let diffContextSide = 'mercado';
     let firebaseDb = null;
-    let firebaseSaveTimer = null;
-    let firebaseManualSaveTimer = null;
+    const firebaseSummarySaveTimers = new Map();
+    const firebaseManualSaveTimers = new Map();
+    let firebaseManualLoadedDate = '';
+    let firebaseManualSnapshot = '';
+    const firebaseCajaRemoteSnapshots = new Map();
+    const firebaseCajaWriteChains = new Map();
+    let firebaseSummaryLoadedDate = '';
+    let firebaseSummarySnapshot = '';
     let applyingFirebaseSummary = false;
     let lastPublicCajaSignature = '';
     let lastPublicCajaPayloadSignatures = {
@@ -2118,7 +2128,19 @@
     }
 
     function updateDateLabel() {
-      el.cajaDateLabel.textContent = formatDateLabel();
+      el.cajaDateLabel.value = formatDateLabel().replace(' - Hoy', '');
+      el.cajaDateLabel.setCustomValidity('');
+    }
+
+    function parseCajaDate(value, now = new Date()) {
+      const dayName = String(value || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const weekday = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'].indexOf(dayName);
+      if (weekday >= 0) {
+        const date = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        date.setDate(date.getDate() - (date.getDay() - weekday + 7) % 7);
+        return { date, text: date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) };
+      }
+      return window.CorralonFunciones.parseFechaFlexible(value, now);
     }
 
     function loadCajaBranches() {
@@ -2917,6 +2939,7 @@
     }
 
     function applyCajaManualPayload(payload, options = {}) {
+      preserveCajaManualLocalCopy(selectedDateKey, cajaManualPayload());
       const includeSystem = options.includeSystem !== false;
       if (Array.isArray(payload?.cash)) state.cash = CASH_DENOMS.map((denom, idx) => {
         const row = payload.cash.find((item) => Number(item.denom) === denom) || payload.cash[idx] || {};
@@ -2937,6 +2960,8 @@
       }
       applyCashMovementBranchOverrides(payload?.cashMovementBranches || {});
       if (applyReceiptBranchOverrides(payload?.receiptBranches || {})) applyReceiptTotalsToBranches();
+      firebaseManualLoadedDate = selectedDateKey;
+      firebaseManualSnapshot = JSON.stringify(cajaManualPayload());
     }
 
     async function loadFirebaseCajaManual(dateKey = selectedDateKey) {
@@ -2944,47 +2969,88 @@
       if (!db) return null;
       try {
         const snap = await db.collection(FIREBASE_CAJA_MANUAL_COLLECTION).doc(dateKey).get();
-        if (!snap.exists || dateKey !== selectedDateKey) return null;
+        if (dateKey !== selectedDateKey) return null;
+        firebaseCajaRemoteSnapshots.set(`${FIREBASE_CAJA_MANUAL_COLLECTION}|${dateKey}`, snap.exists ? snap.data() || {} : {});
+        if (!snap.exists) {
+          firebaseManualLoadedDate = dateKey;
+          firebaseManualSnapshot = JSON.stringify(cajaManualPayload());
+          return null;
+        }
         return snap.data() || {};
       } catch (error) {
+        showToast('No pude cargar los datos manuales de Caja. No se guardarán cambios hasta recuperarlos.');
         return null;
       }
     }
 
     function queueFirebaseCajaManualSave(dateKey = selectedDateKey, values = cajaManualPayload()) {
       const db = firebaseDatabase();
-      if (!db || applyingRemoteState) return;
-      clearTimeout(firebaseManualSaveTimer);
-      firebaseManualSaveTimer = setTimeout(async () => {
+      if (!db || applyingRemoteState || firebaseManualLoadedDate !== dateKey) return;
+      const signature = JSON.stringify(values);
+      clearTimeout(firebaseManualSaveTimers.get(dateKey));
+      firebaseManualSaveTimers.delete(dateKey);
+      if (signature === firebaseManualSnapshot) return;
+      const baseline = JSON.parse(firebaseManualSnapshot || '{}');
+      const changes = Object.fromEntries(Object.entries(values).filter(([field, value]) =>
+        cajaCloudValueSignature(value) !== cajaCloudValueSignature(baseline[field])));
+      if (!Object.keys(changes).length) return;
+      const timer = setTimeout(async () => {
         try {
-          await db.collection(FIREBASE_CAJA_MANUAL_COLLECTION).doc(dateKey).set({
-            fecha: dateKey,
-            cash: values.cash,
-            transfers: values.transfers,
-            systemRows: values.systemRows,
-            systemMergeGroups: values.systemMergeGroups,
-            cashMovementBranches: values.cashMovementBranches,
-            receiptBranches: values.receiptBranches,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
+          await writeCajaFirebaseChanges(FIREBASE_CAJA_MANUAL_COLLECTION, dateKey, changes);
+          if (dateKey === selectedDateKey) firebaseManualSnapshot = signature;
           if (usesSupabaseCaja(dateKey)) await bumpCajaPublicationVersion(dateKey, Date.now(), []);
         } catch (error) {
-          showToast('No pude guardar los datos manuales de caja en Firebase.');
+          if (dateKey === selectedDateKey) firebaseManualLoadedDate = '';
+          showToast(error.code === 'caja-conflict'
+            ? 'Caja cambió en Firebase. Tus cambios quedaron en local; recargá antes de guardar para no sobrescribirla.'
+            : 'No pude guardar los datos manuales de caja en Firebase. Tus cambios quedaron en local.');
+        } finally {
+          if (firebaseManualSaveTimers.get(dateKey) === timer) firebaseManualSaveTimers.delete(dateKey);
         }
       }, 150);
+      firebaseManualSaveTimers.set(dateKey, timer);
     }
 
     function saveFirebaseSystemMergeGroups(dateKey = selectedDateKey) {
-      const db = firebaseDatabase();
-      if (!db) return Promise.resolve(false);
-      return db.collection(FIREBASE_CAJA_MANUAL_COLLECTION).doc(dateKey).set({
-        fecha: dateKey,
-        systemMergeGroups: normalizeSystemMergeGroups(systemMergeGroups),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true }).then(() => true).catch(() => {
-        showToast('No pude guardar la unificación en Firebase.');
-        return false;
+      queueFirebaseCajaManualSave(dateKey);
+      return Promise.resolve(firebaseManualLoadedDate === dateKey);
+    }
+
+    function cajaCloudValueSignature(value) {
+      const canonical = item => {
+        if (Array.isArray(item)) return item.map(canonical);
+        if (item && typeof item === 'object') return Object.fromEntries(
+          Object.keys(item).sort().map(key => [key, canonical(item[key])]));
+        return item ?? null;
+      };
+      return JSON.stringify(canonical(value));
+    }
+
+    function writeCajaFirebaseChanges(collection, dateKey, changes) {
+      const key = `${collection}|${dateKey}`;
+      const task = (firebaseCajaWriteChains.get(key) || Promise.resolve()).catch(() => {}).then(async () => {
+        const db = firebaseDatabase();
+        if (!db || !firebaseCajaRemoteSnapshots.has(key)) throw new Error('Caja pendiente de cargar desde Firebase.');
+        const expected = firebaseCajaRemoteSnapshots.get(key);
+        const ref = db.collection(collection).doc(dateKey);
+        const saved = await db.runTransaction(async transaction => {
+          const snap = await transaction.get(ref);
+          const current = snap.exists ? snap.data() || {} : {};
+          for (const field of Object.keys(changes)) {
+            if (cajaCloudValueSignature(current[field]) !== cajaCloudValueSignature(expected[field])) {
+              const error = new Error('Caja cambió en Firebase.');
+              error.code = 'caja-conflict';
+              throw error;
+            }
+          }
+          transaction.set(ref, { ...changes, fecha: dateKey,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+          return { ...current, ...changes };
+        });
+        firebaseCajaRemoteSnapshots.set(key, saved);
       });
+      firebaseCajaWriteChains.set(key, task);
+      return task;
     }
 
     function summaryManualPayload() {
@@ -3009,14 +3075,17 @@
       try {
         const snap = await db.collection(FIREBASE_SUMMARY_COLLECTION).doc(dateKey).get();
         if (dateKey !== selectedDateKey) return;
+        firebaseCajaRemoteSnapshots.set(`${FIREBASE_SUMMARY_COLLECTION}|${dateKey}`, snap.exists ? snap.data() || {} : {});
         if (!snap.exists) {
-          const hasLocalValues = Object.values(summaryManualPayload()).some((value) => Number(value || 0) !== 0);
-          if (hasLocalValues) queueSummaryManualSave(dateKey);
+          firebaseSummaryLoadedDate = dateKey;
+          firebaseSummarySnapshot = JSON.stringify(summaryManualPayload());
           return;
         }
         applyingFirebaseSummary = true;
         applySummaryManualPayload(snap.data()?.values || snap.data());
         applyingFirebaseSummary = false;
+        firebaseSummaryLoadedDate = dateKey;
+        firebaseSummarySnapshot = JSON.stringify(summaryManualPayload());
         persistLocalState();
         renderSummary();
       } catch (error) {
@@ -3027,23 +3096,29 @@
     }
 
     function queueSummaryManualSave(dateKey = selectedDateKey) {
-      if (applyingFirebaseSummary) return;
+      if (applyingFirebaseSummary || firebaseSummaryLoadedDate !== dateKey) return;
       const db = firebaseDatabase();
       if (!db) return;
-      clearTimeout(firebaseSaveTimer);
+      clearTimeout(firebaseSummarySaveTimers.get(dateKey));
+      firebaseSummarySaveTimers.delete(dateKey);
       const values = summaryManualPayload();
-      firebaseSaveTimer = setTimeout(async () => {
+      const signature = JSON.stringify(values);
+      if (signature === firebaseSummarySnapshot) return;
+      const timer = setTimeout(async () => {
         try {
-          await db.collection(FIREBASE_SUMMARY_COLLECTION).doc(dateKey).set({
-            fecha: dateKey,
-            values,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
+          await writeCajaFirebaseChanges(FIREBASE_SUMMARY_COLLECTION, dateKey, { values });
+          if (dateKey === selectedDateKey) firebaseSummarySnapshot = signature;
           if (usesSupabaseCaja(dateKey)) await bumpCajaPublicationVersion(dateKey, Date.now(), []);
         } catch (error) {
-          showToast('No pude guardar los totales manuales en Firebase.');
+          if (dateKey === selectedDateKey) firebaseSummaryLoadedDate = '';
+          showToast(error.code === 'caja-conflict'
+            ? 'Los totales cambiaron en Firebase. Tus cambios quedaron en local; recargá antes de guardar.'
+            : 'No pude guardar los totales manuales en Firebase.');
+        } finally {
+          if (firebaseSummarySaveTimers.get(dateKey) === timer) firebaseSummarySaveTimers.delete(dateKey);
         }
       }, 450);
+      firebaseSummarySaveTimers.set(dateKey, timer);
     }
 
     function normalizarTexto(value) {
@@ -3332,8 +3407,23 @@
 
     function persistLocalState() {
       try {
+        const previous = JSON.parse(localStorage.getItem(storageKeyForDate()) || 'null');
+        if (previous) preserveCajaManualLocalCopy(selectedDateKey, cajaManualPayload(previous));
+        preserveCajaManualLocalCopy(selectedDateKey, cajaManualPayload());
         localStorage.setItem(storageKeyForDate(), JSON.stringify(statePayload()));
         if (selectedDateKey === TODAY_DATE_KEY) localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch (error) {}
+    }
+
+    function preserveCajaManualLocalCopy(dateKey, payload) {
+      if (!hasCajaManualData(payload)) return;
+      try {
+        const key = `${STORAGE_KEY_BASE}_manual_respaldo_${dateKey}`;
+        const copies = JSON.parse(localStorage.getItem(key) || '[]');
+        const signature = JSON.stringify(payload);
+        if (copies.some(copy => JSON.stringify(copy.payload) === signature)) return;
+        copies.push({ fecha: dateKey, savedAt: new Date().toISOString(), payload });
+        localStorage.setItem(key, JSON.stringify(copies.slice(-3)));
       } catch (error) {}
     }
 
@@ -3345,6 +3435,11 @@
     }
 
     function loadState(dateKey = selectedDateKey) {
+      loadedSupabaseCajaCacheDate = '';
+      firebaseManualLoadedDate = '';
+      firebaseManualSnapshot = '';
+      firebaseSummaryLoadedDate = '';
+      firebaseSummarySnapshot = '';
       try {
         resetState();
         const fallback = dateKey === TODAY_DATE_KEY ? localStorage.getItem(LEGACY_STORAGE_KEY) : null;
@@ -3462,6 +3557,9 @@
 
     async function persistSystemTable(dateKey, currentRows, removedIds = []) {
       if (!usesSupabaseCaja(dateKey)) return;
+      if (currentRows.some(row => row.fecha !== dateKey || (/^\d{4}-\d{2}-\d{2}\|/.test(row.id) && row.id.slice(0, 10) !== dateKey))) {
+        throw new Error('Las transferencias pertenecen a otra fecha. Recargá Caja antes de guardar.');
+      }
       const version = Date.now();
       if (currentRows.length) {
         const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_CAJA_SYSTEM}?on_conflict=id`, {
@@ -3487,21 +3585,25 @@
       if (!usesSupabaseCaja() || applyingSystemTable || applyingRemoteState) return;
       clearTimeout(systemTableSaveTimer);
       const dateKey = selectedDateKey;
-      systemTableSaveTimer = setTimeout(async () => {
-        const currentRows = systemDbRowsFromState(state.system, dateKey);
-        const currentMap = new Map(currentRows.map((row) => [row.id, JSON.stringify(row)]));
-        const changedRows = currentRows.filter((row) => {
+      // Capturar las filas y su comparación antes de cambiar de día.
+      // El temporizador nunca debe leer el estado de otra fecha.
+      const currentRows = systemDbRowsFromState(state.system, dateKey);
+      const currentMap = new Map(currentRows.map((row) => [row.id, JSON.stringify(row)]));
+      const changedRows = currentRows.filter((row) => {
           const previous = systemTableSnapshot.get(row.id);
           if (!previous) return true;
           const comparable = { ...row, updated_at: JSON.parse(previous).updated_at };
           return JSON.stringify(comparable) !== previous;
         });
-        const removedIds = [...systemTableSnapshot.keys()].filter((id) => !currentMap.has(id));
-        if (!changedRows.length && !removedIds.length) return;
+      const removedIds = [...systemTableSnapshot.keys()].filter((id) => !currentMap.has(id));
+      if (!changedRows.length && !removedIds.length) return;
+      systemTableSaveTimer = setTimeout(async () => {
         try {
           await persistSystemTable(dateKey, changedRows, removedIds);
-          currentRows.forEach((row) => systemTableSnapshot.set(row.id, JSON.stringify(row)));
-          removedIds.forEach((id) => systemTableSnapshot.delete(id));
+          if (dateKey === selectedDateKey) {
+            currentRows.forEach((row) => systemTableSnapshot.set(row.id, JSON.stringify(row)));
+            removedIds.forEach((id) => systemTableSnapshot.delete(id));
+          }
         } catch (error) {
           showToast('No se pudieron sincronizar los cambios de transferencias.');
         }
@@ -3570,11 +3672,13 @@
       if (!cached || dateKey !== selectedDateKey) return false;
       const focusSnapshot = captureCajaFocusState();
       applyingSystemTable = true;
-      applyPublicCajaMovements(cached.movimientos);
-      applyPublicCajaCashMovements(cached.ingresosEgresos);
-      applyPublicCajaReceipts(cached.recibos);
-      state.system = systemRowsFromDb(cached.systemRows || []);
-      systemTableSnapshot = new Map(systemDbRowsFromState(state.system, dateKey).map((row) => [row.id, JSON.stringify(row)]));
+      if (cached.movimientos !== undefined) applyPublicCajaMovements(cached.movimientos);
+      if (cached.ingresosEgresos !== undefined) applyPublicCajaCashMovements(cached.ingresosEgresos);
+      if (cached.recibos !== undefined) applyPublicCajaReceipts(cached.recibos);
+      if (hasValidCajaSystemCache(cached, dateKey)) {
+        state.system = systemRowsFromDb(cached.systemRows);
+        systemTableSnapshot = new Map(systemDbRowsFromState(state.system, dateKey).map((row) => [row.id, JSON.stringify(row)]));
+      }
       applyingSystemTable = false;
       lastSupabaseCajaVersion = String(cached.version || '');
       lastSupabaseCajaVersions = { ...lastSupabaseCajaVersions, ...(cached.versions || {}) };
@@ -3587,10 +3691,17 @@
       return true;
     }
 
+    function hasValidCajaSystemCache(cached, dateKey) {
+      return Array.isArray(cached?.systemRows) && cached.systemRows.every(row =>
+        (!row.fecha || row.fecha === dateKey) &&
+        (!/^\d{4}-\d{2}-\d{2}\|/.test(String(row.id || '')) || String(row.id).slice(0, 10) === dateKey));
+    }
+
     async function loadSupabaseCaja(dateKey = selectedDateKey, options = {}) {
       if (!usesSupabaseCaja(dateKey)) return false;
       const silent = Boolean(options.silent);
       const forceFull = Boolean(options.forceFull);
+      const initialLoad = loadedSupabaseCajaCacheDate !== dateKey;
       let cached = await readCajaRemoteCache(dateKey);
       if (cached && loadedSupabaseCajaCacheDate !== dateKey) applyCajaRemoteCache(cached, dateKey);
 
@@ -3605,16 +3716,18 @@
       };
       const localVersions = cached?.versions || {};
       const changed = {
-        movimientos: forceFull || !cached || Number(localVersions.movimientos || 0) !== remoteVersions.movimientos,
-        cashMovements: forceFull || !cached || Number(localVersions.cashMovements || 0) !== remoteVersions.cashMovements,
-        receipts: forceFull || !cached || Number(localVersions.receipts || 0) !== remoteVersions.receipts,
-        system: forceFull || !cached || Number(localVersions.system || 0) !== remoteVersions.system
+        movimientos: forceFull || cached?.movimientos === undefined || Number(localVersions.movimientos || 0) !== remoteVersions.movimientos,
+        cashMovements: forceFull || cached?.ingresosEgresos === undefined || Number(localVersions.cashMovements || 0) !== remoteVersions.cashMovements,
+        receipts: forceFull || cached?.recibos === undefined || Number(localVersions.receipts || 0) !== remoteVersions.receipts,
+        system: forceFull || !hasValidCajaSystemCache(cached, dateKey) || Number(localVersions.system || 0) !== remoteVersions.system
       };
       if (!Object.values(changed).some(Boolean)) {
         const generalChanged = Number(cached?.version || 0) !== generalVersion;
         if (cached && generalChanged) {
           cached = { ...cached, version: generalVersion, versions: remoteVersions };
           await writeCajaRemoteCache(dateKey, cached);
+        }
+        if (initialLoad || generalChanged || firebaseManualLoadedDate !== dateKey) {
           const manualPayload = await loadFirebaseCajaManual(dateKey);
           if (manualPayload && dateKey === selectedDateKey) {
             applyCajaManualPayload(manualPayload, { includeSystem: false });
@@ -3625,7 +3738,7 @@
         }
         lastSupabaseCajaVersion = String(generalVersion || '');
         lastSupabaseCajaVersions = remoteVersions;
-        return generalChanged;
+        return initialLoad || generalChanged;
       }
       if (silent && cajaHasActiveEditor()) {
         pendingCajaRefresh = true;
@@ -3639,13 +3752,14 @@
       const sections = await fetchCajaPublicationSections(dateKey, fields);
       let systemRows = Array.isArray(cached?.systemRows) ? cached.systemRows : [];
       if (changed.system) {
-        const useDelta = !legacy && !forceFull && cached && Number(localVersions.system || 0) > 0;
+        const useDelta = !legacy && !forceFull && hasValidCajaSystemCache(cached, dateKey) && Number(localVersions.system || 0) > 0;
         const incoming = await fetchCajaSystemRows(dateKey, useDelta ? localVersions.system : 0);
         systemRows = useDelta ? mergeCajaSystemDelta(systemRows, incoming) : incoming;
         if (useDelta && !incoming.length) systemRows = await fetchCajaSystemRows(dateKey, 0);
       }
 
       cached = {
+        ...cached,
         fecha: dateKey,
         version: generalVersion,
         versions: remoteVersions,
@@ -3676,12 +3790,10 @@
         const rows = await response.json();
         const payload = rows?.[0]?.payload;
         if (!payload || typeof payload !== 'object') {
-          if (dateKey === selectedDateKey && hasStateData()) queueRemoteSave();
           return;
         }
         if (dateKey !== selectedDateKey) return;
         if (!hasPayloadData(payload) && hasStateData()) {
-          queueRemoteSave();
           return;
         }
         applyingRemoteState = true;
@@ -3730,21 +3842,30 @@
     }
 
     async function switchCajaDate(delta) {
+      return setCajaDate(addDaysToKey(selectedDateKey, delta));
+    }
+
+    async function setCajaDate(dateKey) {
+      if (cajaRestricted || dateKey === selectedDateKey) {
+        updateDateLabel();
+        return;
+      }
       hideSystemRowMenu();
       closePasteModal();
       closeDiffModal();
       closeMovementSeparateModal();
       clearTimeout(remoteSaveTimer);
-      saveState();
+      // Navegar no es editar: nunca publicar una tabla aún pendiente de cargar.
+      persistLocalState();
       const previousDate = selectedDateKey;
-      selectedDateKey = addDaysToKey(selectedDateKey, delta);
+      selectedDateKey = dateKey;
       updateDateLabel();
       loadState(selectedDateKey);
       renderAll();
       showToast(`Caja ${formatDateLabel(selectedDateKey)} cargada.`);
-      if (usesSupabaseCaja()) await loadSupabaseCaja(selectedDateKey);
-      else await loadRemoteState(selectedDateKey);
-      await loadSummaryManualState(selectedDateKey);
+      if (usesSupabaseCaja(dateKey)) await loadSupabaseCaja(dateKey);
+      else await loadRemoteState(dateKey);
+      if (dateKey === selectedDateKey) await loadSummaryManualState(dateKey);
       if (previousDate !== selectedDateKey) window.scrollTo?.(0, 0);
     }
 
@@ -6775,6 +6896,40 @@
     document.getElementById('findDiffBtn').addEventListener('click', openDiffModal);
     el.prevCajaDayBtn.addEventListener('click', () => switchCajaDate(-1));
     el.nextCajaDayBtn.addEventListener('click', () => switchCajaDate(1));
+    let cajaDateBeforeEdit = '';
+    const commitCajaDate = () => {
+      const parsed = parseCajaDate(el.cajaDateLabel.value);
+      if (!parsed) {
+        el.cajaDateLabel.setCustomValidity('Ingresá una fecha válida. Ejemplo: 8 9, 08/09/2026 o lunes.');
+        el.cajaDateLabel.reportValidity();
+        return false;
+      }
+      el.cajaDateLabel.value = parsed.text;
+      el.cajaDateLabel.setCustomValidity('');
+      cajaDateBeforeEdit = parsed.text;
+      setCajaDate(dateKeyFromDate(parsed.date)).catch(() => showToast('No pude cargar la fecha elegida.'));
+      return true;
+    };
+    el.cajaDateLabel.addEventListener('focus', () => { cajaDateBeforeEdit = el.cajaDateLabel.value; });
+    el.cajaDateLabel.addEventListener('input', () => el.cajaDateLabel.setCustomValidity(''));
+    el.cajaDateLabel.addEventListener('blur', commitCajaDate);
+    el.cajaDateLabel.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        el.cajaDateLabel.value = cajaDateBeforeEdit;
+        el.cajaDateLabel.setCustomValidity('');
+        el.cajaDateLabel.select();
+      } else if (event.key === 'Enter' && !commitCajaDate()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+    window.CorralonFunciones.bindLinearNavigation({
+      root: el.cajaDateLabel.closest('.date-nav'), selector: 'button, input',
+      navigateLeftRight: true, smartCaret: true, selectOnAnyFocus: true,
+      selectOnFirstPointerFocus: true
+    });
     el.cajaBranchButton.addEventListener('keydown', (event) => {
       const isOpen = el.cajaBranchList.classList.contains('open');
       if (event.key === 'F4') {
@@ -7302,17 +7457,17 @@
       if (commitCalculatedCell(event.target)) return;
       if (event.target.dataset.transferField) {
         formatTransferAmountInput(event.target);
-        saveState();
+        persistLocalState();
         updateTotals();
         return;
       }
       if (event.relatedTarget?.matches?.('.cell-input')) {
-        saveState();
+        persistLocalState();
         updateTotals();
         return;
       }
       renderAll();
-      saveState();
+      persistLocalState();
     });
 
     loadCajaBranches();

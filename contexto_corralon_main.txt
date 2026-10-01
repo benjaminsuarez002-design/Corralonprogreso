@@ -1,9 +1,9 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia: 05/09/2026
-El cuerpo historico corresponde al 25/08/2026; la seccion 21 registra las
-actualizaciones posteriores y prevalece sobre las descripciones anteriores.
+Fecha de referencia: 01/10/2026
+El cuerpo historico corresponde al 25/08/2026; las secciones 21 y 22 registran
+actualizaciones posteriores. La seccion mas reciente prevalece sobre las anteriores.
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -26,6 +26,9 @@ REGLAS DE TRABAJO
   antes de reemplazarlos. El usuario ya tiene sus propios backups.
 - Cuando el usuario pide diagnosticar o revisar sin tocar nada, las consultas a
   Access, Supabase y archivos deben ser de solo lectura.
+- En Caja, la copia local nunca debe publicarse automaticamente sobre Firebase.
+  Cargar, navegar, recuperar cache o perder el foco no autoriza subir una tabla.
+  Las modificaciones del usuario deben comprobar el estado remoto antes de guardar.
 
 
 1. DESCRIPCION GENERAL
@@ -1584,3 +1587,119 @@ Pendientes y criterios para continuar
 - Las secciones anteriores son una fotografia historica. En particular, las
   optimizaciones de egress, cache, Realtime y almacenamiento de imagenes tuvieron
   cambios posteriores: revisar cada pagina antes de afirmar como descarga hoy.
+
+
+22. ACTUALIZACIONES AL 01/10/2026
+================================
+
+Caja: origen, consultas y publicacion incremental
+------------------------------------------------
+
+- caja.html usa Supabase para los movimientos publicados y Transferencias sistema;
+  los datos manuales de efectivo y Transferencias Mercado Pago estan en Firestore,
+  coleccion control_caja_manual, documento por fecha YYYY-MM-DD.
+- Los totales ingresados manualmente estan en control_caja_totales_manual.
+  No confundir estas dos colecciones con la tabla de transferencias de Supabase.
+- El cache compartido de IndexedDB utiliza corralon_caja_remota_v2:<fecha>.
+  caja-ingresos-historial.js puede crear registros parciales: no asumir que existe
+  systemRows porque haya versiones o datos de otras secciones en ese registro.
+- Los botones Consultar ingresos y egresos y Consultar totales entre fechas
+  estan fuera del cuadro de totales, arriba a su derecha. Ambos tienen rango
+  de fechas, filtro de sucursal, cache incremental y seleccion para imprimir.
+  En seleccion de impresion, todas las filas arrancan marcadas y tocar la fila
+  alterna su seleccion. Los informes incluyen sumas al pie.
+- El usuario aclaro que Actualizar saldo es el boton de Access, no Actualizar
+  importes de la web. El boton existente sigue invocando el mismo BAT.
+- Se adapto el publicador externo para leer SQL directamente, sin modificar
+  Access, manteniendo los contratos JSON y la publicacion incremental existente.
+  Archivos activos: C:\Update\actualizaciones\Exportar caja\exportar_caja_web.bat,
+  export_caja_json.ps1, publish_caja_json.js y sync_caja_sql.ps1.
+  Copias en el repositorio: tmp\saldos-proveedores-export.
+- sync_caja_sql.ps1 serializa exportacion y publicacion mediante un mutex.
+  La conexion SQL se obtiene de la configuracion local cifrada con DPAPI.
+- La sucursal sale de Depositos.IDSucAsoc: 1 progreso_ruta, 2 calle5_espana.
+  Se aplica a ingresos/egresos y recibos, sin inferirla por la nota.
+  Facturas confirmadas pueden tener Confirmado=-1: usar <>0, no =1.
+- Se probo la exportacion SQL y una publicacion real; repetir sin cambios
+  mantuvo las versiones remotas. La tarea de saldos de proveedores que corre
+  en segundo plano conserva su mecanismo anterior y queda fuera de este cambio.
+
+Caja: incidente de tablas vacias y recuperacion
+----------------------------------------------
+
+- Se identificaron DOS problemas distintos. No presentar la recuperacion de
+  Transferencias sistema como recuperacion de Transferencias Mercado Pago.
+- Transferencias sistema: un guardado diferido capturaba la fecha antigua,
+  pero leia las filas vivas despues de cambiar de dia. Eso movia filas a otra fecha.
+- Se corrigio queueSystemTableSave para capturar fecha, filas y diferencias
+  antes del temporizador; persistSystemTable rechaza IDs importados cuya fecha
+  inicial YYYY-MM-DD| no coincide con la fecha que se intenta guardar.
+- Se recuperaron 671 filas de caja_transferencias_sistema en Supabase a la
+  fecha identificada por su ID. Se comprobaron todos los campos de negocio;
+  solo cambiaron fecha y metadatos de sincronizacion. Se notificaron 19 fechas.
+- Evidencia original: .codex-staging\caja-fechas-recovery-20261001\filas-antes.json.
+  Resultados: resultado-<fecha>-<inicio>.json en esa carpeta.
+  Esta recuperacion YA se ejecuto: no repetirla sin revisar el estado actual.
+- El 29/09 recupero $3.510.823,01 en Transferencias sistema. Se verifico en el
+  navegador cambiar de dia, salir al menu y volver con datos visibles.
+- Se corrigio la hidratacion de cache parcial y la recarga inicial de datos
+  manuales aunque las versiones de Supabase no hubieran cambiado.
+- Transferencias Mercado Pago: saveState mezclaba persistencia local y envio
+  a Firebase; navegar rapidamente podia enviar una tabla aun vacia mientras
+  se cargaba. El documento seguia existiendo, pero transfers quedaba vacio.
+- En la consulta del 01/10, del 15/09 al 25/09 transfers estaba vacio en
+  control_caja_manual. El 14/09 conservaba 21 movimientos; se verifico volver
+  a ese dia y que navegar no cambiara su documento remoto.
+- PENDIENTE: recuperar las transferencias manuales del 15 al 25. No se hallo
+  una copia en control_caja_estados para ese rango. Se pregunto por otra PC
+  o un respaldo; no hubo respuesta al cerrar esta revision.
+- Si otra PC conserva esas filas, NO recargar Caja ni borrar su almacenamiento
+  antes de preservar la copia. No inventar movimientos ni reconstruir Mercado
+  Pago usando ventas SQL: son datos distintos.
+
+Caja: protecciones vigentes y limites de validacion
+-------------------------------------------------
+
+- switchCajaDate persiste solo en local; ya no llama a saveState.
+  Los caminos de focusout sin edicion tambien persisten solo en local.
+- Se quitaron publicaciones automaticas desde loadRemoteState cuando faltaba
+  el registro remoto o estaba vacio, y desde loadSummaryManualState cuando
+  no existia el documento de totales en Firebase.
+- Los guardados manuales requieren haber cargado Firebase para esa fecha,
+  comparan con la instantanea cargada y envian solo los campos modificados.
+  Navegar o cargar cache no es una edicion y no debe generar escrituras.
+- writeCajaFirebaseChanges centraliza las escrituras de los datos manuales
+  y totales mediante transacciones Firestore. Antes de escribir compara los
+  campos afectados con la instantanea remota leida. Si otra PC los cambio,
+  bloquea la escritura, conserva los cambios locales y muestra un aviso.
+- Los guardados de un mismo documento se serializan. Los temporizadores son
+  independientes por fecha; revertir un cambio cancela el guardado pendiente.
+  La unificacion de filas no debe eludir esta proteccion con un .set directo.
+- preserveCajaManualLocalCopy conserva hasta tres copias locales con datos
+  por fecha bajo corralon_control_caja_v1_manual_respaldo_<fecha>.
+  Estas copias son locales, no se publican automaticamente, no tienen un boton
+  de restauracion implementado y no recuperan datos ya perdidos previamente.
+- Pruebas con funciones reales extraidas de caja.html y Firebase simulado:
+  conflictos externos bloqueados sin escritura, editar efectivo conserva
+  transferencias, guardados propios consecutivos, falta de carga/sin cambio
+  no escribe, revertir cancela, temporizadores independientes por fecha.
+  Sintaxis JavaScript y git diff --check correctos.
+- La ultima ampliacion de protecciones se valido con simulaciones; no se hizo
+  una escritura real en Firebase para probarla ni se publicaron estos cambios.
+  No afirmar que todas las otras PCs ya estan usando el codigo corregido.
+
+Otros cambios recientes y criterios
+----------------------------------
+
+- Facturacion: la busqueda de descripcion prioriza que la primera palabra del
+  filtro coincida con la primera palabra del articulo, manteniendo el resto
+  de criterios de coincidencia. Ejemplo: mochila ferrum muestra primero MOCHILA.
+- Se limito el alto disponible de la tabla de articulos de facturacion para
+  que muchas filas generen scroll dentro de la tabla y no expandan la pantalla.
+  Esos cambios tuvieron comprobaciones de codigo; no afirmar prueba visual completa.
+- El importador local de articulos excluye suspendidos en SQL y vuelve a
+  comprobar que el articulo siga activo al aplicar. Archivo CorralonWebServer.cs.
+  Se probo que 008073 y 002860 no aparezcan como activos y se rechace 002860.
+- Hay modificaciones y archivos locales de tareas anteriores. Conservarlos.
+  No actualizar manualmente version-web.json ni versiones de paginas; el flujo
+  Subir a GitHub sigue siendo quien administra la publicacion y sus versiones.
