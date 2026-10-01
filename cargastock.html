@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.23"></script>
+<script src="corralon-system.js?v=1.0.24"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1337,23 +1337,26 @@ function isGreen(row) {
 }
 async function repairUnmatchedIndexRows() {
   const repairArticle = window.CorralonSystem?.catalog?.repairArticle;
-  if (!provider || typeof repairArticle !== 'function') return;
+  if (!provider || typeof repairArticle !== 'function') return [];
+  const repaired = [];
   const candidates = [...new Set(rowsData
     .filter((row) => !isBlankStockRow(row) && !isGreen(row))
-    .map((row) => String(row.codigo || '').trim())
+    .map((row) => String(row.idart || stockArticleForRow(row)?.idart || '').trim())
     .filter(Boolean))]
     .filter((code) => !indexCodeRepairsAttempted.has(code))
     .slice(0, 10);
-  if (!candidates.length) return;
+  if (!candidates.length) return repaired;
   for (const code of candidates) {
     indexCodeRepairsAttempted.add(code);
     try {
-      await repairArticle(code);
+      const article = await repairArticle(code);
+      if (article) repaired.push(article);
     } catch (error) {
       indexCodeRepairsAttempted.delete(code);
       console.warn(`No se pudo reparar el artículo ${code}`, error);
     }
   }
+  return repaired;
 }
 function stockCostOptionsActive() {
   return Boolean(document.getElementById('stockCostOptions')?.open);
@@ -2308,7 +2311,7 @@ function navigationFields() {
     el.providerIva,
     ...Array.from(el.rows.querySelectorAll('[data-field][data-row][data-col]')),
     document.getElementById('copyBtn')
-  ].filter(Boolean);
+  ].filter(field => field && field.getClientRects().length > 0);
 }
 function isTextFullySelected(target) {
   if (!target) return false;
@@ -2438,7 +2441,7 @@ function placeCaretOnMouseClick(target, event) {
 }
 function moveTableNavigation(cell, rowDelta, colDelta) {
   const position = editableCellPosition(cell);
-  const columns = [0, 7, 1, 2, 3, 4, 5, 6];
+  const columns = stockCostOptionsActive() ? [0, 7, 1, 2, 3, 4, 5, 6] : [0, 7, 1, 2, 3, 6];
   const nextCol = colDelta ? columns[columns.indexOf(position.col) + colDelta] : position.col;
   const next = editableCellAt(position.row + rowDelta, nextCol);
   return focusNavigationTarget(next);
@@ -2613,6 +2616,7 @@ function render() {
   if (stockTableRendering) return;
   stockTableRendering = true;
   try {
+  document.body.classList.toggle('stock-basic-columns', !stockCostOptionsActive());
   document.querySelector('.foot-totals').hidden = !stockCostOptionsActive();
   ensureTrailingBlankRow();
   const view = rowsData;
@@ -3445,7 +3449,7 @@ function applyIndexCodesDelta(changedRows = [], removedCodes = [], meta = {}) {
   el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos listos · ${changed.length + removed.length} cambios aplicados`;
   render();
 }
-async function loadIndexCodes(providedList = null, providedMeta = {}) {
+async function loadIndexCodes(providedList = null, providedMeta = {}, rebuild = false) {
   const generation = ++indexCodesLoadGeneration;
   indexCodesLoading = true;
   el.status.textContent = 'Cargando lista de index...';
@@ -3465,7 +3469,7 @@ async function loadIndexCodes(providedList = null, providedMeta = {}) {
     const sharedLoader = window.CorralonSystem?.catalog?.load;
     if (!list.length && typeof progressiveLoader === 'function') {
       progressive = await progressiveLoader({ fallback: true });
-      const canValidateFromLocalCache = cachedIndexReady
+      const canValidateFromLocalCache = !rebuild && cachedIndexReady
         && progressive?.fromCache
         && Number(progressive.version || 0) > 0
         && Number(progressive.version) === Number(indexCodesCacheVersion)
@@ -3486,7 +3490,7 @@ async function loadIndexCodes(providedList = null, providedMeta = {}) {
       if (!url) throw new Error('No hay lista publicada');
       list = await fetchJson(url);
     }
-    const cachedVersionMatches = cachedIndexReady
+    const cachedVersionMatches = !rebuild && cachedIndexReady
       && progressive?.fromCache
       && Number(progressive.version || 0) > 0
       && Number(progressive.version) === Number(indexCodesCacheVersion);
@@ -3537,6 +3541,7 @@ async function loadIndexCodes(providedList = null, providedMeta = {}) {
       indexCodeDescriptions = new Map();
       el.status.textContent = 'No pude cargar codigos de index';
     }
+    if (rebuild) throw error;
   } finally {
     if (generation === indexCodesLoadGeneration) indexCodesLoading = false;
   }
@@ -4747,13 +4752,12 @@ function stockArticleForRow(row) {
   if (!row) return null;
   let article = stockSqlById.get(String(row.idart || ''));
   if (article && !String(article.codProv || '').trim() && codeKey(row.codigo) === codeKey(article.idart)) row.codigo = '';
-  if (article && codeKey(row.codigo) !== codeKey(article.codProv)) article = null;
   if (!article && row.codigo) {
     const matches = stockMatchesForRow(row);
     if (matches.length === 1) article = matches[0];
   }
   if (article) { row.idart = String(article.idart); row.stock = Number(article.stock || 0); }
-  else { row.idart = ''; row.stock = null; }
+  else if (stockSqlArticles.length) { row.stock = null; }
   return article;
 }
 function stockSqlArticlesForProvider() {
@@ -5480,9 +5484,14 @@ el.recalculateContextBtn.addEventListener('click', async () => {
   closeTableContextMenu();
   el.recalculateContextBtn.disabled = true;
   try {
-    await loadIndexCodes();
-    await repairUnmatchedIndexRows();
+    await loadIndexCodes(null, {}, true);
+    indexCodeRepairsAttempted.clear();
+    const repaired = await repairUnmatchedIndexRows();
+    if (repaired.length) applyIndexCodesDelta(repaired, [], {});
     show('Codigos de index recalculados');
+  } catch (error) {
+    console.warn(error);
+    show('No se pudo recalcular la lista de index');
   } finally {
     el.recalculateContextBtn.disabled = false;
   }
@@ -5570,6 +5579,8 @@ el.rows.addEventListener('input', (event) => {
   const row = rowsData[rowIndex];
   if (!row || row.id !== rowEl.dataset.id) return;
   const field = cell.dataset.field;
+  if (field === 'idart') return;
+  if (field === 'codigo' && codeKey(cell.textContent) !== codeKey(row.codigo)) row.idart = '';
   if (field === 'precio') {
     row.precio = moneyNumber(cell.textContent);
     row.precioOriginal = 0;

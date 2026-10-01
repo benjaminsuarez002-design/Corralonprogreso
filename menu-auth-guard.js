@@ -141,34 +141,28 @@
     } catch (_) {}
   }
 
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      if ([...document.scripts].some((script) => script.src === src)) {
-        resolve();
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-
+  let firestoreReady = null;
   async function firestoreDb() {
-    if (!window.firebase?.firestore) {
-      await loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
-      await loadScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js');
+    if (!firestoreReady) {
+      // El guard no modifica window.firebase ni compite con los scripts compat
+      // de la página. Todas las validaciones esperan la misma inicialización.
+      firestoreReady = Promise.all([
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')
+      ]).then(([apps, firestore]) => {
+        const name = 'corralon-menu-auth-guard';
+        const app = apps.getApps().find(item => item.name === name) || apps.initializeApp(firebaseConfig, name);
+        return { ...firestore, db: firestore.getFirestore(app) };
+      }).catch(error => { firestoreReady = null; throw error; });
     }
-    if (!window.firebase.apps.length) window.firebase.initializeApp(firebaseConfig);
-    return window.firebase.firestore();
+    return firestoreReady;
   }
 
   async function getRemoteUser(id) {
-    const db = await firestoreDb();
-    const doc = await db.collection(USERS_COLLECTION).doc(id).get();
-    if (!doc.exists) return null;
-    return normalizeUser({ id: doc.id, ...doc.data() });
+    const api = await firestoreDb();
+    const snapshot = await api.getDoc(api.doc(api.db, USERS_COLLECTION, id));
+    if (!snapshot.exists()) return null;
+    return normalizeUser({ id: snapshot.id, ...snapshot.data() });
   }
 
   async function validate() {
@@ -195,8 +189,8 @@
       saveActiveUser(user, persistent, temporary);
       window.dispatchEvent(new CustomEvent('menu-user-validated', { detail: { user } }));
       try {
-        const db = await firestoreDb();
-        db.collection(USERS_COLLECTION).get().then((snap) => {
+        const api = await firestoreDb();
+        api.getDocs(api.collection(api.db, USERS_COLLECTION)).then((snap) => {
           const users = snap.docs.map((item) => normalizeUser({ id: item.id, ...item.data() }));
           if (users.length) localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(users));
         }).catch(() => {});

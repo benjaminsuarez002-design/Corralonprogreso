@@ -56,6 +56,16 @@ internal static class FacturacionCopiaApi
     {
         if (!TicketPrinters().Contains(printer))
             throw new InvalidOperationException("La ticketera elegida no está instalada en esta PC.");
+        // Una cola local con puerto UNC añade un monitor intermedio que puede
+        // quedar bloqueado. Abrir directamente la impresora compartida evita
+        // esa cola y conserva la selección que ya tiene cada puesto.
+        string destination = printer;
+        using (var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Print\Printers\" + printer))
+        {
+            string port = key == null ? null : key.GetValue("Port") as string;
+            if (!String.IsNullOrWhiteSpace(port) && port.StartsWith(@"\\", StringComparison.Ordinal) && port.IndexOf(',') < 0)
+                destination = port;
+        }
         byte[] png;
         try { png = Convert.FromBase64String(pngBase64); }
         catch { throw new InvalidOperationException("La imagen del ticket no es válida."); }
@@ -97,7 +107,7 @@ internal static class FacturacionCopiaApi
                 }
                 output.Write(new byte[] { 0x1B, 0x64, 0x03, 0x1D, 0x56, 0x00 }, 0, 6); // feed + cut
                 IntPtr handle;
-                if (!OpenPrinter(printer, out handle, IntPtr.Zero))
+                if (!OpenPrinter(destination, out handle, IntPtr.Zero))
                     throw new InvalidOperationException("Windows no pudo abrir la ticketera.");
                 try
                 {
@@ -555,6 +565,22 @@ internal static class FacturacionCopiaApi
         if (!Decimal.TryParse(Text(value), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out result)) throw new InvalidOperationException("Importe o cantidad inválida.");
         return result;
     }
+    private static decimal StockNumber(object value)
+    {
+        // SQL real llega como Single. Convertir primero a Double conserva sus
+        // bits; Convert.ToDecimal(Single) redondea a siete cifras significativas.
+        if (value is float) return Convert.ToDecimal((double)(float)value);
+        return Convert.ToDecimal(value);
+    }
+    private static decimal StoredStock(decimal value)
+    {
+        return StockNumber((float)value);
+    }
+    private static bool StockMatches(object actual, decimal expected)
+    {
+        return actual != null && actual != DBNull.Value &&
+            Math.Abs(StockNumber(actual) - (actual is float ? StoredStock(expected) : expected)) <= .0001m;
+    }
     private static int Id(object value)
     {
         int result;
@@ -977,7 +1003,7 @@ internal static class FacturacionCopiaApi
                     decimal margin = cost == 0 ? 0 : price / cost - 1;
                     lines.Add(new object[] { id, qty, price, amount, tax, gain, iva, discount / 100m, cost,
                         Limited(Value(row, "descripcion"), 150, "Descripción"), lineNet / qty, list,
-                        basePrice > 0 ? basePrice : price, price / rate, Convert.ToDecimal(article[4]), margin, article[3] == DBNull.Value ? null : article[3],
+                        basePrice > 0 ? basePrice : price, price / rate, StockNumber(article[4]), margin, article[3] == DBNull.Value ? null : article[3],
                         article[5] != DBNull.Value && Convert.ToBoolean(article[5]) });
                 }
                 if (gross <= 0 || gross > 1000000000) throw new InvalidOperationException("Total fuera de rango.");
@@ -1167,12 +1193,12 @@ internal static class FacturacionCopiaApi
                     string id = (string)line[0];
                     if (!(bool)line[17]) continue;
                     if (!stockExpected.ContainsKey(id)) stockExpected[id] = Convert.ToDecimal(line[14]);
-                    if (!quotation) stockExpected[id] -= Convert.ToDecimal(line[1]) * sign;
+                    if (!quotation) stockExpected[id] = StoredStock(stockExpected[id] - Convert.ToDecimal(line[1]) * sign);
                 }
                 foreach (var expected in stockExpected)
                 {
                     object actual = Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", expected.Key, branch);
-                    if (actual == null || actual == DBNull.Value || Math.Abs(Convert.ToDecimal(actual) - expected.Value) > .0001m)
+                    if (!StockMatches(actual, expected.Value))
                         throw new InvalidOperationException("La actualización de stock no coincide para " + expected.Key + ".");
                 }
                 if (dryRun) tx.Rollback(); else tx.Commit();
@@ -1295,7 +1321,7 @@ internal static class FacturacionCopiaApi
                 var found = RowsTx(connection, tx, "SELECT a.IDArt,a.IDArtProv,a.[Descripción] AS descripcion,a.UniMed,ISNULL(a.PrecioCpraSI,0) AS precioCosto,ISNULL(s.StockAct,0) AS stock FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s ON s.IDArt=a.IDArt AND s.IDSuc=@p2 WHERE a.Suspendido=0 AND ((@p3<>'' AND a.IDArt=@p3) OR (@p3='' AND a.IDProveedor=@p0 AND LTRIM(RTRIM(a.IDArtProv))=@p1))", proveedor, codigo, sucursal, id);
                 if (found.Count != 1) throw new InvalidOperationException("El código " + codigo + " no tiene una coincidencia única en SQL.");
                 id = Text(found[0]["IDArt"]); if (!ids.Add(id)) throw new InvalidOperationException("El artículo " + id + " está repetido. Unificá sus cantidades.");
-                decimal before = Convert.ToDecimal(found[0]["stock"]), qty = Math.Round(Number(Value(row, "cantidad")), 4, MidpointRounding.AwayFromZero);
+                decimal before = StockNumber(found[0]["stock"]), qty = Math.Round(Number(Value(row, "cantidad")), 4, MidpointRounding.AwayFromZero);
                 if (Value(row, "conteo") != null)
                 {
                     if (movimiento != 35) throw new InvalidOperationException("El conteo de inventario requiere Ajuste de Stock.");
@@ -1330,11 +1356,11 @@ internal static class FacturacionCopiaApi
                 foreach (var line in lines)
                 {
                     Execute(connection, tx, "IF NOT EXISTS (SELECT 1 FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1) INSERT dbo.ArtsStock (IDArt,IDSuc,StockAct) VALUES (@p0,@p1,0)", line["idart"], destino);
-                    decimal destinationBefore = Convert.ToDecimal(Scalar(connection, tx, "SELECT ISNULL(StockAct,0) FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], destino));
+                    decimal destinationBefore = StockNumber(Scalar(connection, tx, "SELECT ISNULL(StockAct,0) FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], destino));
                     Execute(connection, tx, "INSERT dbo.RecibosTS (IDRecibo,IDArt,Cantidad,PrecioUni,Importe,Stock,UniMed) VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6)", destinationReceipt, line["idart"], line["cantidad"], line["precioUnitario"], line["importe"], destinationBefore, line["unidad"] ?? DBNull.Value);
                     if (Execute(connection, tx, "UPDATE dbo.ArtsStock SET StockAct=ISNULL(StockAct,0)+@p0 WHERE IDArt=@p1 AND IDSuc=@p2", line["cantidad"], line["idart"], destino) != 1) throw new InvalidOperationException("Stock destino no único.");
-                    decimal destinationAfter = Convert.ToDecimal(Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], destino));
-                    if (Math.Abs(destinationAfter - destinationBefore - Convert.ToDecimal(line["cantidad"])) > .0001m) throw new InvalidOperationException("El stock de destino no coincide con la transferencia.");
+                    object destinationAfter = Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], destino);
+                    if (!StockMatches(destinationAfter, destinationBefore + Convert.ToDecimal(line["cantidad"]))) throw new InvalidOperationException("El stock de destino no coincide con la transferencia.");
                 }
                 Execute(connection, tx, "UPDATE dbo.RecibosTP SET IDRecDes=@p0 WHERE IDRecibo=@p1", destinationReceipt, receipt);
                 Execute(connection, tx, "UPDATE dbo.TipoComprobantes SET UltNroComp=@p0 WHERE IDComprob=58", destinationNumber);
@@ -1342,8 +1368,8 @@ internal static class FacturacionCopiaApi
             if (Convert.ToInt32(Scalar(connection, tx, "SELECT COUNT(*) FROM dbo.RecibosTS WHERE IDRecibo=@p0", receipt)) != lines.Count) throw new InvalidOperationException("El movimiento no guardó todos sus artículos.");
             if (stockSign != 0) foreach (var line in lines)
             {
-                decimal actual = Convert.ToDecimal(Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], sucursal));
-                if (Math.Abs(actual - Convert.ToDecimal(line["stockDespues"])) > .0001m) throw new InvalidOperationException("El stock final no coincide para " + line["idart"]);
+                object actual = Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", line["idart"], sucursal);
+                if (!StockMatches(actual, Convert.ToDecimal(line["stockDespues"]))) throw new InvalidOperationException("El stock final no coincide para " + line["idart"]);
             }
             tx.Commit();
             return new { ok = true, yaCargado = false, idRecibo = receipt, numeroMovimiento = number, total, articulos = lines };
