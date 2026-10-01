@@ -23,11 +23,27 @@ function initializeCashHistory(totalsMode) {
     .cash-history-totals{display:flex;gap:24px;justify-content:flex-end;flex-wrap:wrap;padding:14px 16px;font-weight:800}
     #cashHistoryModal [role=status]{color:#555}
     #cashHistoryModal [hidden]{display:none!important}
+    #cashTotalsModal .cash-history-totals{display:block;padding:10px 16px;flex:none;max-height:34vh;overflow:auto}
+    .cash-totals-summary{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
+    .cash-totals-summary caption{text-align:left;padding-bottom:5px;font-weight:700}
+    .cash-totals-summary th,.cash-totals-summary td{border:1px solid var(--borde,#ccc);padding:4px 7px}
+    .cash-totals-summary th{text-align:left;background:var(--panel-soft,#eee);font-weight:600}
+    .cash-totals-summary td{text-align:right;white-space:nowrap}
+    .cash-totals-summary tfoot .cash-totals-main th,.cash-totals-summary tfoot .cash-totals-main td{font-weight:800;background:#e7f1ea}
+    .cash-totals-summary tfoot .cash-totals-separate th,.cash-totals-summary tfoot .cash-totals-separate td{background:#f4f4f4}
     .cash-history-print-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .cash-history-check{width:30px;text-align:center}
     @media(max-width:650px){#cashHistoryModal{padding:6px}.cash-history-filters{gap:8px}.cash-history-date input[type=text]{width:125px}.cash-history-totals{gap:12px}}
   `;
   if (totalsMode) style.textContent = style.textContent.replaceAll('cashHistory', 'cashTotals');
+  if (totalsMode) style.textContent += `
+    #cashTotalsModal .modal{
+      zoom:1.25;
+      width:min(1400px,calc(96vw / (var(--ui-scale,1) * 1.25)));
+      max-height:calc(94vh / (var(--ui-scale,1) * 1.25));
+    }
+    #cashTotalsModal .cash-history-table{min-height:0}
+  `;
   document.head.appendChild(style);
   const popup = document.createElement('div');
   popup.id = 'cashHistoryModal'; popup.className = 'modal-bg';
@@ -75,10 +91,19 @@ function initializeCashHistory(totalsMode) {
   function drawTotals() {
     const rows = printMode ? printableRows() : reportRows, totals = historyTotals(rows);
     if (totalsMode) {
-      get('cashHistoryTotals').innerHTML = `<span>${rows.length} registros${printMode ? ' seleccionados' : ''}</span>` + totalColumns.map(([key,label]) => `<span>${label}: ${formatMoney(rows.reduce((sum,row) => sum + row[key],0))}</span>`).join('');
+      get('cashHistoryTotals').innerHTML = totalSummaryTable(rows);
       return;
     }
     get('cashHistoryTotals').innerHTML = `<span>${rows.length} ${printMode ? 'seleccionados para imprimir' : 'movimientos'}</span><span class="cash-movement-positive">Ingresos: ${formatMoney(totals.income)}</span><span class="cash-movement-negative">Egresos: ${formatMoney(totals.expense)}</span><span>Saldo: ${formatMoney(totals.balance)}</span>`;
+  }
+  function totalSummaryTable(rows) {
+    const amount = key => escapeHtml(formatMoney(rows.reduce((sum,row) => sum + Number(row[key] || 0),0)));
+    const media = totalColumns.filter(([key]) => !['daily','accountCredit','vouchers'].includes(key));
+    let body = '';
+    for(let index=0;index<media.length;index+=3){
+      body += '<tr>' + media.slice(index,index+3).map(([key,label]) => `<th scope="row">${escapeHtml(label)}</th><td>${amount(key)}</td>`).join('') + '</tr>';
+    }
+    return `<table class="cash-totals-summary"><caption>${rows.length} registros${printMode ? ' seleccionados' : ''} · Totales del período</caption><thead><tr>${'<th>Medio</th><th>Total</th>'.repeat(3)}</tr></thead><tbody>${body}</tbody><tfoot><tr class="cash-totals-main"><th colspan="5" scope="row">Total movimientos del día</th><td>${amount('daily')}</td></tr><tr class="cash-totals-separate"><th colspan="2" scope="row">Cta. Cte. (aparte)</th><td>${amount('accountCredit')}</td><th colspan="2" scope="row">Vales (aparte)</th><td>${amount('vouchers')}</td></tr></tfoot></table>`;
   }
   function printHistory() {
     if (totalsMode && !cajaTotalsAllowed) return;
@@ -92,8 +117,8 @@ function initializeCashHistory(totalsMode) {
     if (totalsMode) {
       const headings = '<th>Fecha</th><th>Sucursal</th>' + totalColumns.map(([,label]) => `<th>${label}</th>`).join('');
       const body = rows.map(row => `<tr>${totalRowCells(row)}</tr>`).join('');
-      const footer = totalColumns.map(([key,label]) => `<span>${label}: ${escapeHtml(formatMoney(rows.reduce((sum,row) => sum + row[key],0)))}</span>`).join('');
-      page.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Totales entre fechas</title><style>@page{size:A4 landscape;margin:12mm}body{font:11px Arial}table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:5px}thead{display:table-header-group}.money{text-align:right;white-space:nowrap}tr{break-inside:avoid}footer{display:flex;gap:15px;flex-wrap:wrap;margin-top:15px;font-weight:bold}</style></head><body><h1>Corralón Progreso · Totales entre fechas</h1><p>${escapeHtml(printRange)}</p><table><thead><tr>${headings}</tr></thead><tbody>${body}</tbody></table><footer>${footer}</footer></body></html>`);
+      const footer = totalSummaryTable(rows);
+      page.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Totales entre fechas</title><style>@page{size:A4 landscape;margin:12mm}body{font:11px Arial}table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:5px}thead{display:table-header-group}.money{text-align:right;white-space:nowrap}tr{break-inside:avoid}footer{display:block;margin-top:15px;font-weight:bold;break-inside:avoid}.cash-totals-summary{font-size:10px;table-layout:fixed}.cash-totals-summary caption{text-align:left;margin-bottom:5px}.cash-totals-summary th{text-align:left;background:#eee}.cash-totals-summary td{text-align:right;white-space:nowrap}.cash-totals-main th,.cash-totals-main td{font-weight:bold;background:#e7f1ea}</style></head><body><h1>Corralón Progreso · Totales entre fechas</h1><p>${escapeHtml(printRange)}</p><table><thead><tr>${headings}</tr></thead><tbody>${body}</tbody></table><footer>${footer}</footer></body></html>`);
       page.onload = () => { page.focus(); page.print(); }; page.document.close(); return;
     }
     const body = rows.map(row => `<tr><td>${escapeHtml(formatDateLabel(row.date).replace(' - Hoy', ''))}</td><td>${escapeHtml(row.hour)}</td><td>${escapeHtml(row.id)}</td><td>${escapeHtml(row.branch)}</td><td class="note">${escapeHtml(row.note)}</td><td class="money">${row.income ? escapeHtml(formatMoney(row.income)) : ''}</td><td class="money">${row.expense ? escapeHtml(formatMoney(row.expense)) : ''}</td></tr>`).join('');

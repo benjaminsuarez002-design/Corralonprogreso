@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.27"></script>
+<script src="corralon-system.js?v=1.0.28"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -373,7 +373,7 @@
   <section class="stock-footer">
     <div class="stock-inventory-tip">ⓘ Inventario: escribí '9 en Cantidad para indicar 9 unidades contadas.</div>
     <div class="stock-summary"><label>Nota (Observaciones del movimiento)<textarea id="stockIngresoNota" data-stock-header maxlength="300" rows="2"></textarea></label><label>Total unidades<output id="stockTotalUnits">0</output></label><label>Total<output id="stockTotalAmount">$ 0,00</output></label></div>
-    <div class="actions-bottom"><button id="compareStockBtn" type="button">Comparar</button><button id="copyBtn" type="button">Copiar</button><button id="stockConsultBtn" type="button">Consultar</button><button id="stockCancelBtn" type="button">Cancelar</button><button id="stockNewBtn" type="button">Nuevo</button><button id="stockPrevBtn" title="Movimiento anterior" type="button">‹</button><button id="stockNextBtn" title="Movimiento siguiente" type="button">›</button><button id="stockPrintBtn" type="button" hidden>Imprimir comprobante</button><button class="primary" id="confirmStockIngresoBtn" type="button">Confirmar ingreso en SQL</button><span class="stock-ingreso-message" id="stockIngresoMessage" role="status" aria-live="polite">Conectando con SQL…</span><div class="summary-pill" id="copySummary" hidden>0 listos para copiar</div></div>
+    <div class="actions-bottom"><button id="compareStockBtn" type="button">Comparar</button><button id="copyBtn" type="button">Copiar</button><button id="stockConsultBtn" type="button">Consultar</button><button id="stockCancelBtn" type="button">Cancelar</button><button id="stockNewBtn" type="button">Nuevo</button><button id="stockPrevBtn" title="Movimiento anterior" type="button">‹</button><button id="stockNextBtn" title="Movimiento siguiente" type="button">›</button><button id="stockPrintBtn" type="button" hidden>Imprimir comprobante</button><button class="primary" id="confirmStockIngresoBtn" type="button">Confirmar</button><span class="stock-ingreso-message" id="stockIngresoMessage" role="status" aria-live="polite">Conectando con SQL…</span><div class="summary-pill" id="copySummary" hidden>0 listos para copiar</div></div>
   </section>
   <section id="stockConsultPanel" class="stock-consult-panel" hidden></section>
   <section id="stockMovementPopup" class="stock-movement-popup" role="dialog" aria-modal="true" aria-label="Detalle del movimiento de stock" hidden></section>
@@ -1331,6 +1331,10 @@ function selectedProviderIdentityKeys() {
 function isGreen(row) {
   const key = codeKey(row.codigo);
   if (!key) return false;
+  if (stockSqlMeta) {
+    const matches = stockMatchesForRow(row);
+    return row.idart ? matches.some(article=>codeKey(article.idart)===codeKey(row.idart)) : matches.length===1;
+  }
   if (stockSqlArticles.length && stockArticleProviderFilterId() && !stockMatchesForRow(row).length) return false;
   const idart = codeKey(row.idart);
   if (idart) {
@@ -4793,11 +4797,11 @@ function stockSqlArticlesForProvider() {
   const providerId = stockArticleProviderFilterId();
   return providerId ? stockSqlArticles.filter(article => Number(article.proveedor) === providerId) : stockSqlArticles;
 }
-function stockRebuildArticleOptions() {
+function stockRebuildArticleOptions(options = {}) {
   const providerKey = String(provider?.id_proveedor || '');
   if (stockField('stockFilterProvider').checked && providerKey) {
-    providerArticles = stockProviderJsonLists.get(providerKey) || [];
-    if (providerKey && !stockProviderJsonLists.has(providerKey) && stockProviderJsonLoading !== providerKey) loadProviderArticles(provider);
+    providerArticles = options.sqlOnly ? stockSqlArticles.filter(article=>Number(article.proveedor)===stockProviderId()) : stockProviderJsonLists.get(providerKey) || [];
+    if (!options.sqlOnly && providerKey && !stockProviderJsonLists.has(providerKey) && stockProviderJsonLoading !== providerKey) loadProviderArticles(provider);
   } else providerArticles = stockSqlArticles;
   articleProviderPage = null;
   articleProviderOptions = [];
@@ -4806,8 +4810,11 @@ function stockRebuildArticleOptions() {
   providerArticleSearch = new WeakMap();
   providerArticlesOrdered.forEach(item => providerArticleSearch.set(item,{text:norm(`${item.codProv || ''} ${item.idart || ''} ${item.descripcion || ''}`),code:codeKey(item.codProv),id:codeKey(item.idart)}));
 }
-async function stockRefreshSql() {
-  if (!stockSqlMeta || !stockField('stockIngresoSucursal').value) return;
+async function stockRefreshSql(options = {}) {
+  if (!stockSqlMeta || !stockField('stockIngresoSucursal').value) {
+    if(options.throwOnError)throw new Error('SQL no está conectado o falta seleccionar la sucursal.');
+    return;
+  }
   const seq = ++stockSqlLoadSeq;
   stockIngresoMessage('Consultando stock de la sucursal…');
   try {
@@ -4820,9 +4827,9 @@ async function stockRefreshSql() {
       const matches = stockSqlByCode.get(key) || []; matches.push(article); stockSqlByCode.set(key,matches);
     });
     rowsData.forEach(row => { stockArticleForRow(row); if (!stockConfirmed && row.conteo != null) row.cantidad = rawNumber(Number(row.conteo) - Number(row.stock || 0)); });
-    stockRebuildArticleOptions(); render(); saveRows();
+    stockRebuildArticleOptions(options); render(); saveRows();
     stockIngresoMessage(stockConfirmed ? 'SQL conectado · Comprobante confirmado' : 'SQL conectado · Borrador sin confirmar', 'ok');
-  } catch (error) { stockIngresoMessage(error.message,'error'); }
+  } catch (error) { stockIngresoMessage(error.message,'error'); if(options.throwOnError)throw error; }
 }
 function stockUpdateTotals() {
   const list = rowsData.filter(row => !isBlankStockRow(row));
@@ -4878,7 +4885,7 @@ async function stockIngresoCall(data, action) {
 function stockFreeze(value) {
   el.rows.inert = value; document.querySelectorAll('.stock-entry,.stock-provider,.toolbar').forEach(section => section.inert=value);
   stockField('confirmStockIngresoBtn').disabled=value;
-  stockField('confirmStockIngresoBtn').textContent=stockConfirmed?'Ingreso confirmado':stockIngresoBusy?'Confirmando…':'Confirmar ingreso en SQL';
+  stockField('confirmStockIngresoBtn').textContent=stockConfirmed?'Ingreso confirmado':stockIngresoBusy?'Confirmando…':'Confirmar';
   stockField('confirmStockIngresoBtn').classList.toggle('stock-confirmed',stockConfirmed);
   ['stockNewBtn','stockCancelBtn','stockConsultBtn','stockPrevBtn','stockNextBtn'].forEach(id => stockField(id).disabled=stockIngresoBusy);
   if (stockWorkspaceReady) stockWorkspaceIndicator();
@@ -4896,7 +4903,9 @@ async function confirmStockIngreso() {
     stockIngresoBusy=true; stockFreeze(true); stockIngresoMessage('Verificando y confirmando el movimiento en SQL…');
     const request={...data,id:pending.id};
     const preview=await stockIngresoCall(request,'previsualizar');
-    if (!preview.yaCargado && !window.confirm(`¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${data.articulos.length} artículos · Total ${money(preview.total)}`)) return;
+    const hasDocument = Number(data.idFactura)>0 || [data.numeroFactura,data.numeroRemito].some(value=>String(value||'').replace(/[^a-z0-9]/gi,'').replace(/^0+$/,'').length>0);
+    const documentWarning = hasDocument ? '' : 'Este movimiento no tiene factura ni remito vinculado.\nPodés continuar igualmente.\n\n';
+    if (!preview.yaCargado && !window.confirm(`${documentWarning}¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${data.articulos.length} artículos · Total ${money(preview.total)}`)) return;
     pending.status='uncertain'; localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));
     const result=preview.yaCargado ? preview : await stockIngresoCall(request,'confirmar');
     pending.status='confirmed';pending.numeroMovimiento=result.numeroMovimiento;pending.idRecibo=result.idRecibo;pending.resultado=result.articulos;localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));
@@ -4945,7 +4954,7 @@ function stockMovementFields() {
     stockHeaderSave();
   }
   if(Number(stockField('stockTipoMovimiento').value)!==35) rowsData.forEach(row=>row.conteo=null);
-  stockField('confirmStockIngresoBtn').textContent=transfer ? 'Confirmar transferencia en SQL' : 'Confirmar ingreso en SQL';
+  stockField('confirmStockIngresoBtn').textContent='Confirmar';
   stockRebuildArticleOptions();
 }
 async function stockRefreshRelations() {
@@ -5596,15 +5605,11 @@ el.recalculateContextBtn.addEventListener('click', async () => {
   closeTableContextMenu();
   el.recalculateContextBtn.disabled = true;
   try {
-    await stockRefreshSql();
-    await loadIndexCodes(null, {}, true);
-    indexCodeRepairsAttempted.clear();
-    const repaired = await repairUnmatchedIndexRows(true);
-    if (repaired.length) applyIndexCodesDelta(repaired, [], {});
-    show('Codigos de index recalculados');
+    await stockRefreshSql({sqlOnly:true,throwOnError:true});
+    show('Artículos y coincidencias recalculados desde SQL');
   } catch (error) {
     console.warn(error);
-    show('No se pudo recalcular la lista de index');
+    show('No se pudo recalcular desde SQL');
   } finally {
     el.recalculateContextBtn.disabled = false;
   }
