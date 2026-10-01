@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.25"></script>
+<script src="corralon-system.js?v=1.0.26"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1709,6 +1709,7 @@ function pickProviderById(id) {
   if (!found) return false;
   setProvider(found);
   closeProviderList();
+  focusNavigationTarget(stockField('stockIngresoFactura'));
   return true;
 }
 function selectedProvider() {
@@ -2310,6 +2311,7 @@ function moveProviderActive(step) {
   items[next].scrollIntoView({ block: 'nearest' });
 }
 function focusNextToolbarField(from, direction = 1) {
+  if (stockHeaderFlowFields().includes(from)) return stockMoveHeaderFocus(from, direction);
   const fields = navigationFields();
   const index = fields.indexOf(from);
   const next = fields[Math.max(0, Math.min(fields.length - 1, index + direction))];
@@ -5088,19 +5090,24 @@ stockHeaderOptions.addEventListener('click',event=>{
   const button=event.target.closest('[data-stock-header-option]'),select=stockHeaderSelect;
   if(!button || button.disabled || !select)return;
   const option=select.options[Number(button.dataset.stockHeaderOption)];
-  select.value=option.value;stockCloseHeaderOptions();select.dispatchEvent(new Event('change',{bubbles:true}));select.focus();
+  select.value=option.value;stockCloseHeaderOptions();select.dispatchEvent(new Event('change',{bubbles:true}));
+  if(select.id==='stockIngresoSucursal'||select.id==='stockTipoMovimiento')stockMoveHeaderFocus(select,1);else select.focus();
 });
 document.querySelectorAll('#stockIngresoSucursal,#stockTipoMovimiento,#stockDestino').forEach(select=>{
   if(select.hidden)return;
   select.addEventListener('pointerdown',event=>{
     if(event.button!==0 || select.disabled || stockConfirmed || stockIngresoBusy)return;
+    const wasOpen=stockHeaderSelect===select && !stockHeaderOptions.hidden;
     event.preventDefault();select.focus();
-    if(stockHeaderSelect===select && !stockHeaderOptions.hidden)stockCloseHeaderOptions();else stockOpenHeaderOptions(select);
+    if(wasOpen)stockCloseHeaderOptions();else if(stockHeaderSelect!==select || stockHeaderOptions.hidden)stockOpenHeaderOptions(select);
   });
+  select.addEventListener('focus',()=>stockOpenHeaderOptions(select));
   select.addEventListener('keydown',event=>{
-    if(!['ArrowDown','ArrowUp','Enter',' ','Escape'].includes(event.key))return;
+    if(!['ArrowDown','ArrowUp','Enter',' ','Escape','F4'].includes(event.key))return;
     event.preventDefault();
     if(event.key==='Escape'){stockCloseHeaderOptions();return;}
+    if(event.key==='F4'){if(stockHeaderSelect===select && !stockHeaderOptions.hidden)stockCloseHeaderOptions();else stockOpenHeaderOptions(select);return;}
+    if(event.key==='Enter' && stockHeaderOptions.hidden && stockHeaderFlowFields().includes(select)){stockMoveHeaderFocus(select,1);return;}
     if(stockHeaderSelect!==select || stockHeaderOptions.hidden){stockOpenHeaderOptions(select);return;}
     const buttons=[...stockHeaderOptions.querySelectorAll('button')];
     if(event.key==='Enter'||event.key===' '){buttons[stockHeaderOptionIndex]?.click();return;}
@@ -5120,6 +5127,8 @@ document.addEventListener('keydown',event=>{
     || Boolean(articleProviderInputTimer);
   if(!open)return;
   event.preventDefault();event.stopImmediatePropagation();
+  const headerField=event.target.closest?.('[data-stock-flow]');
+  if(headerField && headerField.dataset.stockFocusValue!==undefined){headerField.value=headerField.dataset.stockFocusValue;stockHeaderSave();}
   stockCloseHeaderOptions();stockField('stockPurchaseList').hidden=true;
   closeProviderList();closeArticleProviderList();hideArticleProviderToggle();closePriceComparatorProviderList();
 },true);
@@ -5127,23 +5136,97 @@ document.querySelectorAll('[data-stock-header]').forEach(field=>field.addEventLi
 async function stockOpenPurchaseList() {
   const list=stockField('stockPurchaseList');
   if(stockConfirmed || stockIngresoBusy || stockField('stockCompra').disabled)return;
+  stockPurchaseActive=-1;
   list.hidden=false;list.textContent='Cargando facturas pendientes…';
   await stockRefreshRelations();
   if(list.hidden)return;
   const options=[...stockField('stockCompra').options].filter(option=>option.value);
   list.innerHTML='<div class="stock-purchase-head"><span>Nº factura</span><span>Fecha</span><span>Total</span></div>'+options.map(option=>`<button type="button" data-purchase="${escapeHtml(option.value)}"><span>${escapeHtml(option.dataset.number)}</span><span>${escapeHtml(option.dataset.date)}</span><span>${money(Number(option.dataset.total))}</span></button>`).join('')+(options.length?'':'<div class="stock-purchase-empty">No hay facturas pendientes de carga de stock.</div>');
 }
-stockField('stockIngresoFactura').addEventListener('click',stockOpenPurchaseList);
+stockField('stockIngresoFactura').addEventListener('click',()=>{if(stockField('stockPurchaseList').hidden)stockOpenPurchaseList();});
 stockField('stockPurchaseToggle').addEventListener('click',()=>{const list=stockField('stockPurchaseList');if(!list.hidden)list.hidden=true;else stockOpenPurchaseList();});
+stockField('stockPurchaseList').addEventListener('mousedown',event=>{
+  if(event.target.closest('[data-purchase]'))event.preventDefault();
+});
 stockField('stockPurchaseList').addEventListener('click',event=>{
   const button=event.target.closest('[data-purchase]');if(!button)return;
+  // El label que contiene el desplegable no debe volver a enfocar Factura al terminar el clic.
+  event.preventDefault();event.stopPropagation();
+  stockField('stockPurchaseList').hidden=true;
   stockField('stockCompra').value=button.dataset.purchase;
   stockField('stockCompra').dispatchEvent(new Event('change'));
-  stockField('stockPurchaseList').hidden=true;
 });
 document.addEventListener('click',event=>{if(!event.target.closest('.stock-purchase-fields'))stockField('stockPurchaseList').hidden=true;});
-stockField('stockIngresoFactura').addEventListener('keydown',event=>{if(event.key==='Escape')stockField('stockPurchaseList').hidden=true;if(event.key==='ArrowDown'){event.preventDefault();stockOpenPurchaseList();}});
-stockField('stockCompra').addEventListener('change',()=>{const option=stockField('stockCompra').selectedOptions[0];if(option?.dataset.number)stockField('stockIngresoFactura').value=option.dataset.number;stockHeaderSave();});
+let stockPurchaseActive = -1;
+stockField('stockIngresoFactura').addEventListener('keydown',event=>{
+  const list=stockField('stockPurchaseList');
+  if(event.key==='F4'){event.preventDefault();if(list.hidden)stockOpenPurchaseList();else list.hidden=true;return;}
+  if(!list.hidden && ['ArrowDown','ArrowUp','Enter'].includes(event.key)){
+    const buttons=[...list.querySelectorAll('[data-purchase]')];
+    if(event.key==='Enter'){
+      if(stockPurchaseActive>=0 && buttons[stockPurchaseActive]){event.preventDefault();buttons[stockPurchaseActive].click();}
+      return;
+    }
+    event.preventDefault();stockPurchaseActive=Math.max(0,Math.min(buttons.length-1,stockPurchaseActive+(event.key==='ArrowDown'?1:-1)));
+    buttons.forEach((button,index)=>button.setAttribute('aria-selected',String(index===stockPurchaseActive)));
+    buttons[stockPurchaseActive]?.scrollIntoView({block:'nearest'});
+  }
+});
+stockField('stockCompra').addEventListener('change',()=>{const option=stockField('stockCompra').selectedOptions[0];if(option?.dataset.number)stockField('stockIngresoFactura').value=option.dataset.number;stockHeaderSave();if(stockField('stockCompra').value)stockFocusFirstProviderCode();});
+
+function stockHasPurchaseInvoice() {
+  return Boolean(stockField('stockCompra').value || stockField('stockIngresoFactura').value.replace(/\D/g,'').replace(/^0+/,''));
+}
+function stockHeaderFlowFields() {
+  return [stockField('stockIngresoSucursal'),stockField('stockTipoMovimiento'),el.providerInput,
+    stockField('stockIngresoFactura'),stockField('stockRemito')];
+}
+function stockFocusFirstProviderCode() {
+  closeProviderList();stockCloseHeaderOptions();stockField('stockPurchaseList').hidden=true;
+  return focusNavigationTarget(editableCellAt(0,0));
+}
+function stockMoveHeaderFocus(from,direction=1) {
+  const fields=stockHeaderFlowFields();
+  const index=fields.indexOf(from);
+  if(index<0)return false;
+  if(direction>0 && (from.id==='stockRemito' || (from.id==='stockIngresoFactura' && stockHasPurchaseInvoice())))return stockFocusFirstProviderCode();
+  const next=fields[index+direction];
+  if(!next)return false;
+  closeProviderList();stockCloseHeaderOptions();stockField('stockPurchaseList').hidden=true;
+  return focusNavigationTarget(next);
+}
+stockHeaderFlowFields().forEach(field=>{
+  field.dataset.stockFlow='1';
+  field.addEventListener('focus',()=>{
+    field.dataset.stockFocusValue=field.value;
+    if(field.disabled || stockConfirmed || stockIngresoBusy)return;
+    if(field===el.providerInput){
+      stockCloseHeaderOptions();stockField('stockPurchaseList').hidden=true;openProviderList();
+    }else if(field.id==='stockIngresoFactura'){
+      closeProviderList();stockCloseHeaderOptions();
+      // Abrir después del clic que seleccionó el proveedor, para que ese clic no cierre la lista nueva.
+      queueMicrotask(()=>{
+        if(document.activeElement===field && stockField('stockPurchaseList').hidden)stockOpenPurchaseList();
+      });
+    }
+  });
+  field.addEventListener('change',event=>{
+    if(event.isTrusted && ['stockIngresoSucursal','stockTipoMovimiento'].includes(field.id))stockMoveHeaderFocus(field,1);
+  });
+  field.addEventListener('keydown',event=>{
+    if(event.defaultPrevented)return;
+    if(event.key==='Escape'){
+      event.preventDefault();event.stopPropagation();field.value=field.dataset.stockFocusValue??field.value;
+      field.dispatchEvent(new Event('change',{bubbles:true}));return;
+    }
+    if(!['Enter','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
+    if(event.key.startsWith('Arrow') && !field.matches('select') && !canNavigateWithArrow(field,event.key))return;
+    const direction=event.shiftKey||['ArrowUp','ArrowLeft'].includes(event.key)?-1:1;
+    if(stockMoveHeaderFocus(field,direction)){event.preventDefault();event.stopPropagation();}
+  });
+});
+FX.bindLinearNavigation({root:document.querySelector('.app'),selector:'[data-stock-flow]',
+  navigateLeftRight:true,smartCaret:true,selectOnAnyFocus:true,selectOnFirstPointerFocus:true});
 stockField('stockRelacionado').addEventListener('change',async()=>{if(!stockField('stockRelacionado').value)return;if(rowsData.some(row=>!isBlankStockRow(row))&&!window.confirm('¿Reemplazar las filas por las cantidades pendientes del comprobante?')){stockField('stockRelacionado').value='';return;}try{const result=await stockSqlGet('pendientes',{recibo:stockField('stockRelacionado').value});rowsData=(result.articulos||[]).map(line=>normalizeRow({idart:line.idart,codigo:line.codigo||'',descripcion:line.descripcion,cantidad:line.cantidad,precio:precioUnitarioDesdeFinal({},line.precioUnitario)}));render();saveRows();stockHeaderSave();}catch(error){stockIngresoMessage(error.message,'error');}});
 
 document.getElementById('compareStockBtn').addEventListener('click', openStockComparison);

@@ -52,7 +52,7 @@ function initializeCashHistory(totalsMode) {
   }
   document.body.appendChild(popup);
   const get = id => document.getElementById(id.replace('cashHistory', prefix));
-  const totalColumns = [ ['cash','Efectivo'], ['mercadoPago','Mercado Pago'], ['transfers','Transferencia'], ['lapos','Lapos'], ['getnet','Getnet'], ['providerTransfers','Trans a prov'], ['daily','Total Caja Diaria'] ];
+  const totalColumns = [ ['cash','Efectivo'], ['checks','Cheques'], ['mercadoPago','Mercado Pago'], ['transfers','Transferencia'], ['dollars','Dólares'], ['santander','Banco Santander'], ['lapos','Lapos'], ['getnet','Getnet'], ['providerTransfers','Trans a prov'], ['daily','Total movimientos del día'], ['accountCredit','Cta. Cte. (aparte)'], ['vouchers','Vales (aparte)'] ];
   if (totalsMode) get('cashHistoryCheckHead').parentElement.innerHTML = `<th class="cash-history-check" id="cashTotalsCheckHead" hidden><input type="checkbox" id="cashTotalsCheckAll" aria-label="Seleccionar todos para imprimir"></th><th data-history-sort="date">Fecha</th><th data-history-sort="branch">Sucursal</th>` + totalColumns.map(([key,label]) => `<th data-history-sort="${key}">${label}</th>`).join('');
   let sequence = 0, reportRows = [], sort = { field: 'date', direction: 1 }, selected = new Set(), anchor = -1;
   let printMode = false, printExcluded = new Set(), reportRange = '';
@@ -151,10 +151,6 @@ function initializeCashHistory(totalsMode) {
     if (Array.isArray(global) && global.length) entries.push(['', global]);
     return entries.filter(([id]) => !cajaRestricted || id === cajaRestrictedBranchId).map(([branchId, group]) => {
       const movements = (Array.isArray(group) ? group : group?.rows || []).map(row => ({...row}));
-      if (payload && cached?.ingresosEgresos !== undefined && branchId) {
-        const efectivo = movements.find(row => movementTypeKey(row.type || row.tipo || row.TipoPago) === movementTypeKey('Efectivo'));
-        if (efectivo) efectivo.ie = rowsForCashTotals(date, cached).filter(row => row.branchId === branchId).reduce((sum,row) => sum + Number(row.amount || 0),0);
-      }
       if (payload && Array.isArray(global) && cached?.recibos !== undefined) {
         receiptRowsFromPayload(cached.recibos).filter(receipt => branches.some(branch => branch.id === receipt.branchId)).forEach(receipt => {
           if (branchId && branchId !== receipt.branchId) return;
@@ -166,10 +162,12 @@ function initializeCashHistory(totalsMode) {
           });
         });
       }
-      const final = type => movements.filter(row => movementTypeKey(row.type || row.tipo || row.TipoPago) === movementTypeKey(type)).reduce((sum,row) => sum + Number(row.initial ?? row.inicial ?? row.ImpAnt ?? 0) + Number(row.day ?? row.movDia ?? row.Importe ?? 0) + Number(row.ie ?? row.impIE ?? row.ImpRet ?? 0),0);
+      const dayAmount = row => Number(row.day ?? row.movDia ?? row.Importe ?? 0);
+      const day = type => movements.filter(row => movementTypeKey(row.type || row.tipo || row.TipoPago) === movementTypeKey(type)).reduce((sum,row) => sum + dayAmount(row),0);
+      const separateTypes = new Set(['Cta. Cte.','Vale','Vales'].map(movementTypeKey));
       return { date, id: branchId || '__global__', branchId, branch: branches.find(branch => branch.id === branchId)?.label || 'Sin asignar', hour:'', income:0, expense:0,
-        cash:final('Efectivo'), mercadoPago:final('Mercado Pago'), transfers:final('Transf. Bria.'), lapos:final('Lapos'), getnet:final('Get Net'), providerTransfers:final('Transf prov'),
-        daily:movements.filter(row => movementTypeKey(row.type || row.tipo || row.TipoPago) !== movementTypeKey('Cta. Cte.')).reduce((sum,row) => sum + Number(row.day ?? row.movDia ?? row.Importe ?? 0),0) };
+        cash:day('Efectivo'), checks:day('Cheques'), mercadoPago:day('Mercado Pago'), transfers:day('Transf. Bria.'), dollars:day('Dolares'), santander:day('Banco santander'), lapos:day('Lapos'), getnet:day('Get Net'), providerTransfers:day('Transf prov'), accountCredit:day('Cta. Cte.'), vouchers:day('Vale')+day('Vales'),
+        daily:movements.filter(row => !separateTypes.has(movementTypeKey(row.type || row.tipo || row.TipoPago))).reduce((sum,row) => sum + dayAmount(row),0) };
     });
   }
   function rowsForCashTotals(date, cached) {
@@ -191,7 +189,7 @@ function initializeCashHistory(totalsMode) {
       return sort.direction * diff || a.date.localeCompare(b.date) || a.hour.localeCompare(b.hour);
     });
     get('cashHistoryRows').innerHTML = reportRows.length ? reportRows.map((row, index) => `<tr data-history-row="${index}" tabindex="0" class="${selected.has(index) ? 'cash-history-selected' : ''}">${printMode ? `<td class="cash-history-check"><input type="checkbox" data-history-print-row="${index}" aria-label="Imprimir movimiento ${escapeHtml(row.id)}" ${printExcluded.has(printRowKey(row)) ? '' : 'checked'}></td>` : ''}<td>${escapeHtml(formatDateLabel(row.date).replace(' - Hoy', ''))}</td><td>${escapeHtml(row.hour)}</td><td>${escapeHtml(row.id)}</td><td>${escapeHtml(row.branch)}</td><td class="cash-history-note">${escapeHtml(row.note)}</td><td class="money cash-movement-positive">${row.income ? formatMoney(row.income) : ''}</td><td class="money cash-movement-negative">${row.expense ? formatMoney(row.expense) : ''}</td></tr>`).join('') : `<tr><td colspan="${printMode ? 8 : 7}">No hay ingresos ni egresos en estas fechas.</td></tr>`;
-    if (totalsMode) get('cashHistoryRows').innerHTML = reportRows.length ? reportRows.map((row,index) => `<tr data-history-row="${index}" tabindex="0">${printMode ? `<td class="cash-history-check"><input type="checkbox" data-history-print-row="${index}" aria-label="Imprimir totales" ${printExcluded.has(printRowKey(row)) ? '' : 'checked'}></td>` : ''}${totalRowCells(row)}</tr>`).join('') : `<tr><td colspan="${printMode ? 10 : 9}">No hay totales en estas fechas.</td></tr>`;
+    if (totalsMode) get('cashHistoryRows').innerHTML = reportRows.length ? reportRows.map((row,index) => `<tr data-history-row="${index}" tabindex="0">${printMode ? `<td class="cash-history-check"><input type="checkbox" data-history-print-row="${index}" aria-label="Imprimir totales" ${printExcluded.has(printRowKey(row)) ? '' : 'checked'}></td>` : ''}${totalRowCells(row)}</tr>`).join('') : `<tr><td colspan="${totalColumns.length+2+(printMode?1:0)}">No hay totales en estas fechas.</td></tr>`;
     drawTotals(); updatePrintControls();
   }
   async function fetchHistoryPublications(filter, fields) {
@@ -204,7 +202,7 @@ function initializeCashHistory(totalsMode) {
     }
   }
   async function syncHistory(days, caches, request) {
-    const specs = totalsMode ? [['movimientos','movimientos','movimientos'],['ingresos_egresos','ingresosEgresos','cashMovements'],['recibos','recibos','receipts']] : [['ingresos_egresos','ingresosEgresos','cashMovements']];
+    const specs = totalsMode ? [['movimientos','movimientos','movimientos'],['recibos','recibos','receipts']] : [['ingresos_egresos','ingresosEgresos','cashMovements']];
     const filter = `fecha=gte.${days[0]}&fecha=lte.${days.at(-1)}`;
     let publications;
     try { publications = await fetchHistoryPublications(filter, 'fecha,version,' + specs.map(([section]) => section + '_version').join(',')); }
