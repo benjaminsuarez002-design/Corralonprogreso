@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.24"></script>
+<script src="corralon-system.js?v=1.0.25"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1331,20 +1331,31 @@ function selectedProviderIdentityKeys() {
 function isGreen(row) {
   const key = codeKey(row.codigo);
   if (!key) return false;
+  if (stockSqlArticles.length && stockArticleProviderFilterId() && !stockMatchesForRow(row).length) return false;
+  const idart = codeKey(row.idart);
+  if (idart) {
+    const article = indexArticleContributions.get(idart);
+    if (!article || !article.providerCodes.includes(key)) return false;
+    const selected = selectedProviderIdentityKeys();
+    const selectedId = selected.find(value => value.startsWith('ID:'));
+    const articleId = article.providerKeys.find(value => value.startsWith('ID:'));
+    if (selectedId && articleId) return selectedId === articleId;
+    return selected.some(identity => article.providerKeys.includes(identity));
+  }
   const allowedProviders = indexCodeProviders.get(key);
   if (!allowedProviders?.size) return false;
   return selectedProviderIdentityKeys().some((identity) => allowedProviders.has(identity));
 }
-async function repairUnmatchedIndexRows() {
+async function repairUnmatchedIndexRows(refreshAll = false) {
   const repairArticle = window.CorralonSystem?.catalog?.repairArticle;
   if (!provider || typeof repairArticle !== 'function') return [];
   const repaired = [];
   const candidates = [...new Set(rowsData
-    .filter((row) => !isBlankStockRow(row) && !isGreen(row))
+    .filter((row) => !isBlankStockRow(row) && (refreshAll || !isGreen(row)))
     .map((row) => String(row.idart || stockArticleForRow(row)?.idart || '').trim())
     .filter(Boolean))]
-    .filter((code) => !indexCodeRepairsAttempted.has(code))
-    .slice(0, 10);
+    .filter((code) => refreshAll || !indexCodeRepairsAttempted.has(code))
+    .slice(0, refreshAll ? Infinity : 10);
   if (!candidates.length) return repaired;
   for (const code of candidates) {
     indexCodeRepairsAttempted.add(code);
@@ -1354,6 +1365,7 @@ async function repairUnmatchedIndexRows() {
     } catch (error) {
       indexCodeRepairsAttempted.delete(code);
       console.warn(`No se pudo reparar el artículo ${code}`, error);
+      if (refreshAll) throw error;
     }
   }
   return repaired;
@@ -1633,9 +1645,16 @@ function applyExactProviderCode(cell) {
   const row = rowsData[rowIndex];
   const typedCode = codeKey(cell.textContent || row?.codigo);
   if (!row || !typedCode) return false;
-  const item = providerArticles.find((article) => codeKey(article.codProv) === typedCode)
-    || providerArticles.find((article) => codeKey(article.idart) === typedCode);
-  if (!item) return false;
+  const matches = stockMatchesForRow({ codigo: typedCode });
+  const item = stockField('stockFilterProvider').checked
+    ? providerArticles.find((article) => codeKey(article.codProv) === typedCode)
+    : (matches.length === 1 ? matches[0] : null);
+  if (!item) {
+    row.codigo = String(cell.textContent || row.codigo || '').trim();
+    row.idart = ''; row.stock = null;
+    render(); saveRows();
+    return false;
+  }
 
   row.idart = item.source === 'proveedores' ? '' : String(item.idart || ''); row.stock = item.stock ?? null;
   row.codigo = String(item.codProv || '').trim();
@@ -4462,11 +4481,12 @@ async function stockSqlGet(query = '', params = {}) {
 }
 function stockMatchesForRow(row) {
   if(!row?.codigo)return [];
-  if(!stockField('stockFilterProvider').checked || !stockProviderId()){
+  const providerId = stockArticleProviderFilterId();
+  if(!providerId){
     const code=codeKey(row.codigo);
     return stockSqlArticles.filter(article=>codeKey(article.codProv)===code);
   }
-  return stockSqlByCode.get(`${stockProviderId()}:${codeKey(row.codigo)}`) || [];
+  return stockSqlByCode.get(`${providerId}:${codeKey(row.codigo)}`) || [];
 }
 let stockWebBudgets = [];
 let stockWebBudgetHasOlder = true;
@@ -4751,6 +4771,10 @@ function stockCompleteIdArt(cell, focusQuantity = true){
 function stockArticleForRow(row) {
   if (!row) return null;
   let article = stockSqlById.get(String(row.idart || ''));
+  const providerId = stockArticleProviderFilterId();
+  if (!stockConfirmed && article && row.codigo && providerId && Number(article.proveedor) !== providerId) {
+    row.idart = ''; row.stock = null; article = null;
+  }
   if (article && !String(article.codProv || '').trim() && codeKey(row.codigo) === codeKey(article.idart)) row.codigo = '';
   if (!article && row.codigo) {
     const matches = stockMatchesForRow(row);
@@ -4760,8 +4784,12 @@ function stockArticleForRow(row) {
   else if (stockSqlArticles.length) { row.stock = null; }
   return article;
 }
+function stockArticleProviderFilterId() {
+  return Number(stockField('stockTipoMovimiento').value) === 23 ? stockProviderId() : 0;
+}
 function stockSqlArticlesForProvider() {
-  return stockSqlArticles.filter(article => !stockField('stockFilterProvider').checked || Number(article.proveedor) === stockProviderId());
+  const providerId = stockArticleProviderFilterId();
+  return providerId ? stockSqlArticles.filter(article => Number(article.proveedor) === providerId) : stockSqlArticles;
 }
 function stockRebuildArticleOptions() {
   const providerKey = String(provider?.id_proveedor || '');
@@ -4916,6 +4944,7 @@ function stockMovementFields() {
   }
   if(Number(stockField('stockTipoMovimiento').value)!==35) rowsData.forEach(row=>row.conteo=null);
   stockField('confirmStockIngresoBtn').textContent=transfer ? 'Confirmar transferencia en SQL' : 'Confirmar ingreso en SQL';
+  stockRebuildArticleOptions();
 }
 async function stockRefreshRelations() {
   if(!stockSqlMeta) return;
@@ -5484,9 +5513,10 @@ el.recalculateContextBtn.addEventListener('click', async () => {
   closeTableContextMenu();
   el.recalculateContextBtn.disabled = true;
   try {
+    await stockRefreshSql();
     await loadIndexCodes(null, {}, true);
     indexCodeRepairsAttempted.clear();
-    const repaired = await repairUnmatchedIndexRows();
+    const repaired = await repairUnmatchedIndexRows(true);
     if (repaired.length) applyIndexCodesDelta(repaired, [], {});
     show('Codigos de index recalculados');
   } catch (error) {

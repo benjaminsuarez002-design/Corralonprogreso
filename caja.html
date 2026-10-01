@@ -9,6 +9,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="corralon-cache-db.js"></script>
+  <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -308,10 +309,20 @@
     }
     .bottom-grid {
       display: grid;
-      grid-template-columns: 770px 720px;
+      grid-template-columns: 770px 720px 240px;
       gap: 36px;
       align-items: start;
       padding: 8px 14px 0;
+    }
+
+    .cash-history-launch {
+      align-self: start;
+      justify-self: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding-top: 8px;
     }
 
     .subform {
@@ -1506,7 +1517,7 @@
     #diffModal .diff-modal{flex:0 0 auto;width:125vw;height:125dvh;min-width:0;min-height:0;max-width:none;max-height:none;zoom:1;transform:scale(.8);transform-origin:top left;resize:none;border:0;border-radius:0;box-shadow:none}
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
-<script src="corralon-system.js?v=1.0.17"></script>
+<script src="corralon-system.js?v=1.0.18"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -1736,6 +1747,10 @@
               <span class="summary-cell value" id="dailyTotal">$ 0,00</span>
             </div>
           </aside>
+          <div class="cash-history-launch">
+            <button class="access-btn primary" id="cashHistoryBtn" type="button">Consultar ingresos y egresos</button>
+            <button class="access-btn primary" id="cashTotalsBtn" type="button">Consultar totales entre fechas</button>
+          </div>
         </div>
       </section>
     </main>
@@ -2246,7 +2261,7 @@
       if (explicitId === '1') return branches[0]?.id || '';
       if (explicitId === '2') return branches[1]?.id || '';
       const source = normalizarTexto(item.branch || item.sucursal || item.Sucursal || item.Suc || item.Descripción || item.Descripcion || item.deposito || item.Deposito || item.nota || item.Nota || '');
-      const byLabel = branches.find((branch) => {
+      const byLabel = source && branches.find((branch) => {
         const label = normalizarTexto(branch.label);
         return source === label || source.includes(label) || label.includes(source);
       });
@@ -2280,7 +2295,8 @@
       const amount = Number(item.amount ?? item.importe ?? item.Importe ?? item['Ing(+)/Egr(-)'] ?? 0) || 0;
       const note = String(item.note ?? item.nota ?? item.Nota ?? '').trim();
       const branchManual = Boolean(item.branchManual ?? item.manualBranch ?? false);
-      const automaticBranchId = resolveCashMovementBranchIdFromNote(note);
+      const explicitBranchId = String(item.branchId || item.sucursalId || item.idSucursal || item.IDSuc || '').trim();
+      const automaticBranchId = explicitBranchId ? resolveCashMovementBranchId({ ...item, nota: note }) : resolveCashMovementBranchIdFromNote(note);
       return {
         id,
         idRecibo: String(item.idRecibo ?? item.IDRecibo ?? '').trim(),
@@ -2288,6 +2304,7 @@
         hour: cashMovementHour(item.hour ?? item.hora ?? item.Hora ?? ''),
         note,
         branchId: branchManual ? resolveCashMovementBranchId({ ...item, nota: note }) : automaticBranchId,
+        branchSource: String(item.branchSource || ''),
         branchManual
       };
     }
@@ -7310,6 +7327,7 @@
     startPublicCajaPolling();
     startCajaVersionRealtime();
   </script>
+<script src="caja-ingresos-historial.js"></script>
 <script src="recargar-deslizando.js" defer></script>
 </body>
 </html>

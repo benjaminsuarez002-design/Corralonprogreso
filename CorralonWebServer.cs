@@ -55,8 +55,8 @@ internal static class LocalArticleImport
     private const string ArticleSelect = "SELECT IDArt AS id, [Descripción] AS descripcion, IDArtProv AS codigo, IDProveedor AS proveedor, IDRubro AS rubro, PorcIVA1 AS iva, PorcGanMin AS margen, PorcGanMay AS margenMay, PorcGanInt AS margenInt, PrecioCpraSISDto AS costo, PrecioCpraSI AS costoSI, PrecioCpraCI AS costoCI, PrecioVta1 AS venta1, PrecioVta2 AS venta2, PrecioVta3 AS venta3, PorcDto1 AS dto1, PorcDto2 AS dto2, IDMoneda AS moneda, FechaActPrec AS fecha FROM dbo.[Artículos]";
     private static Dictionary<string, object> Article(SqlConnection c, SqlTransaction t, string id)
     {
-        var rows = Rows(Command(c, t, ArticleSelect + " WHERE IDArt=@p0", id));
-        if (rows.Count != 1) throw new InvalidOperationException("El articulo " + id + " ya no existe. Volve a seleccionarlo.");
+        var rows = Rows(Command(c, t, ArticleSelect + (t == null ? "" : " WITH (UPDLOCK,HOLDLOCK)") + " WHERE IDArt=@p0 AND ISNULL(Suspendido,0)=0", id));
+        if (rows.Count != 1) throw new InvalidOperationException("El articulo " + id + " no existe o esta suspendido. Volve a seleccionarlo.");
         var row = rows[0]; row["version"] = Hash(Json().Serialize(row)); return row;
     }
     private static void Reply(HttpListenerContext ctx, int status, object value)
@@ -172,7 +172,7 @@ internal static class LocalArticleImport
                 {
                     if (path == "/api/local-articles/catalog")
                     {
-                        var articles = Rows(Command(c, null, "SELECT a.IDArt AS id,a.[Descripción] AS descripcion,a.IDArtProv AS codigo,a.IDProveedor AS proveedor,p.[RazónSocial] AS proveedorNombre,a.IDRubro AS rubro FROM dbo.[Artículos] a LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor ORDER BY a.[Descripción],a.IDArt"));
+                        var articles = Rows(Command(c, null, "SELECT a.IDArt AS id,a.[Descripción] AS descripcion,a.IDArtProv AS codigo,a.IDProveedor AS proveedor,p.[RazónSocial] AS proveedorNombre,a.IDRubro AS rubro FROM dbo.[Artículos] a LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor WHERE ISNULL(a.Suspendido,0)=0 ORDER BY a.[Descripción],a.IDArt"));
                         var rubros = Rows(Command(c, null, "SELECT IDRubro AS id,[Descripción] AS nombre FROM dbo.Rubros ORDER BY [Descripción]"));
                         Reply(ctx, 200, new { articles = articles, rubros = rubros, token = Token }); return;
                     }
