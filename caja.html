@@ -202,6 +202,7 @@
       text-align: center;
       white-space: nowrap;
     }
+    #cashTotalsBtn[hidden] { display: none !important; }
     .branch-combo {
       position: relative;
       width: 210px;
@@ -1521,7 +1522,7 @@
     #diffModal .diff-modal{flex:0 0 auto;width:125vw;height:125dvh;min-width:0;min-height:0;max-width:none;max-height:none;zoom:1;transform:scale(.8);transform-origin:top left;resize:none;border:0;border-radius:0;box-shadow:none}
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
-<script src="corralon-system.js?v=1.0.19"></script>
+<script src="corralon-system.js?v=1.0.20"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -1753,7 +1754,7 @@
           </aside>
           <div class="cash-history-launch">
             <button class="access-btn primary" id="cashHistoryBtn" type="button">Consultar ingresos y egresos</button>
-            <button class="access-btn primary" id="cashTotalsBtn" type="button">Consultar totales entre fechas</button>
+            <button class="access-btn primary" id="cashTotalsBtn" type="button" hidden>Consultar totales entre fechas</button>
           </div>
         </div>
       </section>
@@ -1918,6 +1919,7 @@
     ]);
 
     let cajaRestricted = false;
+    let cajaTotalsAllowed = false;
     let cajaRestrictedBranchId = '';
     const CAJA_RESTRICTED_SELECTORS = '#prevCajaDayBtn,#nextCajaDayBtn,#cajaDateLabel,#cajaBranchButton';
 
@@ -1932,6 +1934,10 @@
     }
 
     function applyCajaMode(user = cajaSessionUser()) {
+      cajaTotalsAllowed = String(user?.nivel || '').trim().toLowerCase() === 'administrador';
+      const totalsButton = document.getElementById('cashTotalsBtn');
+      totalsButton.hidden = !cajaTotalsAllowed;
+      totalsButton.disabled = !cajaTotalsAllowed;
       cajaRestricted = Boolean(user && String(user.nivel || '').toLowerCase() !== 'administrador' && ['lector','restringido'].includes(user.cajaModo));
       cajaRestrictedBranchId = cajaRestricted ? String(user.cajaSucursalId || cashMovementBranches()[0]?.id || '') : '';
       if(cajaRestricted && selectedDateKey !== TODAY_DATE_KEY) {

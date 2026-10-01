@@ -81,6 +81,7 @@ function initializeCashHistory(totalsMode) {
     get('cashHistoryTotals').innerHTML = `<span>${rows.length} ${printMode ? 'seleccionados para imprimir' : 'movimientos'}</span><span class="cash-movement-positive">Ingresos: ${formatMoney(totals.income)}</span><span class="cash-movement-negative">Egresos: ${formatMoney(totals.expense)}</span><span>Saldo: ${formatMoney(totals.balance)}</span>`;
   }
   function printHistory() {
+    if (totalsMode && !cajaTotalsAllowed) return;
     if (!printMode) { printMode = true; printExcluded.clear(); drawHistory(); return; }
     const rows = printableRows();
     if (!rows.length) return;
@@ -257,6 +258,7 @@ function initializeCashHistory(totalsMode) {
     get('cashHistoryStatus').textContent = `${formatDateLabel(days[0]).replace(' - Hoy', '')} al ${formatDateLabel(days.at(-1)).replace(' - Hoy', '')} · ${loaded ? `${loaded} secciones actualizadas` : 'Caché al día'}${unpublished ? ` · ${unpublished} días sin publicación` : ''}`;
   }
   async function loadHistory() {
+    if (totalsMode && !cajaTotalsAllowed) return;
     const start = normalizeDate(get('cashHistoryStart')), end = normalizeDate(get('cashHistoryEnd'));
     if (!start || !end) { get(!start ? 'cashHistoryStart' : 'cashHistoryEnd').reportValidity(); return; }
     const from = dateKeyFromDate(start.date), until = dateKeyFromDate(end.date);
@@ -282,6 +284,7 @@ function initializeCashHistory(totalsMode) {
   }
   function closeHistory() { sequence++; popup.classList.remove('open'); button.focus(); }
   button.addEventListener('click', () => {
+    if (totalsMode && !cajaTotalsAllowed) return;
     popup.classList.add('open');
     const branches = cashMovementBranches().filter(branch => !cajaRestricted || branch.id === cajaRestrictedBranchId);
     get('cashHistoryBranch').innerHTML = (cajaRestricted ? '' : '<option value="">Todas las sucursales</option>') + branches.map(branch => `<option value="${escapeHtml(branch.id)}">${escapeHtml(branch.label)}</option>`).join('') + (cajaRestricted ? '' : '<option value="__unassigned__">Sin asignar</option>');
@@ -294,6 +297,12 @@ function initializeCashHistory(totalsMode) {
     }
     sort = { field: 'date', direction: 1 };
     get('cashHistoryClose').focus(); loadHistory();
+  });
+  if (totalsMode) window.addEventListener('menu-user-validated', () => {
+    if (!cajaTotalsAllowed) {
+      sequence++;
+      popup.classList.remove('open');
+    }
   });
   get('cashHistoryClose').addEventListener('click', closeHistory);
   get('cashHistoryBranch').addEventListener('change', applyBranchFilter);

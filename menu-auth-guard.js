@@ -46,7 +46,7 @@
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const pageId = document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile];
-  const loginPage = pageId === 'facturacion' ? 'menu.html' : 'index.html';
+  const loginPage = ['facturacion', 'carga_stock'].includes(pageId) ? 'menu.html' : 'index.html';
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));
 

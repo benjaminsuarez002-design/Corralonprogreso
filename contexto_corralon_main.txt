@@ -2,7 +2,7 @@ CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
 Fecha de referencia: 01/10/2026
-El cuerpo historico corresponde al 25/08/2026; las secciones 21 y 22 registran
+El cuerpo historico corresponde al 25/08/2026; las secciones 21 a 23 registran
 actualizaciones posteriores. La seccion mas reciente prevalece sobre las anteriores.
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
@@ -1703,3 +1703,243 @@ Otros cambios recientes y criterios
 - Hay modificaciones y archivos locales de tareas anteriores. Conservarlos.
   No actualizar manualmente version-web.json ni versiones de paginas; el flujo
   Subir a GitHub sigue siendo quien administra la publicacion y sus versiones.
+
+
+23. CONTEXTO AMPLIADO DE LA CONVERSACION HASTA EL 01/10/2026
+=========================================================
+
+Alcance de esta actualizacion
+----------------------------
+
+- El usuario pidio incorporar TODO lo trabajado desde su primer pedido de leer
+  el contexto, no solamente el incidente reciente de Caja. Esta seccion integra
+  los pedidos y resultados disponibles de esa conversacion con el codigo actual.
+- Conservar el contexto historico, pero no usarlo para contradecir los requisitos
+  posteriores. Las descripciones antiguas de Cargar Stock basadas exclusivamente
+  en el indice publicado y proveedores Supabase fueron ampliadas con SQL local.
+- Diferenciar siempre: requisito del usuario, codigo implementado, prueba
+  efectuada, cambio externo aplicado y pendiente sin confirmacion. La ausencia
+  de un nuevo reclamo NO demuestra por si sola que un problema quedo resuelto.
+- Esta actualizacion es documental. No ejecuta publicaciones, cargas SQL,
+  restauraciones de Firebase ni cambios de impresoras.
+
+Cargar Stock: origen de datos, campos y listas
+--------------------------------------------
+
+- Archivos principales: cargastock.html, cargastock-sql.css, servidor local
+  CorralonWebServer.cs y facturacion-copia-api.cs para operaciones SQL relacionadas.
+- El proveedor de la cabecera debe mostrar proveedores de SQL, no la lista de
+  Supabase. El catalogo SQL conserva IDArt, CodProv, IDProveedor, descripcion,
+  costo sin IVA y stock de la sucursal elegida como datos separados.
+- Se debe poder agregar articulos sin proveedor seleccionado. Nuevo y Cancelar
+  limpian el proveedor; una carga no debe heredar silenciosamente el anterior.
+- Sucursal, Tipo movimiento y Sucursal destino deben recibir foco Y desplegar
+  sus opciones con el primer clic; no exigir un clic para enfocar y otro para abrir.
+- Descripcion y CodProv tienen la excepcion pedida por el usuario: no abrir al
+  hacer clic solamente; desplegar al empezar a escribir o usar el control de lista.
+- Escape debe cerrar todas las listas. Mantener las funciones de seleccion,
+  F2, Tab, Enter y flechas indicadas en aplica funciones.txt.
+- IDArt es editable y punto de tabulacion. Escribir 10 busca 000010, completa
+  la fila desde SQL y lleva el foco a Cantidad. No poner CodProv en IDArt.
+- Un articulo sin CodProv debe conservar codigo de proveedor vacio; no completar
+  ese dato artificialmente con su IDArt. El ejemplo reclamado fue CEMENTO LOMA
+  NEGRA X 25KG, IDArt 000010.
+- Al recargar con F5, conservar un IDArt ingresado explicitamente aunque no haya
+  coincidencia por CodProv. Restaurar borradores por IDArt, no solo por CodProv.
+- Recalcular recarga el indice/catalogo y vuelve a comprobar las filas. No alcanza
+  con recalcular importes usando un indice viejo. La accion vigente llama a la
+  recarga SQL y actualiza los codigos identificados antes de renderizar/guardar.
+- Tras importar/actualizar articulos, revisar nuevamente sus IDArt; no mantener
+  coincidencias antiguas ni confundir el codigo del proveedor con el interno.
+
+Cargar Stock: coincidencia por proveedor y articulos suspendidos
+--------------------------------------------------------------
+
+- El tilde Filtrar por proveedor determina la lista del desplegable. Si esta
+  desmarcado, el usuario quiere ver todos los articulos, aunque haya proveedor
+  arriba. No filtrar esa lista de manera implicita para resolver coincidencias.
+- La asignacion automatica por CodProv debe comprobar TAMBIEN que el IDProveedor
+  SQL del articulo coincide con el IDProveedor seleccionado en la cabecera.
+- Si el codigo coincide pero el proveedor no, no dar la fila por identificada:
+  dejar IDArt vacio y marcar el error cuando las opciones adicionales esten activas.
+- No confundir permitir una seleccion manual del catalogo completo con autorizar
+  una coincidencia automatica por codigo de otro proveedor.
+- Ejemplo reclamado: CodProv 2600601 / IDArt 008273 mostraba RUEDA GIRATORIA de
+  otro proveedor al trabajar con ABC DISTRIBUCIONES; la similitud de codigo no
+  basta para validarlo como articulo de ABC.
+- El importador/actualizador local debe excluir suspendidos tanto del desplegable
+  como de la validacion final. CorralonWebServer.cs filtra Suspendido en SQL y
+  vuelve a comprobar el articulo al aplicar, dentro de la transaccion.
+- Pruebas registradas: excluir 008073 y 002860 del catalogo activo y rechazar la
+  seleccion suspendida 002860. Detalle de implementacion/pruebas en la seccion 22.
+
+Cargar Stock: descuentos, costos y columnas
+-------------------------------------------
+
+- Descuentos y costos adicionales es un desplegable cerrado por defecto.
+  Al estar cerrado, no aplicar descuentos/flete/IVA adicionales ni marcar
+  validaciones de precios/proveedor de ese modo avanzado.
+- Al abrirlo, habilitar esos ajustes y sus comprobaciones. Mantener el significado
+  de los datos ya ingresados al alternar el panel; no alterar el catalogo SQL.
+- El usuario corrigio el pedido de precio terminado: necesita costo SIN IVA SQL
+  para la busqueda/completado de articulos de Cargar Stock.
+- En modo simple, usar Precio unit. e Importe; ocultar Desc. adicional y Precio
+  final, junto con la tira de totales de costos adicionales al pie de la tabla.
+- Codigo prov. SIEMPRE visible. Ultima correccion: Stock suc. TAMBIEN siempre
+  visible, con el panel cerrado o abierto. cargastock-sql.css ya no oculta la
+  sexta columna; la grilla simple tiene ocho columnas incluyendo el selector.
+- Stock suc. muestra el stock disponible SQL de la sucursal elegida. No es una
+  cantidad que deba cargarse manualmente ni un descuento.
+
+Cargar Stock: consultas, borradores, confirmacion y transferencias
+-----------------------------------------------------------------
+
+- Consultar abre Movimientos confirmados en un popup de pantalla completa.
+  Elegir un movimiento abre otro popup de detalle de pantalla completa.
+  La lista debe tener columnas definidas, incluyendo numero de factura y remito.
+- Las flechas inferiores primero se ocultaron por pedido del usuario y luego
+  se habilitaron para manejar DOS CARGAS/BORRADORES independientes.
+  No deben recorrer el historial SQL. Indicador Carga 1 de 2 / Carga 2 de 2.
+  Los borradores y sus cabeceras se conservan separados en cache local.
+- Al confirmar correctamente, mostrar Movimiento confirmado y dejar preparada
+  una carga nueva; evitar que el usuario vuelva a confirmar el mismo movimiento.
+- Al elegir Transferencia de Stock, seleccionar automaticamente la otra sucursal
+  disponible como destino y usar CORRALON PROGRESO como proveedor.
+- El usuario pidio revisar transferencia 78 porque no aparecia la entrada de
+  stock. No hay en el material disponible una comprobacion final de esa operacion:
+  revisar salida y entrada asociadas en SQL antes de declararla resuelta.
+- Se corrigio una comparacion de stock final sensible a precision numerica en
+  facturacion-copia-api.cs. No repetir una emision/carga para verificar un error
+  sin comprobar primero si ya quedo confirmado el movimiento real.
+- El error de navegador innerHTML / node no longer a child es un problema de
+  reemplazo del DOM mientras blur modifica los mismos nodos. Cargar Stock tiene
+  protecciones para terminar blur antes de sustituir filas y evitar renderizado
+  reentrante. No atribuir ese error JavaScript a Access o al motor SQL.
+
+Cargar Stock: importar presupuestos web y resolver notificaciones
+----------------------------------------------------------------
+
+- Importar presupuesto web abre una tabla con Nro presupuesto, Cliente, Usuario,
+  Nota y Estado. Tocar una fila despliega sus articulos y al pie aparece Importar.
+- Importar SOLO IDArt y cantidad del presupuesto. Descripcion, CodProv, costo
+  sin IVA y stock se completan con SQL; no tomar precios del presupuesto web.
+- El numero del presupuesto va a Nro remito. Nombre del cliente y nota del
+  presupuesto van a Nota (Observaciones del movimiento), separados por salto de linea.
+- El importador avisa si hay articulos/cantidades sin resolver y pregunta antes
+  de reemplazar filas existentes. La carga importada sigue siendo un borrador
+  que debe revisarse y confirmarse; importar no confirma stock automaticamente.
+- Los presupuestos se consultan de presupuestos_web en SUPABASE. Los estados
+  Resuelto/No resuelto provienen de las notificaciones en FIRESTORE.
+  No afirmar que los items de todos los presupuestos se descargan de Firebase.
+- Cache del importador: IndexedDB corralon_stock_web_budgets_v1. Primera pagina
+  de 100; Cargar mas trae anteriores. Posteriores se consultan por numero mayor
+  al ultimo conocido; cambios de notificacion invalidan solo su presupuesto.
+- Las notificaciones tambien aprovechan corralon_menu_notifications_v1 como
+  semilla local y sincronizan los cambios; evitar releer historiales completos.
+- Chip verde Resuelto / rojo No resuelto. Si el estado aun no esta disponible,
+  mostrar Estado no disponible en vez de inventar una resolucion.
+- Al confirmar la carga de un presupuesto, resolver su notificacion en Menu.
+  Si falla esa sincronizacion despues del stock confirmado, avisar y reintentar
+  la notificacion; NO volver a confirmar el stock por ese fallo secundario.
+- En la tabla de presupuestos, segundo clic (clic derecho/contextual) ofrece
+  Marcar como resuelto, actualizando la misma notificacion que usa Menu.
+
+Facturacion: clientes, cupo, busqueda y tabla
+-------------------------------------------
+
+- Los clientes deben mostrarse siempre en mayusculas: busqueda, seleccion,
+  borrador restaurado, ficha y datos enviados. Se implemento customerUpper y
+  normalizacion de los campos de texto del editor. No fue una actualizacion
+  masiva de todos los registros historicos de SQL.
+- El campo Cupo disponible de la ficha del cliente paso a ser editable y tiene
+  formato de moneda argentino en tiempo real. Distinguir saldo, limite de credito
+  y cupo restante; revisar customerCurrentBalance y el guardado vigente antes de
+  asumir que cualquiera de esos tres importes es intercambiable.
+- Moneda: digitos a parte entera, puntos de miles, coma decimal, hasta dos
+  decimales. El decimal del teclado numerico debe funcionar como decimal.
+- La busqueda de articulos prioriza primera palabra del filtro con primera
+  palabra de descripcion. Ejemplo mochila ferrum: MOCHILA antes que GUARNICION,
+  VARILLA o BOTON que solo contienen mochila mas adelante. Detalle en seccion 22.
+- La tabla crece hasta el alto/ancho disponible; al agregar muchos articulos,
+  hacer scroll SOLO dentro de su seccion sin seguir agrandando toda la pantalla.
+- El mensaje stock final no coincide debe distinguirse de una validacion de
+  cupo o de un fallo de impresion. Comprobar resultado SQL antes de reemitir.
+
+Sesion: Firebase duplicado y guard de acceso
+-------------------------------------------
+
+- Reclamo: Firebase already defined y window.firebase.firestore is not a function
+  al validar usuario. Se reviso la competencia entre SDK compat de paginas y guard.
+- menu-auth-guard.js usa imports modulares Firebase 10.12.0, una promesa
+  firestoreReady compartida y app con nombre corralon-menu-auth-guard.
+  No sustituye window.firebase ni depende de que la pagina cargue compat primero.
+- Si inicializar falla, permite reintentar en lugar de conservar una promesa fallida.
+- proxy.js DarkTheme y content.js No Listener aparecieron en la consola del
+  navegador como mensajes de extensiones; no tratarlos automaticamente como
+  fallos del control de sesion de la aplicacion.
+
+Impresion y acceso a PC5-CAJA
+---------------------------
+
+- El usuario reporto tickets atascados en cola mientras el resto del sistema
+  seguia funcionando. Reiniciar Spooler permitia volver a imprimir.
+- Todas las PCs utilizaban la impresora de PC5-CAJA como destino compartido.
+  No afirmar que cada PC imprime fisicamente sin depender de PC5 cuando la
+  impresora real esta conectada por USB a esa computadora.
+- Cambio registrado: destino POS-80 por \\192.168.100.60\POS-80; equipo PC5-CAJA,
+  impresora fisica USB002. El envio RAW puede abrir directamente el puerto UNC
+  para evitar el paso por la cola/alias local de la PC emisora. Existe PrintRawTicket
+  en facturacion-copia-api.cs e ImpresoraLocal.cs; comprobar el recorrido activo.
+- Se habilito la politica RPC por named pipes de impresion y se configuraron
+  credenciales existentes para el recurso compartido. NO guardar contrasenas
+  en este contexto, scripts, comandos visibles o nuevas respuestas.
+- Se recuperaron siete trabajos RAW de la cola y se reenviaron al destino,
+  retirando el original solo despues de la aceptacion. Se verificaron colas
+  vacias entonces; aceptacion de Spooler no demuestra por si sola papel impreso.
+- El usuario reclamo luego no poder entrar a PC5-CAJA desde Red de Windows.
+  Por IP el recurso respondia; el acceso SMB por nombre habia presentado bloqueo.
+  No se documento una solucion final al acceso por nombre. No decir que no se
+  tocaron recursos de impresion: hubo cambios concretos de puerto/politica.
+- Reiniciar cola de impresion.bat esta en la raiz del proyecto. Se eleva, reinicia
+  el Spooler de PC5-CAJA (local si corre ahi, remoto desde otra PC) y CONSERVA
+  tickets pendientes; no borra la carpeta spool ni contiene credenciales.
+- Si falla el reinicio remoto, el BAT indica ejecutarlo directamente en
+  PC5-CAJA como administrador. Un ticket que sigue trabado requiere diagnostico
+  de cola, controlador, puerto y dispositivo; no reinicios repetidos a ciegas.
+
+Factura asociada en Access: reclamo separado y pendiente
+-------------------------------------------------------
+
+- El usuario mostro Compras de Mercaderia con numero de factura en cabecera,
+  pero el combo inferior Nro Factura vacio, y una compra sin numero de movimiento
+  de stock asociado. Ejemplo mas reciente: movimiento 6924, factura 0048-00004399.
+- Se menciono FRecibosFPCons como formulario a revisar. La captura del combo
+  vacio no prueba por si sola que el problema sea exclusivamente visual: comprobar
+  origen de filas/control, clave de compra y vinculo guardado en SQL.
+- No hay evidencia final disponible de que ese combo/vinculo se haya reparado.
+  Conservarlo como pendiente. No modificar stock ni reconfirmar la carga para
+  intentar llenar ese campo; no confundirlo con el error innerHTML del navegador.
+
+Caja: ultimos campos editables y resumen de pendientes
+-----------------------------------------------------
+
+- Toda la publicacion SQL, informes entre fechas, ubicacion de botones, incidentes
+  de cache, recuperacion de 671 filas y protecciones Firebase estan en seccion 22.
+- Ultimo pedido: el selector central de fecha de Caja es un INPUT editable entre
+  las flechas. Acepta 8, 8 9, fecha completa y dias completos de semana con/sin tilde.
+  Dia sin mes/anio usa el actual; dia semanal usa la aparicion mas reciente,
+  incluyendo hoy. Se aplica con Enter o blur; valida fechas imposibles.
+- Se reutiliza CorralonFunciones.parseFechaFlexible para fechas numericas y
+  bindLinearNavigation para seleccion al enfocar, F2, Enter/Tab y flechas.
+  Escape restaura el texto anterior a editar. Las flechas conservan su funcion.
+- setCajaDate comparte el recorrido de carga por fecha y solo persiste en local.
+  El input tambien queda bloqueado en modo restringido, igual que las flechas.
+- Se probaron fechas cortas/completas, dias con tildes y fechas invalidas con
+  funciones reales; pasaron tambien las pruebas de proteccion de escrituras.
+- Pendientes que no deben perderse: transferencias Mercado Pago del 15 al 25;
+  factura asociada inferior/vinculo de compra; revision final de transferencia 78;
+  acceso SMB por nombre a PC5-CAJA; validacion visual de cambios de tabla/busqueda
+  que solo tuvieron pruebas de codigo; adopcion/publicacion del codigo en otras PCs.
+- Los presupuestos web importados en Stock YA tienen su cache incremental; no
+  asumir por eso que el historial general de presupuestos/remitos/garantias tenga
+  implementada toda la optimizacion pendiente mencionada en la seccion 21.
