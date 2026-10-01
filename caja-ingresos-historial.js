@@ -170,9 +170,6 @@ function initializeCashHistory(totalsMode) {
         daily:movements.filter(row => !separateTypes.has(movementTypeKey(row.type || row.tipo || row.TipoPago))).reduce((sum,row) => sum + dayAmount(row),0) };
     });
   }
-  function rowsForCashTotals(date, cached) {
-    return cashMovementRowsFromPayload(cached.ingresosEgresos);
-  }
   function totalRowCells(row) {
     return `<td>${escapeHtml(formatDateLabel(row.date).replace(' - Hoy',''))}</td><td>${escapeHtml(row.branch)}</td>` + totalColumns.map(([key]) => `<td class="money">${formatMoney(row[key])}</td>`).join('');
   }
