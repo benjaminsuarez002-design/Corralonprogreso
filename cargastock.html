@@ -7,7 +7,8 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.28"></script>
+<script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
+<script src="corralon-system.js?v=1.0.29"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -536,7 +537,7 @@
     <div class="copy-result-body">
       <div id="copyResultMessage"></div>
       <div class="copy-warning" id="copyDuplicateWarning" hidden>
-        <div class="copy-warning-title">Advertencia: hay códigos con más de una coincidencia en index</div>
+        <div class="copy-warning-title">Advertencia: hay códigos con más de una coincidencia en SQL</div>
         <ul class="copy-warning-list" id="copyDuplicateList"></ul>
       </div>
     </div>
@@ -567,7 +568,6 @@ const db = getFirestore(app);
 const CACHE_KEY = 'corralon_carga_stock_rows_v1';
 const PROVIDER_KEY = 'corralon_carga_stock_provider_v1';
 const PROVIDERS_VERSION_CACHE_KEY = 'corralon_carga_stock_providers_version_v1';
-const INDEX_CODES_CACHE_KEY = 'corralon_carga_stock_index_code_providers_v3';
 const PRICE_COMPARATOR_CACHE_KEY = 'corralon_carga_stock_price_comparator_v1';
 const PRICE_COMPARATOR_LAST_PROVIDER_KEY = 'corralon_carga_stock_price_comparator_last_provider_v1';
 
@@ -588,17 +588,9 @@ let priceComparatorProviderActive = -1;
 const priceComparatorUndo = [];
 let priceComparatorEdit = null;
 let lastPriceComparatorProvider = '';
-let indexCodeProviders = new Map();
-let indexCodeMatchCounts = new Map();
-let indexCodeDescriptions = new Map();
-let indexCatalogRows = [];
-let indexArticleContributions = new Map();
-let indexCodeProviderRefCounts = new Map();
-let indexCatalogRowPositions = new Map();
-let indexCodesLoading = false;
-let indexCodesCacheVersion = 0;
-let indexCodesCachePatchVersion = 0;
-const indexCodeRepairsAttempted = new Set();
+let stockSqlCodeMatchCounts = new Map();
+let stockSqlCodeDescriptions = new Map();
+let stockSqlCatalogRows = [];
 let compareSystemRows = [];
 let comparePairs = [];
 const compareSelections = { left: new Set(), right: new Set() };
@@ -1329,50 +1321,9 @@ function selectedProviderIdentityKeys() {
   return keys;
 }
 function isGreen(row) {
-  const key = codeKey(row.codigo);
-  if (!key) return false;
-  if (stockSqlMeta) {
-    const matches = stockMatchesForRow(row);
-    return row.idart ? matches.some(article=>codeKey(article.idart)===codeKey(row.idart)) : matches.length===1;
-  }
-  if (stockSqlArticles.length && stockArticleProviderFilterId() && !stockMatchesForRow(row).length) return false;
-  const idart = codeKey(row.idart);
-  if (idart) {
-    const article = indexArticleContributions.get(idart);
-    if (!article || !article.providerCodes.includes(key)) return false;
-    const selected = selectedProviderIdentityKeys();
-    const selectedId = selected.find(value => value.startsWith('ID:'));
-    const articleId = article.providerKeys.find(value => value.startsWith('ID:'));
-    if (selectedId && articleId) return selectedId === articleId;
-    return selected.some(identity => article.providerKeys.includes(identity));
-  }
-  const allowedProviders = indexCodeProviders.get(key);
-  if (!allowedProviders?.size) return false;
-  return selectedProviderIdentityKeys().some((identity) => allowedProviders.has(identity));
-}
-async function repairUnmatchedIndexRows(refreshAll = false) {
-  const repairArticle = window.CorralonSystem?.catalog?.repairArticle;
-  if (!provider || typeof repairArticle !== 'function') return [];
-  const repaired = [];
-  const candidates = [...new Set(rowsData
-    .filter((row) => !isBlankStockRow(row) && (refreshAll || !isGreen(row)))
-    .map((row) => String(row.idart || stockArticleForRow(row)?.idart || '').trim())
-    .filter(Boolean))]
-    .filter((code) => refreshAll || !indexCodeRepairsAttempted.has(code))
-    .slice(0, refreshAll ? Infinity : 10);
-  if (!candidates.length) return repaired;
-  for (const code of candidates) {
-    indexCodeRepairsAttempted.add(code);
-    try {
-      const article = await repairArticle(code);
-      if (article) repaired.push(article);
-    } catch (error) {
-      indexCodeRepairsAttempted.delete(code);
-      console.warn(`No se pudo reparar el artículo ${code}`, error);
-      if (refreshAll) throw error;
-    }
-  }
-  return repaired;
+  if (!codeKey(row.codigo) || !stockSqlMeta) return false;
+  const matches = stockMatchesForRow(row);
+  return row.idart ? matches.some(article=>codeKey(article.idart)===codeKey(row.idart)) : matches.length===1;
 }
 function stockCostOptionsActive() {
   return Boolean(document.getElementById('stockCostOptions')?.open);
@@ -1504,32 +1455,9 @@ function hideArticleProviderToggle() {
   el.articleProviderToggle.classList.remove('visible');
   articleProviderButtonCell = null;
 }
-const stockProviderJsonLists = new Map();
-let stockProviderJsonLoading = '';
-async function loadProviderArticles(nextProvider) {
-  const seq = ++providerArticlesLoadSeq;
-  providerArticles = [];
-  providerArticlesOrdered = [];
-  providerArticleSearch = new WeakMap();
-  closeArticleProviderList();
-  if (!stockField('stockFilterProvider').checked) { stockRebuildArticleOptions(); return; }
-  if (!nextProvider?.id_proveedor) return;
-  const providerKey = String(nextProvider.id_proveedor);
-  if (stockProviderJsonLists.has(providerKey)) { stockRebuildArticleOptions(); return; }
-  stockProviderJsonLoading = providerKey;
-  el.status.textContent = `Cargando lista de ${providerLabel(nextProvider)}...`;
-  try {
-    const loaded = await CorralonSystem.faltantes.syncSingleProviderJson(providerLabel(nextProvider), nextProvider.id_proveedor);
-    if (seq !== providerArticlesLoadSeq) return;
-    stockProviderJsonLists.set(providerKey, Array.isArray(loaded) ? loaded : []);
-    stockRebuildArticleOptions();
-    el.status.textContent = `${providerArticles.length.toLocaleString('es-AR')} artículos de ${providerLabel(nextProvider)} disponibles`;
-  } catch (error) {
-    if (seq !== providerArticlesLoadSeq) return;
-    console.warn(error);
-    stockProviderJsonLists.set(providerKey, []);
-    el.status.textContent = 'No se pudo cargar el JSON del proveedor';
-  } finally { if (stockProviderJsonLoading === providerKey) stockProviderJsonLoading = ''; }
+function loadProviderArticles() {
+  providerArticlesLoadSeq += 1;
+  stockRebuildArticleOptions();
 }
 function filteredProviderArticles(cell) {
   const rowIndex = Number(cell?.dataset?.row);
@@ -1796,7 +1724,7 @@ function catalogRubroId(article = {}) {
 }
 function catalogRubros() {
   const rubros = new Map();
-  indexCatalogRows.forEach((article) => {
+  stockSqlCatalogRows.forEach((article) => {
     const id = catalogRubroId(article);
     const name = String(readField(article, ['rubro', 'Rubros_Descripción', 'rubro_descripcion']) || '').trim();
     if (id > 0 && name && !rubros.has(id)) rubros.set(id, name);
@@ -1804,7 +1732,7 @@ function catalogRubros() {
   return [...rubros].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
 }
 function currentCatalogMaxId() {
-  return indexCatalogRows.reduce((max, article) => {
+  return stockSqlCatalogRows.reduce((max, article) => {
     const value = Number(String(catalogArticleCode(article)).replace(/[^0-9]/g, ''));
     return Number.isInteger(value) && value > max ? value : max;
   }, 0);
@@ -1818,7 +1746,7 @@ function providerCatalogMatches(article) {
 }
 function defaultRubroForSelectedProvider() {
   const counts = new Map();
-  indexCatalogRows.forEach((article) => {
+  stockSqlCatalogRows.forEach((article) => {
     if (!providerCatalogMatches(article)) return;
     const id = catalogRubroId(article);
     if (id > 0) counts.set(id, (counts.get(id) || 0) + 1);
@@ -1852,8 +1780,8 @@ function newArticleValidation() {
   const errors = [];
   const rubros = catalogRubros();
   const currentProvider = selectedProvider();
-  const catalogIds = new Set(indexCatalogRows.map(catalogArticleCode).filter(Boolean));
-  const catalogDescriptions = new Set(indexCatalogRows.map((article) => norm(catalogArticleDescription(article))).filter(Boolean));
+  const catalogIds = new Set(stockSqlCatalogRows.map(catalogArticleCode).filter(Boolean));
+  const catalogDescriptions = new Set(stockSqlCatalogRows.map((article) => norm(catalogArticleDescription(article))).filter(Boolean));
   const batchCodes = new Map();
   const batchDescriptions = new Map();
 
@@ -1877,7 +1805,7 @@ function newArticleValidation() {
     if (![0.21, 0.105].includes(iva)) rowErrors.push('IVA inválido');
     if (!Number.isFinite(margin) || margin < 0) rowErrors.push('margen inválido');
 
-    const codeExisting = indexCatalogRows.some((article) => articleProviderCodes(article).includes(code) && providerCatalogMatches(article));
+    const codeExisting = stockSqlCatalogRows.some((article) => articleProviderCodes(article).includes(code) && providerCatalogMatches(article));
     if (codeExisting) rowErrors.push('código ya existente para este proveedor');
     if (description && catalogDescriptions.has(description)) rowErrors.push('descripción ya existente');
 
@@ -1965,20 +1893,10 @@ async function openNewArticlesModal() {
       descripcion: String(row.descripcion || '').trim(),
       costo: Number(calcPrecioFinal(row).toFixed(2))
     })),
-    catalogRows: indexCatalogRows,
+    catalogRows: stockSqlCatalogRows,
+    catalogSource: 'sql',
     showMessage: show,
     onImported(payload, appliedRows) {
-      if (payload.directSql && Array.isArray(payload.rows)) {
-        const changed = payload.rows.map((result, index) => {
-          const row = appliedRows[index];
-          const prior = indexCatalogRows.find(article => catalogArticleCode(article) === result.id) || {};
-          return { ...prior, codigo:result.id, cod_proveedor:row.codigo,
-            nombre:row.descripcion, descripcion:row.descripcion,
-            id_proveedor:CorralonSystem.providerIdentity.externalId(currentProvider),
-            proveedor:providerLabel(currentProvider), id_rubro:row.rubro };
-        });
-        applyIndexCodesDelta(changed);
-      }
       stockRefreshSql().catch(error=>stockIngresoMessage(error.message,'error'));
       el.status.textContent = payload.directSql
         ? `${payload.nuevos} artículos nuevos y ${payload.actualizados} actualizados en la base local`
@@ -2715,11 +2633,11 @@ async function copyGreen() {
   const duplicateCodes = [...new Map(
     greenRows
       .map((row) => [codeKey(row.codigo), String(row.codigo || '').trim()])
-      .filter(([key]) => (indexCodeMatchCounts.get(key) || 0) > 1)
+      .filter(([key]) => (stockSqlCodeMatchCounts.get(key) || 0) > 1)
   )].map(([key, code]) => ({
     code,
-    count: indexCodeMatchCounts.get(key) || 0,
-    descriptions: indexCodeDescriptions.get(key) || []
+    count: stockSqlCodeMatchCounts.get(key) || 0,
+    descriptions: stockSqlCodeDescriptions.get(key) || []
   }));
   document.getElementById('copyResultMessage').textContent = `${rows.length} filas copiadas correctamente.`;
   const warning = document.getElementById('copyDuplicateWarning');
@@ -3330,247 +3248,22 @@ async function fetchJson(url) {
   const data = await response.json();
   return Array.isArray(data) ? data : [];
 }
-let indexCodesLoadGeneration = 0;
-function yieldIndexCodesWork() {
-  return new Promise((resolve) => {
-    if ('requestIdleCallback' in window) requestIdleCallback(() => resolve(), { timeout: 40 });
-    else setTimeout(resolve, 0);
+function stockRebuildSqlCatalog() {
+  const providerNames = new Map(providers.map(item=>[Number(CorralonSystem.providerIdentity.externalId(item)),providerLabel(item)]));
+  stockSqlCatalogRows = stockSqlArticles.map(article=>({
+    ...article, codigo:article.idart, cod_proveedor:article.codProv || '',
+    nombre:article.descripcion, id_proveedor:article.proveedor,
+    proveedor:providerNames.get(Number(article.proveedor)) || article.proveedorNombre || '',
+    id_rubro:article.idRubro, rubro:article.rubroNombre || '',
+    precio_costo:article.precioCosto, porc_iva:article.iva, porc_gan:article.margen
+  }));
+  stockSqlCodeMatchCounts = new Map(); stockSqlCodeDescriptions = new Map();
+  stockSqlArticles.forEach(article=>{
+    const key=codeKey(article.codProv); if(!key)return;
+    stockSqlCodeMatchCounts.set(key,(stockSqlCodeMatchCounts.get(key)||0)+1);
+    const descriptions=stockSqlCodeDescriptions.get(key)||[];
+    descriptions.push(article.descripcion || '');stockSqlCodeDescriptions.set(key,descriptions);
   });
-}
-function indexArticleKey(article = {}) {
-  return codeKey(catalogArticleCode(article));
-}
-function indexArticleContribution(article = {}) {
-  const articleKey = indexArticleKey(article);
-  const providerCodes = [...new Set(articleProviderCodes(article))];
-  const providerKeys = [...new Set(articleProviderIdentityKeys(article))];
-  const description = String(readField(article, [
-    'nombre', 'descripcion', 'descripción', 'detalle',
-    'AArtículos_Descripción', 'articulo', 'Artículo'
-  ]) || '').trim() || '(Sin descripción)';
-  return { articleKey, providerCodes, providerKeys, description };
-}
-function addIndexArticleContribution(article) {
-  const contribution = indexArticleContribution(article);
-  if (!contribution.articleKey) return;
-  indexArticleContributions.set(contribution.articleKey, contribution);
-  contribution.providerCodes.forEach((providerCode) => {
-    indexCodeMatchCounts.set(providerCode, (indexCodeMatchCounts.get(providerCode) || 0) + 1);
-    if (!indexCodeDescriptions.has(providerCode)) indexCodeDescriptions.set(providerCode, []);
-    indexCodeDescriptions.get(providerCode).push(contribution.description);
-    if (!indexCodeProviders.has(providerCode)) indexCodeProviders.set(providerCode, new Set());
-    if (!indexCodeProviderRefCounts.has(providerCode)) indexCodeProviderRefCounts.set(providerCode, new Map());
-    const refs = indexCodeProviderRefCounts.get(providerCode);
-    contribution.providerKeys.forEach((providerKey) => {
-      refs.set(providerKey, (refs.get(providerKey) || 0) + 1);
-      indexCodeProviders.get(providerCode).add(providerKey);
-    });
-  });
-}
-function removeIndexArticleContribution(articleKey) {
-  const contribution = indexArticleContributions.get(codeKey(articleKey));
-  if (!contribution) return;
-  contribution.providerCodes.forEach((providerCode) => {
-    const nextCount = (indexCodeMatchCounts.get(providerCode) || 0) - 1;
-    if (nextCount > 0) indexCodeMatchCounts.set(providerCode, nextCount);
-    else indexCodeMatchCounts.delete(providerCode);
-    const descriptions = indexCodeDescriptions.get(providerCode) || [];
-    const descriptionIndex = descriptions.indexOf(contribution.description);
-    if (descriptionIndex >= 0) descriptions.splice(descriptionIndex, 1);
-    if (descriptions.length) indexCodeDescriptions.set(providerCode, descriptions);
-    else indexCodeDescriptions.delete(providerCode);
-    const refs = indexCodeProviderRefCounts.get(providerCode);
-    const providersForCode = indexCodeProviders.get(providerCode);
-    contribution.providerKeys.forEach((providerKey) => {
-      const nextRefCount = (refs?.get(providerKey) || 0) - 1;
-      if (nextRefCount > 0) refs.set(providerKey, nextRefCount);
-      else {
-        refs?.delete(providerKey);
-        providersForCode?.delete(providerKey);
-      }
-    });
-    if (!refs?.size) indexCodeProviderRefCounts.delete(providerCode);
-    if (!providersForCode?.size) indexCodeProviders.delete(providerCode);
-  });
-  indexArticleContributions.delete(contribution.articleKey);
-}
-function replaceIndexCatalogRow(article) {
-  const articleKey = indexArticleKey(article);
-  if (!articleKey) return;
-  const existingPosition = indexCatalogRowPositions.get(articleKey);
-  if (Number.isInteger(existingPosition)) indexCatalogRows[existingPosition] = article;
-  else {
-    indexCatalogRowPositions.set(articleKey, indexCatalogRows.length);
-    indexCatalogRows.push(article);
-  }
-}
-function removeIndexCatalogRow(articleKey) {
-  const key = codeKey(articleKey);
-  const position = indexCatalogRowPositions.get(key);
-  if (!Number.isInteger(position)) return;
-  const lastPosition = indexCatalogRows.length - 1;
-  const lastRow = indexCatalogRows[lastPosition];
-  if (position !== lastPosition) {
-    indexCatalogRows[position] = lastRow;
-    indexCatalogRowPositions.set(indexArticleKey(lastRow), position);
-  }
-  indexCatalogRows.pop();
-  indexCatalogRowPositions.delete(key);
-}
-function saveIndexCodesCache(generation = indexCodesLoadGeneration) {
-  const save = () => {
-    if (generation !== indexCodesLoadGeneration) return;
-    const payload = {
-      format: 3,
-      version: indexCodesCacheVersion,
-      patchVersion: indexCodesCachePatchVersion,
-      providers: [...indexCodeProviders].map(([key, providerKeys]) => [key, [...providerKeys]]),
-      counts: [...indexCodeMatchCounts],
-      descriptions: [...indexCodeDescriptions],
-      contributions: [...indexArticleContributions],
-      providerRefs: [...indexCodeProviderRefCounts].map(([key, refs]) => [key, [...refs]])
-    };
-    window.CorralonCacheDB.set(INDEX_CODES_CACHE_KEY, payload).then(() => {
-      try { localStorage.removeItem(INDEX_CODES_CACHE_KEY); } catch (_) {}
-    }).catch((error) => console.warn('No se pudo guardar el índice de códigos en IndexedDB', error));
-  };
-  if ('requestIdleCallback' in window) requestIdleCallback(save, { timeout: 1500 });
-  else setTimeout(save, 0);
-}
-async function loadIndexCodesCache() {
-  try {
-    const cached = await window.CorralonCacheDB.migrateLocalStorage(INDEX_CODES_CACHE_KEY);
-    if (!cached || cached.format !== 3 || !Array.isArray(cached.providers) || !Array.isArray(cached.contributions)) return false;
-    indexCodeProviders = new Map(cached.providers.map(([key, providerKeys]) => [key, new Set(providerKeys)]));
-    indexCodeMatchCounts = new Map(cached.counts || []);
-    indexCodeDescriptions = new Map(cached.descriptions || []);
-    indexArticleContributions = new Map(cached.contributions || []);
-    indexCodeProviderRefCounts = new Map((cached.providerRefs || []).map(([key, refs]) => [key, new Map(refs)]));
-    indexCodesCacheVersion = Number(cached.version || 0);
-    indexCodesCachePatchVersion = Number(cached.patchVersion || 0);
-    return indexCodeProviders.size > 0 && indexArticleContributions.size > 0;
-  } catch (error) {
-    console.warn('No se pudo abrir el índice local de códigos', error);
-    return false;
-  }
-}
-function applyIndexCodesDelta(changedRows = [], removedCodes = [], meta = {}) {
-  const changed = Array.isArray(changedRows) ? changedRows : [];
-  const removed = Array.isArray(removedCodes) ? removedCodes : [];
-  removed.forEach((articleKey) => {
-    removeIndexArticleContribution(articleKey);
-    removeIndexCatalogRow(articleKey);
-  });
-  changed.forEach((article) => {
-    const articleKey = indexArticleKey(article);
-    if (!articleKey) return;
-    removeIndexArticleContribution(articleKey);
-    replaceIndexCatalogRow(article);
-    addIndexArticleContribution(article);
-  });
-  if (Number(meta.version || 0) > 0) indexCodesCacheVersion = Number(meta.version);
-  if (Number(meta.patchVersion || meta.patch_version || 0) > 0) indexCodesCachePatchVersion = Number(meta.patchVersion || meta.patch_version);
-  saveIndexCodesCache();
-  el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos listos · ${changed.length + removed.length} cambios aplicados`;
-  render();
-}
-async function loadIndexCodes(providedList = null, providedMeta = {}, rebuild = false) {
-  const generation = ++indexCodesLoadGeneration;
-  indexCodesLoading = true;
-  el.status.textContent = 'Cargando lista de index...';
-  try {
-    let list = Array.isArray(providedList) ? providedList : [];
-    let progressive = null;
-    let cachedIndexReady = false;
-    if (!list.length) {
-      cachedIndexReady = await loadIndexCodesCache();
-      if (cachedIndexReady) {
-        el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos listos · buscando cambios`;
-        render();
-      }
-    }
-    const codeIndexLoader = window.CorralonSystem?.catalog?.fetchCodeIndexRows;
-    const progressiveLoader = window.CorralonSystem?.catalog?.loadProgressive;
-    const sharedLoader = window.CorralonSystem?.catalog?.load;
-    if (!list.length && typeof progressiveLoader === 'function') {
-      progressive = await progressiveLoader({ fallback: true });
-      const canValidateFromLocalCache = !rebuild && cachedIndexReady
-        && progressive?.fromCache
-        && Number(progressive.version || 0) > 0
-        && Number(progressive.version) === Number(indexCodesCacheVersion)
-        && Array.isArray(progressive.initialRows)
-        && progressive.initialRows.length;
-      if (canValidateFromLocalCache) {
-        list = progressive.initialRows;
-        progressive.complete.catch((error) => console.warn('No se pudo actualizar el índice en segundo plano', error));
-      } else {
-        list = await progressive.complete;
-      }
-    }
-    else if (!list.length && typeof sharedLoader === 'function') list = await sharedLoader({ fallback: true });
-    else if (!list.length && typeof codeIndexLoader === 'function') list = await codeIndexLoader();
-    if (!Array.isArray(list) || !list.length) {
-      const snap = await getDocFromServer(doc(db, 'config', 'listaActual')).catch(() => getDoc(doc(db, 'config', 'listaActual')));
-      const url = snap.exists() ? String(snap.data()?.url || '').trim() : '';
-      if (!url) throw new Error('No hay lista publicada');
-      list = await fetchJson(url);
-    }
-    const cachedVersionMatches = !rebuild && cachedIndexReady
-      && progressive?.fromCache
-      && Number(progressive.version || 0) > 0
-      && Number(progressive.version) === Number(indexCodesCacheVersion);
-    indexCatalogRows = list.slice();
-    indexCatalogRowPositions = new Map(indexCatalogRows.map((article, index) => [indexArticleKey(article), index]).filter(([key]) => key));
-    if (cachedVersionMatches && !pendingIndexFullRows) {
-      const changedRows = [...pendingIndexChangedRows.values()];
-      const removedCodes = [...pendingIndexRemovedCodes];
-      pendingIndexChangedRows.clear();
-      pendingIndexRemovedCodes.clear();
-      if (changedRows.length || removedCodes.length) applyIndexCodesDelta(changedRows, removedCodes, pendingIndexEventMeta);
-      else {
-        el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos de proveedor listos`;
-        render();
-      }
-      pendingIndexEventMeta = {};
-      return;
-    }
-    indexCodeProviders = new Map();
-    indexCodeMatchCounts = new Map();
-    indexCodeDescriptions = new Map();
-    indexArticleContributions = new Map();
-    indexCodeProviderRefCounts = new Map();
-    for (let articleIndex = 0; articleIndex < list.length; articleIndex += 1) {
-      if (generation !== indexCodesLoadGeneration) return;
-      const article = list[articleIndex];
-      addIndexArticleContribution(article);
-      if (articleIndex > 0 && articleIndex % 150 === 0) await yieldIndexCodesWork();
-    }
-    if (generation !== indexCodesLoadGeneration) return;
-    const cacheMeta = { ...providedMeta, ...pendingIndexEventMeta };
-    indexCodesCacheVersion = Number(cacheMeta.version || progressive?.version || indexCodesCacheVersion || 0);
-    indexCodesCachePatchVersion = Number(cacheMeta.patchVersion || cacheMeta.patch_version || indexCodesCachePatchVersion || 0);
-    pendingIndexChangedRows.clear();
-    pendingIndexRemovedCodes.clear();
-    pendingIndexFullRows = null;
-    pendingIndexEventMeta = {};
-    saveIndexCodesCache(generation);
-    el.status.textContent = `${indexCodeProviders.size.toLocaleString('es-AR')} codigos de proveedor listos`;
-  } catch (error) {
-    console.warn(error);
-    try {
-      if (!indexCodeProviders.size) await loadIndexCodesCache();
-      el.status.textContent = `Usando cache: ${indexCodeProviders.size.toLocaleString('es-AR')} codigos`;
-    } catch (_) {
-      indexCodeProviders = new Map();
-      indexCodeMatchCounts = new Map();
-      indexCodeDescriptions = new Map();
-      el.status.textContent = 'No pude cargar codigos de index';
-    }
-    if (rebuild) throw error;
-  } finally {
-    if (generation === indexCodesLoadGeneration) indexCodesLoading = false;
-  }
-  render();
 }
 
 function editableCellPosition(cell) {
@@ -4797,12 +4490,9 @@ function stockSqlArticlesForProvider() {
   const providerId = stockArticleProviderFilterId();
   return providerId ? stockSqlArticles.filter(article => Number(article.proveedor) === providerId) : stockSqlArticles;
 }
-function stockRebuildArticleOptions(options = {}) {
-  const providerKey = String(provider?.id_proveedor || '');
-  if (stockField('stockFilterProvider').checked && providerKey) {
-    providerArticles = options.sqlOnly ? stockSqlArticles.filter(article=>Number(article.proveedor)===stockProviderId()) : stockProviderJsonLists.get(providerKey) || [];
-    if (!options.sqlOnly && providerKey && !stockProviderJsonLists.has(providerKey) && stockProviderJsonLoading !== providerKey) loadProviderArticles(provider);
-  } else providerArticles = stockSqlArticles;
+function stockRebuildArticleOptions() {
+  const filterProvider = stockField('stockFilterProvider').checked && provider;
+  providerArticles = filterProvider ? stockSqlArticles.filter(article=>Number(article.proveedor)===stockProviderId()) : stockSqlArticles;
   articleProviderPage = null;
   articleProviderOptions = [];
   closeArticleProviderList();
@@ -4827,7 +4517,7 @@ async function stockRefreshSql(options = {}) {
       const matches = stockSqlByCode.get(key) || []; matches.push(article); stockSqlByCode.set(key,matches);
     });
     rowsData.forEach(row => { stockArticleForRow(row); if (!stockConfirmed && row.conteo != null) row.cantidad = rawNumber(Number(row.conteo) - Number(row.stock || 0)); });
-    stockRebuildArticleOptions(options); render(); saveRows();
+    stockRebuildSqlCatalog(); stockRebuildArticleOptions(); render(); saveRows();
     stockIngresoMessage(stockConfirmed ? 'SQL conectado · Comprobante confirmado' : 'SQL conectado · Borrador sin confirmar', 'ok');
   } catch (error) { stockIngresoMessage(error.message,'error'); if(options.throwOnError)throw error; }
 }
@@ -4982,31 +4672,90 @@ function stockReset() {
   closeProviderList();closeArticleProviderList();
   stockMovementFields(); stockFreeze(false); render();saveRows();stockHeaderSave();stockRefreshSql(); stockRefreshRelations();
 }
-async function stockConsult() {
-  if(stockIngresoBusy) return;
-  try {
-    const result=await stockSqlGet('movimientos');stockMovements=result.movimientos||[];
+let stockConsultFilters=null;
+let stockConsultRequest=0,stockConsultMore=false,stockConsultTotal=0,stockConsultLoading=false;
+function stockRenderConsult() {
     const panel=stockField('stockConsultPanel'); panel.hidden=false;
-    panel.innerHTML='<div class="stock-consult-title">Movimientos confirmados <button type="button" id="stockCloseConsult">Cerrar</button></div><div class="stock-consult-grid"><div class="stock-consult-columns"><span>Fecha</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(item.nombre)}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>';
+    const filters=stockConsultFilters||{desde:stockToday(),hasta:stockToday(),proveedor:'0'};
+    const dateText=value=>value.split('-').reverse().join('/');
+    const providerOptions=providers.map(item=>`<option value="${Number(CorralonSystem.providerIdentity.externalId(item))}" ${String(CorralonSystem.providerIdentity.externalId(item))===String(filters.proveedor)?'selected':''}>${escapeHtml(providerLabel(item))}</option>`).join('');
+    panel.innerHTML='<div class="stock-consult-title" style="gap:12px;flex-wrap:wrap"><span>Movimientos confirmados</span><button type="button" id="stockCloseConsult">Cerrar</button></div><form class="stock-consult-filters"><label>Desde<input id="stockConsultFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.desde)+'"></label><label>Hasta<input id="stockConsultTo" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.hasta)+'"></label><label>Proveedor<select id="stockConsultProvider"><option value="0">Todos los proveedores</option>'+providerOptions+'</select></label><button type="submit">Consultar</button></form><div class="stock-consult-grid"><div class="stock-consult-columns"><span>Fecha</span><span>Sucursal</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||item.sucursal||'—')}</span><span>${escapeHtml(item.nombre||'Movimiento de stock')}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>'+`<div style="padding:10px;display:flex;gap:12px;align-items:center"><span>${stockMovements.length} de ${stockConsultTotal} movimientos de todas las sucursales</span>${stockConsultMore?'<button id="stockConsultMore" type="button">Cargar más movimientos</button>':''}</div>`;
     if(!stockMovements.length) panel.insertAdjacentHTML('beforeend','<p>No hay movimientos confirmados.</p>');
-    stockField('stockCloseConsult').onclick=()=>panel.hidden=true;
+    stockField('stockCloseConsult').onclick=()=>{panel.hidden=true;stockConsultRequest++;stockConsultLoading=false;};
     panel.querySelectorAll('[data-stock-view]').forEach(button=>button.onclick=()=>stockOpenMovementPopup(Number(button.dataset.stockView)));
-  }catch(error){stockIngresoMessage(error.message,'error');}
+    panel.querySelector('#stockConsultMore')?.addEventListener('click',()=>stockLoadConsult(true));
+    const form=panel.querySelector('form');
+    form.addEventListener('submit',event=>{event.preventDefault();stockApplyConsultFilters();});
+    form.querySelector('select').addEventListener('change',()=>stockApplyConsultFilters());
+    form.querySelectorAll('input').forEach(field=>{
+      field.addEventListener('input',()=>field.setCustomValidity(''));
+      field.addEventListener('blur',()=>{const parsed=FX.parseFechaFlexible(field.value);if(parsed){field.value=parsed.text;field.setCustomValidity('');}});
+    });
+    FX.bindLinearNavigation({root:form,selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
+}
+function stockApplyConsultFilters(){
+  const dates=['stockConsultFrom','stockConsultTo'].map(id=>{
+    const field=stockField(id),parsed=FX.parseFechaFlexible(field.value);
+    if(!parsed){field.setCustomValidity('Ingresá una fecha válida.');field.reportValidity();return null;}
+    field.setCustomValidity('');field.value=parsed.text;
+    const d=parsed.date;return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  });
+  if(dates.some(date=>!date))return;
+  if(dates[0]>dates[1]){const field=stockField('stockConsultTo');field.setCustomValidity('Hasta debe ser igual o posterior a Desde.');field.reportValidity();return;}
+  stockConsultFilters={desde:dates[0],hasta:dates[1],proveedor:stockField('stockConsultProvider').value};
+  return stockStartConsult();
+}
+async function stockLoadConsult(append=false){
+  if(stockConsultLoading)return;
+  const request=++stockConsultRequest;stockConsultLoading=true;
+  const panel=stockField('stockConsultPanel'),list=panel.querySelector('.stock-consult-list'),scroll=list?.scrollTop||0;
+  const more=panel.querySelector('#stockConsultMore');if(more){more.disabled=true;more.textContent='Consultando SQL…';}
+  try{
+    const before=append?Number(stockMovements.at(-1)?.id)||0:0;
+    const result=await stockSqlGet('movimientos',{sucursal:0,antes:before,...stockConsultFilters});
+    if(request!==stockConsultRequest)return;
+    stockMovements=append?[...stockMovements,...(result.movimientos||[])]:result.movimientos||[];
+    stockConsultMore=Boolean(result.hayMas);stockConsultTotal=Number(result.total)||stockMovements.length;
+    stockRenderConsult();if(append)panel.querySelector('.stock-consult-list').scrollTop=scroll;
+  }catch(error){if(request===stockConsultRequest){stockIngresoMessage(error.message,'error');if(more){more.disabled=false;more.textContent='Reintentar cargar más';}}}
+  finally{if(request===stockConsultRequest)stockConsultLoading=false;}
+}
+async function stockConsult() {
+  if(stockIngresoBusy||stockConsultLoading)return;
+  stockConsultFilters={desde:stockToday(),hasta:stockToday(),proveedor:'0'};
+  await stockStartConsult();
+}
+async function stockStartConsult(){
+  stockConsultRequest++;stockConsultLoading=false;
+  stockMovements=[];stockConsultMore=false;stockConsultTotal=0;
+  stockRenderConsult();await stockLoadConsult();
 }
 let stockMovementPopupRequest=0;
+function stockPopupNavigation(index){
+  return `<div class="stock-popup-nav"><button type="button" data-stock-popup-prev ${index===0?'disabled':''} aria-label="Movimiento anterior">‹ Anterior</button><span>${index+1} de ${stockConsultTotal||stockMovements.length}</span><button type="button" data-stock-popup-next ${index===stockMovements.length-1&&!stockConsultMore?'disabled':''} aria-label="Movimiento siguiente">Siguiente ›</button><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div>`;
+}
+async function stockPopupNext(index){
+  const request=stockMovementPopupRequest;
+  if(index+1===stockMovements.length&&stockConsultMore){await stockLoadConsult(true);}
+  if(request===stockMovementPopupRequest&&!stockField('stockMovementPopup').hidden&&stockMovements[index+1])await stockOpenMovementPopup(index+1);
+}
 async function stockOpenMovementPopup(index){
   const item=stockMovements[index];if(!item)return;
   const request=++stockMovementPopupRequest,popup=stockField('stockMovementPopup');
   popup.hidden=false;
   popup.innerHTML='<div class="stock-popup-head"><strong>Movimiento de stock</strong><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div><p>Cargando movimiento…</p>';
-  const bindClose=()=>popup.querySelector('[data-close-stock-popup]').onclick=()=>{popup.hidden=true;stockMovementPopupRequest++;};
+  const bindClose=()=>{
+    popup.querySelector('[data-close-stock-popup]').onclick=()=>{popup.hidden=true;stockMovementPopupRequest++;};
+    popup.querySelector('[data-stock-popup-prev]')?.addEventListener('click',()=>stockOpenMovementPopup(index-1));
+    popup.querySelector('[data-stock-popup-next]')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;await stockPopupNext(index);if(!popup.hidden&&request===stockMovementPopupRequest)event.target.disabled=false;});
+  };
   bindClose();
   try{
-    const result=await stockSqlGet('detalle',{recibo:item.id});
+    const result=await stockSqlGet('detalle',{recibo:item.id,sucursal:item.sucursal||Number(stockField('stockIngresoSucursal').value)});
     if(request!==stockMovementPopupRequest||popup.hidden)return;
     const lines=result.articulos||[],units=lines.reduce((sum,line)=>sum+Number(line.cantidad||0),0);
     const note=String(item.nota||'').replace(/\[WEBSTOCK:[^\]]*\]\[HASH:[^\]]*\]\s*/,'');
-    popup.innerHTML=`<div class="stock-popup-head"><strong>${escapeHtml(item.nombre)} Nº ${escapeHtml(item.numero)}</strong><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div>
+    popup.innerHTML=`<div class="stock-popup-head"><strong>${escapeHtml(item.nombre)} Nº ${escapeHtml(item.numero)}</strong>${stockPopupNavigation(index)}</div>
       <div class="stock-popup-info"><span><b>Fecha:</b> ${escapeHtml(item.fecha)}</span><span><b>Proveedor:</b> ${escapeHtml(item.proveedorNombre||'—')}</span><span><b>Factura:</b> ${escapeHtml(item.factura||'—')}</span><span><b>Remito:</b> ${escapeHtml(item.remito||'—')}</span></div>
       <div class="stock-popup-table"><table><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Descripción</th><th>Cantidad</th><th>Costo unitario</th><th>Importe</th><th>Stock actual</th></tr></thead><tbody>${lines.map(line=>`<tr><td>${escapeHtml(line.idart)}</td><td>${escapeHtml(line.codigo||'')}</td><td>${escapeHtml(line.descripcion)}</td><td class="num">${escapeHtml(Number(line.cantidad||0).toLocaleString('es-AR'))}</td><td class="num">${money(line.precioUnitario)}</td><td class="num">${money(line.importe)}</td><td class="num">${escapeHtml(Number(line.stock||0).toLocaleString('es-AR'))}</td></tr>`).join('')}</tbody></table></div>
       <div class="stock-popup-footer"><span>${escapeHtml(note)}</span><b>${lines.length} artículos · ${escapeHtml(units.toLocaleString('es-AR'))} unidades</b><strong>Total: ${money(item.total)}</strong></div>`;
@@ -5025,7 +4774,7 @@ async function stockViewMovement(index) {
   if(pending?.status==='uncertain'){stockIngresoMessage('Primero recuperá la confirmación pendiente.','error');return;}
   if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !window.confirm('¿Descartar el borrador y consultar este movimiento?'))return;
   try {
-    const item=stockMovements[index], result=await stockSqlGet('detalle',{recibo:item.id}); stockMovementIndex=index;stockConfirmed=true;
+    const item=stockMovements[index], result=await stockSqlGet('detalle',{recibo:item.id,sucursal:item.sucursal||Number(stockField('stockIngresoSucursal').value)}); stockField('stockIngresoSucursal').value=String(item.sucursal||Number(stockField('stockIngresoSucursal').value));stockMovementIndex=index;stockConfirmed=true;
     const selected=providers.find(p=>Number(CorralonSystem.providerIdentity.externalId(p))===Number(item.proveedor));
     setProvider(selected||null,{skipUndo:true,skipProviderArticles:true});
     rowsData=(result.articulos||[]).map(line=>{const row=normalizeRow({codigo:line.codigo||'',idart:line.idart,descripcion:line.descripcion,cantidad:line.cantidad,stock:line.stock,descuento:providerDiscountValue()});row.precio=precioUnitarioDesdeFinal(row,line.precioUnitario);return row;});
@@ -5043,7 +4792,7 @@ function stockPrint() {
   if(!stockConfirmed)return;
   const page=window.open('','_blank');if(!page){stockIngresoMessage('Permití abrir pestañas para ver el comprobante.','error');return;}
   const lines=rowsData.filter(row=>!isBlankStockRow(row));
-  page.document.write(`<!doctype html><html lang="es"><title>Movimiento de stock ${escapeHtml(stockField('stockNumero').value)}</title><style>body{font:14px Arial;margin:30px}table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid #ccc;text-align:left}@media print{button{display:none}}</style><h1>Corralón Progreso</h1><h2>${escapeHtml(stockField('stockTipoMovimiento').selectedOptions[0]?.textContent||'Movimiento de stock')} Nº ${escapeHtml(stockField('stockNumero').value)}</h2><p>Sucursal: ${escapeHtml(stockField('stockIngresoSucursal').selectedOptions[0]?.textContent||'')} · Fecha: ${escapeHtml(stockField('stockFecha').value)} · Proveedor: ${escapeHtml(el.providerInput.value)}</p><table><thead><tr><th>IDArt</th><th>Descripción</th><th>Cantidad</th><th>Precio</th><th>Importe</th></tr></thead><tbody>${lines.map(row=>`<tr><td>${escapeHtml(row.idart)}</td><td>${escapeHtml(row.descripcion)}</td><td>${escapeHtml(row.cantidad)}</td><td>${money(calcPrecioFinal(row))}</td><td>${money(calcPrecioFinalCantidad(row))}</td></tr>`).join('')}</tbody></table><p>${escapeHtml(stockField('stockIngresoNota').value)}</p><strong>Total: ${escapeHtml(stockField('stockTotalAmount').textContent)}</strong><p><button onclick="window.print()">Imprimir</button></p></html>`);page.document.close();
+  page.document.write(`<!doctype html><html lang="es"><title>Movimiento de stock ${escapeHtml(stockField('stockNumero').value)}</title><style>body{font:14px Arial;margin:30px}table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid #ccc;text-align:left}@media print{button{display:none}}</style><h1>Corralón Progreso</h1><h2>${escapeHtml(stockField('stockTipoMovimiento').selectedOptions[0]?.textContent||'Movimiento de stock')} Nº ${escapeHtml(stockField('stockNumero').value)}</h2><p>Sucursal: ${escapeHtml(stockField('stockIngresoSucursal').selectedOptions[0]?.textContent||'')} · Fecha: ${escapeHtml(stockField('stockFecha').value)} · Proveedor: ${escapeHtml(el.providerInput.value)}</p><p><b>Nº factura:</b> ${escapeHtml(stockField('stockIngresoFactura').value.trim()||'—')} · <b>Nº remito:</b> ${escapeHtml(stockField('stockRemito').value.trim()||'—')}</p><table><thead><tr><th>IDArt</th><th>Descripción</th><th>Cantidad</th><th>Precio</th><th>Importe</th></tr></thead><tbody>${lines.map(row=>`<tr><td>${escapeHtml(row.idart)}</td><td>${escapeHtml(row.descripcion)}</td><td>${escapeHtml(row.cantidad)}</td><td>${money(calcPrecioFinal(row))}</td><td>${money(calcPrecioFinalCantidad(row))}</td></tr>`).join('')}</tbody></table><p>${escapeHtml(stockField('stockIngresoNota').value)}</p><strong>Total: ${escapeHtml(stockField('stockTotalAmount').textContent)}</strong><p><button onclick="window.print()">Imprimir</button></p></html>`);page.document.close();
 }
 async function initStockSql() {
   try {
@@ -5960,61 +5709,11 @@ document.querySelector('.table-wrap').addEventListener('keydown', (event) => {
 });
 
 initFuncionesJsBindings();
-let refreshIndexCodesTimer = null;
-const pendingIndexChangedRows = new Map();
-const pendingIndexRemovedCodes = new Set();
-let pendingIndexFullRows = null;
-let pendingIndexEventMeta = {};
-function queueIndexDelta(changedRows, removedCodes) {
-  removedCodes.forEach((articleKey) => {
-    const key = codeKey(articleKey);
-    pendingIndexChangedRows.delete(key);
-    pendingIndexRemovedCodes.add(key);
-  });
-  changedRows.forEach((article) => {
-    const key = indexArticleKey(article);
-    if (!key) return;
-    pendingIndexRemovedCodes.delete(key);
-    pendingIndexChangedRows.set(key, article);
-  });
-}
-const refreshIndexCodesFromCatalog = (event) => {
-  const detail = event?.detail || {};
-  const list = detail.rows;
-  if (!Array.isArray(list) || !list.length) return;
-  const changedRows = Array.isArray(detail.changedRows) ? detail.changedRows : [];
-  const removedCodes = Array.isArray(detail.removedCodes) ? detail.removedCodes : [];
-  if (indexCodesLoading) {
-    pendingIndexEventMeta = { ...pendingIndexEventMeta, ...detail, rows: undefined, changedRows: undefined, removedCodes: undefined };
-    if (changedRows.length || removedCodes.length) queueIndexDelta(changedRows, removedCodes);
-    else pendingIndexFullRows = list;
-    return;
-  }
-  if ((changedRows.length || removedCodes.length) && indexArticleContributions.size) {
-    queueIndexDelta(changedRows, removedCodes);
-    pendingIndexEventMeta = { ...pendingIndexEventMeta, ...detail, rows: undefined, changedRows: undefined, removedCodes: undefined };
-    clearTimeout(refreshIndexCodesTimer);
-    refreshIndexCodesTimer = setTimeout(() => {
-      const pendingChanges = [...pendingIndexChangedRows.values()];
-      const pendingRemovals = [...pendingIndexRemovedCodes];
-      pendingIndexChangedRows.clear();
-      pendingIndexRemovedCodes.clear();
-      const meta = pendingIndexEventMeta;
-      pendingIndexEventMeta = {};
-      applyIndexCodesDelta(pendingChanges, pendingRemovals, meta);
-    }, 120);
-    return;
-  }
-  clearTimeout(refreshIndexCodesTimer);
-  refreshIndexCodesTimer = setTimeout(() => loadIndexCodes(list, detail).catch(console.warn), 120);
-};
-window.addEventListener('corralon:catalog-delta', refreshIndexCodesFromCatalog);
-window.addEventListener('corralon:catalog-ready', refreshIndexCodesFromCatalog);
 (async()=>{
   await Promise.all([loadRows(), loadPriceComparisons()]);
   render();
   const stockReady = initStockSql();
-  await Promise.allSettled([loadProviders(), loadIndexCodes()]);
+  await loadProviders();
   await stockReady;
   stockRebuildArticleOptions();
   await stockRefreshRelations();
@@ -6029,7 +5728,7 @@ window.addEventListener('corralon:catalog-ready', refreshIndexCodesFromCatalog);
   stockWorkspaceReady = true;
   stockWorkspaceIndicator();
   saveRows();
-  repairUnmatchedIndexRows().catch(console.warn);
+  stockRebuildSqlCatalog();
   render();
 })().catch(console.warn);
 </script>

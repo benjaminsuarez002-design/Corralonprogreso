@@ -1,4 +1,8 @@
 (function () {
+  if (!document.querySelector('script[data-sale-reviews-loader]')) {
+    const script=document.createElement('script');script.src=new URL('facturacion-revisiones.js',document.currentScript?.src||location.href).href;
+    script.dataset.saleReviewsLoader='1';document.head.appendChild(script);
+  }
   const KEEP_LOGIN_KEY = 'historial_keep_logged_v1';
   const ACTIVE_USER_KEY = 'corralon_menu_active_user_v1';
   const ACTIVE_USER_SNAPSHOT_KEY = 'corralon_menu_active_user_snapshot_v1';

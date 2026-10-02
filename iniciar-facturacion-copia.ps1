@@ -1,4 +1,4 @@
-param([switch]$SoloCompilar)
+param([switch]$SoloCompilar,[switch]$SinAbrir)
 $ErrorActionPreference = 'Stop'
 $apiSource = Join-Path $PSScriptRoot 'facturacion-copia-api.cs'
 $serverSource = Join-Path $PSScriptRoot 'CorralonWebServer.cs'
@@ -73,5 +73,5 @@ if (Test-Path -LiteralPath $shortcut) {
     $shortcutUrl = Get-Content -LiteralPath $shortcut | Where-Object { $_ -like 'URL=*' } | Select-Object -First 1
     if ($shortcutUrl) { $facturacionUrl = $shortcutUrl.Substring(4).Trim() }
 }
-Start-Process -FilePath $facturacionUrl | Out-Null
+if (-not $SinAbrir) { Start-Process -FilePath $facturacionUrl | Out-Null }
 Write-Host 'Facturación actualizada y conectada con SQL.'

@@ -1,4 +1,8 @@
 (function () {
+  if (!document.querySelector('script[data-sale-reviews-loader]')) {
+    const script=document.createElement('script');script.src=new URL('facturacion-revisiones.js',document.currentScript?.src||location.href).href;
+    script.dataset.saleReviewsLoader='1';document.head.appendChild(script);
+  }
   try {
   const SUPABASE_URL = 'https://tizyjenayrcdkcodsjnc.supabase.co';
   const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpenlqZW5heXJjZGtjb2Rzam5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzE4MDYsImV4cCI6MjA4NzgwNzgwNn0.Xue8zgo8QJiKTErtzfUOgpczMngsAaePJZqLvA8Z7oI';
@@ -6849,6 +6853,10 @@
       if (!sourceRows.length) { options.showMessage?.('No hay artículos para importar'); return false; }
       returnFocus = options.returnFocus || document.activeElement;
       let catalog = Array.isArray(options.catalogRows) && options.catalogRows.length ? options.catalogRows : null;
+      if (options.catalogSource === 'sql' && !catalog) {
+        options.showMessage?.('No hay artículos SQL disponibles. Revisá la conexión y volvé a recalcular.');
+        return false;
+      }
       if (!catalog) {
         const progressive = await CATALOG.loadProgressive({ fallback:true });
         catalog = progressive.fromCache && progressive.initialRows.length
@@ -6858,7 +6866,7 @@
       // Algunas instalaciones conservaron una cache parcial con un unico
       // rubro. No se usa para importar: se elimina y se baja el catalogo
       // completo una sola vez.
-      if (rubros(catalog).length <= 1) {
+      if (options.catalogSource !== 'sql' && rubros(catalog).length <= 1) {
         await CATALOG.clearCache();
         catalog = await CATALOG.load({ fallback:true });
       }

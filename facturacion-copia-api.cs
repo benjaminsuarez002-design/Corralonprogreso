@@ -134,6 +134,10 @@ internal static class FacturacionCopiaApi
     {
         public ArcaUnavailableException(string message) : base(message) { }
     }
+    private sealed class SaleReviewException : InvalidOperationException
+    {
+        public SaleReviewException(string message) : base(message) { }
+    }
     private sealed class FiscalRecoveryException : InvalidOperationException
     {
         public readonly string Number;
@@ -810,6 +814,60 @@ internal static class FacturacionCopiaApi
             throw new InvalidOperationException("El operador configurado en la API no existe en SQL o está suspendido.");
         return operatorId;
     }
+    private static bool InvoiceDateAllowed(DateTime date, DateTime today)
+    {
+        return date.Date >= today.Date.AddDays(-5) && date.Date <= today.Date;
+    }
+    private static void AssertBackdatedInvoicePermission(Dictionary<string, object> invoice, DateTime date, DateTime today)
+    {
+        if(date.Date==today.Date)return;
+        string userId=Text(Value(invoice,"usuarioId")).Trim();
+        if(userId.Length==0)throw new InvalidOperationException("Solo los administradores pueden emitir con fecha anterior. Iniciá sesión y usá la fecha de hoy.");
+        Dictionary<string,object> document;
+        try
+        {
+            string url="https://firestore.googleapis.com/v1/projects/corralon-progreso/databases/(default)/documents/menuUsuarios/"+Uri.EscapeDataString(userId)+"?key=AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0";
+            var request=(HttpWebRequest)WebRequest.Create(url);request.Method="GET";request.Timeout=6000;
+            using(var response=request.GetResponse())using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8))document=Object(Json.DeserializeObject(reader.ReadToEnd()));
+        }
+        catch { throw new InvalidOperationException("No se pudo verificar el permiso de administrador. Usá la fecha de hoy o reintentá cuando vuelva la conexión."); }
+        string level=Text(Value(Object(Value(Object(Value(document,"fields")),"nivel")),"stringValue")).Trim();
+        if(!String.Equals(level,"administrador",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Solo los administradores pueden emitir con fecha anterior. La fecha debe ser la de hoy.");
+    }
+    private static void AssertStoredInvoice(SqlConnection connection, SqlTransaction tx, int receipt, Dictionary<string, object> invoice)
+    {
+        var headers = RowsTx(connection, tx, "SELECT IDDepósito AS point,IDComprob AS type,IDCliente AS customer,ApeYNom AS name,CONVERT(varchar(10),Fecha,23) AS date,TotalME AS total,Confirmado AS confirmed,Anulada AS cancelled FROM dbo.FacturasATP WHERE IDRecibo=@p0", receipt);
+        var articles = RowsTx(connection, tx, "SELECT IDArt AS idart,Cantidad AS cantidad,PrecioUni AS precio,ArtDesc AS descripcion FROM dbo.FacturasATS WHERE IDRecibo=@p0 ORDER BY Orden", receipt);
+        var payments = RowsTx(connection, tx, "SELECT IDTipoPago AS idTipoPago,Importe AS importe,ImpRec AS impRec,Cuotas AS cuotas,IDTarjeta AS idTarjeta FROM dbo.FacturasTSVal WHERE IDRecibo=@p0 ORDER BY Orden", receipt);
+        var items = Value(invoice, "articulos") as System.Collections.ArrayList;
+        var values = Value(invoice, "valores") as System.Collections.ArrayList;
+        bool matches = headers.Count == 1 && items != null && values != null && articles.Count == items.Count && payments.Count == values.Count;
+        if (matches)
+        {
+            var h = headers[0];
+            matches = Number(h["confirmed"]) == -1 && Number(h["cancelled"]) == 0 &&
+                Number(h["point"]) == Number(Value(invoice, "idPuntoVenta")) && Number(h["type"]) == Number(Value(invoice, "idComprobante")) &&
+                Number(h["customer"]) == Number(Value(invoice, "idCliente")) && Text(h["date"]) == Text(Value(invoice, "fecha")) &&
+                String.Equals(Text(h["name"]).Trim(), Text(Value(Object(Value(invoice, "cliente")), "nombre")).Trim(), StringComparison.OrdinalIgnoreCase) &&
+                Math.Abs(Number(h["total"]) - Number(Value(Object(Value(invoice, "totales")), "total"))) <= .01m;
+            for (int i = 0; matches && i < items.Count; i++)
+            {
+                var row = Object(items[i]); var saved = articles[i];
+                matches = Number(saved["idart"]) == Number(Value(row, "idart")) &&
+                    Math.Abs(Number(saved["cantidad"]) - Number(Value(row, "cantidad"))) <= .0001m &&
+                    Math.Abs(Number(saved["precio"]) - Number(Value(row, "precio"))) <= .0001m &&
+                    String.Equals(Text(saved["descripcion"]).Trim(), Limited(Value(row, "descripcion"), 150, "Descripción"), StringComparison.OrdinalIgnoreCase);
+            }
+            for (int i = 0; matches && i < values.Count; i++)
+            {
+                var row = Object(values[i]); var saved = payments[i];
+                matches = Number(saved["idTipoPago"]) == Number(Value(row, "idTipoPago")) &&
+                    Number(saved["idTarjeta"] == DBNull.Value ? (object)0 : saved["idTarjeta"]) == Number(Value(row, "idTarjeta") ?? (object)0) && Number(saved["cuotas"] == DBNull.Value ? (object)0 : saved["cuotas"]) == Number(Value(row, "cuotas") ?? (object)0) &&
+                    Math.Abs(Number(saved["importe"]) - Number(Value(row, "importe"))) <= .01m && Math.Abs(Number(saved["impRec"]) - Number(Value(row, "impRec"))) <= .01m;
+            }
+        }
+        if (!matches) throw new SaleReviewException("Este borrador ya está asociado a otra venta o sus datos cambiaron. No se emitió ni vinculó otra boleta.");
+    }
     private static object Emit(SqlConnection connection, Dictionary<string, object> invoice, bool dryRun, bool recoveryOnly)
     {
         int typeId = RequiredId(Value(invoice, "idComprobante"), "el comprobante");
@@ -828,8 +886,9 @@ internal static class FacturacionCopiaApi
         bool savedAuthorization = fiscal && Guid.TryParse(Text(Value(invoice, "id")), out recoveryDraftId)
             && File.Exists(RecoveryPath(recoveryDraftId));
         if (!DateTime.TryParseExact(Text(Value(invoice, "fecha")), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.None, out date) || (date.Date != DateTime.Today && !savedAuthorization))
-            throw new InvalidOperationException("Para emitir, la fecha debe ser la de hoy. Access exige autorización para otra fecha.");
+            System.Globalization.DateTimeStyles.None, out date) || (!savedAuthorization && !InvoiceDateAllowed(date, DateTime.Today)))
+            throw new InvalidOperationException("La fecha debe estar entre hoy y los 5 días corridos anteriores. No se permiten fechas futuras.");
+        if(!savedAuthorization)AssertBackdatedInvoicePermission(invoice,date,DateTime.Today);
         var items = Value(invoice, "articulos") as System.Collections.ArrayList;
         var payments = Value(invoice, "valores") as System.Collections.ArrayList;
         if (items == null || items.Count == 0 || items.Count > 200) throw new InvalidOperationException("Agregá entre 1 y 200 artículos.");
@@ -875,6 +934,7 @@ internal static class FacturacionCopiaApi
                 if (existing != null && existing != DBNull.Value)
                 {
                     int prior = Convert.ToInt32(existing);
+                    AssertStoredInvoice(connection, tx, prior, invoice);
                     var found = Scalar(connection, tx, "SELECT NroFactura FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND Confirmado=-1", prior);
                     if (found == null) throw new InvalidOperationException("Ya existe un intento previo con este borrador. Revisá el comprobante " + prior + " en Access.");
                     tx.Commit();
@@ -1383,9 +1443,21 @@ internal static class FacturacionCopiaApi
         Int32.TryParse(request.QueryString["sucursal"], out branch); Int32.TryParse(request.QueryString["proveedor"], out provider); Int32.TryParse(request.QueryString["recibo"], out receipt);
         string query = request.QueryString["consulta"] ?? "";
         if (query == "proveedores") return new { ok = true, proveedores = Rows(connection, "SELECT IDProveedor AS id,[RazónSocial] AS nombre FROM dbo.Proveedores WHERE ISNULL(Suspendido,0)=0 ORDER BY [RazónSocial]") };
-        if (query == "articulos") return new { ok = true, articulos = Rows(connection, "SELECT a.IDArt AS idart,a.IDArtProv AS codProv,a.[Descripción] AS descripcion,a.IDProveedor AS proveedor,ISNULL(s.StockAct,0) AS stock,a.PrecioCpraSI AS precioCosto,a.PrecioCpraCI * CASE WHEN a.IDMoneda=1 THEN CONVERT(decimal(18,4),1) ELSE m.ImpCotiz END AS costoFinal FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s ON s.IDArt=a.IDArt AND s.IDSuc=@p0 LEFT JOIN dbo.Monedas m ON m.IDMoneda=a.IDMoneda WHERE a.Suspendido=0 ORDER BY a.[Descripción]", branch) };
+        if (query == "articulos") return new { ok = true, articulos = Rows(connection, "SELECT a.IDArt AS idart,a.IDArtProv AS codProv,a.[Descripción] AS descripcion,a.IDProveedor AS proveedor,p.[RazónSocial] AS proveedorNombre,a.IDRubro AS idRubro,r.[Descripción] AS rubroNombre,a.PorcIVA1 AS iva,a.PorcGanMin AS margen,ISNULL(s.StockAct,0) AS stock,a.PrecioCpraSI AS precioCosto,a.PrecioCpraCI * CASE WHEN a.IDMoneda=1 THEN CONVERT(decimal(18,4),1) ELSE m.ImpCotiz END AS costoFinal FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s ON s.IDArt=a.IDArt AND s.IDSuc=@p0 LEFT JOIN dbo.Monedas m ON m.IDMoneda=a.IDMoneda LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor LEFT JOIN dbo.Rubros r ON r.IDRubro=a.IDRubro WHERE a.Suspendido=0 ORDER BY a.[Descripción]", branch) };
         if (query == "compras") return new { ok = true, compras = Rows(connection, "SELECT IDRecibo AS id,NroFactura AS numero,CONVERT(varchar(10),Fecha,103) AS fecha,Total AS total FROM dbo.ComprasTP WHERE IDProveedor=@p0 AND Fecha>=DATEADD(day,-90,GETDATE()) AND Confirmado=1 AND EnMovStk=1 AND IDMovStk IS NULL ORDER BY Fecha DESC", provider) };
-        if (query == "movimientos") return new { ok = true, movimientos = Rows(connection, "SELECT TOP 200 r.IDRecibo AS id,r.NroMov AS numero,r.IDTipoMov AS tipo,r.IDProveedor AS proveedor,r.IDDepósito AS puntoVenta,r.IDDepDes AS destino,r.IDFactura AS compra,r.IDRemito AS relacionado,r.NroFactura AS factura,r.NroRemito AS remito,CONVERT(varchar(10),r.Fecha,103) AS fecha,t.Descripcion AS nombre,p.[RazónSocial] AS proveedorNombre,r.Total AS total,r.Nota AS nota FROM dbo.RecibosTP r INNER JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Proveedores p ON p.IDProveedor=r.IDProveedor WHERE r.IDSuc=@p0 AND r.Confirmado=1 AND r.Anulado=0 ORDER BY r.IDRecibo DESC", branch) };
+        if (query == "movimientos")
+        {
+            int before;
+            if(!Int32.TryParse(request.QueryString["antes"]??"0",out before)||before<0)throw new InvalidOperationException("Página de movimientos inválida.");
+            DateTime from,to;
+            if(!DateTime.TryParseExact(request.QueryString["desde"]??DateTime.Today.ToString("yyyy-MM-dd"),"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out from)||
+               !DateTime.TryParseExact(request.QueryString["hasta"]??DateTime.Today.ToString("yyyy-MM-dd"),"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out to)||from>to||to==DateTime.MaxValue.Date)
+                throw new InvalidOperationException("Rango de fechas inválido.");
+            var records=Rows(connection,"SELECT TOP 201 r.IDRecibo AS id,r.NroMov AS numero,r.IDSuc AS sucursal,r.IDTipoMov AS tipo,r.IDProveedor AS proveedor,r.IDDepósito AS puntoVenta,r.IDDepDes AS destino,r.IDFactura AS compra,r.IDRemito AS relacionado,r.NroFactura AS factura,r.NroRemito AS remito,CONVERT(varchar(10),r.Fecha,103) AS fecha,t.Descripcion AS nombre,p.[RazónSocial] AS proveedorNombre,r.Total AS total,r.Nota AS nota FROM dbo.RecibosTP r LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Proveedores p ON p.IDProveedor=r.IDProveedor WHERE (@p0=0 OR r.IDSuc=@p0) AND r.Confirmado=1 AND r.Anulado=0 AND (@p1=0 OR r.IDRecibo<@p1) AND r.Fecha>=@p2 AND r.Fecha<@p3 AND (@p4=0 OR r.IDProveedor=@p4) ORDER BY r.IDRecibo DESC",branch,before,from,to.AddDays(1),provider);
+            bool more=records.Count>200;if(more)records.RemoveAt(200);
+            int count=Convert.ToInt32(Scalar(connection,null,"SELECT COUNT(*) FROM dbo.RecibosTP WHERE (@p0=0 OR IDSuc=@p0) AND Confirmado=1 AND Anulado=0 AND Fecha>=@p1 AND Fecha<@p2 AND (@p3=0 OR IDProveedor=@p3)",branch,from,to.AddDays(1),provider));
+            return new {ok=true,movimientos=records,hayMas=more,total=count};
+        }
         if (query == "detalle") return new { ok = true, articulos = Rows(connection, "SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,d.Cantidad AS cantidad,d.PrecioUni AS precioUnitario,d.Importe AS importe,ISNULL(s.StockAct,0) AS stock FROM dbo.RecibosTS d INNER JOIN dbo.RecibosTP r ON r.IDRecibo=d.IDRecibo INNER JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt LEFT JOIN dbo.ArtsStock s ON s.IDArt=d.IDArt AND s.IDSuc=r.IDSuc WHERE d.IDRecibo=@p0 AND r.IDSuc=@p1 AND r.Confirmado=1 AND r.Anulado=0 ORDER BY d.IDOrden", receipt, branch) };
         if (query == "relacionados") return new { ok = true, relacionados = Rows(connection, "SELECT TOP 200 r.IDRecibo AS id,r.NroMov AS numero,t.Abreviatura AS tipo,CONVERT(varchar(10),r.Fecha,103) AS fecha FROM dbo.RecibosTP r INNER JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov WHERE r.IDSuc=@p0 AND r.Confirmado=1 AND r.Anulado=0 AND r.Completo=0 AND r.Fecha>=DATEADD(day,-30,GETDATE()) ORDER BY r.IDRecibo DESC", branch) };
         if (query == "pendientes") return new { ok = true, articulos = Rows(connection, "SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,SUM(d.Cantidad)-ISNULL((SELECT SUM(e.Cantidad) FROM dbo.RecibosTS e INNER JOIN dbo.RecibosTP h ON h.IDRecibo=e.IDRecibo WHERE h.IDRemito=@p0 AND h.Confirmado=1 AND h.Anulado=0 AND e.IDArt=d.IDArt),0) AS cantidad,MAX(d.PrecioUni) AS precioUnitario FROM dbo.RecibosTS d INNER JOIN dbo.RecibosTP r ON r.IDRecibo=d.IDRecibo INNER JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=@p0 AND r.IDSuc=@p1 AND r.Confirmado=1 AND r.Anulado=0 GROUP BY d.IDArt,a.IDArtProv,a.[Descripción] HAVING SUM(d.Cantidad)>ISNULL((SELECT SUM(e.Cantidad) FROM dbo.RecibosTS e INNER JOIN dbo.RecibosTP h ON h.IDRecibo=e.IDRecibo WHERE h.IDRemito=@p0 AND h.Confirmado=1 AND h.Anulado=0 AND e.IDArt=d.IDArt),0)", receipt, branch) };
@@ -1408,6 +1480,99 @@ internal static class FacturacionCopiaApi
         context.Response.OutputStream.Write(bytes, 0, bytes.Length);
         context.Response.Close();
     }
+    private static readonly object ReviewGate = new object();
+    private static Timer ReviewNotifyTimer;
+    private static string ReviewPath(Guid id)
+    {
+        return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "venta-revision-" + id.ToString("N") + ".bin");
+    }
+    private static Dictionary<string, object> ReadReview(string path)
+    {
+        return Object(Json.DeserializeObject(Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(path), null, DataProtectionScope.CurrentUser))));
+    }
+    private static void WriteReview(string path, object data)
+    {
+        byte[] bytes = ProtectedData.Protect(Encoding.UTF8.GetBytes(Json.Serialize(data)), null, DataProtectionScope.CurrentUser);
+        string temp = path + ".tmp";
+        using (var file = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None)) { file.Write(bytes, 0, bytes.Length); file.Flush(true); }
+        if (File.Exists(path)) File.Replace(temp, path, null); else File.Move(temp, path);
+    }
+    private static void NotifyReviews()
+    {
+        if (!Monitor.TryEnter(ReviewGate)) return;
+        try
+        {
+            foreach (string path in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "venta-revision-*.bin"))
+            {
+                try
+                {
+                    var review = ReadReview(path);
+                    if (Text(Value(review, "notificado")) == "True") continue;
+                    var sale = Object(Value(review, "comprobante"));
+                    var fields = new Dictionary<string, object>();
+                    foreach (var pair in new Dictionary<string, object> {
+                        {"idRevision",Value(review,"id")},{"destinatario","benja"},{"estado","pendiente"},
+                        {"cliente",Value(Object(Value(sale,"cliente")),"nombre")},{"total",Value(Object(Value(sale,"totales")),"total")},
+                        {"usuario",Value(sale,"usuario")},{"fecha",Value(sale,"fecha")},{"motivo",Value(review,"motivo")},
+                        {"creadoAt",Value(review,"creadoAt")},{"url",Value(review,"url")}
+                    }) fields[pair.Key] = new { stringValue = Text(pair.Value) };
+                    string url = "https://firestore.googleapis.com/v1/projects/corralon-progreso/databases/(default)/documents/facturacionRevisiones/" + Text(Value(review,"id")) + "?currentDocument.exists=false&key=AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0";
+                    var request = (HttpWebRequest)WebRequest.Create(url);
+                    request.Method="PATCH";request.ContentType="application/json";request.Timeout=8000;
+                    byte[] body=Encoding.UTF8.GetBytes(Json.Serialize(new { fields }));request.ContentLength=body.Length;
+                    bool sent=false;
+                    try { using(var stream=request.GetRequestStream())stream.Write(body,0,body.Length);using(var response=request.GetResponse())sent=true; }
+                    catch(WebException ex) { var response=ex.Response as HttpWebResponse; if(response!=null && (int)response.StatusCode==409)sent=true; else throw; if(response!=null)response.Close(); }
+                    if(sent){review["notificado"]=true;WriteReview(path,review);}
+                }
+                catch (Exception ex) { Console.Error.WriteLine("Revisión pendiente de notificar: " + ex.Message); }
+            }
+        }
+        finally { Monitor.Exit(ReviewGate); }
+    }
+    private static void HandleSaleReview(HttpListenerContext context)
+    {
+        var request=context.Request;
+        Dictionary<string,object> input=new Dictionary<string,object>();
+        if(request.HttpMethod=="POST")
+        {
+            if(!(request.ContentType??"").StartsWith("application/json")||request.ContentLength64>(request.Url.AbsolutePath=="/imprimir-revision"?8500000:1000000))throw new InvalidOperationException("Revisión inválida o demasiado grande.");
+            using(var reader=new StreamReader(request.InputStream,Encoding.UTF8))input=Object(Json.DeserializeObject(reader.ReadToEnd()));
+        }
+        Guid id;
+        if(!Guid.TryParse(request.HttpMethod=="GET"?request.QueryString["id"]:Text(Value(input,"idRevision")),out id))throw new InvalidOperationException("Identificador de revisión inválido.");
+        string path=ReviewPath(id);
+        lock(ReviewGate)
+        {
+            if(request.HttpMethod=="GET")
+            {
+                if(!File.Exists(path))throw new InvalidOperationException("No se encontró la venta en revisión.");
+                Reply(context,200,new {ok=true,revision=ReadReview(path)});return;
+            }
+            if(request.Url.AbsolutePath=="/revision-venta")
+            {
+                var sale=Object(Value(input,"comprobante"));Guid draft;
+                if(!Guid.TryParse(Text(Value(sale,"id")),out draft)|| !(Value(sale,"articulos") is System.Collections.IList))throw new InvalidOperationException("Faltan los datos de la venta.");
+                if(File.Exists(path))
+                {
+                    var existing=ReadReview(path);
+                    if(Text(Value(existing,"fingerprint"))!=DraftFingerprint(sale))throw new InvalidOperationException("La revisión guardada tiene otro contenido. No se sobrescribió.");
+                }
+                else WriteReview(path,new {id=id.ToString(),comprobante=sale,fingerprint=DraftFingerprint(sale),motivo=Limited(Value(input,"motivo"),2000,"Motivo"),creadoAt=DateTime.UtcNow.ToString("o"),url=Text(Value(input,"url")),notificado=false,impreso=false});
+                Reply(context,200,new {ok=true,idRevision=id.ToString()});ThreadPool.QueueUserWorkItem(_=>NotifyReviews());return;
+            }
+            if(request.Url.AbsolutePath=="/imprimir-revision")
+            {
+                if(!File.Exists(path))throw new InvalidOperationException("Guardá la revisión antes de imprimir.");
+                var review=ReadReview(path);
+                if(Text(Value(review,"impreso"))=="True"){Reply(context,200,new {ok=true,yaImpreso=true});return;}
+                PrintRawTicket(Text(Value(input,"impresora")),Text(Value(input,"imagen")),"VENTA PENDIENTE DE REVISION "+id.ToString());
+                review["impreso"]=true;review["impresoAt"]=DateTime.UtcNow.ToString("o");WriteReview(path,review);
+                Reply(context,200,new {ok=true});return;
+            }
+        }
+        throw new InvalidOperationException("Acción de revisión no disponible.");
+    }
     private static void Handle(HttpListenerContext context)
     {
         var request = context.Request;
@@ -1427,6 +1592,12 @@ internal static class FacturacionCopiaApi
         if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/health")
         {
             Reply(context, 200, new { ok = true });
+            return;
+        }
+        if (request.Url.AbsolutePath == "/revision-venta" || request.Url.AbsolutePath == "/imprimir-revision")
+        {
+            try { HandleSaleReview(context); }
+            catch (Exception ex) { Reply(context, 400, new { ok = false, error = ex.Message }); }
             return;
         }
         if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/borradores-fiscales")
@@ -1665,14 +1836,37 @@ internal static class FacturacionCopiaApi
                     Reply(context, 200, new { ok = true, factura = header[0], articulos = lines, valores = values });
                     return;
                 }
+                if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/consultar-comprobantes")
+                {
+                    DateTime from,to;
+                    if(!DateTime.TryParseExact(request.QueryString["desde"],"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out from)||
+                       !DateTime.TryParseExact(request.QueryString["hasta"],"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out to)||from>to||to.Year>=9999)
+                        throw new InvalidOperationException("Ingresá un rango de fechas válido.");
+                    int page,branch,point;
+                    if(!Int32.TryParse(request.QueryString["pagina"]??"0",out page)||page<0||page>100000||
+                       !Int32.TryParse(request.QueryString["sucursal"]??"0",out branch)||branch<0||
+                       !Int32.TryParse(request.QueryString["puntoVenta"]??"0",out point)||point<0)
+                        throw new InvalidOperationException("Página, sucursal o punto de venta inválido.");
+                    string search=Limited(request.QueryString["buscar"],80,"Búsqueda");
+                    string pattern="%"+search.Replace("[","[[]").Replace("%","[%]").Replace("_","[_]")+"%";
+                    var records=Rows(connection,
+                        "SELECT f.IDRecibo AS idRecibo,f.NroFactura AS numero,CONVERT(varchar(10),f.Fecha,103) AS fecha,f.IDComprob AS idComprobante,t.Descripcion AS tipo,f.ApeYNom AS cliente,f.IDSuc AS idSucursal,s.Sucursal AS sucursal,f.Total AS total,f.Anulada AS anulada,f.IDDepósito AS puntoVenta " +
+                        "FROM dbo.FacturasATP f LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob LEFT JOIN dbo.Sucursales s ON s.IDSuc=f.IDSuc " +
+                        "WHERE f.Confirmado<>0 AND f.IDComprob IN (1,2,5,6,7,8,13,29,43) AND f.Fecha>=@p0 AND f.Fecha<@p1 " +
+                        "AND (@p2=0 OR f.IDSuc=@p2) AND (@p6=0 OR f.IDDepósito=@p6) AND (@p3='' OR f.ApeYNom LIKE @p4 OR f.NroFactura LIKE @p4) " +
+                        "ORDER BY f.Fecha DESC,f.IDRecibo DESC OFFSET @p5 ROWS FETCH NEXT 51 ROWS ONLY",
+                        from.Date,to.Date.AddDays(1),branch,search,pattern,page*50,point);
+                    bool more=records.Count>50;if(more)records.RemoveAt(50);
+                    Reply(context,200,new {ok=true,comprobantes=records,pagina=page,hayMas=more});return;
+                }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/comprobante")
                 {
                     int receipt = Id(request.QueryString["id"]);
-                    var header = Rows(connection, "SELECT IDRecibo AS idRecibo,NroFactura AS numero,Fecha AS fecha,IDComprob AS idComprobante,IDDepósito AS idPuntoVenta,Confirmado AS confirmado,Anulada AS anulada,Total AS total,TotalME AS totalAbsoluto,IDCliente AS idCliente,ApeYNom AS cliente,CUIT AS documento,CAE AS cae,CASE WHEN LEN(CodBarra)=40 THEN SUBSTRING(CodBarra,32,8) ELSE '' END AS caeExpiry,NroFacNC AS facturaAsociada,IDVend AS vendedor,IDSuc AS sucursal,Impresa AS impresa,ActStock AS stockActualizado FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND IDComprob IN (1,2,5,6,7,8,13,29,43)", receipt);
+                    var header = Rows(connection, "SELECT IDRecibo AS idRecibo,NroFactura AS numero,Fecha AS fecha,CONVERT(varchar(10),Fecha,23) AS fechaComprobante,IDComprob AS idComprobante,IDDepósito AS idPuntoVenta,Confirmado AS confirmado,Anulada AS anulada,Total AS total,TotalME AS totalAbsoluto,IDCliente AS idCliente,ApeYNom AS cliente,CUIT AS documento,CAE AS cae,CASE WHEN LEN(CodBarra)=40 THEN SUBSTRING(CodBarra,32,8) ELSE '' END AS caeExpiry,NroFacNC AS facturaAsociada,IDVend AS vendedor,IDSuc AS sucursal,Impresa AS impresa,ActStock AS stockActualizado,IDTipoIVA AS idTipoIva,IDTipoDocFis AS idTipoDoc,[Dirección] AS direccion,[Teléfono] AS telefono,Nota AS nota FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND IDComprob IN (1,2,5,6,7,8,13,29,43)", receipt);
                     if (header.Count != 1) { Reply(context, 404, new { ok = false, error = "El comprobante no existe en SQL." }); return; }
                     Reply(context, 200, new { ok = true, comprobante = header[0],
                         articulos = Rows(connection, "SELECT IDArt AS idart,ArtDesc AS descripcion,Cantidad AS cantidad,PrecioUni AS precio,Importe AS importe FROM dbo.FacturasATS WHERE IDRecibo=@p0 ORDER BY Orden", receipt),
-                        valores = Rows(connection, "SELECT IDTipoPago AS idTipoPago,Importe AS importe,ImpRec AS impRec,ImpEnt AS total,Cuotas AS cuotas,IDTarjeta AS idTarjeta,Coef AS coef,Concepto AS descripcion FROM dbo.FacturasTSVal WHERE IDRecibo=@p0 ORDER BY Orden", receipt) });
+                        valores = Rows(connection, "SELECT v.IDTipoPago AS idTipoPago,p.TipoPago AS tipo,v.Importe AS importe,v.ImpRec AS impRec,v.ImpEnt AS total,v.Cuotas AS cuotas,v.IDTarjeta AS idTarjeta,t.[Descripción] AS tarjeta,v.Coef AS coef,v.Concepto AS descripcion FROM dbo.FacturasTSVal v LEFT JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta WHERE v.IDRecibo=@p0 ORDER BY v.Orden", receipt) });
                     return;
                 }
                 if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/imprimir")
@@ -1714,6 +1908,14 @@ internal static class FacturacionCopiaApi
                         bool issued = Convert.ToInt32(found[0]["confirmado"]) == -1 && Convert.ToInt32(found[0]["anulada"]) == 0;
                         Reply(context, 200, new { ok = true, estado = issued ? "emitido" : "pendiente",
                             idRecibo = found[0]["idRecibo"], numero = found[0]["numero"] });
+                        return;
+                    }
+                    // Al restaurar una pantalla sólo consultar SQL y las copias pendientes;
+                    // no habilitar edición de una venta cuyo resultado fiscal esté guardado.
+                    if (request.QueryString["soloSql"] == "1")
+                    {
+                        bool pending = File.Exists(RecoveryPath(id)) || File.Exists(PendingDraftPath(id));
+                        Reply(context, 200, new { ok = true, estado = pending ? "pendiente" : "sinRegistro" });
                         return;
                     }
                     // Estos comprobantes no consultan ARCA. Con SQL disponible y sin la marca
@@ -1874,6 +2076,7 @@ internal static class FacturacionCopiaApi
         }
         catch (FiscalRejectedException ex) { Reply(context, 409, new { ok = false, error = ex.Message, fiscalRejected = true }); }
         catch (ArcaUnavailableException ex) { Reply(context, 503, new { ok = false, error = "No hay conexión con ARCA o no devolvió CAE. Intentá con PRES. ESPECIAL. " + ex.Message, arcaUnavailable = true, safeToRetry = true }); }
+        catch (SaleReviewException ex) { Reply(context, 409, new { ok = false, error = ex.Message, revisionRequired = true, recoveryRequired = true }); }
         catch (FiscalRecoveryException ex) { Reply(context, 409, new { ok = false, error = ex.Message, recoveryRequired = true, numero = ex.Number }); }
         catch (InvalidOperationException ex) { Reply(context, 409, new { ok = false, error = ex.Message }); }
         catch (SqlException ex)
@@ -1890,6 +2093,7 @@ internal static class FacturacionCopiaApi
 
     private static void Main()
     {
+        ReviewNotifyTimer = new Timer(_ => NotifyReviews(), null, 15000, 60000);
         using (var listener = new HttpListener())
         {
             int port;
@@ -1921,7 +2125,7 @@ internal static class FacturacionCopiaApi
                     break;
                 }
                 bool critical = context.Request.HttpMethod == "POST" &&
-                    (context.Request.Url.AbsolutePath == "/emitir" || context.Request.Url.AbsolutePath == "/imprimir" ||
+                    (context.Request.Url.AbsolutePath == "/emitir" || context.Request.Url.AbsolutePath == "/imprimir" || context.Request.Url.AbsolutePath == "/imprimir-revision" || context.Request.Url.AbsolutePath == "/revision-venta" ||
                      context.Request.Url.AbsolutePath == "/stock-ingreso");
                 critical = critical || (context.Request.HttpMethod == "GET" && context.Request.Url.AbsolutePath == "/estado-emision");
                 if (critical) Interlocked.Increment(ref activeCriticalRequests);
