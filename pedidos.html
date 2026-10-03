@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.32"></script>
+<script src="corralon-system.js?v=1.0.33"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -2031,7 +2031,7 @@ els.compareModal.addEventListener('mousedown',e=>{if(e.target===els.compareModal
 els.providerInput.addEventListener('focus',()=>{showCombo(els.providerInput,false,'provider')})
 els.providerInput.addEventListener('input',()=>{headerProviderId='';updateHeaderProviderLinkState();resetProviderCatalog();showCombo(els.providerInput,false,'provider')})
 els.providerInput.addEventListener('dblclick',e=>{if(openProviderPage(els.providerInput.value,headerProviderId))e.preventDefault()})
-;[els.orderNumber,els.dateInput,els.confirmedCheck].forEach(input=>input.addEventListener('change',()=>{queueSave();saveRemote()}))
+;[els.orderNumber,els.dateInput,els.confirmedCheck].forEach(input=>input.addEventListener('change',()=>{queueSave();saveRemote();if(input===els.dateInput)refreshMonthlyLimit()}))
 Catalog.bindCatalogToggle(els.filterPriceList,()=>{queueSave();saveRemote();scheduleCatalogLoad(false,()=>{if(combo.input)showCombo(combo.input,true,combo.mode)})})
 function openConfirmChoice(){if(!requireSelectedBranch())return;const duplicated=hasDuplicateArticles();const duplicateTitle=duplicated?'Corregí los artículos duplicados antes de confirmar el pedido':'';for(const button of [els.reviewOrderBtn,els.pdfOrderBtn,els.shareOrderBtn,els.generateOrderBtn]){button.disabled=duplicated;button.title=duplicateTitle}if(duplicated)show('Hay artículos duplicados. Corregilos antes de confirmar el pedido.');els.confirmChoiceModal.classList.add('visible')}
 function closeConfirmChoice(){els.confirmChoiceModal.classList.remove('visible')}
@@ -2049,7 +2049,8 @@ function monthlyLimitForBranch(config={},branch=''){const legacy=Number(config?.
 function invalidateMonthlyPedidosCache(){monthlyPedidosCache.clear()}
 async function monthlyPedidosState(excludeDocId='',requestedBranch=selectedBranch()){const firestore=firebaseDb();if(!firestore)throw new Error('Sin conexión a Firebase');const month=orderMonthKey(els.dateInput?.value)||currentMonthKey();let cached=monthlyPedidosCache.get(month);if(!cached||Date.now()-Number(cached.at||0)>30000){if(cached?.promise)cached=await cached.promise;else{const [year,monthNumber]=month.split('-').map(Number),start=`${month}-01`,nextDate=new Date(year,monthNumber,1),next=`${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,'0')}-01`;const promise=Promise.all([firestore.collection('configuracion').doc(PEDIDOS_CONFIG_DOC).get(),firestore.collection('pedidos').where('fecha','>=',start).where('fecha','<',next).orderBy('fecha','asc').get()]).then(([configSnap,ordersSnap])=>({at:Date.now(),config:configSnap.exists?configSnap.data()||{}:{},orders:ordersSnap.docs.map(doc=>({...doc.data(),_docId:doc.id}))}));monthlyPedidosCache.set(month,{promise});try{cached=await promise;monthlyPedidosCache.set(month,cached)}catch(error){monthlyPedidosCache.delete(month);throw error}}}const branch=branchSelectValue(requestedBranch);const limit=monthlyLimitForBranch(cached.config,branch);let used=0;cached.orders.forEach(order=>{if(order._docId===String(excludeDocId||'')||order.eliminado||!order.confirmado)return;if(branch&&orderBranchKey(order)!==branch)return;used+=Number(order.total||0)||0});return{limit,used,month,branch,branchLabel:branch?Core.normalizeBranch(branch):'Todas las sucursales'}}
 function paintMonthlyLimit(state){if(!state||!els.monthlyLimitCard)return;const percent=state.limit>0?Math.max(0,state.used/state.limit*100):0;if(els.monthlyLimitLabel)els.monthlyLimitLabel.textContent=state.branch?`Límite · ${state.branchLabel}`:'Límites mensuales';els.monthlyLimitText.textContent=`${money(state.used)} / ${money(state.limit)}`;els.monthlyLimitBar.style.width=`${Math.min(100,percent)}%`;els.monthlyLimitCard.classList.toggle('warning',percent>=80&&percent<100);els.monthlyLimitCard.classList.toggle('danger',percent>=100);els.monthlyLimitCard.title=`${state.branchLabel}: usado ${percent.toFixed(1).replace('.',',')}% durante ${state.month}`}
-async function refreshMonthlyLimit(){try{const state=await monthlyPedidosState();paintMonthlyLimit(state);return state}catch(error){console.warn(error);if(els.monthlyLimitText)els.monthlyLimitText.textContent='No disponible';return null}}
+let monthlyLimitRefreshId=0;
+async function refreshMonthlyLimit(){const requestId=++monthlyLimitRefreshId;try{const state=await monthlyPedidosState();if(requestId===monthlyLimitRefreshId)paintMonthlyLimit(state);return state}catch(error){console.warn(error);if(requestId===monthlyLimitRefreshId&&els.monthlyLimitText)els.monthlyLimitText.textContent='No disponible';return null}}
 function pedidoAuthorizationHash(value){let hash=2166136261;for(const char of String(value||'')){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619)}return(hash>>>0).toString(16)}
 function pedidoAuthorizationDocId(orderDocId){return`autorizacion_pedido_${pedidoAuthorizationHash(orderDocId)}`}
 let monthlyAuthorizationUnsubscribe=null;

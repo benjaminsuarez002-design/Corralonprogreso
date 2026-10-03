@@ -12,7 +12,7 @@
   const USERS_COLLECTION = 'menuUsuarios';
   const CATALOG_EDITOR_LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
   const CATALOG_EDITOR_SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
-  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
+  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const firebaseConfig = {
     apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -34,6 +34,7 @@
     'actualizar articulos': 'actualizar_articulos',
     'actualizar%20articulos': 'actualizar_articulos',
     cargastock: 'carga_stock',
+    'articulos-sql': 'articulos_sql',
     proveedores: 'proveedores',
     listasproveedores: 'listas_proveedores',
     'diferencias-proveedores': 'diferencias_proveedores',
@@ -50,7 +51,7 @@
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const pageId = document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile];
-  const loginPage = ['facturacion', 'carga_stock'].includes(pageId) ? 'menu.html' : 'index.html';
+  const loginPage = ['facturacion', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html';
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));
 

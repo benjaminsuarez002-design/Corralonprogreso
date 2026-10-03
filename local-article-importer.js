@@ -1,3 +1,5 @@
+import {enqueue, resumeQueue} from './local-article-sync.js';
+export {resumeQueue};
 // Loaded only by the importer on localhost. No database credentials reach the browser.
 const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 const normalizeIndexFilter = value => String(value ?? '')
@@ -32,7 +34,7 @@ const money = value => Number(value || 0).toLocaleString('es-AR', { style:'curre
 let active = false;
 const draftKey = providerId => `corralon_local_article_import_draft_v1_${providerId}`;
 export function hasDraft(providerId) {
-  try { return Boolean(window.localStorage.getItem(draftKey(providerId))); } catch { return false; }
+  try { return Boolean(window.localStorage.getItem(draftKey(providerId)) || window.sessionStorage.getItem(draftKey(providerId))); } catch { return false; }
 }
 
 async function api(path, options = {}) {
@@ -52,7 +54,7 @@ export async function open(options) {
   backdrop.className = 'local-articles-backdrop';
   backdrop.innerHTML = `<section class="local-articles-dialog" role="dialog" aria-modal="true" aria-labelledby="localArticlesTitle">
     <header><div><h2 id="localArticlesTitle">Importar o actualizar artículos</h2><p data-provider></p><p data-original-description hidden></p></div><button type="button" data-close>Cerrar</button></header>
-    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:115px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:34px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:115px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:130px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
     <div data-status role="status"><span data-status-text>Leyendo artículos de la base local…</span><button type="button" data-reconnect hidden>Restablecer conexión</button></div><footer><span data-summary></span><button type="button" data-cancel>Cancelar</button><button type="button" class="primary" data-apply disabled>Aplicar todos</button></footer>
   </section>`;
   document.body.append(backdrop);
@@ -62,6 +64,8 @@ export async function open(options) {
   const providerId = Number(options.provider.id_proveedor || options.provider.idProveedor);
   let busy = false, rows = [], catalog = [], catalogSorted = [], rubros = [], token = '', operation = crypto.randomUUID();
   let catalogReady = false, draftSaveTimer = 0;
+  const draftCache=window.CorralonSystem.localCache;
+  let draftWrite=Promise.resolve();
   let menu = null, menuInput = null, menuIndex = -1, menuKind = '', matches = [];
   let articlePage = null, articleHasMatch = false;
   const fieldSnapshots = new Map(), undoStack = [];
@@ -71,19 +75,35 @@ export async function open(options) {
     status.classList.toggle('error', error);
     reconnect.hidden = !recoverable;
   };
-  function saveDraft() {
+  function saveDraft(strict = false) {
     if (!catalogReady) return;
-    if (!rows.length) { clearDraft(); return; }
-    try { window.localStorage.setItem(draftKey(providerId), JSON.stringify({ operation, rows })); } catch (error) { console.warn('No se pudo guardar el borrador del importador.', error); }
+    if (!rows.length) return clearDraft();
+    const snapshot=structuredClone({operation,rows});
+    draftWrite=draftWrite.catch(()=>{}).then(async()=>{
+      if (draftCache) {
+        await draftCache.write(draftKey(providerId),snapshot);
+        // Only a small marker remains in localStorage; images stay in IndexedDB.
+        try { window.localStorage.setItem(draftKey(providerId),JSON.stringify({indexedDb:true})); }
+        catch(error) { window.sessionStorage.setItem(draftKey(providerId),JSON.stringify({indexedDb:true})); }
+      } else window.localStorage.setItem(draftKey(providerId),JSON.stringify(snapshot));
+    });
+    if (strict) return draftWrite.catch(()=>{throw new Error('No se pudo guardar el borrador local. Verificá el espacio disponible en el equipo y volvé a Guardar.');});
+    return draftWrite.catch(error=>console.warn('No se pudo guardar el borrador del importador.',error));
   }
   function clearDraft() {
     clearTimeout(draftSaveTimer); draftSaveTimer = 0;
-    try { window.localStorage.removeItem(draftKey(providerId)); } catch (error) { console.warn('No se pudo borrar el borrador del importador.', error); }
+    try { window.localStorage.removeItem(draftKey(providerId)); window.sessionStorage.removeItem(draftKey(providerId)); } catch (error) { console.warn('No se pudo borrar el borrador del importador.', error); }
+    draftWrite=draftWrite.catch(()=>{}).then(async()=>{
+      if (draftCache) await draftCache.remove(draftKey(providerId));
+      window.localStorage.removeItem(draftKey(providerId));
+      window.sessionStorage.removeItem(draftKey(providerId));
+    });
+    return draftWrite.catch(error=>console.warn('No se pudo borrar el borrador del importador.',error));
   }
-  function flushDraft() { clearTimeout(draftSaveTimer); draftSaveTimer = 0; saveDraft(); }
-  function loadDraft() {
+  function flushDraft(strict = false) { clearTimeout(draftSaveTimer); draftSaveTimer = 0; return saveDraft(strict); }
+  async function loadDraft() {
     try {
-      const draft = JSON.parse(window.localStorage.getItem(draftKey(providerId)) || 'null');
+      const draft = (draftCache ? await draftCache.read(draftKey(providerId)) : null) || JSON.parse(window.localStorage.getItem(draftKey(providerId)) || 'null');
       return draft && Array.isArray(draft.rows) && draft.rows.length && draft.rows.every(row => row && typeof row.codigo === 'string' && typeof row.descripcion === 'string') ? draft : null;
     } catch { return null; }
   }
@@ -92,7 +112,7 @@ export async function open(options) {
     if (busy) return;
     clearTimeout(draftSaveTimer); draftSaveTimer = 0;
     if (discard) clearDraft(); else saveDraft();
-    window.removeEventListener('pagehide', flushDraft);
+    window.removeEventListener('pagehide', flushOnPageHide);
     hideMenu(); window.removeEventListener('keydown', handleDialogKeydown, true);
     backdrop.remove(); active = false; returnFocus?.focus?.({ preventScroll:true });
   }
@@ -101,7 +121,8 @@ export async function open(options) {
     clearTimeout(draftSaveTimer);
     draftSaveTimer = setTimeout(() => { draftSaveTimer = 0; saveDraft(); }, 500);
   }
-  window.addEventListener('pagehide', flushDraft);
+  function flushOnPageHide() { flushDraft(); }
+  window.addEventListener('pagehide', flushOnPageHide);
   const rowCopy = row => ({ ...row, ...(row.original ? { original:{ ...row.original } } : {}) });
   const rowAt = element => rows[Number(element?.closest('[data-row]')?.dataset.row)];
   function beginFieldEdit(input) {
@@ -181,10 +202,11 @@ export async function open(options) {
       <td><select data-field="iva"><option value="0.21">21 %</option><option value="0.105">10,5 %</option>${![.21,.105].some(v => Math.abs(v-r.iva)<.00001) ? `<option value="${Number(r.iva)}">${Number(r.iva)*100} %</option>` : ''}</select></td>
       <td><input data-field="margen" inputmode="decimal" value="${displayMargin(r.margen)}"></td>
       <td class="num">${money(r.costo)}</td><td class="num">${r.original ? money(r.original.costo) : '—'}</td><td class="num" data-difference>${costDifference(r)}</td>
-      <td><button type="button" data-remove title="Quitar">×</button></td>
+      <td><label class="local-load-web"><input type="checkbox" data-load-web ${r.loadWeb ? 'checked' : ''}>Cargar web</label><button type="button" data-remove title="Quitar">×</button></td>
     </tr>`).join('');
     backdrop.querySelectorAll('tr[data-row]').forEach(tr => {
       const row = rows[Number(tr.dataset.row)];
+      if (row.sqlSaved) tr.querySelectorAll('[data-field], [data-article-toggle], [data-rubro-toggle]').forEach(input => input.disabled = true);
       tr.querySelector('[data-field="iva"]').value = String([.21,.105].find(v => Math.abs(v-row.iva)<.00001) ?? row.iva);
     });
     summary();
@@ -204,6 +226,30 @@ export async function open(options) {
       changed(); setStatus('Revisá los datos. El proveedor, código y costo nuevos vienen de la lista seleccionada.');
     } catch (error) { setStatus(error.message, true); }
     finally { row.loading = false; if (backdrop.isConnected) render(); }
+  }
+  function importPayload(selected, op) {
+    return {operation:op,provider:providerId,rows:selected.map(r=>({mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))};
+  }
+  async function openWebEditor(row, input) {
+    if (busy || !confirmNew(row,true)) { input.checked=false; return; }
+    if (!row.rubro || !row.descripcion.trim() || !(row.costo>0) || !Number.isFinite(row.margen) || row.margen<0) {
+      input.checked=false; setStatus('Completá artículo, rubro, costo y margen antes de cargar web.',true); return;
+    }
+    row.loadWeb=true; changed(); flushDraft(); hideMenu(); backdrop.inert=true;
+    const seed={...(row.webDraft || {}),codigo:row.sqlSaved?.id || row.uid,nombre:row.descripcion,codigoProveedor:row.codigo,rubro:rubros.find(r=>Number(r.id)===Number(row.rubro))?.nombre || '',precio:row.sqlSaved?.venta3 ?? row.costo*(1+row.iva)*(1+row.margen/100)};
+    window.CorralonSystem.articleEditor.open(seed.codigo,{articles:[seed],displayCode:row.sqlSaved?.id || row.id || 'Automático',returnFocus:input,operation:{
+      articles:[seed],deferImages:true,
+      async save(list,article) {
+        const previous=row.webDraft;
+        row.webDraft=article; row.loadWeb=true;
+        try { await saveDraft(true); } catch(error) { row.webDraft=previous; throw error; }
+        setStatus('Ficha web guardada en el borrador local. Se publicará al aplicar el importador.');
+      },
+      onClose() {
+        backdrop.inert=false;
+        row.loadWeb=Boolean(row.webDraft); changed(); flushDraft(); render();
+      }
+    }});
   }
   function search(input, row) {
     hideMenu(); menuInput = input; menuKind = 'article';
@@ -405,6 +451,13 @@ export async function open(options) {
     changed();
   });
   backdrop.addEventListener('change', e => {
+    if (e.target.matches('[data-load-web]')) {
+      const row=rowAt(e.target);
+      if (!row || busy) return;
+      if (e.target.checked || row.sqlSaved) openWebEditor(row,e.target).catch(error=>{backdrop.inert=false;setStatus(error.message,true);});
+      else { row.loadWeb=false; changed(); }
+      return;
+    }
     const input = e.target.closest('[data-field]'); if (!input || busy) return;
     const row = rows[Number(input.closest('[data-row]').dataset.row)], field = input.dataset.field;
     if (field === 'iva') {
@@ -441,6 +494,7 @@ export async function open(options) {
     return all || (direction === 'left' ? input.selectionStart === 0 : input.selectionEnd === input.value.length);
   }
   function handleDialogKeydown(e) {
+    if (backdrop.inert) return;
     if (!backdrop.isConnected) return;
     const inDialog = backdrop.contains(e.target) || menu?.contains(e.target);
     if (!inDialog && e.key !== 'Escape') return;
@@ -510,29 +564,19 @@ export async function open(options) {
   window.addEventListener('keydown', handleDialogKeydown, true);
   apply.addEventListener('click', async () => {
     if (busy) return;
-    for (const row of rows) if (!confirmNew(row, true)) return;
+    const sqlRows=rows.filter(r=>!r.sqlSaved);
+    for (const row of sqlRows) if (!confirmNew(row, true)) return;
     const invalid = rows.find(r => (r.mode==='update'&&!r.id) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
     if(invalid) { setStatus('Completá artículo, rubro, costo y margen en todas las filas.',true); return; }
-    flushDraft();
-    busy=true; hideMenu(); backdrop.querySelectorAll('button,input,select').forEach(el=>el.disabled=true); apply.textContent='Aplicando…';
-    setStatus('Validando y guardando todo el lote en la base local…');
-    const payload={ operation, provider:Number(options.provider.id_proveedor || options.provider.idProveedor), rows:rows.map(r=>({ mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen })) };
-    let result;
+    try { await flushDraft(true); } catch(error) { setStatus(error.message,true); return; }
+    busy=true; apply.disabled=true;
     try {
-      result=await api('apply',{method:'POST',headers:{'Content-Type':'application/json','X-Local-Articles-Token':token},body:JSON.stringify(payload)});
+      await enqueue({operation,provider:providerId,rows},options.onImported,token);
+      busy=false; close(true);
+      try { options.showMessage?.('Carga en cola. Continúa en segundo plano.'); } catch(error) { console.warn(error); }
     } catch(error) {
-      busy=false; backdrop.querySelectorAll('button,input,select').forEach(el=>el.disabled=false);
-      setStatus(error.message,true,true);
-      apply.textContent='Aplicar todos'; summary();
-      return;
+      busy=false;setStatus(`No se pudo poner la carga en cola: ${error.message}`,true);summary();
     }
-    const appliedRows=rows.map(row=>rowCopy(row));
-    const message=`${result.nuevos} artículos nuevos y ${result.actualizados} actualizados en la base local`;
-    // Liberar el popup antes de refrescar la tabla principal. Así un error visual
-    // posterior nunca puede dejar el importador bloqueado para el próximo uso.
-    busy=false; close(true);
-    try { options.showMessage?.(message); } catch(error) { console.warn('El lote se guardó; falló el mensaje visual.',error); }
-    try { options.onImported?.({...result,importados:result.nuevos+result.actualizados,directSql:true},appliedRows); } catch(error) { console.warn('El lote se guardó; falló la actualización visual.',error); }
   });
   async function refreshConnection() {
     if (busy) return;
@@ -548,7 +592,7 @@ export async function open(options) {
       catalogSorted=catalog.slice().sort((a,b)=>String(a.descripcion || '').localeCompare(String(b.descripcion || ''),'es',{sensitivity:'base'}) || String(a.id).localeCompare(String(b.id)));
       backdrop.querySelector('[data-provider]').textContent=`${options.provider.proveedor || options.provider.nombre || ''} · ${catalog.length.toLocaleString('es-AR')} artículos leídos desde SQL Server`;
       if (!catalogReady) {
-        const draft = loadDraft();
+        const draft = await loadDraft();
         const counts=new Map(); catalog.filter(a=>Number(a.proveedor)===providerId).forEach(a=>counts.set(Number(a.rubro),(counts.get(Number(a.rubro))||0)+1));
         const defaultRubro=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0] || '';
         const importedRows = Array.isArray(options.rows) ? options.rows : [];
@@ -560,7 +604,7 @@ export async function open(options) {
           : importedRows.map(source=>({uid:crypto.randomUUID(),mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
         if (draft?.operation) operation = draft.operation;
         catalogReady=true;
-        saveDraft();
+        await saveDraft();
         render(); setStatus(draft ? 'Borrador recuperado. Podés seguir donde lo dejaste.' : 'Conexión restablecida. Podés continuar y aplicar el lote.');
       } else {
         render(); setStatus('Conexión restablecida. Podés continuar y aplicar el lote.');

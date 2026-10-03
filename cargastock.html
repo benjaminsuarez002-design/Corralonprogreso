@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.29"></script>
+<script src="corralon-system.js?v=1.0.30"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1771,7 +1771,7 @@ function hasLocalArticleImportDraft() {
   const provider = selectedProvider();
   const id = provider && CorralonSystem.providerIdentity.externalId(provider);
   if (!id || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return false;
-  try { return Boolean(localStorage.getItem(`corralon_local_article_import_draft_v1_${id}`)); } catch { return false; }
+  try { const key=`corralon_local_article_import_draft_v1_${id}`; return Boolean(localStorage.getItem(key) || sessionStorage.getItem(key)); } catch { return false; }
 }
 function assignNewArticleIds() {
   newArticlesRows.forEach((row, index) => { row.idArt = formatNewIdArt(newArticlesIndexMax + index + 1); });
@@ -3472,9 +3472,29 @@ function openRowNumberCalc(rowIndex, field, initialField = 'divide') {
     originalLabel: isPrice ? 'Precio inicial' : 'Cantidad inicial',
     resultLabel: isPrice ? 'Precio calculado' : 'Cantidad calculada',
     formatValue: isPrice ? money : rawNumber,
+    inverseLabel: isPrice ? 'Aplicar la inversa a la cantidad (mantener importe)' : 'Aplicar la inversa al precio (mantener importe)',
+    inverseDefault: true,
     returnFocus: () => focusCalculatedRow(row.id, col),
     onApply: (result, details) => {
       const before = { ...row };
+      if (details.inverse) {
+        const factor = calculator.calculate(1, details.divide, details.multiply);
+        const previousFactor = isPrice && before.precioOriginal
+          ? calculator.calculate(1, before.precioDivisor, before.precioMultiplicador) : 1;
+        const relativeFactor = factor / previousFactor;
+        if (!Number.isFinite(relativeFactor) || relativeFactor === 0) {
+          show('La operación inversa necesita un factor válido distinto de cero');
+          return;
+        }
+        if (isPrice) {
+          row.cantidad = rawNumber(quantityNumber(before.cantidad) / relativeFactor);
+        } else {
+          row.precio = Math.round(Number(before.precio || 0) / relativeFactor * 100) / 100;
+          row.precioOriginal = 0;
+          row.precioDivisor = '';
+          row.precioMultiplicador = '';
+        }
+      }
       if (isPrice) {
         row.precio = Math.round(result * 100) / 100;
         row.precioOriginal = original;
@@ -3486,10 +3506,14 @@ function openRowNumberCalc(rowIndex, field, initialField = 'divide') {
       pushStockRowMovement(row, field, before);
       saveRows();
       render();
-      show(isPrice ? 'Precio unitario guardado' : 'Cantidad guardada');
+      show(details.inverse ? 'Cantidad y precio ajustados' : isPrice ? 'Precio unitario guardado' : 'Cantidad guardada');
     },
-    onRestore: () => {
+    onRestore: (_value, details = {}) => {
       const before = { ...row };
+      if (details.inverse && isPrice && before.precioOriginal) {
+        const factor = calculator.calculate(1, before.precioDivisor, before.precioMultiplicador);
+        row.cantidad = rawNumber(quantityNumber(before.cantidad) * factor);
+      }
       if (isPrice) {
         row.precio = original;
         row.precioOriginal = 0;
@@ -5713,6 +5737,9 @@ initFuncionesJsBindings();
   await Promise.all([loadRows(), loadPriceComparisons()]);
   render();
   const stockReady = initStockSql();
+  if (['localhost','127.0.0.1','[::1]'].includes(location.hostname)) {
+    import('./local-article-sync.js').then(module=>module.resumeQueue()).catch(console.warn);
+  }
   await loadProviders();
   await stockReady;
   stockRebuildArticleOptions();

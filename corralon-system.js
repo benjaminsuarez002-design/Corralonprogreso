@@ -175,19 +175,27 @@
         <span data-corralon-sync-text>Sincronizando en segundo plano…</span>
       </div>
       <div class="corralon-sync-track"><div class="corralon-sync-fill"></div></div>
+      <button type="button" data-corralon-sync-retry hidden style="margin-top:8px;padding:4px 10px;border:1px solid #aaa;border-radius:6px;background:#fff;cursor:pointer;pointer-events:auto">Reintentar</button>
     `;
     document.body.appendChild(indicator);
     return indicator;
   }
 
-  function setArticleSyncIndicator(state, message) {
+  function setArticleSyncIndicator(state, message, options = {}) {
     const indicator = ensureArticleSyncIndicator();
     const text = indicator.querySelector('[data-corralon-sync-text]');
     clearTimeout(articleSyncIndicatorHideTimer);
     indicator.classList.remove('is-syncing', 'is-success', 'is-error');
     indicator.classList.add('is-visible', `is-${state}`);
     if (text) text.textContent = message;
-    if (state === 'success' || state === 'error') {
+    const fill=indicator.querySelector('.corralon-sync-fill');
+    const determinate=Number.isFinite(options.progress);
+    fill.style.animation=determinate ? 'none' : '';
+    fill.style.width=determinate ? `${Math.max(0,Math.min(100,options.progress))}%` : '';
+    fill.style.transform=determinate ? 'translateX(0)' : '';
+    const retry=indicator.querySelector('[data-corralon-sync-retry]');
+    retry.hidden=!options.retry;retry.onclick=()=>options.retry?.();
+    if ((state === 'success' || state === 'error') && !options.retry) {
       articleSyncIndicatorHideTimer = setTimeout(() => {
         indicator.classList.remove('is-visible');
       }, state === 'success' ? 1700 : 5000);
@@ -768,7 +776,8 @@
       .corralon-article-editor-photo-head button{border:0;border-radius:999px;background:#ef111b;color:#fff;padding:9px 14px;font-weight:900;cursor:pointer}
       .corralon-article-editor-photo{position:relative;display:grid;place-items:center;min-height:180px;margin:5px 0 14px;border:2px dashed #ddd;border-radius:14px;background:#fafafa;overflow:hidden;cursor:pointer}
       .corralon-article-editor-photo img{width:100%;height:180px;object-fit:contain;background:#f6f6f6}
-      .corralon-article-editor-photo input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+      .corralon-article-editor-photo input{display:none}
+      .corralon-article-editor-photo-head>div{display:flex;gap:4px}
       .corralon-editor-photo-tools{position:absolute;right:10px;top:10px;display:flex;align-items:center;gap:6px;z-index:2}
       .corralon-editor-photo-tools button,.corralon-editor-photo-tools span{display:grid;place-items:center;min-width:28px;height:28px;border:0;border-radius:50%;background:#777;color:#fff;font-weight:900}
       .corralon-editor-photo-tools button{cursor:pointer}.corralon-editor-photo-tools button:disabled{opacity:.45}
@@ -808,6 +817,41 @@
       .corralon-editor-paste-area:focus{border-color:#666;box-shadow:0 0 0 2px rgba(0,0,0,.08)}
       .corralon-editor-empty{padding:22px;text-align:center;color:#777}
       @media(max-width:560px){.corralon-article-editor-host{padding:0}.corralon-article-editor-card{width:100%;max-height:100dvh;border-radius:0;padding:18px}.corralon-article-editor-head{margin:-18px -18px 14px;top:-18px;padding:16px 18px 13px}.corralon-article-editor-info{grid-template-columns:90px 1fr}.corralon-article-editor-info-price{grid-row:auto;grid-column:1/-1;align-items:flex-start;text-align:left;padding-top:10px;border-top:1px solid #ddd}.corralon-article-editor-main-grid,.corralon-article-editor-extras,.corralon-editor-target-filters{grid-template-columns:1fr}.corralon-article-editor-arid-prices{grid-template-columns:1fr 1fr}.corralon-article-editor-actions{margin:0 -18px -18px;padding:12px 18px 16px;grid-template-columns:1fr}.corralon-article-editor-actions button{min-height:42px}}
+      /* Compact shared editor: reserve space for every field and its actions. */
+      .corralon-article-editor-host{padding:8px}
+      .corralon-article-editor-card{box-sizing:border-box;width:min(780px,100%);max-height:calc(100dvh - 16px);padding:10px;border-radius:12px}
+      .corralon-article-editor-head{position:static;margin:-10px -10px 6px;padding:6px 10px}
+      .corralon-article-editor-title{font-size:19px}
+      .corralon-article-editor-close{width:28px;height:28px;font-size:19px}
+      .corralon-article-editor-info{grid-template-columns:minmax(90px,.65fr) minmax(0,2fr) minmax(120px,.8fr);gap:2px 10px;margin-bottom:6px;padding:6px;border-radius:8px}
+      .corralon-article-editor-info-value,.corralon-article-editor-info-sub-value{font-size:13px;line-height:1.1}
+      .corralon-article-editor-info-sub-label{margin-top:2px}
+      .corralon-article-editor-info-rubro{margin-top:2px;padding-top:4px}
+      .corralon-article-editor-info-price{grid-row:1/3;grid-column:3;align-items:flex-end;padding-top:0;border-top:0;gap:2px}
+      .corralon-article-editor-price-state{min-height:16px}
+      .corralon-article-editor-price{font-size:19px}
+      .corralon-article-editor-main-grid{grid-template-columns:1fr 1fr;gap:6px}
+      .corralon-article-editor-field{gap:2px;margin-bottom:5px}
+      .corralon-article-editor-field input,.corralon-article-editor-field textarea{padding:1px 6px;border-radius:6px;font-size:13px;line-height:1.2;min-height:24px}
+      .corralon-article-editor-field textarea{height:42px;min-height:42px;resize:none}
+      .corralon-article-editor-chips{gap:4px;margin:2px 0 6px}
+      .corralon-article-editor-chip{padding:3px 8px}
+      .corralon-article-editor-extras{gap:4px;margin-bottom:5px;padding:5px 6px 0;border-radius:8px}
+      .corralon-article-editor-arid-prices{gap:4px}
+      .corralon-article-editor-arid-note{margin:0 0 4px}
+      .corralon-article-editor-paste{min-height:24px}
+      .corralon-article-editor-photo-head{gap:4px}
+      .corralon-article-editor-photo-head button{padding:4px 9px}
+      .corralon-article-editor-photo{height:clamp(56px,14dvh,100px);min-height:0;margin:3px 0 6px;border-radius:8px}
+      .corralon-article-editor-photo:has(img){height:clamp(140px,32dvh,260px)}
+      .corralon-article-editor-photo img{height:100%;min-height:0;max-height:100%;object-fit:contain}
+      .corralon-article-editor-photo .corralon-editor-empty{padding:4px}
+      .corralon-editor-photo-tools{right:5px;top:5px;gap:3px}
+      .corralon-editor-photo-tools button,.corralon-editor-photo-tools span{min-width:22px;height:22px}
+      .corralon-article-editor-actions{position:static;grid-template-columns:.8fr 1.2fr 1.2fr;gap:6px;margin:0 -10px -10px;padding:6px 10px}
+      .corralon-article-editor-actions button{min-height:30px;border-radius:7px;padding:1px 8px}
+      .corralon-article-editor-actions:has([data-editor-apply-open][hidden]){grid-template-columns:1fr 1.5fr}
+      @media(max-width:560px){.corralon-article-editor-info{grid-template-columns:80px minmax(0,1fr) 100px}.corralon-article-editor-chip{font-size:12px}.corralon-article-editor-info-price{grid-row:1/3;grid-column:3}.corralon-article-editor-extras{grid-template-columns:1fr 1fr}}
     `;
     document.head.appendChild(style);
     articleEditorHost = document.createElement('div');
@@ -874,7 +918,7 @@
           <div class="corralon-article-editor-field"><label for="corralonEditAridoFleteCalle5">Costo flete pasando Calle 5 por viaje</label><input id="corralonEditAridoFleteCalle5" data-editor-field="aridoFleteCalle5" data-editor-number="2" data-editor-kind="money" inputmode="decimal"></div>
           <div class="corralon-article-editor-arid-note">La configuración de flete es compartida por todos los artículos marcados como Árido.</div>
         </div>
-        <div class="corralon-article-editor-photo-head"><label>Foto (arrastrá o hacé clic para cambiar)</label><button type="button" data-editor-images-open>Ver imágenes</button></div>
+        <div class="corralon-article-editor-photo-head"><label>Foto (tocá para ampliar; arrastrá para cambiar)</label><div><button type="button" data-editor-photo-change>Cambiar foto</button><button type="button" data-editor-images-open>Ver imágenes</button></div></div>
         <div class="corralon-article-editor-photo" data-editor-photo-zone><img data-editor-photo alt="Foto del artículo"><input type="file" accept="image/*" multiple data-editor-photo-input>
           <div class="corralon-editor-photo-tools"><button type="button" data-editor-photo-prev>‹</button><span data-editor-photo-count>0/0</span><button type="button" data-editor-photo-next>›</button><button type="button" data-editor-photo-remove>×</button></div>
         </div>
@@ -935,6 +979,12 @@
       }
       if (event.target.matches?.('[data-editor-arid-paste-dialog]')) closeArticleEditorAridPasteDialog();
       if (event.target.closest('[data-editor-close]')) closeArticleEditor();
+      if (event.target.closest('[data-editor-photo-change]')) articleEditorHost.querySelector('[data-editor-photo-input]').click();
+      if (event.target.closest('[data-editor-photo-zone]') && !event.target.closest('.corralon-editor-photo-tools,input')) {
+        const url=editorImageUrl();
+        if(url) window.CorralonFunciones.openImagePreview(url,{alt:'Foto del artículo',returnFocus:articleEditorHost.querySelector('[data-editor-photo-change]')});
+        else articleEditorHost.querySelector('[data-editor-photo-input]').click();
+      }
       const chip = event.target.closest('[data-editor-chip]');
       if (chip) {
         chip.classList.toggle('is-active');
@@ -1091,6 +1141,9 @@
   function configureArticleEditor(options = {}) {
     articleEditorAdapter = { ...articleEditorAdapter, ...options };
   }
+  // A per-opening adapter lets importers reuse the editor without replacing
+  // the page's normal Index editing adapter.
+  let articleEditorOperation = null;
 
   function splitAridClipboardRow(line) {
     const text = String(line || '').trim();
@@ -1265,6 +1318,8 @@
     const article = list.find((item) => articleCode(item) === articleCodeValue);
     if (!article) return false;
     const host = ensureArticleEditorHost();
+    articleEditorOperation = options.operation || null;
+    host.querySelector('[data-editor-apply-open]').hidden = Boolean(articleEditorOperation);
     articleEditorOriginalCode = articleCodeValue;
     articleEditorImages.forEach((url) => { if (String(url).startsWith('blob:')) URL.revokeObjectURL(url); });
     articleEditorImages = articleImages(article);
@@ -1276,7 +1331,7 @@
     articleEditorAridEligible = false;
     updateArticleEditorTargetCount();
     articleEditorReturnFocus = options.returnFocus || document.activeElement;
-    editorInfo('codigo').textContent = articleCodeValue;
+    editorInfo('codigo').textContent = options.displayCode || articleCodeValue;
     editorInfo('nombre').textContent = String(article.nombre ?? article.descripcion ?? '');
     editorInfo('codigoProveedor').textContent = String(
       article.codigoProveedor ?? article.codigo_proveedor ?? article.idartprov ?? article.codprov ?? ''
@@ -1335,6 +1390,9 @@
 
   function closeArticleEditor() {
     if (!articleEditorHost) return;
+    if (articleEditorHost.querySelector('[data-editor-save]')?.disabled) return;
+    const operation = articleEditorOperation;
+    articleEditorOperation = null;
     articleEditorHost.classList.remove('is-open');
     articleEditorHost.setAttribute('aria-hidden', 'true');
     articleEditorImages.forEach((url) => { if (String(url).startsWith('blob:')) URL.revokeObjectURL(url); });
@@ -1348,6 +1406,7 @@
     articleEditorHost.querySelectorAll('.corralon-editor-subdialog').forEach((dialog) => dialog.classList.remove('is-open'));
     articleEditorReturnFocus?.focus?.();
     articleEditorReturnFocus = null;
+    operation?.onClose?.();
   }
 
   async function uploadArticleImage(file, code) {
@@ -1360,14 +1419,37 @@
     if (!response.ok) throw new Error(payload?.error?.message || 'No se pudo subir la imagen');
     return payload.secure_url;
   }
+  function articleImageDataUrl(file) {
+    return new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(reader.result);
+      reader.onerror=()=>reject(new Error('No se pudo guardar la foto en el borrador local.'));
+      reader.readAsDataURL(file);
+    });
+  }
+  async function publishArticleImages(article, code, onImage) {
+    const images=articleImages(article);
+    for (let index=0;index<images.length;index++) {
+      if (!images[index].startsWith('data:image/')) continue;
+      const response=await fetch(images[index]);
+      images[index]=await uploadArticleImage(await response.blob(),code);
+      // Persist each completed upload, so a failed second photo isn't repeated.
+      article.imagenes=[...images]; article.fotos=[...images];
+      article.fotoUrl=article.foto_url=article.imagen=article.imageUrl=images[0] || '';
+      article.galeria=[...images]; article.fotoUrls=[...images];
+      await onImage?.(article);
+    }
+    return article;
+  }
 
   async function saveArticleEditor() {
-    const list = articleEditorAdapter.getArticles?.() || [];
-    const original = list.find((item) => articleCode(item) === articleEditorOriginalCode);
+    const operation = articleEditorOperation;
+    const list = operation?.articles || articleEditorAdapter.getArticles?.() || [];
+    let original = list.find((item) => articleCode(item) === articleEditorOriginalCode);
     if (!original) return;
-    const code = articleEditorOriginalCode;
-    const name = String(original.nombre ?? original.descripcion ?? '').trim();
-    const price = articleEditorBasePrice;
+    let code = articleEditorOriginalCode;
+    let name = String(original.nombre ?? original.descripcion ?? '').trim();
+    let price = articleEditorBasePrice;
     if (!code || !name || price === null) {
       alert('Completá código, nombre y precio');
       return;
@@ -1380,12 +1462,22 @@
     saveButton.disabled = true;
     saveButton.textContent = 'Guardando...';
     try {
+      if (operation?.beforeSave) {
+        original = await operation.beforeSave(original);
+        code = articleCode(original);
+        articleEditorOriginalCode = code;
+        operation.articles = [original];
+        name = String(original.nombre ?? original.descripcion ?? '').trim();
+        price = Number(original.precio);
+        editorInfo('codigo').textContent = code;
+      }
       const images = [...articleEditorImages];
       for (let index = 0; index < images.length; index += 1) {
         const file = articleEditorImageFiles.get(images[index]);
         if (!file) continue;
         const blobUrl = images[index];
-        images[index] = await uploadArticleImage(file, code);
+        images[index] = operation?.deferImages ? await articleImageDataUrl(file) : await uploadArticleImage(file, code);
+        articleEditorImages[index] = images[index];
         URL.revokeObjectURL(blobUrl);
         articleEditorImageFiles.delete(blobUrl);
       }
@@ -1435,9 +1527,10 @@
         appliedTargets.push(applied);
         return applied;
       });
-      if (!articleEditorAdapter.save) throw new Error('El editor no está conectado a esta página');
-      await articleEditorAdapter.save(nextList, updated, articleEditorOriginalCode, appliedTargets);
-      if (articleEditorAridEligible) {
+      const save = operation?.save || articleEditorAdapter.save;
+      if (!save) throw new Error('El editor no está conectado a esta página');
+      await save(nextList, updated, articleEditorOriginalCode, appliedTargets);
+      if (articleEditorAridEligible && !operation?.deferImages) {
         const nextConfigs = new Map(aridosConfigMap);
         nextConfigs.set(aridCodeKey(code), aridConfig);
         setAridosConfigMap(nextConfigs);
@@ -1456,9 +1549,10 @@
           });
         }
       }
-      window.dispatchEvent(new CustomEvent('corralon:article-updated', {
+      window.dispatchEvent(new CustomEvent(operation?.deferImages ? 'corralon:article-draft-saved' : 'corralon:article-updated', {
         detail: { article: updated, articles: [updated, ...appliedTargets], previousCode: articleEditorOriginalCode }
       }));
+      saveButton.disabled = false;
       closeArticleEditor();
     } catch (error) {
       console.error(error);
@@ -2233,6 +2327,10 @@
             <label class="corralon-number-calc-label" data-number-calc-label="result">Resultado</label>
             <div class="corralon-number-calc-field"><input data-number-calc-result readonly></div>
           </div>
+          <label data-number-calc-inverse-option hidden style="align-items:center;gap:10px;margin-top:16px;font:600 18px Arial,sans-serif;cursor:pointer">
+            <input type="checkbox" data-number-calc-inverse style="width:20px;height:20px;margin:0">
+            <span data-number-calc-inverse-label></span>
+          </label>
           <div class="corralon-number-calc-actions">
             <button type="button" data-number-calc-cancel>Cancelar</button>
             <button type="button" data-number-calc-restore>Volver a original</button>
@@ -2250,6 +2348,9 @@
         divide: backdrop.querySelector('[data-number-calc-divide]'),
         multiply: backdrop.querySelector('[data-number-calc-multiply]'),
         result: backdrop.querySelector('[data-number-calc-result]'),
+        inverseOption: backdrop.querySelector('[data-number-calc-inverse-option]'),
+        inverse: backdrop.querySelector('[data-number-calc-inverse]'),
+        inverseLabel: backdrop.querySelector('[data-number-calc-inverse-label]'),
         cancel: backdrop.querySelector('[data-number-calc-cancel]'),
         restore: backdrop.querySelector('[data-number-calc-restore]'),
         apply: backdrop.querySelector('[data-number-calc-apply]')
@@ -2282,14 +2383,15 @@
         current.onApply?.(result, {
           original: current.value,
           divide: String(ui.divide.value || '').trim(),
-          multiply: String(ui.multiply.value || '').trim()
+          multiply: String(ui.multiply.value || '').trim(),
+          inverse: Boolean(current.inverseOption && ui.inverse.checked)
         });
         close();
       };
       const restore = () => {
         if (!state) return;
         const current = state;
-        if (current.onRestore) current.onRestore(current.value);
+        if (current.onRestore) current.onRestore(current.value, { inverse: Boolean(current.inverseOption && ui.inverse.checked) });
         else current.onApply?.(current.value, { original: current.value, divide: '', multiply: '', restored: true });
         close();
       };
@@ -2309,7 +2411,7 @@
         }
         if (!['Enter', 'Tab', 'ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
         event.preventDefault();
-        const fields = [ui.divide, ui.multiply, ui.cancel, ui.restore, ui.apply];
+        const fields = [ui.divide, ui.multiply, ...(state?.inverseOption ? [ui.inverse] : []), ui.cancel, ui.restore, ui.apply];
         const current = fields.indexOf(event.target);
         if (current < 0) return;
         const backwards = event.shiftKey || event.key === 'ArrowUp' || event.key === 'ArrowLeft';
@@ -2339,6 +2441,7 @@
         formatValue: typeof options.formatValue === 'function' ? options.formatValue : null,
         onApply: options.onApply,
         onRestore: options.onRestore,
+        inverseOption: Boolean(options.inverseLabel),
         returnFocus: options.returnFocus || document.activeElement
       };
       elements.title.textContent = options.title || 'Dividir / multiplicar';
@@ -2347,6 +2450,10 @@
       elements.original.value = state.formatValue?.(value) ?? value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       elements.divide.value = options.divide ?? '';
       elements.multiply.value = options.multiply ?? '';
+      elements.inverseOption.hidden = !state.inverseOption;
+      elements.inverseOption.style.display = state.inverseOption ? 'flex' : 'none';
+      elements.inverseLabel.textContent = options.inverseLabel || '';
+      elements.inverse.checked = state.inverseOption && options.inverseDefault !== false;
       elements.update();
       elements.backdrop.classList.add('is-visible');
       requestAnimationFrame(() => {
@@ -2784,8 +2891,17 @@
     return new Promise((resolve, reject) => {
       const tx = database.transaction('cache', 'readwrite');
       tx.objectStore('cache').put({ id: String(id), value, savedAt: Date.now() });
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
+      tx.oncomplete = () => { database.close(); resolve(); };
+      tx.onerror = tx.onabort = () => { database.close(); reject(tx.error || new Error('No se pudo guardar la caché local.')); };
+    });
+  }
+  async function removeLargeCache(id) {
+    const database=await openLargeCacheDb();
+    return new Promise((resolve,reject)=>{
+      const tx=database.transaction('cache','readwrite');
+      tx.objectStore('cache').delete(String(id));
+      tx.oncomplete=()=>{database.close();resolve();};
+      tx.onerror=tx.onabort=()=>{database.close();reject(tx.error || new Error('No se pudo borrar el borrador local.'));};
     });
   }
 
@@ -7555,7 +7671,8 @@
       configure: configureArticleEditor,
       open: openArticleEditor,
       close: closeArticleEditor,
-      publishCatalog: publishArticleCatalog
+      publishCatalog: publishArticleCatalog,
+      publishImages: publishArticleImages
     },
     aridos: {
       configure: configureAridos,
@@ -7569,6 +7686,8 @@
       calculateMaterial: calculateAridMaterial
     },
     catalogEditorSession: CATALOG_EDITOR_SESSION,
+    localCache: {read:readLargeCache,write:writeLargeCache,remove:removeLargeCache},
+    articleSync: {set:setArticleSyncIndicator},
     catalog: CATALOG,
     catalogRealtime: CATALOG_REALTIME,
     providerIdentity: { internalId: providerInternalId, externalId: providerExternalId, newId: newProviderId, resolveText: resolveProviderText, mergeImport: mergeProviderImport },

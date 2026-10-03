@@ -85,6 +85,85 @@ internal static class LocalArticleImport
         public int rubro { get; set; }
         public decimal? margen { get; set; }
     }
+    internal sealed class WebArticle
+    {
+        public string id { get; set; }
+        public Dictionary<string, object> article { get; set; }
+        public List<WebArticle> articles { get; set; }
+    }
+    private static Dictionary<string, string> PublishConfig()
+    {
+        string file = @"C:\Update\actualizaciones\Subir Lista Index\catalogo-supabase.ini";
+        if (!File.Exists(file)) throw new InvalidOperationException("Falta la configuracion de Subir Lista Index en esta PC.");
+        var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string section = "";
+        foreach (string raw in File.ReadAllLines(file))
+        {
+            string line = raw.Trim().TrimStart('\uFEFF');
+            if (line.StartsWith("[") && line.EndsWith("]")) { section = line.Substring(1, line.Length - 2); continue; }
+            if (line.StartsWith(";") || line.StartsWith("#")) continue;
+            int split = line.IndexOf('=');
+            if (split > 0) config[section + "." + line.Substring(0, split).Trim()] = line.Substring(split + 1).Trim();
+        }
+        foreach (string key in new[] { "supabase.url", "supabase.anonkey", "supabase.importtoken" })
+            if (!config.ContainsKey(key) || config[key].Length == 0) throw new InvalidOperationException("La configuracion de Subir Lista Index esta incompleta.");
+        return config;
+    }
+    private static void PublishRequest(Dictionary<string, string> config, object payload)
+    {
+        string url = config["supabase.url"].TrimEnd('/');
+        if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("La publicacion web requiere HTTPS.");
+        // The server targets .NET Framework 4: its default can still be TLS 1.0.
+        // Set TLS here, independently of whether another API was used earlier.
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+        var request = (HttpWebRequest)WebRequest.Create(url + "/functions/v1/importar-catalogo-articulos");
+        request.Method = "POST"; request.ContentType = "application/json"; request.Timeout = 60000;
+        request.Headers["apikey"] = config["supabase.anonkey"];
+        request.Headers["Authorization"] = "Bearer " + config["supabase.importtoken"];
+        byte[] bytes = Encoding.UTF8.GetBytes(Json().Serialize(payload));
+        request.ContentLength = bytes.Length;
+        try
+        {
+            using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length);
+            using (var response = request.GetResponse()) using (var stream = response.GetResponseStream()) using (var reader = new StreamReader(stream)) reader.ReadToEnd();
+        }
+        catch (WebException ex)
+        {
+            using (var response = ex.Response as HttpWebResponse)
+            {
+                if (response != null)
+                {
+                    string detail = "";
+                    try { using (var reader = new StreamReader(response.GetResponseStream())) { var body = Json().Deserialize<Dictionary<string, object>>(reader.ReadToEnd()); object error; if (body.TryGetValue("error", out error)) detail = Str(error); } } catch { }
+                    throw new InvalidOperationException("Index respondio HTTP " + (int)response.StatusCode + (detail.Length == 0 ? "." : ": " + detail));
+                }
+            }
+            throw new InvalidOperationException("No se pudo conectar con Index para publicar. Verifica la conexion a Internet e intenta otra vez.");
+        }
+    }
+    private static object Publish(SqlConnection c, WebArticle input)
+    {
+        var inputs = input == null ? null : input.articles ?? new List<WebArticle> { input };
+        if (inputs == null || inputs.Count == 0 || inputs.Count > 500) throw new InvalidOperationException("El lote web debe contener entre 1 y 500 articulos.");
+        var codes = new HashSet<string>(); var parameters = new List<string>(); var args = new List<object>();
+        var metadata = new List<Dictionary<string, object>>();
+        foreach (var item in inputs)
+        {
+            if (item == null || !Regex.IsMatch(item.id ?? "", "^[0-9]{6}$") || item.article == null || !codes.Add(item.id))
+                throw new InvalidOperationException("Falta identificar el articulo guardado en SQL o esta repetido.");
+            parameters.Add("@p" + args.Count); args.Add(item.id);
+            item.article["codigo"] = item.id; metadata.Add(item.article);
+        }
+        var config = PublishConfig();
+        // All base values come from SQL, never from the editor or a local catalog cache.
+        var article = Rows(Command(c, null, "SELECT a.IDArt AS codigo,a.IDArtProv AS codigo_proveedor,a.IDProveedor AS id_proveedor,a.[Descripción] AS nombre,a.IDRubro AS id_rubro,r.[Descripción] AS rubro,a.PrecioCpraSISDto AS precio_compra_sin_descuento,a.PrecioCpraCI AS precio_compra_con_impuestos,a.PorcGanMin AS porcentaje_ganancia_min,a.PrecioVta3 AS precio_venta,(SELECT SUM(s.StockAct) FROM dbo.ArtsStock s WHERE s.IDArt=a.IDArt) AS stock,(SELECT SUM(s.StockAct) FROM dbo.ArtsStock s WHERE s.IDArt=a.IDArt AND s.IDSuc=1) AS stock_progreso,(SELECT SUM(s.StockAct) FROM dbo.ArtsStock s WHERE s.IDArt=a.IDArt AND s.IDSuc=2) AS stock_calle5 FROM dbo.[Artículos] a LEFT JOIN dbo.Rubros r ON r.IDRubro=a.IDRubro WHERE a.IDArt IN (" + string.Join(",", parameters.ToArray()) + ") AND ISNULL(a.Suspendido,0)=0", args.ToArray()));
+        if (article.Count != inputs.Count) throw new InvalidOperationException("Uno de los articulos ya no esta disponible en SQL.");
+        long version = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalMilliseconds;
+        PublishRequest(config, new { action = "delta_batch", version = version, rows = article, source_file = "Importador SQL local" });
+        PublishRequest(config, new { action = "metadata_batch", version = version, rows = metadata, updated_by = "importador_sql_local" });
+        PublishRequest(config, new { action = "delta_finalize", version = version, changed_codes = codes, removed_codes = new string[0], source_file = "Importador SQL local" });
+        return new { ok = true, publicados = inputs.Count, version = version };
+    }
     internal static object Apply(SqlConnection c, Batch batch)
     {
         if (batch == null || batch.rows == null || batch.rows.Count == 0 || batch.rows.Count > 1000 || batch.provider <= 0)
@@ -166,6 +245,16 @@ internal static class LocalArticleImport
         try
         {
             string path = ctx.Request.Url.AbsolutePath;
+            if (ctx.Request.HttpMethod == "POST" && path == "/api/local-articles/publish")
+            {
+                if (ctx.Request.Headers["X-Local-Articles-Token"] != Token || !(ctx.Request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+                { Reply(ctx, 403, new { error = "Reabri el importador para renovar la sesion local." }); return; }
+                string body; using (var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8)) body = reader.ReadToEnd();
+                if (body.Length > 2000000) throw new InvalidOperationException("La ficha web es demasiado grande.");
+                var input = Json().Deserialize<WebArticle>(body);
+                lock (Gate) using (var c = Connect()) Reply(ctx, 200, Publish(c, input));
+                return;
+            }
             if (ctx.Request.HttpMethod == "GET")
             {
                 using (var c = Connect())
@@ -803,8 +892,8 @@ internal sealed class ServerForm : Form
     {
         string route = requestPath.Substring("api/facturacion/".Length).ToLowerInvariant();
         string method = context.Request.HttpMethod;
-        bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "catalogo", "stock", "stock-ingreso", "clientes", "comprobante", "consultar-comprobantes", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras", "revision-venta" }, route) >= 0)
-            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso", "clientes", "revision-venta", "imprimir-revision" }, route) >= 0);
+        bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "catalogo", "articulos-sql", "stock", "stock-ingreso", "clientes", "comprobante", "consultar-comprobantes", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras", "revision-venta" }, route) >= 0)
+            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso", "articulos-sql", "clientes", "revision-venta", "imprimir-revision" }, route) >= 0);
         if (!allowed) { WriteJson(context, 404, "{\"ok\":false,\"error\":\"Ruta de facturación no disponible.\"}"); return; }
 
         IPAddress address = context.Request.RemoteEndPoint == null ? null : context.Request.RemoteEndPoint.Address;

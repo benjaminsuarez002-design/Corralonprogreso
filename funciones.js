@@ -1435,7 +1435,104 @@
     };
   }
 
+  function evaluatePriceAdjustment(value, originalValue) {
+    const text=String(value??'').trim();
+    const formula=text.match(/^(-?\d[\d.,]*)\s*([+\-*/xX×])\s*(\d+(?:[.,]\d+)?)\s*(%)?$/);
+    if(formula){
+      const base=parseLocaleNumber(formula[1]),amount=Number(formula[3].replace(',','.')),op=formula[2];
+      const operand=formula[4]?amount/100:amount;
+      const result=op==='+'?base+(formula[4]?base*operand:operand):op==='-'?base-(formula[4]?base*operand:operand):op==='/'?(operand?base/operand:NaN):base*operand;
+      return Number.isFinite(result)?Math.round((result+Number.EPSILON)*100)/100:NaN;
+    }
+    const match=text.match(/^([+-])\s*(\d+(?:[.,]\d+)?)\s*%$/)||text.match(/^([xX×*])\s*(\d+(?:[.,]\d+)?)$/);
+    if(!match)return NaN;
+    const amount=Number(match[2].replace(',','.')),base=Number(originalValue);
+    if(!Number.isFinite(amount)||!Number.isFinite(base))return NaN;
+    const result=match[1]==='+'?base*(1+amount/100):match[1]==='-'?base*(1-amount/100):base*amount;
+    return Math.round((result+Number.EPSILON)*100)/100;
+  }
+
+  function bindNumericExpressions(options = {}) {
+    const root=options.root||document;
+    const selector=options.selector||'input[type="number"],input[inputmode="decimal"],input[inputmode="numeric"],input[data-number-format],input[data-currency],input[data-money]';
+    const states=new WeakMap();
+    const field=event=>{const input=states.has(event.target)?event.target:event.target?.closest?.(selector);return input&&!input.readOnly&&!input.disabled&&!input.matches('[type="date"],[type="tel"]')?input:null;};
+    const hasExpression=value=>/[+xX×*/]/.test(String(value))||/\d\s*-/.test(String(value))||/^\s*-.*%/.test(String(value));
+    function remember(event){const input=field(event);if(input)states.set(input,{base:input.type==='number'?Number(input.value):parseLocaleNumber(input.value),value:input.value,type:input.type});}
+    function commit(input){
+      if(!hasExpression(input.value))return true;
+      const state=states.get(input)||{base:0,value:'',type:input.type};
+      const value=evaluatePriceAdjustment(input.value.replace(/US\$|\$|€/g,'').trim(),state.base);
+      if(!Number.isFinite(value)){input.setCustomValidity('Cuenta inválida. Usá +3%, x 1.03 o 100*1.03.');input.reportValidity();return false;}
+      input.setCustomValidity('');
+      const localized=state.type!=='number'&&/[,€$%]/.test(state.value);
+      input.value=value.toFixed(2).replace('.',localized?',':'.');
+      if(state.type==='number')input.type='number';
+      input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true;
+    }
+    function onInput(event){const input=field(event);if(!input)return;if(hasExpression(input.value)){input.setCustomValidity('');event.stopImmediatePropagation();}}
+    function onKey(event){
+      const input=field(event);if(!input)return;
+      if(input.type==='number'&&['+','x','X','*','/','%'].includes(event.key)){if(!states.has(input))remember(event);input.type='text';}
+      if(['Enter','Tab'].includes(event.key)&&!commit(input)){event.preventDefault();event.stopImmediatePropagation();}
+    }
+    function onBlur(event){const input=field(event);if(input)commit(input);}
+    root.addEventListener('focusin',remember,true);root.addEventListener('input',onInput,true);root.addEventListener('keydown',onKey,true);root.addEventListener('blur',onBlur,true);
+    return {commit,destroy(){root.removeEventListener('focusin',remember,true);root.removeEventListener('input',onInput,true);root.removeEventListener('keydown',onKey,true);root.removeEventListener('blur',onBlur,true);}};
+  }
+
+  function bindIncrementalRendering(options = {}) {
+    const root=options.root,batchSize=Math.max(1,Number(options.batchSize)||120);
+    const getTotal=options.getTotal,renderRange=options.renderRange;
+    let count=0;
+    function ensure(minimum){
+      const total=Math.max(0,Number(getTotal())||0);
+      const target=Math.min(total,Math.ceil(Math.max(0,minimum)/batchSize)*batchSize);
+      if(target>count){const start=count;count=target;renderRange(start,target,start===0);options.afterRender?.(count,total);}
+      return count;
+    }
+    function reset(){
+      count=0;root.scrollTop=0;
+      if(!getTotal()){renderRange(0,0,true);options.afterRender?.(0,0);}else ensure(batchSize);
+    }
+    function onScroll(){if(root.scrollHeight-root.scrollTop-root.clientHeight<=Number(options.threshold??40))ensure(count+batchSize);}
+    root.addEventListener('scroll',onScroll,{passive:true});
+    return {reset,ensure,getCount:()=>count,destroy:()=>root.removeEventListener('scroll',onScroll)};
+  }
+
+  let imagePreviewDialog = null;
+  function openImagePreview(src, options = {}) {
+    if (!src) return false;
+    if (!imagePreviewDialog?.isConnected) {
+      imagePreviewDialog = document.createElement('dialog');
+      imagePreviewDialog.setAttribute('aria-label','Imagen ampliada');
+      imagePreviewDialog.style.cssText='width:min(1200px,96vw);height:94dvh;max-width:96vw;max-height:94dvh;padding:0;border:0;border-radius:10px;background:#181818;overflow:hidden;color:#fff';
+      imagePreviewDialog.innerHTML='<div style="position:relative;width:100%;height:100%"><img alt="" style="display:block;width:100%;height:100%;object-fit:contain"><button type="button" aria-label="Cerrar imagen ampliada" style="position:absolute;right:10px;top:10px;min-height:36px;padding:4px 12px;border:1px solid #777;border-radius:8px;background:#fff;color:#171717;font-weight:700;cursor:pointer">Cerrar ×</button></div>';
+      imagePreviewDialog.querySelector('button').addEventListener('click',()=>imagePreviewDialog.close());
+      imagePreviewDialog.addEventListener('click',event=>{if(event.target===imagePreviewDialog)imagePreviewDialog.close();});
+      imagePreviewDialog.addEventListener('keydown',event=>{
+        event.stopPropagation();
+        if(event.key==='Escape'){event.preventDefault();imagePreviewDialog.close();}
+      });
+      imagePreviewDialog.addEventListener('close',()=>{
+        imagePreviewDialog.querySelector('img').removeAttribute('src');
+        imagePreviewDialog.returnFocus?.focus?.({preventScroll:true});
+      });
+      document.body.append(imagePreviewDialog);
+    }
+    imagePreviewDialog.returnFocus=options.returnFocus || document.activeElement;
+    const image=imagePreviewDialog.querySelector('img');
+    image.src=src; image.alt=options.alt || 'Imagen ampliada';
+    if(!imagePreviewDialog.open)imagePreviewDialog.showModal();
+    imagePreviewDialog.querySelector('button').focus();
+    return true;
+  }
+
   window.CorralonFunciones = {
+    openImagePreview,
+    evaluatePriceAdjustment,
+    bindNumericExpressions,
+    bindIncrementalRendering,
     deepClone,
     statesEqual,
     isUndoShortcut,
@@ -1468,4 +1565,5 @@
     presupuestoMediosPago,
     normalizePresupuestoDatos
   };
+  bindNumericExpressions();
 })();

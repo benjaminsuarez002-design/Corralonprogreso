@@ -1412,7 +1412,7 @@ internal static class FacturacionCopiaApi
             {
                 if (RowsTx(connection, tx, "SELECT IDComprob FROM dbo.TipoComprobantes WHERE IDComprob=58", new object[0]).Count != 1) throw new InvalidOperationException("Falta el tipo de entrada de transferencia 58 en SQL.");
                 int destinationNumber = Convert.ToInt32(Scalar(connection, tx, "SELECT ISNULL(MAX(NroMov),0)+1 FROM dbo.RecibosTP WITH (UPDLOCK,HOLDLOCK) WHERE IDTipoMov=58 AND IDSuc=@p0", destino));
-                int destinationReceipt = Convert.ToInt32(Scalar(connection, tx, "INSERT dbo.RecibosTP (IDTipoMov,NroMov,Fecha,IDDepósito,IDVend,IDOper,IDProveedor,IDSuc,IDEmp,IDDepDes,IDRecDes,Total,SubTSDto,Confirmado,Anulado,Nota,FechaYHora) OUTPUT INSERTED.IDRecibo VALUES (58,@p0,@p1,@p2,@p3,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p9,1,0,@p10,GETDATE())", destinationNumber, DateTime.Today, puntoVenta, operador, proveedor == 0 ? (object)DBNull.Value : proveedor, destino, empresa, sucursal, receipt, total, "Entrada relacionada: " + receipt + " " + nota));
+                int destinationReceipt = Convert.ToInt32(Scalar(connection, tx, "INSERT dbo.RecibosTP (IDTipoMov,NroMov,Fecha,IDDepósito,IDVend,IDOper,IDProveedor,IDSuc,IDEmp,IDDepDes,IDRecDes,Total,SubTSDto,Confirmado,Anulado,Nota,FechaYHora,NroRemito) OUTPUT INSERTED.IDRecibo VALUES (58,@p0,@p1,@p2,@p3,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p9,1,0,@p10,GETDATE(),@p11)", destinationNumber, DateTime.Today, puntoVenta, operador, proveedor == 0 ? (object)DBNull.Value : proveedor, destino, empresa, sucursal, receipt, total, "Entrada relacionada: " + receipt + " " + nota, remito.Length == 0 ? (object)DBNull.Value : remito));
                 foreach (var line in lines)
                 {
                     Execute(connection, tx, "IF NOT EXISTS (SELECT 1 FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1) INSERT dbo.ArtsStock (IDArt,IDSuc,StockAct) VALUES (@p0,@p1,0)", line["idart"], destino);
@@ -1437,6 +1437,142 @@ internal static class FacturacionCopiaApi
         catch { if (tx != null) try { tx.Rollback(); } catch { } throw; }
         finally { if (tx != null) tx.Dispose(); }
     }
+    private const string ArticuloSelect = @"SELECT a.IDArt AS id,a.IDProveedor AS idProveedor,a.IDRubro AS idRubro,a.IDSeccion AS idSeccion,a.IDMoneda AS idMoneda,a.IDPorcIVA AS idIva,a.ImpImpInt AS impuestoInterno,a.PrecioFlete AS flete,a.PorcDto1 AS descuento1,a.PorcDto2 AS descuento2,a.IDArtProv AS codigoProveedor,a.IDArtExt AS codigoBarras,
+            a.[Descripción] AS descripcion,a.DescImpr AS descripcionWeb,r.[Descripción] AS rubro,p.[RazónSocial] AS proveedor,
+            s.Seccion AS seccion,m.Moneda AS moneda,a.Suspendido AS suspendido,a.ModifPV AS modificaPrecio,a.EnStock AS enStock,
+            a.UniXBulto AS unidadesBulto,a.PrecioCpraSISDto AS costoLista,CONVERT(varchar(10),a.FechaActPrec,103) AS ultimaActualizacion,a.PrecioCpraSI AS costoSinIva,a.PrecioCpraCI AS costoConIva,
+            a.ImpDtos AS descuentos,a.PorcIVA1 AS iva,a.PrecioVta3 AS minorista,a.PrecioVta2 AS intermedio,a.PrecioVta1 AS mayorista,
+            a.PorcGanMin AS gananciaMinorista,a.PorcGanInt AS gananciaIntermedio,a.PorcGanMay AS gananciaMayorista,
+            a.PrecioVta3-a.PrecioCpraCI-ISNULL(a.ImpImpInt,0) AS margenMinorista,
+            a.PrecioVta2-a.PrecioCpraCI-ISNULL(a.ImpImpInt,0) AS margenIntermedio,
+            a.PrecioVta1-a.PrecioCpraCI-ISNULL(a.ImpImpInt,0) AS margenMayorista,
+            ISNULL(st.total,0) AS stockTotal
+            FROM dbo.[Artículos] a LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor
+            LEFT JOIN dbo.Rubros r ON r.IDRubro=a.IDRubro LEFT JOIN dbo.Secciones s ON s.IDSeccion=a.IDSeccion
+            LEFT JOIN dbo.Monedas m ON m.IDMoneda=a.IDMoneda
+            LEFT JOIN (SELECT IDArt,SUM(StockAct) AS total FROM dbo.ArtsStock GROUP BY IDArt) st ON st.IDArt=a.IDArt
+";
+    private const string ArticuloStockSelect = "SELECT s.IDSuc AS id,s.Sucursal AS sucursal,ISNULL(a.StockAct,0) AS stock,a.Ubic AS ubicacion FROM dbo.Sucursales s LEFT JOIN dbo.ArtsStock a ON a.IDSuc=s.IDSuc AND a.IDArt=@p0 ORDER BY s.IDSuc";
+    private static string ArticuloVersion(Dictionary<string, object> row)
+    {
+        var snapshot = new Dictionary<string, object>(row);
+        snapshot.Remove("version"); snapshot.Remove("stockTotal");
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+            return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(snapshot))));
+    }
+    private static List<Dictionary<string, object>> ArticuloRows(SqlConnection c, SqlTransaction tx, string id)
+    {
+        var rows = id == null ? Rows(c, ArticuloSelect + " ORDER BY a.[Descripción],a.IDArt") :
+            RowsTx(c, tx, ArticuloSelect + " WHERE a.IDArt=@p0", id);
+        foreach (var row in rows) row["version"] = ArticuloVersion(row);
+        return rows;
+    }
+    private static object ArticulosSql(SqlConnection connection, HttpListenerRequest request)
+    {
+        string id = request.QueryString["id"];
+        if (!String.IsNullOrEmpty(id)) {
+            var rows = ArticuloRows(connection, null, Limited(id,20,"ID artículo"));
+            if (rows.Count != 1) throw new InvalidOperationException("El artículo ya no existe. Actualizá el listado.");
+            return new { ok = true, articulo = rows[0], stock = Rows(connection, ArticuloStockSelect, id) };
+        }
+        return new { ok = true, articulos = ArticuloRows(connection,null,null),
+            proveedores = Rows(connection,"SELECT IDProveedor AS id,[RazónSocial] AS nombre FROM dbo.Proveedores ORDER BY [RazónSocial]"),
+            rubros = Rows(connection,"SELECT IDRubro AS id,[Descripción] AS nombre FROM dbo.Rubros ORDER BY [Descripción]"),
+            secciones = Rows(connection,"SELECT IDSeccion AS id,Seccion AS nombre FROM dbo.Secciones ORDER BY Seccion"),
+            monedas = Rows(connection,"SELECT IDMoneda AS id,Moneda AS nombre FROM dbo.Monedas ORDER BY IDMoneda"),
+            tasasIva = Rows(connection,"SELECT IDPorcIVA AS id,PorcIVA1 AS iva,PorcIVA2 AS iva2 FROM dbo.PorcIVA ORDER BY PorcIVA1,IDPorcIVA") };
+    }
+    private static object ArticuloNumero(Dictionary<string, object> data, string key, bool negative, bool nullable)
+    {
+        if (!data.ContainsKey(key)) throw new InvalidOperationException("Falta el campo " + key + ".");
+        object value = Value(data,key);
+        if (value == null && nullable) return null;
+        decimal n = Number(value);
+        if ((!negative && n < 0) || Math.Abs(n) > 100000000m) throw new InvalidOperationException("Valor fuera de rango en " + key + ".");
+        return Math.Round(n,key.StartsWith("ganancia")?8:4,MidpointRounding.AwayFromZero);
+    }
+    private static object ArticuloGuardar(SqlConnection connection, Dictionary<string, object> input, bool prueba)
+    {
+        int oper = LocalOperator(connection);
+        var data = Object(Value(input,"articulo"));
+        string oldId = Limited(Value(input,"idOriginal"),20,"ID artículo"), id = Limited(Value(data,"id"),20,"ID artículo");
+        string version = Text(Value(input,"version"));
+        if (oldId.Length == 0 || id.Length == 0 || version.Length == 0) throw new InvalidOperationException("Falta identificar el artículo y su versión.");
+        var stockItems = Value(input,"stock") as System.Collections.IEnumerable;
+        if (stockItems == null || Value(input,"stock") is string) throw new InvalidOperationException("Stock inválido.");
+        using (var tx = connection.BeginTransaction(IsolationLevel.Serializable)) {
+            try {
+                if (Scalar(connection,tx,"SELECT IDArt FROM dbo.[Artículos] WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0",oldId) == null)
+                    throw new InvalidOperationException("El artículo ya no existe.");
+                var current = ArticuloRows(connection,tx,oldId)[0];
+                if (Text(current["version"]) != version) throw new InvalidOperationException("El artículo cambió desde otra PC. Recargá la ficha antes de guardar.");
+                if (oldId != id && Scalar(connection,tx,"SELECT IDArt FROM dbo.[Artículos] WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0",id) != null)
+                    throw new InvalidOperationException("Ese ID ya corresponde a otro artículo.");
+                var values = new List<object>(); values.Add(oldId);
+                var sets = new List<string>();
+                Action<string,object> set = (column,value) => { values.Add(value); sets.Add("["+column+"]=@p"+(values.Count-1)); };
+                set("IDArt",id);
+                string[] texts = {"codigoProveedor","IDArtProv","30","codigoBarras","IDArtExt","30","descripcion","Descripción","100","descripcionWeb","DescImpr","100"};
+                for(int i=0;i<texts.Length;i+=3) {
+                    if(!data.ContainsKey(texts[i])) throw new InvalidOperationException("Falta el campo "+texts[i]);
+                    set(texts[i+1],Limited(Value(data,texts[i]),Int32.Parse(texts[i+2]),texts[i]));
+                }
+                string[] lookups = {"idProveedor","IDProveedor","Proveedores","idRubro","IDRubro","Rubros","idSeccion","IDSeccion","Secciones","idMoneda","IDMoneda","Monedas","idIva","IDPorcIVA","PorcIVA"};
+                for(int i=0;i<lookups.Length;i+=3) {
+                    if(!data.ContainsKey(lookups[i])) throw new InvalidOperationException("Falta el campo "+lookups[i]);
+                    object v = Value(data,lookups[i]);
+                    if(v != null) {
+                        int n; if(!Int32.TryParse(Text(v),out n) || Scalar(connection,tx,"SELECT ["+lookups[i+1]+"] FROM dbo.["+lookups[i+2]+"] WHERE ["+lookups[i+1]+"]=@p0",n)==null)
+                            throw new InvalidOperationException("Selección inválida en "+lookups[i]);
+                        v=n;
+                    } else if(lookups[i]=="idIva") throw new InvalidOperationException("Elegí un IVA.");
+                    set(lookups[i+1],v);
+                }
+                var rate=RowsTx(connection,tx,"SELECT PorcIVA1,PorcIVA2 FROM dbo.PorcIVA WHERE IDPorcIVA=@p0",Value(data,"idIva"))[0];
+                set("PorcIVA1",rate["PorcIVA1"]);set("PorcIVA2",rate["PorcIVA2"]);
+                string[] flags = {"suspendido","Suspendido","modificaPrecio","ModifPV","enStock","EnStock"};
+                for(int i=0;i<flags.Length;i+=2) { if(!(Value(data,flags[i]) is bool))throw new InvalidOperationException("Estado inválido en "+flags[i]);set(flags[i+1],Value(data,flags[i])); }
+                string[] amounts = {"unidadesBulto","UniXBulto","costoLista","PrecioCpraSISDto","descuentos","ImpDtos","costoSinIva","PrecioCpraSI","costoConIva","PrecioCpraCI","minorista","PrecioVta3","intermedio","PrecioVta2","mayorista","PrecioVta1","gananciaMinorista","PorcGanMin","gananciaIntermedio","PorcGanInt","gananciaMayorista","PorcGanMay"};
+                for(int i=0;i<amounts.Length;i+=2) {
+                    bool gain=amounts[i].StartsWith("ganancia");
+                    object v=ArticuloNumero(data,amounts[i],gain,amounts[i]!="unidadesBulto" && amounts[i]!="descuentos");
+                    if(gain && v!=null) v=Number(v)/100m;
+                    set(amounts[i+1],v);
+                }
+                set("IDOperModif",oper);sets.Add("[HoraModif]=GETDATE()");
+                string[] priceKeys={"costoLista","costoSinIva","costoConIva","minorista","intermedio","mayorista","descuentos"};
+                bool pricesChanged = Text(current["idIva"])!=Text(Value(data,"idIva"));
+                foreach(string key in priceKeys) if(Text(current[key])!=Text(Value(data,key)))pricesChanged=true;
+                if(pricesChanged)sets.Add("[FechaActPrec]=GETDATE()");
+                if(Execute(connection,tx,"UPDATE dbo.[Artículos] SET "+String.Join(",",sets.ToArray())+" WHERE IDArt=@p0",values.ToArray())!=1)
+                    throw new InvalidOperationException("No se pudo guardar el artículo.");
+                var seen = new HashSet<int>(); bool stockChanged=false;
+                foreach(object item in stockItems) {
+                    var entry=Object(item); int branch=RequiredId(Value(entry,"id"),"la sucursal");
+                    if(!seen.Add(branch))throw new InvalidOperationException("Sucursal duplicada.");
+                    if(Scalar(connection,tx,"SELECT IDSuc FROM dbo.Sucursales WHERE IDSuc=@p0",branch)==null)throw new InvalidOperationException("Sucursal inválida.");
+                    decimal stock=Number(ArticuloNumero(entry,"stock",true,false));string location=Limited(Value(entry,"ubicacion"),10,"Ubicación");
+                    decimal previous=Number(Value(entry,"stockAnterior"));string previousLocation=Text(Value(entry,"ubicacionAnterior"));
+                    var existing=RowsTx(connection,tx,"SELECT StockAct,Ubic FROM dbo.ArtsStock WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0 AND IDSuc=@p1",id,branch);
+                    if(existing.Count>1)throw new InvalidOperationException("Stock duplicado para esta sucursal.");
+                    object actual=existing.Count==0?0f:existing[0]["StockAct"];
+                    string actualLocation=existing.Count==0?"":Text(existing[0]["Ubic"]);
+                    if(!StockMatches(actual,previous) || actualLocation!=previousLocation)
+                        throw new InvalidOperationException("El stock cambió desde otra PC. Recargá la ficha antes de guardar.");
+                    if(!StockMatches(actual,stock) || actualLocation!=location) {
+                        if(existing.Count==0)Execute(connection,tx,"INSERT INTO dbo.ArtsStock(IDArt,IDSuc,StockAct,Ubic) VALUES(@p0,@p1,@p2,@p3)",id,branch,stock,location);
+                        else Execute(connection,tx,"UPDATE dbo.ArtsStock SET StockAct=@p2,Ubic=@p3 WHERE IDArt=@p0 AND IDSuc=@p1",id,branch,stock,location);
+                        stockChanged=true;
+                    }
+                }
+                if(stockChanged)Execute(connection,tx,"UPDATE dbo.[Artículos] SET StockAct=(SELECT ISNULL(SUM(StockAct),0) FROM dbo.ArtsStock WHERE IDArt=@p0) WHERE IDArt=@p0",id);
+                var saved=ArticuloRows(connection,tx,id)[0];var savedStock=RowsTx(connection,tx,ArticuloStockSelect,id);
+                if(prueba)tx.Rollback();else tx.Commit();
+                return new {ok=true,articulo=saved,stock=savedStock,prueba=prueba};
+            } catch {try {tx.Rollback();}catch{}throw;}
+        }
+    }
+
     private static object StockConsulta(SqlConnection connection, HttpListenerRequest request)
     {
         int branch = 0, provider = 0, receipt = 0;
@@ -1453,7 +1589,7 @@ internal static class FacturacionCopiaApi
             if(!DateTime.TryParseExact(request.QueryString["desde"]??DateTime.Today.ToString("yyyy-MM-dd"),"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out from)||
                !DateTime.TryParseExact(request.QueryString["hasta"]??DateTime.Today.ToString("yyyy-MM-dd"),"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out to)||from>to||to==DateTime.MaxValue.Date)
                 throw new InvalidOperationException("Rango de fechas inválido.");
-            var records=Rows(connection,"SELECT TOP 201 r.IDRecibo AS id,r.NroMov AS numero,r.IDSuc AS sucursal,r.IDTipoMov AS tipo,r.IDProveedor AS proveedor,r.IDDepósito AS puntoVenta,r.IDDepDes AS destino,r.IDFactura AS compra,r.IDRemito AS relacionado,r.NroFactura AS factura,r.NroRemito AS remito,CONVERT(varchar(10),r.Fecha,103) AS fecha,t.Descripcion AS nombre,p.[RazónSocial] AS proveedorNombre,r.Total AS total,r.Nota AS nota FROM dbo.RecibosTP r LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Proveedores p ON p.IDProveedor=r.IDProveedor WHERE (@p0=0 OR r.IDSuc=@p0) AND r.Confirmado=1 AND r.Anulado=0 AND (@p1=0 OR r.IDRecibo<@p1) AND r.Fecha>=@p2 AND r.Fecha<@p3 AND (@p4=0 OR r.IDProveedor=@p4) ORDER BY r.IDRecibo DESC",branch,before,from,to.AddDays(1),provider);
+            var records=Rows(connection,"SELECT TOP 201 r.IDRecibo AS id,r.NroMov AS numero,r.IDSuc AS sucursal,r.IDTipoMov AS tipo,r.IDProveedor AS proveedor,r.IDDepósito AS puntoVenta,r.IDDepDes AS destino,r.IDFactura AS compra,r.IDRemito AS relacionado,r.NroFactura AS factura,COALESCE(NULLIF(LTRIM(RTRIM(r.NroRemito)),''),CASE WHEN r.IDTipoMov=58 THEN (SELECT s.NroRemito FROM dbo.RecibosTP s WHERE s.IDRecibo=r.IDRecDes AND s.IDTipoMov=57) END) AS remito,CONVERT(varchar(10),r.Fecha,103) AS fecha,t.Descripcion AS nombre,p.[RazónSocial] AS proveedorNombre,r.Total AS total,r.Nota AS nota FROM dbo.RecibosTP r LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Proveedores p ON p.IDProveedor=r.IDProveedor WHERE (@p0=0 OR r.IDSuc=@p0) AND r.Confirmado=1 AND r.Anulado=0 AND (@p1=0 OR r.IDRecibo<@p1) AND r.Fecha>=@p2 AND r.Fecha<@p3 AND (@p4=0 OR r.IDProveedor=@p4) ORDER BY r.IDRecibo DESC",branch,before,from,to.AddDays(1),provider);
             bool more=records.Count>200;if(more)records.RemoveAt(200);
             int count=Convert.ToInt32(Scalar(connection,null,"SELECT COUNT(*) FROM dbo.RecibosTP WHERE (@p0=0 OR IDSuc=@p0) AND Confirmado=1 AND Anulado=0 AND Fecha>=@p1 AND Fecha<@p2 AND (@p3=0 OR IDProveedor=@p3)",branch,from,to.AddDays(1),provider));
             return new {ok=true,movimientos=records,hayMas=more,total=count};
@@ -1637,6 +1773,18 @@ internal static class FacturacionCopiaApi
         {
             using (var connection = Connect())
             {
+                if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/articulos-sql")
+                {
+                    if (!(request.ContentType ?? "").StartsWith("application/json",StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Se esperaba un artículo JSON.");
+                    string body; using(var reader=new StreamReader(request.InputStream,Encoding.UTF8))body=reader.ReadToEnd();
+                    if(body.Length>100000)throw new InvalidOperationException("El artículo es demasiado grande.");
+                    Reply(context,200,ArticuloGuardar(connection,Object(Json.DeserializeObject(body)),false)); return;
+                }
+                if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/articulos-sql")
+                {
+                    Reply(context, 200, ArticulosSql(connection, request));
+                    return;
+                }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/stock-ingreso")
                 {
                     Reply(context, 200, StockConsulta(connection, request));
@@ -2126,7 +2274,7 @@ internal static class FacturacionCopiaApi
                 }
                 bool critical = context.Request.HttpMethod == "POST" &&
                     (context.Request.Url.AbsolutePath == "/emitir" || context.Request.Url.AbsolutePath == "/imprimir" || context.Request.Url.AbsolutePath == "/imprimir-revision" || context.Request.Url.AbsolutePath == "/revision-venta" ||
-                     context.Request.Url.AbsolutePath == "/stock-ingreso");
+                     context.Request.Url.AbsolutePath == "/stock-ingreso" || context.Request.Url.AbsolutePath == "/articulos-sql");
                 critical = critical || (context.Request.HttpMethod == "GET" && context.Request.Url.AbsolutePath == "/estado-emision");
                 if (critical) Interlocked.Increment(ref activeCriticalRequests);
                 ThreadPool.QueueUserWorkItem(_ =>
