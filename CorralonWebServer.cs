@@ -639,7 +639,7 @@ internal sealed class ServerForm : Form
 
     private bool EnsureFacturacionApi()
     {
-        string executable = Path.Combine(root, ".codex-staging", "FacturacionCopiaApi.exe");
+        string executable = Path.Combine(root, "servidor", "FacturacionCopiaApi.exe");
         if (!File.Exists(executable))
         {
             Log("Facturación central: falta " + executable);
@@ -716,7 +716,7 @@ internal sealed class ServerForm : Form
 
     private bool StopFacturacionApi()
     {
-        string executable = Path.Combine(root, ".codex-staging", "FacturacionCopiaApi.exe");
+        string executable = Path.Combine(root, "servidor", "FacturacionCopiaApi.exe");
         foreach (Process running in Process.GetProcessesByName("FacturacionCopiaApi"))
         {
             using (running)
@@ -802,6 +802,12 @@ internal sealed class ServerForm : Form
         try
         {
             string requestPath = Uri.UnescapeDataString(context.Request.Url.AbsolutePath.TrimStart('/'));
+            if (requestPath.Equals("servidor", StringComparison.OrdinalIgnoreCase) ||
+                requestPath.StartsWith("servidor/", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteText(context, 404, "404");
+                return;
+            }
             if (string.Equals(requestPath, "updates/manifest.json", StringComparison.OrdinalIgnoreCase))
             {
                 WriteJson(context, 200, BuildUpdateManifest());
@@ -830,6 +836,13 @@ internal sealed class ServerForm : Form
             string fullPath = ResolveStaticFile(requestPath);
             string rootFull = Path.GetFullPath(root);
             string factPublicFull = Path.GetFullPath(Path.Combine(root, "Fact Web", "public"));
+            string runtimeFull = Path.GetFullPath(Path.Combine(root, "servidor"));
+            if (String.Equals(fullPath, runtimeFull, StringComparison.OrdinalIgnoreCase) ||
+                fullPath.StartsWith(runtimeFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                WriteText(context, 404, "404");
+                return;
+            }
 
             if ((!fullPath.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase) && !fullPath.StartsWith(factPublicFull, StringComparison.OrdinalIgnoreCase)) || !File.Exists(fullPath))
             {

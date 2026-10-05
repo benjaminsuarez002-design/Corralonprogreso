@@ -1,4 +1,4 @@
-param([string]$OutputPath = '.codex-staging\CorralonWebServer.local-articles.exe')
+param([string]$OutputPath = 'servidor\CorralonWebServer.compilado.exe')
 $ErrorActionPreference = 'Stop'
 $output = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot $OutputPath))
 [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($output)) | Out-Null

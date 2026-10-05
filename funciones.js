@@ -1542,6 +1542,23 @@
     root.addEventListener('focusin',remember);root.addEventListener('keydown',restore);
     return {destroy(){root.removeEventListener('focusin',remember);root.removeEventListener('keydown',restore);}};
   }
+  function formatComprobanteNumber(value) {
+    const text=String(value ?? '').trim();
+    if(!text)return '';
+    const parts=text.match(/^(\d{1,4})\s*-\s*(\d{1,8})$/);
+    if(parts)return parts[1].padStart(4,'0')+'-'+parts[2].padStart(8,'0');
+    if(/^\d{1,12}$/.test(text)) {
+      const digits=text.padStart(12,'0');
+      return digits.slice(0,4)+'-'+digits.slice(4);
+    }
+    return text;
+  }
+  function bindComprobanteNumber(field) {
+    const commit=()=>{if(!field.readOnly && !field.disabled)field.value=formatComprobanteNumber(field.value);};
+    field.addEventListener('change',commit);
+    field.addEventListener('blur',commit);
+    return {commit,destroy(){field.removeEventListener('change',commit);field.removeEventListener('blur',commit);}};
+  }
   let clipboardTextRequest = null;
   function requestClipboardText() {
     if(clipboardTextRequest)return clipboardTextRequest;
@@ -1568,6 +1585,8 @@
     return clipboardTextRequest;
   }
   window.CorralonFunciones = {
+    formatComprobanteNumber,
+    bindComprobanteNumber,
     requestClipboardText,
     bindFieldRestore,
     openImagePreview,

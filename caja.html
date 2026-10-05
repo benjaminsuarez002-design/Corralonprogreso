@@ -1522,7 +1522,7 @@
     #diffModal .diff-modal{flex:0 0 auto;width:125vw;height:125dvh;min-width:0;min-height:0;max-width:none;max-height:none;zoom:1;transform:scale(.8);transform-origin:top left;resize:none;border:0;border-radius:0;box-shadow:none}
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
-<script src="corralon-system.js?v=1.0.20"></script>
+<script src="corralon-system.js?v=1.0.21"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -1558,7 +1558,7 @@
         <div class="top-grid">
           <section class="subform">
             <div class="subform-head">
-              <div class="subform-title">Total caja en efectivo</div>
+              <div class="subform-title">Total caja en efectivo <span id="cashUserLabel"></span></div>
               <div class="head-actions">
                 <button class="access-btn" id="clearCashBtn" type="button">Eliminar registro</button>
               </div>
@@ -1887,6 +1887,7 @@
       appId: "1:466583614632:web:42cb839f83e97475fabe9d"
     };
     const FIREBASE_SUMMARY_COLLECTION = 'control_caja_totales_manual';
+    const FIREBASE_CASH_USER_COLLECTION = 'control_caja_efectivo_usuario';
     const DIFF_TOLERANCE = 10;
     const CASH_DENOMS = [100, 200, 500, 1000, 2000, 10000, 20000];
     const MOVEMENT_TYPES = ['Efectivo', 'Cheques', 'Cta. Cte.', 'Mercado Pago', 'Transf. Bria.', 'Vale', 'Dolares', 'Banco santander', 'Lapos', 'Get Net', 'Transf prov', ''];
@@ -1934,6 +1935,13 @@
     }
 
     function applyCajaMode(user = cajaSessionUser()) {
+      if (String(user?.id || '') !== cashUserId) {
+        cashUserId = String(user?.id || '');
+        loadUserCashLocal();
+        renderCashRows();
+        updateTotals();
+        loadUserCashState();
+      }
       cajaTotalsAllowed = String(user?.nivel || '').trim().toLowerCase() === 'administrador';
       const totalsButton = document.getElementById('cashTotalsBtn');
       totalsButton.hidden = !cajaTotalsAllowed;
@@ -2065,6 +2073,13 @@
     let firebaseManualSnapshot = '';
     const firebaseCajaRemoteSnapshots = new Map();
     const firebaseCajaWriteChains = new Map();
+    let cashUserId = String(cajaSessionUser()?.id || '');
+    let cashUserLoadedKey = '';
+    let cashUserSnapshot = '';
+    let cashUserLoadSequence = 0;
+    const cashUserSaveTimers = new Map();
+    const cashUserWritesInFlight = new Map();
+    const legacyCashByDate = new Map();
     let firebaseSummaryLoadedDate = '';
     let firebaseSummarySnapshot = '';
     let applyingFirebaseSummary = false;
@@ -2848,7 +2863,7 @@
     }
 
     function resetState() {
-      state.cash = CASH_DENOMS.map((denom) => ({ denom, bills: 0, packs: 0 }));
+      loadUserCashLocal();
       state.transfers = [];
       state.system = [];
       systemMergeGroups = [];
@@ -2919,10 +2934,99 @@
       return changed;
     }
 
+    function userCashDocId(dateKey = selectedDateKey, userId = cashUserId) {
+      return `${dateKey}__${encodeURIComponent(userId)}`;
+    }
+
+    function userCashStorageKey(dateKey = selectedDateKey, userId = cashUserId) {
+      return `${STORAGE_KEY_BASE}_efectivo_usuario_${userCashDocId(dateKey, userId)}`;
+    }
+
+    function normalizeUserCash(rows = []) {
+      return CASH_DENOMS.map(denom => {
+        const row = rows.find(item => Number(item.denom) === denom) || {};
+        return { denom, bills: Number(row.bills || 0), packs: Number(row.packs || 0) };
+      });
+    }
+
+    function loadUserCashLocal() {
+      let rows = [];
+      try {
+        if (cashUserId) rows = JSON.parse(localStorage.getItem(userCashStorageKey()) || 'null')?.cash || [];
+      } catch (_) {}
+      state.cash = normalizeUserCash(rows);
+    }
+
+    function persistUserCashLocal() {
+      if (!cashUserId) return;
+      try {
+        localStorage.setItem(userCashStorageKey(), JSON.stringify({ fecha: selectedDateKey, usuarioId: cashUserId, cash: state.cash }));
+      } catch (_) {}
+    }
+
+    function cashUserCanEdit() {
+      return Boolean(cashUserId && cashUserLoadedKey === userCashDocId());
+    }
+
+    async function loadUserCashState(dateKey = selectedDateKey) {
+      const userId = cashUserId;
+      const docId = userCashDocId(dateKey, userId);
+      const sequence = ++cashUserLoadSequence;
+      cashUserLoadedKey = '';
+      cashUserSnapshot = '';
+      renderCashRows();
+      const db = firebaseDatabase();
+      if (!db || !userId) return;
+      try {
+        const snap = await db.collection(FIREBASE_CASH_USER_COLLECTION).doc(docId).get();
+        if (sequence !== cashUserLoadSequence || dateKey !== selectedDateKey || userId !== cashUserId) return;
+        const payload = snap.exists ? snap.data() || {} : {};
+        firebaseCajaRemoteSnapshots.set(`${FIREBASE_CASH_USER_COLLECTION}|${docId}`, payload);
+        state.cash = normalizeUserCash(payload.cash || []);
+        cashUserSnapshot = JSON.stringify(state.cash);
+        cashUserLoadedKey = docId;
+        persistUserCashLocal();
+        renderCashRows();
+        updateTotals();
+      } catch (_) {
+        if (sequence === cashUserLoadSequence) showToast('No pude cargar tu conteo de efectivo. Se conserva la copia local; la edición queda bloqueada hasta recargar.');
+      }
+    }
+
+    function queueUserCashSave() {
+      if (applyingRemoteState || !cashUserCanEdit()) return;
+      const dateKey = selectedDateKey;
+      const userId = cashUserId;
+      const docId = userCashDocId(dateKey, userId);
+      const cash = normalizeUserCash(state.cash);
+      const signature = JSON.stringify(cash);
+      clearTimeout(cashUserSaveTimers.get(docId));
+      cashUserSaveTimers.delete(docId);
+      if (signature === cashUserSnapshot && !cashUserWritesInFlight.get(docId)) return;
+      const timer = setTimeout(async () => {
+        cashUserWritesInFlight.set(docId, (cashUserWritesInFlight.get(docId) || 0) + 1);
+        try {
+          await writeCajaFirebaseChanges(FIREBASE_CASH_USER_COLLECTION, docId, { cash, usuarioId: userId }, dateKey);
+          if (dateKey === selectedDateKey && userId === cashUserId) cashUserSnapshot = signature;
+        } catch (error) {
+          if (dateKey === selectedDateKey && userId === cashUserId) {
+            cashUserLoadedKey = '';
+            renderCashRows();
+          }
+          showToast(error.code === 'caja-conflict'
+            ? 'Tu conteo de efectivo cambió en otra PC. Tus cambios quedan en local; recargá antes de guardar.'
+            : 'No pude guardar tu conteo de efectivo. Tus cambios quedan en local.');
+        } finally {
+          cashUserWritesInFlight.set(docId, cashUserWritesInFlight.get(docId) - 1);
+          if (cashUserSaveTimers.get(docId) === timer) cashUserSaveTimers.delete(docId);
+        }
+      }, 150);
+      cashUserSaveTimers.set(docId, timer);
+    }
+
     function cajaManualPayload(source = state) {
       const usesTable = usesSupabaseCaja();
       return {
-        cash: (source.cash || []).map((row) => ({ denom: Number(row.denom || 0), bills: Number(row.bills || 0), packs: Number(row.packs || 0) })),
         transfers: (source.transfers || [])
           .filter((row) => !isBlankManualTransfer(row))
           .map((row) => JSON.parse(JSON.stringify(row))),
@@ -2947,10 +3051,6 @@
     function applyCajaManualPayload(payload, options = {}) {
       preserveCajaManualLocalCopy(selectedDateKey, cajaManualPayload());
       const includeSystem = options.includeSystem !== false;
-      if (Array.isArray(payload?.cash)) state.cash = CASH_DENOMS.map((denom, idx) => {
-        const row = payload.cash.find((item) => Number(item.denom) === denom) || payload.cash[idx] || {};
-        return { denom, bills: Number(row.bills || 0), packs: Number(row.packs || 0) };
-      });
       if (Array.isArray(payload?.transfers)) state.transfers = payload.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
       if (includeSystem && Array.isArray(payload?.systemRows)) {
         const existingIds = new Set(manualSystemRows(state.system).map((row) => row.id).filter(Boolean));
@@ -3032,7 +3132,7 @@
       return JSON.stringify(canonical(value));
     }
 
-    function writeCajaFirebaseChanges(collection, dateKey, changes) {
+    function writeCajaFirebaseChanges(collection, dateKey, changes, businessDate = dateKey) {
       const key = `${collection}|${dateKey}`;
       const task = (firebaseCajaWriteChains.get(key) || Promise.resolve()).catch(() => {}).then(async () => {
         const db = firebaseDatabase();
@@ -3049,7 +3149,7 @@
               throw error;
             }
           }
-          transaction.set(ref, { ...changes, fecha: dateKey,
+          transaction.set(ref, { ...changes, fecha: businessDate,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
           return { ...current, ...changes };
         });
@@ -3289,7 +3389,6 @@
     function statePayload() {
       rememberBranchMovements();
       return {
-        cash: state.cash,
         transfers: state.transfers.filter((row) => !isBlankManualTransfer(row)),
         system: state.system.filter((row) => !isBlankManualSystemRow(row)),
         systemMergeGroups,
@@ -3305,7 +3404,7 @@
     function remoteStatePayload() {
       rememberBranchMovements();
       return {
-        cash: state.cash,
+        ...(legacyCashByDate.has(selectedDateKey) ? { cash: legacyCashByDate.get(selectedDateKey) } : {}),
         transfers: state.transfers.filter((row) => !isBlankManualTransfer(row)),
         system: state.system.filter((row) => !isBlankManualSystemRow(row)),
         systemMergeGroups,
@@ -3371,12 +3470,7 @@
 
     function applySavedState(saved) {
       if (!saved || typeof saved !== 'object') return false;
-        if (Array.isArray(saved.cash)) {
-          state.cash = CASH_DENOMS.map((denom, idx) => {
-            const item = saved.cash.find((row) => Number(row.denom) === denom) || saved.cash[idx] || {};
-            return { denom, bills: Number(item.bills || 0), packs: Number(item.packs || 0) };
-          });
-        }
+      if (Array.isArray(saved.cash)) legacyCashByDate.set(selectedDateKey, saved.cash);
         if (Array.isArray(saved.transfers)) state.transfers = saved.transfers.map((item, idx) => normalizeTransfer(item, idx)).filter(Boolean);
         if (Array.isArray(saved.system)) {
           state.system = saved.system.map(normalizeSystemRow);
@@ -3412,12 +3506,12 @@
     }
 
     function persistLocalState() {
+      persistUserCashLocal();
       try {
         const previous = JSON.parse(localStorage.getItem(storageKeyForDate()) || 'null');
         if (previous) preserveCajaManualLocalCopy(selectedDateKey, cajaManualPayload(previous));
         preserveCajaManualLocalCopy(selectedDateKey, cajaManualPayload());
-        localStorage.setItem(storageKeyForDate(), JSON.stringify(statePayload()));
-        if (selectedDateKey === TODAY_DATE_KEY) localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.setItem(storageKeyForDate(), JSON.stringify({ ...previous, ...statePayload() }));
       } catch (error) {}
     }
 
@@ -3435,6 +3529,7 @@
 
     function saveState() {
       persistLocalState();
+      queueUserCashSave();
       queueFirebaseCajaManualSave();
       if (usesSupabaseCaja()) queueSystemTableSave();
       else queueRemoteSave();
@@ -3455,6 +3550,7 @@
         localStorage.removeItem(storageKeyForDate(dateKey));
         resetState();
       }
+      loadUserCashState(dateKey);
     }
 
     function supabaseHeaders(extra = {}) {
@@ -3806,7 +3902,7 @@
         applySavedState(payload);
         applyingRemoteState = false;
         try {
-          localStorage.setItem(storageKeyForDate(dateKey), JSON.stringify(statePayload()));
+          persistLocalState();
         } catch (error) {}
         selectedSystemRows.clear();
         renderAll();
@@ -4251,17 +4347,23 @@
     }
 
     function renderCashRows() {
+      const editable = cashUserCanEdit();
+      const user = cajaSessionUser();
+      document.getElementById('cashUserLabel').textContent = String(user?.id || '') === cashUserId
+        ? `· ${user.nombre || user.usuario || cashUserId}` : '';
+      document.getElementById('clearCashBtn').disabled = !editable;
       const html = state.cash.map((row, idx) => {
         const total = cashRowTotal(row);
         return `<tr data-cash-row-key="${idx}">
           <td class="row-selector-cell"></td>
           <td class="num">${formatDenom(row.denom)}</td>
-          <td class="num"><input class="cell-input" data-cash-field="bills" data-index="${idx}" inputmode="numeric" value="${row.bills || ''}"></td>
-          <td class="num"><input class="cell-input" data-cash-field="packs" data-index="${idx}" inputmode="numeric" value="${row.packs || ''}"></td>
+          <td class="num"><input class="cell-input" data-cash-field="bills" data-index="${idx}" inputmode="numeric" value="${row.bills || ''}" ${editable ? '' : 'disabled'}></td>
+          <td class="num"><input class="cell-input" data-cash-field="packs" data-index="${idx}" inputmode="numeric" value="${row.packs || ''}" ${editable ? '' : 'disabled'}></td>
           <td class="money" data-cash-total="${idx}">${formatMoney(total)}</td>
         </tr>`;
       }).join('') + blankRows(Math.max(0, 10 - state.cash.length), 5);
       patchKeyedTableRows(el.cashRows, html, 'data-cash-row-key');
+      el.cashRows.querySelectorAll('[data-cash-field]').forEach(input => { input.disabled = !editable; });
     }
 
     function updateCashRowDisplay(index) {
@@ -6495,6 +6597,7 @@
     }
 
     function clearCash() {
+      if (!cashUserCanEdit()) return;
       state.cash = CASH_DENOMS.map((denom) => ({ denom, bills: 0, packs: 0 }));
       saveState();
       renderCashRows();
