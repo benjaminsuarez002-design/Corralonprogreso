@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.30"></script>
+<script src="corralon-system.js?v=1.0.31"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -496,6 +496,8 @@
   </section>
 </div>
 <div class="table-context-menu" id="tableContextMenu">
+  <button type="button" id="pasteStockContextBtn">Pegar tabla</button>
+  <button type="button" id="editStockArticleContextBtn" hidden>Editar artículo</button>
   <button type="button" id="stockImportBudgetBtn">Importar presupuesto web</button>
   <button type="button" id="copyAccessPriceContextBtn" hidden>Actualizar costo en SQL</button>
   <button type="button" id="sendToComparatorContextBtn">Enviar al comparador</button>
@@ -2604,8 +2606,7 @@ function updateCalculatedCells(rowIndex = null) {
     el.totalRows.textContent = `${rowsData.filter((row) => !isBlankStockRow(row)).length.toLocaleString('es-AR')} filas`;
   });
 }
-async function pasteAll() {
-  const text = await navigator.clipboard.readText();
+function pasteAllText(text) {
   const parsed = parsePasted(text);
   if (!parsed.length) {
     show('No encontre filas para pegar');
@@ -2616,6 +2617,11 @@ async function pasteAll() {
   saveRows();
   render();
   show(`${parsed.length} filas pegadas`);
+}
+async function pasteAll() {
+  if (stockConfirmed || stockIngresoBusy) return;
+  const text = await FX.requestClipboardText();
+  if (text?.trim() && !stockConfirmed && !stockIngresoBusy) pasteAllText(text);
 }
 async function copyGreen() {
   const greenRows = rowsData.filter(isGreen);
@@ -5195,9 +5201,27 @@ document.getElementById('closeCopyResultBtn').addEventListener('click', closeCop
 document.getElementById('copyResultBackdrop').addEventListener('mousedown', (event) => {
   if (event.target === document.getElementById('copyResultBackdrop')) closeCopyResultModal();
 });
-el.corner.addEventListener('click', () => el.corner.classList.toggle('active'));
+el.corner.tabIndex = 0;
+el.corner.addEventListener('click', () => { el.corner.classList.toggle('active'); el.corner.focus(); });
+document.addEventListener('paste', (event) => {
+  if (event.defaultPrevented || stockConfirmed || stockIngresoBusy) return;
+  if (document.getElementById('compareStockBackdrop').classList.contains('visible')) return;
+  const target = event.target;
+  if (target.closest?.('input, textarea, [contenteditable="true"]')) return;
+  const inTable = target.closest?.('.table-wrap');
+  if (!inTable && !el.corner.classList.contains('active')) return;
+  const text = event.clipboardData?.getData('text/plain') || '';
+  if (!text.trim()) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  pasteAllText(text);
+}, true);
 el.corner.addEventListener('dblclick', (event) => {
   event.preventDefault();
+  pasteAll().catch((error) => { console.error(error); show('No pude pegar'); });
+});
+document.getElementById('pasteStockContextBtn').addEventListener('click', () => {
+  closeTableContextMenu();
   pasteAll().catch((error) => { console.error(error); show('No pude pegar'); });
 });
 el.rows.addEventListener('click',event=>{
@@ -5285,6 +5309,7 @@ document.querySelector('.table-wrap').addEventListener('contextmenu', (event) =>
   el.calcPriceContextBtn.hidden = !canCalculatePrice;
   el.applyDiscountContextBtn.hidden = !canApplyDiscount;
   const comparatorRow = Number.isFinite(contextMenuRowIndex) ? rowsData[contextMenuRowIndex] : null;
+  document.getElementById('editStockArticleContextBtn').hidden=!comparatorRow||!stockArticleForRow(comparatorRow);
   el.sendToComparatorContextBtn.disabled = !comparatorRow || isBlankStockRow(comparatorRow) || !(calcPrecioFinal(comparatorRow) > 0);
   el.importNewArticlesContextBtn.disabled = !selectedProvider()?.id_proveedor || (!selectedRedRowsForNewArticles().length && !hasLocalArticleImportDraft());
   el.tableContextMenu.classList.add('visible');
@@ -5292,6 +5317,23 @@ document.querySelector('.table-wrap').addEventListener('contextmenu', (event) =>
   const menuHeight = el.tableContextMenu.offsetHeight;
   el.tableContextMenu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8))}px`;
   el.tableContextMenu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8))}px`;
+});
+document.getElementById('editStockArticleContextBtn').addEventListener('click',()=>{
+  const row=rowsData[contextMenuRowIndex],article=stockArticleForRow(row);closeTableContextMenu();
+  if(!article)return;
+  const popup=document.createElement('dialog');
+  popup.style.cssText='width:min(1100px,98vw);height:94dvh;max-width:none;max-height:none;padding:0;border:1px solid #ccc;border-radius:10px;overflow:hidden';
+  const frame=document.createElement('iframe');frame.title='Ficha del artículo';frame.style.cssText='width:100%;height:100%;border:0';
+  frame.src=`articulos-sql.html?embed=stock&articulo=${encodeURIComponent(article.idart)}`;popup.append(frame);document.body.append(popup);
+  const receive=event=>{
+    if(event.origin!==location.origin||event.source!==frame.contentWindow)return;
+    if(event.data?.type==='corralon:article-editor-saved')stockRefreshSql().catch(error=>show(error.message));
+    if(event.data?.type==='corralon:article-editor-close')popup.close();
+  };
+  window.addEventListener('message',receive);
+  popup.addEventListener('cancel',event=>{event.preventDefault();frame.contentDocument?.getElementById('closeArticle')?.click();});
+  popup.addEventListener('close',()=>{window.removeEventListener('message',receive);popup.remove();});
+  popup.showModal();
 });
 el.providerInput.addEventListener('contextmenu', (event) => {
   event.preventDefault();
@@ -5709,11 +5751,7 @@ document.addEventListener('keydown', (event) => {
     input.setSelectionRange(start + 1, start + 1);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  const pasteTarget = event.target.closest?.('[data-field], input, textarea, [contenteditable="true"]');
-  if (event.ctrlKey && key === 'v' && el.corner.classList.contains('active') && !pasteTarget) {
-    event.preventDefault();
-    pasteAll().catch((error) => { console.error(error); show('No pude pegar'); });
-  }
+  // Ctrl+V uses the native paste event, also on LAN HTTP where clipboard.readText is unavailable.
   if (event.key === 'Delete' && selectedRows.size) {
     event.preventDefault();
     deleteSelectedRows();

@@ -209,12 +209,12 @@ internal static class LocalArticleImport
                     {
                         description = description.ToUpperInvariant();
                         if (description.Length == 0 || description.Length > 100 || !descriptions.Add(description)) throw new InvalidOperationException("Descripcion vacia, demasiado larga o repetida: " + code);
-                        using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE [Descripción]=@p0", description))
+                        using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE [Descripción]=@p0 AND ISNULL(Suspendido,0)=0", description))
                             if (Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("Ya existe la descripcion de " + code + ". Elegi Actualizar y selecciona el articulo.");
                         if (++max > 999999) throw new InvalidOperationException("Se agoto la numeracion de seis digitos.");
                         id = max.ToString("D6"); ids.Add(id);
                     }
-                    using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE IDProveedor=@p0 AND IDArtProv=@p1 AND IDArt<>@p2", batch.provider, code, id))
+                    using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE IDProveedor=@p0 AND IDArtProv=@p1 AND IDArt<>@p2 AND ISNULL(Suspendido,0)=0", batch.provider, code, id))
                         if (Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("El codigo " + code + " ya pertenece a otro articulo de este proveedor.");
                     decimal cost = Decimal.Round(row.costo, 2, MidpointRounding.AwayFromZero);
                     decimal ci = Decimal.Round(cost * (1 + iva), 4, MidpointRounding.AwayFromZero);

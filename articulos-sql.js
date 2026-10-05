@@ -4,6 +4,14 @@
   const FX = window.CorralonFunciones;
   const els = Object.fromEntries(['search','provider','category','state','status','articles','page','reload','detail','articleDialog','articlePosition','prevArticle','nextArticle','closeArticle','dialogStatus'].map(id => [id,$(id)]));
   const size = 120;
+  const embedded=new URLSearchParams(location.search).get('embed')==='stock';
+  const requestedArticle=new URLSearchParams(location.search).get('articulo');
+  const notifyParent=(type)=>{if(embedded&&parent!==window)parent.postMessage({type,id:selected},location.origin);};
+  if(embedded){
+    const style=document.createElement('style');style.textContent='body>header,body>main{display:none}body{background:white}.article-dialog{width:calc(100vw - 8px)!important;max-width:none!important;max-height:calc(100dvh - 8px)!important;margin:4px!important}.article-dialog::backdrop{background:transparent}';document.head.append(style);
+  }
+  const editWeb=document.createElement('button');editWeb.type='button';editWeb.id='editArticleWeb';editWeb.textContent='✎';editWeb.title='Editar artículo web';editWeb.setAttribute('aria-label','Editar artículo web');
+  els.articlePosition.after(editWeb);
   let articleRows=null;
   let articles = [], filtered = [], selected = null, generation = 0, stockGeneration = 0, catalogs = {}, draft = null, stockDraft = [], dirty = false, saving = false, loadingDetail = false;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -60,6 +68,7 @@
     els.prevArticle.disabled=saving||loadingDetail||index<=0;
     els.nextArticle.disabled=saving||loadingDetail||index<0||index>=filtered.length-1;
     els.closeArticle.disabled=saving||loadingDetail;
+    editWeb.disabled=saving||loadingDetail||!selected;
   }
   function moveArticle(direction) {
     if(!els.articleDialog.open||saving||loadingDetail)return;
@@ -69,6 +78,7 @@
   function closeArticle() {
     if(!mayDiscard())return;
     markDirty(false);els.articleDialog.close();
+    notifyParent('corralon:article-editor-close');
   }
   const numericKeys=['unidadesBulto','costoLista','descuentos','costoSinIva','costoConIva','minorista','intermedio','mayorista','gananciaMinorista','gananciaIntermedio','gananciaMayorista','margenMinorista','margenIntermedio','margenMayorista'];
   const lookupFields={idProveedor:'proveedores',idRubro:'rubros',idSeccion:'secciones',idMoneda:'monedas',idIva:'tasasIva'};
@@ -140,6 +150,7 @@
   }
   function drawForm(a,stock) {
     draft={...a};for(const type of ['Minorista','Intermedio','Mayorista'])draft['ganancia'+type]=a['ganancia'+type]==null?null:Number(a['ganancia'+type])*100;
+    for(const key of ['descripcion','descripcionWeb'])draft[key]=String(draft[key]??'').toUpperCase();
     stockDraft=stock.map(s=>({...s,stockAnterior:s.stock,ubicacionAnterior:s.ubicacion}));
     els.detail.innerHTML=`<form id="articleForm"><fieldset id="articleFields"><div class="fields article-identity">
       ${field('ID artículo','id',false,20)}${field('Código de proveedor','codigoProveedor',false,30)}
@@ -167,6 +178,16 @@
     const input=event.target;
     if(input.matches('[data-stock]')) return;
     const key=input.dataset.field;if(!key||key==='id')return;
+    if(key==='descripcion'||key==='descripcionWeb'){
+      const start=input.selectionStart,end=input.selectionEnd;
+      input.value=input.value.toUpperCase();
+      if(start!=null&&end!=null)input.setSelectionRange(start,end);
+      if(key==='descripcion'){
+        draft.descripcionWeb=input.value;
+        const web=els.detail.querySelector('[data-field="descripcionWeb"]');
+        if(web)web.value=input.value;
+      }
+    }
     if(input.hasAttribute('data-article-combo')){
       const text=input.value.trim(),list=catalogs[lookupFields[key]]||[];
       const match=list.find(v=>normalize(v.nombre)===normalize(text)||String(v.id)===text);
@@ -196,6 +217,7 @@
       a.search=normalize([a.id,a.codigoProveedor,a.codigoBarras,a.descripcion,a.descripcionWeb].join(' '));
       if(index>=0)articles[index]=a;else articles.push(a);
       selected=String(a.id);drawForm(a,data.stock||[]);options(els.provider,'proveedor');options(els.category,'rubro');filter();status('Artículo guardado.');
+      notifyParent('corralon:article-editor-saved');
     }catch(error){status(error.message,true);}
     finally{saving=false;articleNavigation();const fields=$('articleFields');if(fields)fields.disabled=false;const cancel=$('cancelArticle');if(cancel)cancel.disabled=false;els.reload.disabled=false;markDirty(dirty);}
   }
@@ -322,5 +344,24 @@
   });
   window.addEventListener('beforeunload',event=>{if(dirty||saving){event.preventDefault();event.returnValue='';}});
   articleRows=FX.bindIncrementalRendering({root:els.articles.closest('.scroll'),batchSize:size,getTotal:()=>filtered.length,renderRange:renderRows,afterRender:(count,total)=>{els.page.textContent=`${total.toLocaleString('es-AR')} artículos · ${count.toLocaleString('es-AR')} visibles`;}});
-  render(true);load();
+  editWeb.addEventListener('click',async()=>{
+    if(saving||loadingDetail||!selected)return;
+    if(dirty){status('Guardá o descartá los cambios de la ficha antes de abrir el editor web.',true);return;}
+    editWeb.disabled=true;
+    try{
+      const system=window.CorralonSystem;
+      const stored=await system.catalog.fetchArticle(selected);
+      const article=stored||{codigo:selected,idart:selected,nombre:draft.descripcionWeb||draft.descripcion,descripcion:draft.descripcionWeb||draft.descripcion,precio:draft.minorista,rubro:draft.rubro,codProv:draft.codigoProveedor};
+      const operation={articles:[article],onClose:()=>{els.articleDialog.showModal();editWeb.disabled=false;},save:async(_list,updated)=>{
+        if(stored){await system.catalog.saveArticleEdits([updated]);return;}
+        const response=await fetch('/api/local-articles/catalog',{cache:'no-store'}),catalog=await response.json();
+        if(!response.ok||!catalog.token)throw new Error(catalog.error||'No se pudo conectar al editor local.');
+        const published=await fetch('/api/local-articles/publish',{method:'POST',headers:{'Content-Type':'application/json','X-Local-Articles-Token':catalog.token},body:JSON.stringify({id:selected,article:updated})});
+        const result=await published.json();if(!published.ok)throw new Error(result.error||'No se pudo guardar la ficha web.');
+      }};
+      els.articleDialog.close();
+      if(!system.articleEditor.open(selected,{articles:[article],operation}))els.articleDialog.showModal();
+    }catch(error){status(error.message,true);editWeb.disabled=false;}
+  });
+  render(true);load().then(()=>{if(requestedArticle&&/^\d{6}$/.test(requestedArticle))select(requestedArticle,true);});
 })();

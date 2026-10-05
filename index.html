@@ -4388,7 +4388,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.24"></script>
+<script src="corralon-system.js?v=1.0.25"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4607,9 +4607,8 @@ let solicitudBusquedaPublica = 0;
 let busquedaPublicaEnCurso = '';
 let enfocarBusquedaPublicaAlCompletar = false;
 const cacheBusquedaPublica = new Map();
-const PUBLIC_CATALOG_VERSION_POLL_MS = 60000;
 let publicCatalogVersion = null;
-let publicCatalogVersionTimer = null;
+let publicCatalogRealtimeStarted = false;
 let publicCatalogVersionChecking = false;
 try {
   const savedView = localStorage.getItem('vistaArticulos');
@@ -4981,9 +4980,10 @@ async function comprobarVersionCatalogoPublico() {
 }
 
 function iniciarConsultaVersionCatalogoPublico() {
-  if (INDEX_MENU_SESSION_ACTIVE || publicCatalogVersionTimer) return;
-  comprobarVersionCatalogoPublico();
-  publicCatalogVersionTimer = setInterval(comprobarVersionCatalogoPublico, PUBLIC_CATALOG_VERSION_POLL_MS);
+  if (INDEX_MENU_SESSION_ACTIVE || publicCatalogRealtimeStarted) return;
+  publicCatalogRealtimeStarted = true;
+  window.CorralonSystem?.catalogRealtime?.configure({refresh:comprobarVersionCatalogoPublico});
+  window.CorralonSystem?.catalogRealtime?.start();
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) comprobarVersionCatalogoPublico();
   });

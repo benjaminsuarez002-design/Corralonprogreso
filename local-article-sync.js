@@ -39,7 +39,15 @@ async function retry() {
 }
 function showResult() {
   const errors=jobs.filter(job=>job.state==='error');
-  window.CorralonSystem.articleSync.set(errors.length ? 'error' : 'success',errors.length ? `${errors.length} cargas pendientes: ${errors[0].error}` : 'Cargas completadas',{progress:100,retry:errors.length ? retry : null});
+  window.CorralonSystem.articleSync.set(errors.length ? 'error' : 'success',errors.length ? `${errors.length} cargas pendientes: ${errors[0].error}` : 'Cargas completadas',{progress:100,retry:errors.length ? retry : null,cancel:errors.length ? cancelFailed : null});
+}
+async function cancelFailed() {
+  const canceled=jobs.filter(job=>job.state==='error');
+  const saved=canceled.some(job=>job.rows.some(row=>row.sqlSaved));
+  jobs=jobs.filter(job=>job.state!=='error');
+  canceled.forEach(job=>callbacks.delete(job.id));
+  await persist();
+  window.CorralonSystem.articleSync.set('success',saved ? 'Carga pendiente cancelada. Lo ya guardado en SQL se conserva.' : 'Carga pendiente cancelada.');
 }
 async function process(job) {
   job.state='running';await persist();

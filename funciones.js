@@ -1460,7 +1460,7 @@
     const hasExpression=value=>/[+xX×*/]/.test(String(value))||/\d\s*-/.test(String(value))||/^\s*-.*%/.test(String(value));
     function remember(event){const input=field(event);if(input)states.set(input,{base:input.type==='number'?Number(input.value):parseLocaleNumber(input.value),value:input.value,type:input.type});}
     function commit(input){
-      if(!hasExpression(input.value))return true;
+      if(!hasExpression(input.value)){input.setCustomValidity('');return true;}
       const state=states.get(input)||{base:0,value:'',type:input.type};
       const value=evaluatePriceAdjustment(input.value.replace(/US\$|\$|€/g,'').trim(),state.base);
       if(!Number.isFinite(value)){input.setCustomValidity('Cuenta inválida. Usá +3%, x 1.03 o 100*1.03.');input.reportValidity();return false;}
@@ -1470,7 +1470,7 @@
       if(state.type==='number')input.type='number';
       input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true;
     }
-    function onInput(event){const input=field(event);if(!input)return;if(hasExpression(input.value)){input.setCustomValidity('');event.stopImmediatePropagation();}}
+    function onInput(event){const input=field(event);if(!input)return;input.setCustomValidity('');if(hasExpression(input.value)){event.stopImmediatePropagation();}}
     function onKey(event){
       const input=field(event);if(!input)return;
       if(input.type==='number'&&['+','x','X','*','/','%'].includes(event.key)){if(!states.has(input))remember(event);input.type='text';}
@@ -1528,7 +1528,48 @@
     return true;
   }
 
+  // Restore only the current field's value when Escape is pressed.
+  function bindFieldRestore(options = {}) {
+    const root=options.root||document, selector=options.selector||'input,textarea,select', originals=new WeakMap();
+    function remember(event){const field=event.target;if(field.matches?.(selector))originals.set(field,{value:field.value,checked:field.checked});}
+    function restore(event){
+      const field=event.target;
+      if(event.defaultPrevented || event.key!=='Escape' || !field.matches?.(selector) || field.readOnly || field.disabled)return;
+      const previous=originals.get(field);if(!previous)return;
+      event.preventDefault();field.value=previous.value;if(field.type==='checkbox')field.checked=previous.checked;
+      field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));field.select?.();
+    }
+    root.addEventListener('focusin',remember);root.addEventListener('keydown',restore);
+    return {destroy(){root.removeEventListener('focusin',remember);root.removeEventListener('keydown',restore);}};
+  }
+  let clipboardTextRequest = null;
+  function requestClipboardText() {
+    if(clipboardTextRequest)return clipboardTextRequest;
+    clipboardTextRequest=(async()=>{
+      if(navigator.clipboard?.readText){
+        try{return await navigator.clipboard.readText();}catch(_){}
+      }
+      // HTTP on the local network has no Clipboard API. Native paste remains available.
+      return await new Promise(resolve=>{
+        const previous=document.activeElement, dialog=document.createElement('dialog');
+        dialog.style.cssText='width:min(520px,94vw);padding:16px;border:1px solid #ccc;border-radius:10px;background:var(--panel,#fff);color:var(--text,#171717);font:inherit';
+        dialog.innerHTML='<strong>Pegar tabla</strong><p>Pegá acá con Ctrl + V o mantené presionado y elegí Pegar.</p><textarea aria-label="Pegar tabla del portapapeles" rows="4" style="width:100%;box-sizing:border-box;font:inherit"></textarea><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button type="button" data-cancel>Cancelar</button><button type="button" data-accept>Pegar</button></div>';
+        document.body.append(dialog);
+        const input=dialog.querySelector('textarea');let settled=false;
+        function finish(value){if(settled)return;settled=true;dialog.close();dialog.remove();previous?.focus?.();resolve(value);}
+        input.addEventListener('paste',event=>{const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();event.stopPropagation();finish(text);}});
+        dialog.querySelector('[data-cancel]').onclick=()=>finish(null);
+        dialog.querySelector('[data-accept]').onclick=()=>{if(input.value.trim())finish(input.value);else input.focus();};
+        dialog.addEventListener('cancel',event=>{event.preventDefault();finish(null);});
+        dialog.addEventListener('close',()=>{if(!settled)finish(null);});
+        dialog.showModal();input.focus();
+      });
+    })().finally(()=>{clipboardTextRequest=null;});
+    return clipboardTextRequest;
+  }
   window.CorralonFunciones = {
+    requestClipboardText,
+    bindFieldRestore,
     openImagePreview,
     evaluatePriceAdjustment,
     bindNumericExpressions,

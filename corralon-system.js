@@ -176,6 +176,7 @@
       </div>
       <div class="corralon-sync-track"><div class="corralon-sync-fill"></div></div>
       <button type="button" data-corralon-sync-retry hidden style="margin-top:8px;padding:4px 10px;border:1px solid #aaa;border-radius:6px;background:#fff;cursor:pointer;pointer-events:auto">Reintentar</button>
+      <button type="button" data-corralon-sync-cancel hidden style="margin-top:8px;padding:4px 10px;border:1px solid #aaa;border-radius:6px;background:#fff;cursor:pointer;pointer-events:auto">Cancelar</button>
     `;
     document.body.appendChild(indicator);
     return indicator;
@@ -195,6 +196,8 @@
     fill.style.transform=determinate ? 'translateX(0)' : '';
     const retry=indicator.querySelector('[data-corralon-sync-retry]');
     retry.hidden=!options.retry;retry.onclick=()=>options.retry?.();
+    const cancel=indicator.querySelector('[data-corralon-sync-cancel]');
+    cancel.hidden=!options.cancel;cancel.onclick=()=>options.cancel?.();
     if ((state === 'success' || state === 'error') && !options.retry) {
       articleSyncIndicatorHideTimer = setTimeout(() => {
         indicator.classList.remove('is-visible');
@@ -4578,6 +4581,7 @@
     let supabaseClient = null;
     let realtimeChannel = null;
     let realtimeLibraryPromise = null;
+    let refreshAdapter=null,connecting=false,nextReconnectAt=0,retryDelay=5000;
 
     function readLeader() {
       try {
@@ -4606,7 +4610,7 @@
     function scheduleRefresh() {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
-        CATALOG.refresh({ fallback: false }).catch((error) => {
+        Promise.resolve().then(()=>refreshAdapter ? refreshAdapter() : CATALOG.refresh({ fallback: false })).catch((error) => {
           console.warn('No se pudo aplicar la actualizacion en tiempo real del catalogo', error);
         });
       }, 80);
@@ -4629,15 +4633,16 @@
     }
 
     async function disconnectRealtime() {
-      if (realtimeChannel && supabaseClient) {
-        try { await supabaseClient.removeChannel(realtimeChannel); } catch (_) {}
-      }
+      const channel=realtimeChannel,client=supabaseClient;
       realtimeChannel = null;
       supabaseClient = null;
+      if(channel&&client){try{await client.removeChannel(channel);}catch(_) {}}
+      try{client?.realtime?.disconnect();}catch(_){}
     }
 
     async function connectRealtime() {
-      if (realtimeChannel || !leader) return;
+      if (realtimeChannel || !leader || connecting || Date.now()<nextReconnectAt) return;
+      connecting=true;
       try {
         const library = await loadRealtimeLibrary();
         if (!leader || realtimeChannel) return;
@@ -4645,6 +4650,7 @@
           auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
           global: { headers: { 'x-client-info': 'corralon-catalog-realtime' } }
         });
+        const ownedClient=supabaseClient;
         realtimeChannel = supabaseClient
           .channel('catalogo-meta-principal-v1')
           .on('postgres_changes', {
@@ -4660,20 +4666,18 @@
             scheduleRefresh();
           })
           .subscribe((status) => {
-            if (status === 'SUBSCRIBED') scheduleRefresh();
+            if(supabaseClient!==ownedClient)return;
+            if (status === 'SUBSCRIBED') {retryDelay=5000;nextReconnectAt=0;scheduleRefresh();}
             if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              const failedChannel = realtimeChannel;
-              realtimeChannel = null;
-              if (failedChannel && supabaseClient) {
-                try { supabaseClient.removeChannel(failedChannel); } catch (_) {}
-              }
+              nextReconnectAt=Date.now()+retryDelay;retryDelay=Math.min(retryDelay*2,60000);
+              disconnectRealtime();
             }
           });
       } catch (error) {
         console.warn('Realtime de catalogo no disponible; se reintentara', error);
-        realtimeChannel = null;
-        supabaseClient = null;
-      }
+        nextReconnectAt=Date.now()+retryDelay;retryDelay=Math.min(retryDelay*2,60000);
+        await disconnectRealtime();
+      }finally{connecting=false;}
     }
 
     function evaluateLeadership() {
@@ -4706,6 +4710,7 @@
 
     function start() {
       if (started) return;
+      if(window.self!==window.top)return;
       if (IS_AUTOMATED_CRAWLER) {
         document.documentElement.dataset.catalogRealtimeLeader = 'crawler-disabled';
         return;
@@ -4727,13 +4732,19 @@
         if (leader && readLeader()?.tabId === tabId) {
           try { localStorage.removeItem(LEADER_KEY); } catch (_) {}
         }
-      }, { once: true });
+        leader=false;clearTimeout(refreshTimer);disconnectRealtime();
+        clearInterval(leaseTimer);leaseTimer=null;
+      });
+      window.addEventListener('pageshow',()=>{
+        evaluateLeadership();if(!leaseTimer)leaseTimer=setInterval(evaluateLeadership,RENEW_MS);
+      });
       evaluateLeadership();
       leaseTimer = setInterval(evaluateLeadership, RENEW_MS);
     }
 
     return {
       start,
+      configure(options={}) {refreshAdapter=typeof options.refresh==='function'?options.refresh:null;},
       isLeader: () => leader
     };
   })();
@@ -7468,11 +7479,15 @@
       appId: '1:466583614632:web:42cb839f83e97475fabe9d'
     };
     const FALLBACK_CHECK_MS = 60 * 1000;
+    let initialManifestVersion = null;
 
     function localVersion() {
       const script = Array.from(document.scripts).find(item => /(?:^|\/)corralon-system\.js(?:\?|$)/i.test(item.src || ''));
-      if (!script) return '0.0.0';
-      try { return new URL(script.src, location.href).searchParams.get('v') || '0.0.0'; } catch (_) { return '0.0.0'; }
+      try {
+        return new URL(location.href).searchParams.get('_version')
+          || (script && new URL(script.src, location.href).searchParams.get('v'))
+          || initialManifestVersion;
+      } catch (_) { return initialManifestVersion; }
     }
     function pageKey() {
       let name = String(location.pathname.split('/').pop() || 'index');
@@ -7563,6 +7578,8 @@
         const manifest = await response.json();
         const currentPageKey = pageKey();
         const page = manifest.paginas?.[currentPageKey] || manifest;
+        // An unversioned page establishes its baseline once instead of reporting 0.0.0 forever.
+        if (!localVersion()) initialManifestVersion = String(page.version || '0.0.0');
         const overrideKey = `${currentPageKey}__${page.version || ''}`;
         const globalOverrideKey = `__global____${page.version || ''}`;
         const overridePriority = realtimeConfig?.prioridades?.[overrideKey] || realtimeConfig?.prioridades?.[globalOverrideKey];
@@ -7596,6 +7613,8 @@
     let started = false;
     function start() {
       if (started) return;
+      // Embedded editors share the parent page's update notification and must not reload independently.
+      if (window.self !== window.top) return;
       started = true;
       const begin = () => {
         recordExecutedVersion();
