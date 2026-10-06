@@ -211,7 +211,7 @@
   }
 </style>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.10"></script>
+<script src="corralon-system.js?v=1.0.11"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="usuarios"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-17">
 </head>
@@ -235,10 +235,6 @@
           <input id="userName" type="text" placeholder="Ej: Vendedor mostrador">
         </div>
         <div>
-          <label for="userLogin">Usuario</label>
-          <input id="userLogin" type="text" placeholder="vendedor1" autocomplete="off">
-        </div>
-        <div>
           <label for="userPass">Contrase&ntilde;a</label>
           <input id="userPass" type="text" placeholder="1234" autocomplete="off">
         </div>
@@ -249,6 +245,11 @@
             <option value="vendedor">Vendedor</option>
             <option value="personalizado">Personalizado</option>
           </select>
+        </div>
+        <div>
+          <label for="userOperator">ID operador SQL</label>
+          <input id="userOperator" type="number" min="1" step="1" list="sqlOperators" placeholder="Sin asignar">
+          <datalist id="sqlOperators"></datalist>
         </div>
         <button class="btn" id="saveUser" type="button">Guardar</button>
       </div>
@@ -306,7 +307,7 @@
   const firebaseApp = initializeApp(firebaseConfig);
   const db = getFirestore(firebaseApp);
   const MENU_USERS_COLLECTION = 'menuUsuarios';
-  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
+  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'cargar_facturas', 'proveedores_sql', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const MENU_ITEMS = [
     { id: 'lista', label: 'Lista de precios' },
@@ -318,6 +319,8 @@
     { id: 'faltantes', label: 'Faltantes' },
     { id: 'pedidos', label: 'Pedidos' },
     { id: 'facturacion', label: 'Facturación' },
+    { id: 'cargar_facturas', label: 'Cargar facturas' },
+    { id: 'proveedores_sql', label: 'Proveedores SQL' },
     { id: 'tarjetas', label: 'Tarjetas' },
     { id: 'actualizar_articulos', label: 'Actualizar articulos' },
     { id: 'carga_stock', label: 'Carga stock' },
@@ -333,9 +336,9 @@
 
   const els = {
     name: document.getElementById('userName'),
-    login: document.getElementById('userLogin'),
     pass: document.getElementById('userPass'),
     level: document.getElementById('userLevel'),
+    operator: document.getElementById('userOperator'),
     save: document.getElementById('saveUser'),
     list: document.getElementById('usersList'),
     modal: document.getElementById('permissionsModal'),
@@ -413,9 +416,9 @@
     draftCajaModo = 'completo';
     draftCajaSucursalId = '';
     els.name.value = '';
-    els.login.value = '';
     els.pass.value = '';
     els.level.value = 'vendedor';
+    els.operator.value = '';
     els.save.textContent = 'Guardar';
   }
 
@@ -424,11 +427,12 @@
       els.list.innerHTML = '<div class="empty">No hay usuarios cargados.</div>';
       return;
     }
-    els.list.innerHTML = users.map((user) => `
+    els.list.innerHTML = [...users].sort((a, b) => String(a.nombre || a.usuario || '').localeCompare(String(b.nombre || b.usuario || ''), 'es', { sensitivity: 'base', numeric: true })).map((user) => `
       <div class="user-row">
         <div>
           <div class="user-title">${escapeHtml(user.nombre)}</div>
-          <div class="user-meta">Usuario: ${escapeHtml(user.usuario || '-')} · Contraseña: ${escapeHtml(user.password || '-')} · Nivel: ${escapeHtml(user.nivel)} · Botones: ${escapeHtml(permissionLabels(user))}</div>
+          <div class="user-meta">Operador SQL: ${escapeHtml(user.idOperador || 'Sin asignar')}</div>
+          <div class="user-meta">Contraseña: ${escapeHtml(user.password || '-')} · Nivel: ${escapeHtml(user.nivel)} · Botones: ${escapeHtml(permissionLabels(user))}</div>
         </div>
         <div class="actions">
           <button class="btn light" type="button" data-action="edit" data-id="${user.id}">Editar</button>
@@ -447,15 +451,15 @@
 
   async function saveUserFromForm() {
     const nombre = els.name.value.trim();
-    const usuario = els.login.value.trim();
+    const usuario = editingId ? (users.find(user => user.id === editingId)?.usuario || nombre) : nombre;
     const password = els.pass.value.trim();
     const nivel = els.level.value;
+    const idOperador = els.operator.value.trim() ? Number(els.operator.value) : null;
+    if (idOperador !== null && (!Number.isSafeInteger(idOperador) || idOperador <= 0)) {
+      alert('Ingresá un ID operador SQL válido.'); els.operator.focus(); return;
+    }
     if (!nombre) {
       els.name.focus();
-      return;
-    }
-    if (!usuario) {
-      els.login.focus();
       return;
     }
     if (!password) {
@@ -465,14 +469,14 @@
     const usuarioDuplicado = users.some((user) => user.id !== editingId && String(user.usuario || '').trim().toLowerCase() === usuario.toLowerCase());
     if (usuarioDuplicado) {
       alert('Ya existe un usuario con ese nombre de acceso.');
-      els.login.focus();
+      els.name.focus();
       return;
     }
     if (editingId) {
       let updatedUser = null;
       users = users.map((user) => {
         if (user.id !== editingId) return user;
-        updatedUser = { ...user, nombre, usuario, password, nivel, permisos: nivel === 'personalizado' ? userPermissions(user) : currentDefaultPermissions(nivel), cajaModo: nivel === 'administrador' ? 'completo' : (['lector','restringido'].includes(user.cajaModo) ? 'restringido' : 'completo'), cajaSucursalId: nivel === 'administrador' ? '' : String(user.cajaSucursalId || '') };
+        updatedUser = { ...user, nombre, usuario, password, nivel, idOperador, permisos: nivel === 'personalizado' ? userPermissions(user) : currentDefaultPermissions(nivel), cajaModo: nivel === 'administrador' ? 'completo' : (['lector','restringido'].includes(user.cajaModo) ? 'restringido' : 'completo'), cajaSucursalId: nivel === 'administrador' ? '' : String(user.cajaSucursalId || '') };
         return updatedUser;
       });
       await saveUser(updatedUser);
@@ -482,6 +486,7 @@
         nombre,
         usuario,
         password,
+        idOperador,
         nivel,
         permisos: nivel === 'personalizado' ? draftPermisos.slice() : currentDefaultPermissions(nivel),
         cajaModo: nivel === 'administrador' ? 'completo' : draftCajaModo,
@@ -499,9 +504,9 @@
     if (!user) return;
     editingId = id;
     els.name.value = user.nombre;
-    els.login.value = user.usuario || '';
     els.pass.value = user.password || '';
     els.level.value = user.nivel;
+    els.operator.value = user.idOperador || '';
     els.save.textContent = 'Actualizar';
     els.name.focus();
   }
@@ -622,6 +627,9 @@
   });
 
   async function inicializarUsuarios() {
+    fetch('/api/facturacion/bootstrap', { cache: 'no-store' }).then(response => response.json()).then(data => {
+      document.getElementById('sqlOperators').innerHTML = (data.vendedores || []).map(operator => `<option value="${Number(operator.id)}">${escapeHtml(operator.nombre)}</option>`).join('');
+    }).catch(() => {});
     els.list.innerHTML = '<div class="empty">Cargando usuarios...</div>';
     users = await readUsers();
     renderUsers();

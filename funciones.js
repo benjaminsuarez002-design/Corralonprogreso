@@ -555,6 +555,7 @@
   }
 
   function parseLocaleNumber(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
     let text = String(value ?? '').trim().replace(/[^\d.,-]/g, '');
     if (!text) return 0;
     const negative = text.startsWith('-');
@@ -567,7 +568,8 @@
     if (decimalAt >= 0) {
       const separator = text[decimalAt];
       const digitsAfter = text.slice(decimalAt + 1).replace(/\D/g, '');
-      const separatorIsDecimal = separator === ',' || digitsAfter.length !== 3 || text.indexOf(separator) !== decimalAt;
+      const groupedThousands = separator === '.' && comma < 0 && /^\d{1,3}(?:\.\d{3})+$/.test(text);
+      const separatorIsDecimal = !groupedThousands && (separator === ',' || digitsAfter.length !== 3 || text.indexOf(separator) !== decimalAt);
       if (separatorIsDecimal) {
         integer = text.slice(0, decimalAt);
         decimal = digitsAfter;
@@ -671,6 +673,8 @@
     const suffix = String(options.suffix || '');
 
     function formatEditing(input, fixed = false) {
+      if (options.preserveEmpty && !String(input.value || '').trim()) return;
+      const previousCaret = input.selectionStart;
       const original = String(input.value || '').replace(suffix, '').trim();
       const numericText = original.replace(/[^\d.,-]/g, '');
       const trailingDecimal = /[.,]$/.test(numericText);
@@ -684,13 +688,28 @@
       });
       if (!fixed && (trailingDecimal || match)) output += `,${typedDecimals}`;
       input.value = `${output}${suffix}`;
-      const caret = output.length;
+      let caret = output.length;
+      if (options.fixedOnInput && previousCaret != null) {
+        const comma = original.lastIndexOf(','), outputComma = output.indexOf(',');
+        if (comma >= 0 && previousCaret > comma) caret = Math.min(output.length, outputComma + 1 + Math.min(decimals, previousCaret - comma - 1));
+        else {
+          const digitsBefore = original.slice(0, previousCaret).replace(/\D/g, '').length;
+          let digits = 0; caret = 0;
+          while (caret < (outputComma >= 0 ? outputComma : output.length) && digits < digitsBefore) { if (/\d/.test(output[caret])) digits++; caret++; }
+        }
+      }
       input.setSelectionRange?.(caret, caret);
     }
 
     root.addEventListener('input', (event) => {
       const input = event.target?.closest?.(selector);
-      if (input && root.contains(input)) formatEditing(input, false);
+      if (input && root.contains(input)) formatEditing(input, options.fixedOnInput === true);
+    });
+    if (options.fixedOnInput) root.addEventListener('keydown', event => {
+      const input = event.target?.closest?.(selector);
+      if (!input || ![',', '.'].includes(event.key) && event.code !== 'NumpadDecimal') return;
+      const comma = input.value.indexOf(',');
+      if (comma >= 0) { event.preventDefault(); input.setSelectionRange?.(comma + 1, comma + 1); }
     });
     root.addEventListener('focusin', (event) => {
       const input = event.target?.closest?.(selector);
@@ -1444,11 +1463,11 @@
       const result=op==='+'?base+(formula[4]?base*operand:operand):op==='-'?base-(formula[4]?base*operand:operand):op==='/'?(operand?base/operand:NaN):base*operand;
       return Number.isFinite(result)?Math.round((result+Number.EPSILON)*100)/100:NaN;
     }
-    const match=text.match(/^([+-])\s*(\d+(?:[.,]\d+)?)\s*%$/)||text.match(/^([xX×*])\s*(\d+(?:[.,]\d+)?)$/);
+    const match=text.match(/^([+-])\s*(\d+(?:[.,]\d+)?)\s*%$/)||text.match(/^([xX×*/])\s*(\d+(?:[.,]\d+)?)$/);
     if(!match)return NaN;
     const amount=Number(match[2].replace(',','.')),base=Number(originalValue);
     if(!Number.isFinite(amount)||!Number.isFinite(base))return NaN;
-    const result=match[1]==='+'?base*(1+amount/100):match[1]==='-'?base*(1-amount/100):base*amount;
+    const result=match[1]==='+'?base*(1+amount/100):match[1]==='-'?base*(1-amount/100):match[1]==='/'?(amount?base/amount:NaN):base*amount;
     return Math.round((result+Number.EPSILON)*100)/100;
   }
 
@@ -1529,6 +1548,126 @@
   }
 
   // Restore only the current field's value when Escape is pressed.
+  function bindCuit(field) {
+    field.type = 'tel'; field.inputMode = 'numeric'; field.maxLength = 13;
+    field.placeholder = '00-00000000-0'; field.pattern = '[0-9]{2}-[0-9]{8}-[0-9]';
+    field.title = 'CUIT de 11 dígitos: 00-00000000-0';
+    function format() {
+      const caret = field.selectionStart, before = String(field.value).slice(0, caret ?? field.value.length).replace(/\D/g, '').length;
+      const digits = String(field.value).replace(/\D/g, '').slice(0, 11);
+      field.value = digits.slice(0, 2) + (digits.length > 2 ? '-' + digits.slice(2, 10) : '') + (digits.length > 10 ? '-' + digits.slice(10) : '');
+      const position = Math.min(field.value.length, before + (before > 2 ? 1 : 0) + (before > 10 ? 1 : 0));
+      field.setSelectionRange?.(position, position);
+    }
+    field.addEventListener('input', format); field.addEventListener('blur', format);
+    return { format };
+  }
+
+  function parseCurrencyNumber(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const text = String(value ?? '').replace(/[^\d,-]/g, '');
+    const number = Number(text.replace(',', '.'));
+    return Number.isFinite(number) ? number : 0;
+  }
+
+  function bindLiveCurrency(options = {}) {
+    const root = options.root || document, selector = options.selector || '[data-number-format="currency"]';
+    root.addEventListener('input', event => {
+      const input = event.target.closest?.(selector); if (!input || input.disabled || input.readOnly) return;
+      const text = input.value.replace(/[^\d,-]/g, ''), negative = text.startsWith('-') ? '-' : '';
+      const parts = text.replace(/-/g, '').split(','), integer = parts[0].replace(/^0+(?=\d)/, '');
+      input.value = integer || parts.length > 1 ? `$ ${negative}${(integer || '0').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${parts.length > 1 ? ',' + parts[1].slice(0, 2) : ''}` : '';
+    });
+    root.addEventListener('keydown', event => {
+      const input = event.target.closest?.(selector);
+      if (input && event.code === 'NumpadDecimal') {
+        event.preventDefault(); input.setRangeText(',', input.selectionStart, input.selectionEnd, 'end');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  }
+
+  function bindEditableTable(options = {}) {
+    const root = options.root, selector = options.selector || 'input[data-field]', rowSelector = options.rowSelector || 'tbody tr';
+    const selected = new Set(), history = []; let anchor = null, session = null, restoring = false, movement = 0;
+    const rowKey = row => row?.dataset.row;
+    const rowNodes = () => Array.from(root.querySelectorAll(rowSelector));
+    const fields = row => Array.from(row.querySelectorAll(selector)).filter(field => !field.disabled && !field.closest('[hidden]'));
+    const snapshot = key => deepClone(options.readRow(key));
+    function paint() { rowNodes().forEach(row => row.classList.toggle('is-selected-row', selected.has(rowKey(row)))); }
+    function finish() {
+      if (!session || restoring) return;
+      if (!statesEqual(session.before, options.readRow(session.key))) history.push(session);
+      session = null;
+    }
+    function restore(state) {
+      restoring = true; session = null;
+      try {
+        options.restoreRow(state.key, deepClone(state.before));
+        const row = rowNodes().find(item => rowKey(item) === state.key);
+        const field = row && fields(row).find(item => item.dataset.field === state.column);
+        if (field) { field.focus(); field.select?.(); session = { ...state, before: snapshot(state.key), movement: ++movement }; }
+        paint();
+      } finally { restoring = false; }
+    }
+    root.addEventListener('focusin', event => {
+      const field = event.target.closest(selector); if (!field || restoring) return;
+      finish(); const key = rowKey(field.closest(rowSelector));
+      session = { key, column: field.dataset.field, before: snapshot(key), movement: ++movement };
+    });
+    root.addEventListener('focusout', event => {
+      if (event.target.matches(selector)) { event.target.classList.remove('table-text-editing'); finish(); }
+    });
+    root.addEventListener('mousedown', event => {
+      if (event.button !== 0 || event.target.closest('button')) return;
+      const row = event.target.closest(rowSelector); if (!row) return;
+      const key = rowKey(row), list = rowNodes().map(rowKey);
+      if (event.shiftKey && anchor !== null) {
+        if (!event.ctrlKey && !event.metaKey) selected.clear();
+        const start = list.indexOf(anchor), end = list.indexOf(key);
+        if (start >= 0) list.slice(Math.min(start, end), Math.max(start, end) + 1).forEach(id => selected.add(id));
+      } else if (event.ctrlKey || event.metaKey) {
+        if (selected.has(key)) selected.delete(key); else selected.add(key);
+        anchor = key;
+      } else { selected.clear(); selected.add(key); anchor = key; }
+      paint(); event.target.closest(selector)?.classList.add('table-text-editing');
+    });
+    root.addEventListener('keydown', event => {
+      if (event.defaultPrevented || event.target.disabled || event.target.readOnly) return;
+      const field = event.target.closest(selector);
+      if (event.key === 'Escape' && session) { event.preventDefault(); event.stopPropagation(); restore(session); return; }
+      if (isUndoShortcut(event)) {
+        event.preventDefault(); event.stopPropagation();
+        if (session && !statesEqual(session.before, options.readRow(session.key))) restore(session);
+        else { finish(); const previous = history.pop(); if (previous) restore(previous); }
+        return;
+      }
+      if (event.key === 'Delete' && (selected.size || event.target.closest(rowSelector))) {
+        event.preventDefault(); event.stopPropagation(); session = null;
+        const current = rowKey(event.target.closest(rowSelector));
+        const keys = selected.has(current) ? Array.from(selected) : current ? [current] : Array.from(selected);
+        options.deleteRows(keys); selected.clear(); return;
+      }
+      if (!field || !['Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+      const list = rowNodes(), row = field.closest(rowSelector), cells = fields(row), r = list.indexOf(row), c = cells.indexOf(field);
+      const complete = field.selectionStart === 0 && field.selectionEnd === field.value.length;
+      if (event.key === 'ArrowLeft' && !complete && field.selectionStart !== 0) return;
+      if (event.key === 'ArrowRight' && !complete && field.selectionEnd !== field.value.length) return;
+      let target;
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        const next = event.ctrlKey ? (event.key === 'ArrowUp' ? 0 : list.length - 1) : r + (event.key === 'ArrowUp' ? -1 : 1);
+        target = list[next] && fields(list[next])[c];
+      } else if (event.ctrlKey && event.key.startsWith('Arrow')) target = cells[event.key === 'ArrowLeft' ? 0 : cells.length - 1];
+      else {
+        const step = event.key === 'ArrowLeft' || event.shiftKey ? -1 : 1;
+        target = cells[c + step];
+        if (!target) { const next = list[r + step]; target = next ? fields(next)[step > 0 ? 0 : fields(next).length - 1] : step > 0 ? options.newRowTarget?.() : null; }
+      }
+      if (target) { event.preventDefault(); event.stopPropagation(); target.focus(); target.select?.(); target.scrollIntoView?.({ block: 'nearest' }); }
+    });
+    return { clearSelection() { selected.clear(); paint(); }, finish };
+  }
+
   function bindFieldRestore(options = {}) {
     const root=options.root||document, selector=options.selector||'input,textarea,select', originals=new WeakMap();
     function remember(event){const field=event.target;if(field.matches?.(selector))originals.set(field,{value:field.value,checked:field.checked});}
@@ -1589,6 +1728,10 @@
     bindComprobanteNumber,
     requestClipboardText,
     bindFieldRestore,
+    bindEditableTable,
+    bindLiveCurrency,
+    parseCurrencyNumber,
+    bindCuit,
     openImagePreview,
     evaluatePriceAdjustment,
     bindNumericExpressions,

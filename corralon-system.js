@@ -6686,16 +6686,14 @@
             options[index].scrollIntoView({ block:'nearest' });
             return;
           }
-          if (event.key === 'Enter' && menu.classList.contains('open')) {
+          if (['Enter', 'Tab'].includes(event.key) && !event.shiftKey && (menu.classList.contains('open') || input.value.trim())) {
             event.preventDefault();
             event.stopImmediatePropagation();
-            if (!input.value.trim()) closeRubroMenus();
-            else {
-              const options = [...menu.querySelectorAll('[data-new-rubro-id]')];
-              chooseRubro(input, options[Math.max(0, Number(menu.dataset.activeIndex || 0))]);
-            }
+            if (!menu.classList.contains('open')) showRubroMenu(input, false);
+            chooseRubro(input, menu.querySelector('[data-new-rubro-id]'));
             commitImporterCell(input);
-            moveImporterCell(input, 'Enter');
+            closeRubroMenus();
+            moveImporterCell(input, event.key);
             return;
           }
         }
@@ -6822,12 +6820,12 @@
         const selectedClass = state.selectedRows.has(index) ? ' class="selected-row"' : '';
         return `<tr${selectedClass} data-new-articles-index="${index}">
           <td><input data-new-articles-cell data-new-articles-col="0" data-row="${index}" data-col="0" data-new-articles-field="idArt" inputmode="numeric" maxlength="6" value="${escape(row.idArt)}" autocomplete="off"></td>
-          <td><input data-new-articles-cell data-new-articles-col="1" data-row="${index}" data-col="1" value="${escape(row.codigo)}" readonly></td>
+          <td><input data-new-articles-cell data-new-articles-col="1" data-row="${index}" data-col="1" data-new-articles-field="codigo" value="${escape(row.codigo)}" autocomplete="off"></td>
           <td><input data-new-articles-cell data-new-articles-col="2" data-row="${index}" data-col="2" data-new-articles-field="descripcion" value="${escape(row.descripcion)}" autocomplete="off"></td>
           <td><div class="corralon-new-rubro-combo"><input class="corralon-new-rubro-input" data-new-articles-cell data-new-articles-col="3" data-row="${index}" data-col="3" data-new-articles-field="rubroText" value="${escape(rubroText)}" autocomplete="off"><button type="button" class="corralon-new-rubro-toggle" data-new-rubro-toggle tabindex="-1" aria-label="Abrir rubros">▼</button><div class="corralon-new-rubro-menu"></div></div></td>
           <td><select data-new-articles-cell data-new-articles-col="4" data-row="${index}" data-col="4" data-new-articles-field="iva"><option value="0.21"${Number(row.iva) === .21 ? ' selected' : ''}>21 %</option><option value="0.105"${Number(row.iva) === .105 ? ' selected' : ''}>10,5 %</option></select></td>
           <td><input class="num" data-new-articles-cell data-new-articles-col="5" data-row="${index}" data-col="5" data-new-articles-field="margen" inputmode="decimal" value="${Number(row.margen || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %"></td>
-          <td><input class="num" data-new-articles-cell data-new-articles-col="6" data-row="${index}" data-col="6" value="${escape(money(row.costo))}" readonly></td>
+          <td><input class="num" data-new-articles-cell data-new-articles-col="6" data-row="${index}" data-col="6" data-new-articles-field="costo" inputmode="decimal" value="${escape(money(row.costo))}" autocomplete="off"></td>
           <td><button class="corralon-new-articles-remove" type="button" data-new-articles-remove="${index}" tabindex="-1" title="Quitar">×</button></td>
         </tr>`;
       }).join('');
@@ -6849,6 +6847,11 @@
         if (event.type === 'change') control.value = row.idArt;
       }
       if (name === 'descripcion') row.descripcion = control.value;
+      if (name === 'codigo') row.codigo = control.value;
+      if (name === 'costo') {
+        row.costo = (window.CorralonFunciones?.parseCurrencyNumber || parseFlexibleNumber)(control.value);
+        if (event.type === 'change') control.value = money(row.costo);
+      }
       if (name === 'rubroText') {
         row.rubroText = control.value;
         row.idRubro = rubroFromText(control.value)?.id || 0;

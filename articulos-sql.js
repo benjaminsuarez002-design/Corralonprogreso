@@ -328,6 +328,7 @@
 
   els.articles.addEventListener('click',event=>{const button=event.target.closest('button[data-id]');if(button)select(button.dataset.id);});
   els.reload.addEventListener('click',load);
+  FX.bindNumericExpressions({root:els.detail,selector:'input[data-number-format="money"]'});
   els.detail.addEventListener('input',edit);
   els.detail.addEventListener('change',event=>{if(event.target.tagName==='SELECT')edit(event);});
   els.detail.addEventListener('submit',save);

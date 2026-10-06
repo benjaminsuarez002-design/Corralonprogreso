@@ -12,7 +12,7 @@
   const USERS_COLLECTION = 'menuUsuarios';
   const CATALOG_EDITOR_LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
   const CATALOG_EDITOR_SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
-  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
+  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'cargar_facturas', 'proveedores_sql', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const firebaseConfig = {
     apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -30,6 +30,8 @@
     faltantes: 'faltantes',
     pedidos: 'pedidos',
     facturacion: 'facturacion',
+    'cargar-facturas': 'cargar_facturas',
+    'proveedores-sql': 'proveedores_sql',
     tarjetas: 'tarjetas',
     'actualizar articulos': 'actualizar_articulos',
     'actualizar%20articulos': 'actualizar_articulos',
@@ -51,7 +53,7 @@
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const pageId = document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile];
-  const loginPage = ['facturacion', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html';
+  const loginPage = ['facturacion', 'cargar_facturas', 'proveedores_sql', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html';
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));
 
@@ -88,6 +90,7 @@
       id: String(raw.id || raw.usuario || raw.nombre || '').trim(),
       nombre: String(raw.nombre || raw.usuario || '').trim(),
       usuario: String(raw.usuario || '').trim(),
+      idOperador: Number(raw.idOperador) || null,
       nivel: String(raw.nivel || 'personalizado').trim().toLowerCase(),
       permisos: Array.isArray(raw.permisos) ? raw.permisos.map(String) : [],
       cajaModo: String(raw.nivel || '').trim().toLowerCase() === 'administrador' ? 'completo' : (['lector','restringido'].includes(raw.cajaModo) ? 'restringido' : 'completo'),

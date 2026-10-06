@@ -235,8 +235,18 @@ export async function open(options) {
     if (!row.rubro || !row.descripcion.trim() || !(row.costo>0) || !Number.isFinite(row.margen) || row.margen<0) {
       input.checked=false; setStatus('Completá artículo, rubro, costo y margen antes de cargar web.',true); return;
     }
+    const previousLoadWeb=Boolean(row.loadWeb);
     row.loadWeb=true; changed(); flushDraft(); hideMenu(); backdrop.inert=true;
-    const seed={...(row.webDraft || {}),codigo:row.sqlSaved?.id || row.uid,nombre:row.descripcion,codigoProveedor:row.codigo,rubro:rubros.find(r=>Number(r.id)===Number(row.rubro))?.nombre || '',precio:row.sqlSaved?.venta3 ?? row.costo*(1+row.iva)*(1+row.margen/100)};
+    const existingCode=row.sqlSaved?.id || row.id;
+    let existing=null;
+    try {
+      if(existingCode)existing=await window.CorralonSystem.catalog.fetchArticle(existingCode);
+    } catch(error) {
+      backdrop.inert=false;row.loadWeb=previousLoadWeb;input.checked=previousLoadWeb;changed();flushDraft();
+      setStatus(`No se pudo leer la ficha web existente: ${error.message}`,true);return;
+    }
+    if(!backdrop.isConnected){backdrop.inert=false;return;}
+    const seed={...(existing || {}),...(row.webDraft || {}),codigo:existingCode || row.uid,nombre:row.descripcion,codigoProveedor:row.codigo,rubro:rubros.find(r=>Number(r.id)===Number(row.rubro))?.nombre || '',precio:row.sqlSaved?.venta3 ?? row.costo*(1+row.iva)*(1+row.margen/100)};
     window.CorralonSystem.articleEditor.open(seed.codigo,{articles:[seed],displayCode:row.sqlSaved?.id || row.id || 'Automático',returnFocus:input,operation:{
       articles:[seed],deferImages:true,
       async save(list,article) {
@@ -529,9 +539,10 @@ export async function open(options) {
       else searchRubro(input,rowAt(input));
       return;
     }
-    if (menu && input === menuInput && ['ArrowDown','ArrowUp','Enter'].includes(e.key)) {
+    if (menu && input === menuInput && (['ArrowDown','ArrowUp','Enter'].includes(e.key) || (e.key === 'Tab' && !e.shiftKey))) {
       e.preventDefault();
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        if (e.key === 'Tab' && matches.length) menuIndex = 0;
         if (menuIndex >= 0 && matches[menuIndex]) {
           if (menuKind === 'article') pick(rowAt(input),matches[menuIndex].id);
           else pickRubro(rowAt(input),matches[menuIndex].id);

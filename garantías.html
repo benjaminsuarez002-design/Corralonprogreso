@@ -334,7 +334,7 @@
 </main>
 
 <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
-<script src="corralon-system.js?v=1.0.9"></script>
+<script src="corralon-system.js?v=1.0.10"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, onSnapshot, collection, addDoc, setDoc, serverTimestamp, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -369,6 +369,9 @@ const els = {
 function historialNotifId(tipo, id) {
   return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
 }
+function avisarNotificacionGarantia(id) {
+  try { localStorage.setItem('corralon_garantia_notificacion_actualizada_v1', JSON.stringify({id:historialNotifId('garantia',id),time:Date.now()})); } catch (_) {}
+}
 
 async function guardarNotificacionGarantia(id, payload) {
   if(!id) return;
@@ -384,8 +387,11 @@ async function guardarNotificacionGarantia(id, payload) {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     }, { merge: true });
+    avisarNotificacionGarantia(id);
+    return true;
   } catch(error) {
     console.warn('No se pudo crear notificación de garantía', error);
+    return false;
   }
 }
 
@@ -1004,7 +1010,7 @@ function manejarNavegacionCampos(event) {
   }
 }
 
-async function generarGarantiaPdf() {
+async function generarGarantiaPdf(settings = {}) {
   if (!articuloSeleccionado || !els.boleta.value.trim() || !els.cliente.value.trim() || !els.fecha.value.trim()) return;
   els.confirmar.disabled = true;
   els.confirmar.textContent = 'Generando...';
@@ -1048,6 +1054,8 @@ async function generarGarantiaPdf() {
     drawSignatureLine(page, fonts, 'Firma del vendedor', 344, 58, 180);
 
     const bytes = await pdf.save();
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    if (settings.returnPdf && settings.onPdf) settings.onPdf(blob);
     const historial = await guardarGarantiaHistorial({
       boleta,
       cliente,
@@ -1062,13 +1070,18 @@ async function generarGarantiaPdf() {
       els.estado.className = 'status ok';
       els.estado.textContent = 'Garantía ya existente: se generó el PDF sin duplicar historial.';
     }
-    const blob = new Blob([bytes], { type: 'application/pdf' });
+    if (settings.returnPdf) {
+      if (!historial) throw new Error('No se pudo guardar la garantía en el historial.');
+      if (!historial.notificacion) throw new Error('La garantía quedó guardada, pero no se pudo crear su notificación. Reintentá generar para recuperarla.');
+      return { blob, historial };
+    }
     const url = URL.createObjectURL(blob);
 window.open(url, '_blank', 'noopener');
   } catch (error) {
     console.error(error);
     els.estado.className = 'status error';
     els.estado.textContent = 'No se pudo generar el PDF.';
+    if (settings.returnPdf) throw error;
   } finally {
     els.confirmar.textContent = 'Confirmar e imprimir';
     actualizarBoton();
@@ -1086,7 +1099,14 @@ async function guardarGarantiaHistorial(payload) {
       limit(1)
     ));
     if (!existenteSnap.empty) {
-      return { existente: true, id: existenteSnap.docs[0].id };
+      const id = existenteSnap.docs[0].id;
+      if (!String(existenteSnap.docs[0].data().rubro || '').trim() && payload.rubro) {
+        await setDoc(doc(db, GARANTIAS_COLLECTION, id), {rubro:payload.rubro,updatedAt:serverTimestamp()}, {merge:true});
+      }
+      const notification = await getDoc(doc(db, HISTORIAL_NOTIFS_COLLECTION, historialNotifId('garantia', id)));
+      const notificacion = notification.exists() || await guardarNotificacionGarantia(id, payload);
+      if (notificacion) avisarNotificacionGarantia(id);
+      return { existente: true, id, notificacion };
     }
     const docRef = await addDoc(collection(db, GARANTIAS_COLLECTION), {
       ...payload,
@@ -1095,8 +1115,8 @@ async function guardarGarantiaHistorial(payload) {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
-    await guardarNotificacionGarantia(docRef.id, payload);
-    return { existente: false, id: docRef.id };
+    const notificacion = await guardarNotificacionGarantia(docRef.id, payload);
+    return { existente: false, id: docRef.id, notificacion };
   } catch (error) {
     console.error('No se pudo guardar la garantia en historial', error);
     els.estado.className = 'status error';
@@ -1146,7 +1166,23 @@ async function cargarCatalogoGarantias() {
   }
 }
 
-cargarCatalogoGarantias();
+if (new URLSearchParams(location.search).get('desdeFacturacion') === '1') {
+  autoPastePending = false;
+  let warrantyCatalogPromise;
+  window.CorralonGarantiaDesdeFacturacion = async (payload, onPdf) => {
+    if (!payload?.codigo || !payload.descripcion || !payload.boleta || !payload.cliente || !/^\d{4}-\d{2}-\d{2}$/.test(payload.fechaIso || '')) throw new Error('Faltan datos de la boleta o del artículo para generar la garantía.');
+    if (!warrantyCatalogPromise) warrantyCatalogPromise = cargarListaConMetadatos('').catch(error => { warrantyCatalogPromise = null; throw error; });
+    const catalog = await warrantyCatalogPromise;
+    const metadata = catalog.find(item => normalizarCodigo(item.idart ?? item.codigo ?? item.idArt ?? item.id) === normalizarCodigo(payload.codigo));
+    articuloSeleccionado = normalizarArticulo({...metadata,idart:payload.codigo,descripcion:payload.descripcion});
+    if (!articuloSeleccionado.rubro) throw new Error('No se encontró el rubro del artículo en el catálogo de Garantías. Actualizá el catálogo antes de generar.');
+    els.codigo.value = payload.codigo;
+    els.boleta.value = payload.boleta;
+    els.cliente.value = payload.cliente;
+    els.fecha.value = payload.fechaIso;
+    return generarGarantiaPdf({returnPdf:true,onPdf});
+  };
+} else cargarCatalogoGarantias();
 </script>
 <script src="recargar-deslizando.js" defer></script>
 </body>

@@ -141,5 +141,24 @@ export function createNotificationCache({ collectionName, versionField, timestam
     unsubscribe?.();
     unsubscribe = null;
   }
-  return { start, stop, values: () => [...rows.values()], restore: () => onChange([...rows.values()], true) };
+  let refreshing = null;
+  async function refresh(id = '') {
+    await load();
+    if (stopped) return;
+    const run = generation;
+    if (id) {
+      const snapshot = await api.getDocFromServer(api.doc(api.db, collectionName, id));
+      if (stopped || run !== generation) return;
+      if (snapshot.exists()) merge({docChanges: () => [{doc:snapshot,type:'modified'}]});
+      else if (rows.delete(id)) { persist(); onChange([...rows.values()]); }
+      return;
+    }
+    if (refreshing) return refreshing;
+    const boundary = timestamp ? new api.Timestamp(Math.max(0, Math.min(cursor?.seconds || 0, Math.floor(Date.now()/1000)) - 86400),0) : Math.max(0,Number(cursor || 0)-60000000);
+    refreshing = api.getDocsFromServer(api.query(api.collection(api.db,collectionName),api.where(versionField,'>=',boundary))).then(snapshot=>{
+      if (!stopped && run === generation) merge({docChanges:()=>snapshot.docs.map(doc=>({doc,type:'modified'}))});
+    }).finally(()=>{refreshing=null;});
+    return refreshing;
+  }
+  return { start, stop, refresh, values: () => [...rows.values()], restore: () => onChange([...rows.values()], true) };
 }

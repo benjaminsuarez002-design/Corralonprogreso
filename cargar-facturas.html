@@ -1,0 +1,1134 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cargar facturas — Corralón Progreso</title>
+  <link rel="icon" href="favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;900&family=Barlow:wght@400;600;700&display=swap" rel="stylesheet">
+  <style id="cargar-facturas-styles">
+*{box-sizing:border-box}
+body{margin:0;font:13px Arial,sans-serif;color:var(--corralon-text);background:var(--corralon-bg);overflow-x:auto}
+.app{width:100%;min-width:854px;margin:0}
+/* Medidas y posiciones del formulario Compras Varias original. */
+.topbar{position:relative;height:38px;border:0;border-bottom:1px solid var(--corralon-line);background:var(--corralon-white)}
+h1{position:absolute;left:21px;top:6px;width:176px;height:26px;margin:0;text-align:center;font:900 19px/26px 'Barlow Condensed',Arial}
+h2{font:700 22px 'Barlow Condensed',Arial;margin:0}
+#todayLabel{position:absolute;left:234px;top:13px;width:190px;height:18px;border:1px solid var(--corralon-line-strong);background:var(--corralon-soft);font-size:10px;line-height:16px;text-align:center;white-space:nowrap}
+button,a.back{padding:4px 8px;border:1px solid var(--corralon-line-strong);border-radius:0;background:var(--corralon-white);font:700 13px Arial,sans-serif;cursor:pointer;text-decoration:none;color:inherit}
+button:disabled{opacity:.5;cursor:default}.primary{background:var(--corralon-red);color:var(--corralon-white);border-color:var(--corralon-red)}
+.topbar button,.topbar .back{position:absolute;top:6px;height:28px;text-align:center}
+#accountButton{left:453px;width:100px}#ivaButton{left:574px;width:100px}.topbar .back{left:700px;width:40px;font-size:11px;line-height:18px;padding:4px 0}
+.panel{position:relative;width:810px;margin:6px 0 0 22px;padding:0;border:0;border-radius:0;background:transparent}
+fieldset{border:0;padding:0;margin:0;min-width:0}
+.purchase-layout{position:relative;width:810px;height:423px}
+label{display:grid;gap:3px;font-size:13px;font-weight:700;min-width:0}
+input,select,textarea,output{width:100%;min-width:0;padding:1px 4px;height:22px;border:1px solid var(--corralon-line-strong);border-radius:0;font:13px Arial,sans-serif;color:inherit;background:var(--corralon-white)}
+textarea{resize:vertical}input[readonly],output{background:var(--corralon-soft);cursor:default}
+output{display:block;text-align:right;font-variant-numeric:tabular-nums;line-height:18px}
+.fields{position:absolute;left:0;width:810px;height:22px}
+.purchase-layout label{position:absolute;display:grid;grid-template-columns:var(--label-width) minmax(0,1fr);gap:0;align-items:center;white-space:nowrap}
+.document-fields{top:0}
+.document-fields label:nth-child(1){left:0;width:146px;--label-width:76px}
+.document-fields label:nth-child(2){left:161px;width:179px;--label-width:68px}
+.document-fields label:nth-child(3){left:363px;width:202px;--label-width:102px}
+.supplier-fields{top:31px}
+.supplier-fields .supplier{left:0;width:295px;--label-width:68px}
+.supplier-fields .provider-name{position:absolute;left:301px;width:266px}
+#providerButton{position:absolute;left:582px;top:-2px;width:122px;height:27px}
+.tax-fields{top:60px}
+.tax-fields label:nth-child(1){left:0;width:152px;--label-width:38px}
+.tax-fields label:nth-child(2){left:172px;width:173px;--label-width:103px}
+.tax-fields label:nth-child(3){left:351px;width:187px;--label-width:92px}
+.tax-fields label:nth-child(4){left:558px;width:197px;--label-width:81px}
+.account-fields{top:90px}
+.account-fields label:nth-child(1){left:0;width:286px;--label-width:52px}
+.account-fields label:nth-child(2){left:315px;width:177px;--label-width:41px}
+.concept-fields{top:120px}
+.concept-fields .concept{left:0;width:378px;--label-width:66px}
+.concept-fields .quick-total{left:408px;width:152px;--label-width:41px}
+.tax-layout{position:absolute;left:0;top:153px;width:810px;height:152px}
+.tax-card{position:absolute;left:0;top:0;width:574px;height:152px;border:1px solid var(--corralon-line-strong);border-radius:0;overflow:hidden;background:var(--corralon-white)}
+.table-scroll{height:133px;overflow:auto;background:repeating-linear-gradient(to bottom,var(--corralon-white) 0,var(--corralon-white) 17px,var(--corralon-line) 17px,var(--corralon-line) 18px)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{border:1px solid var(--corralon-line);padding:6px 8px;text-align:left}
+th{position:sticky;top:0;background:var(--corralon-soft-2);z-index:1;white-space:nowrap;font-size:12px}tbody tr:nth-child(even){background:var(--corralon-soft)}
+.grid{width:572px;table-layout:fixed;font-size:12px}
+.grid th{height:18px;padding:1px 3px;font-weight:400}
+.grid th:nth-child(1){width:20px}.grid th:nth-child(2){width:120px}.grid th:nth-child(3){width:66px}.grid th:nth-child(4){width:95px}.grid th:nth-child(5){width:60px}.grid .secondary-tax{display:none}.grid th:nth-child(7){width:188px}.grid th:nth-child(8){width:23px}
+.grid td{padding:0;height:18px}.grid input,.grid select{border:0;border-radius:0;height:18px;padding:0 3px;font-size:12px;cursor:default}.grid input:focus{cursor:text}
+.grid .row-marker{text-align:center;color:var(--corralon-muted);background:var(--corralon-soft-2)}.grid button{border:0;padding:0;width:100%;height:18px;color:var(--corralon-red);font-size:12px}.numeric{text-align:right}
+.recordbar{display:flex;align-items:center;gap:8px;height:17px;padding:0 4px;font-size:10px;color:var(--corralon-muted);background:var(--corralon-soft-2);border-top:1px solid var(--corralon-line)}
+.recordbar button{height:15px;margin-left:auto;padding:0 5px;font-size:10px;line-height:13px}
+.calculator{position:absolute;left:620px;top:-17px;width:190px;height:138px;border:1px solid var(--corralon-line-strong);border-radius:0;background:var(--corralon-soft);padding:22px 15px}
+.calculator label{position:static;grid-template-columns:44px 110px;height:22px;margin-bottom:15px}
+.calculator input,.calculator select{text-align:right;font-weight:700}
+#calculatorRate{width:85px;margin-left:3px}
+.bottom-fields{top:318px;height:90px}
+.bottom-fields .remito{left:12px;top:0;width:251px;--label-width:129px}
+.bottom-fields .grand-total{left:284px;top:0;width:208px;--label-width:50px;font-size:19px}
+.total{height:24px;font-size:19px;font-weight:700;line-height:20px}
+.bottom-fields .last-number{left:520px;top:0;width:193px;--label-width:85px;font-size:11px}
+.bottom-fields .note{left:6px;top:32px;width:207px;--label-width:38px;align-items:start;font-size:12px}
+.note textarea{height:32px;resize:none}
+.bottom-fields .movement{left:234px;top:37px;width:210px;--label-width:97px;font-size:12px}
+.bottom-fields .check{left:477px;top:28px;width:147px;--label-width:130px;font-size:12px}
+.check input{width:13px;height:13px;margin:0}
+.bottom-fields .discount{left:234px;top:67px;width:179px;--label-width:65px}
+.bottom-fields .discount-amount{left:477px;top:54px;width:221px;--label-width:89px}
+.bottom-fields .discount-total{left:477px;top:78px;width:221px;--label-width:89px}
+.purchase-actions{position:absolute;left:0;top:423px;width:810px;height:56px}
+.confirmation-actions{position:absolute;left:226px;top:0;width:342px;height:56px;display:flex;gap:6px;padding:7px 9px;border:1px solid var(--corralon-line-strong);background:var(--corralon-soft)}
+.confirmation-actions button{flex:1;min-width:0;height:40px;font:700 19px 'Barlow Condensed',Arial}
+.search-fact{position:absolute;left:598px;top:7px;display:grid;grid-template-columns:90px 110px;gap:0;align-items:center;white-space:nowrap}
+.form-options{margin-top:64px;font-size:12px;color:var(--corralon-muted)}
+.form-options summary{width:max-content;cursor:pointer;font-weight:700}
+.options-fields{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding:8px;border:1px solid var(--corralon-line)}
+.options-fields label{display:grid;grid-template-columns:170px 220px;align-items:center;gap:5px;font-size:12px}
+.options-fields button{font-size:12px}
+.form-status{display:flex;align-items:baseline;gap:12px;width:810px;margin:12px 0 0 22px;font-size:11px;color:var(--corralon-muted)}
+#activeUser{font-weight:700;white-space:nowrap}.status{margin:0;min-height:20px;color:var(--corralon-muted)}.status.error{color:var(--corralon-red-dark);font-weight:700}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.purchase-combo{position:relative;display:block;min-width:0;width:100%;height:22px}
+.purchase-combo input,.purchase-combo select{padding-right:22px}.purchase-combo select{appearance:none}
+.purchase-combo-drop{position:absolute;right:2px;top:1px;width:19px;height:19px;padding:0;border-radius:7px;font-size:10px;line-height:17px;opacity:0;pointer-events:none}
+.purchase-combo:hover .purchase-combo-drop,.purchase-combo:focus-within .purchase-combo-drop,.purchase-combo.combo-open .purchase-combo-drop{opacity:1;pointer-events:auto}
+.grid .purchase-combo{height:18px}.grid .purchase-combo input{padding-right:19px}.grid .purchase-combo-drop{width:16px;height:16px;top:1px;line-height:14px}
+.calculator .purchase-combo{width:85px;margin-left:3px}.calculator .purchase-combo #calculatorRate{width:100%;margin-left:0}
+.filters .purchase-combo{height:31px;min-width:230px}.filters .purchase-combo-drop{top:5px;width:22px;height:22px}
+#taxTable tbody input{cursor:default;caret-color:transparent}#taxTable tbody input.table-text-editing{cursor:text;caret-color:auto}#taxTable tbody tr.is-selected-row>td,#taxTable td.is-selected{background:var(--corralon-selection)!important}#taxTable tbody tr.is-selected-row input{background:transparent}#taxTable th[data-col]{cursor:pointer}#taxTable th.sort-asc::after{content:' ▲'}#taxTable th.sort-desc::after{content:' ▼'}
+.purchase-combo-menu{position:fixed;z-index:1500;display:none;max-height:280px;overflow:auto;border:1px solid var(--corralon-line-strong);border-radius:10px;background:var(--corralon-white);box-shadow:var(--corralon-shadow);font:14px Barlow,Arial,sans-serif}
+.purchase-combo-menu.visible{display:block}.purchase-combo-option{display:grid;grid-template-columns:80px minmax(0,1fr) 110px;gap:8px;align-items:center;min-height:31px;padding:6px 8px;border-bottom:1px solid var(--corralon-line);cursor:pointer}
+.purchase-combo-option>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.purchase-combo-option:hover{background:var(--corralon-selection)}#purchaseComboMenu .purchase-combo-option.active{background:#ed0000!important;color:#fff!important}#purchaseComboMenu .purchase-combo-option.active>span{color:#fff!important}
+.purchase-combo-value{text-align:right;color:var(--green,#00b56a);font-weight:700}.purchase-combo-empty{padding:12px;color:var(--corralon-muted)}
+/* Las consultas conservan su distribución adaptable. */
+dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid var(--corralon-line);border-radius:10px;padding:0;color:inherit;background:var(--corralon-white);box-shadow:var(--corralon-shadow)}dialog::backdrop{background:rgba(0,0,0,.45)}
+.dialogbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;background:var(--corralon-white);position:sticky;top:0;z-index:3;border-bottom:1px solid var(--corralon-line)}.dialogbar h2{margin-right:auto}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end;padding:12px}.filters input{width:150px;height:31px}.filters select{max-width:360px;height:31px}.report-scroll{overflow:auto;max-height:60dvh}.report-scroll button{padding:3px 6px}.detail-body{padding:16px}.detail-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.detail-fields dt{font-size:11px;color:var(--corralon-muted)}.detail-fields dd{margin:3px 0;font-weight:600;overflow-wrap:anywhere}.detail-note{white-space:pre-wrap}.detail-body table{margin-top:16px}
+.actions{display:flex;align-items:end;gap:9px;flex-wrap:wrap;padding:12px 0 0}dialog>.actions,dialog>.status{padding:10px 14px;margin:0}.report-scroll .empty{padding:24px;text-align:center;color:var(--corralon-muted)}
+#detailDialog:has(.purchase-inspect){width:min(860px,calc(100vw - 24px))}
+#detailDialog:has(.purchase-inspect) .detail-body{padding:10px;overflow:auto}
+.purchase-inspect{width:735px;font-size:12px}.purchase-inspect label{display:flex;align-items:center;gap:4px;white-space:nowrap;font-weight:700}.purchase-inspect input,.purchase-inspect textarea{border-radius:0;height:23px;min-height:0;padding:2px 5px;box-sizing:border-box;font-size:12px;width:var(--width,100px)}
+.purchase-inspect-row{display:flex;gap:12px;align-items:center;margin-bottom:4px}.purchase-inspect-left{width:340px;display:flex;flex-direction:column;gap:4px}.purchase-inspect-right{display:flex;flex-direction:column;gap:4px}.purchase-inspect-columns{display:flex;gap:38px}
+.purchase-inspect-tax{margin-top:8px;width:585px}.purchase-inspect-tax strong{display:block;margin-bottom:3px}.purchase-inspect-tax .tax-scroll{height:140px;overflow:auto;border:1px solid #aaa;background:#fff}.purchase-inspect-tax table{margin:0;width:100%;table-layout:fixed}.purchase-inspect-tax th,.purchase-inspect-tax td{padding:2px 5px;border:1px solid #ccc;height:18px;box-sizing:border-box}.purchase-inspect-tax th:nth-child(1){width:110px}.purchase-inspect-tax th:nth-child(2){width:70px}.purchase-inspect-tax th:nth-child(3){width:70px}.purchase-inspect-tax th:nth-child(4){width:110px}.purchase-inspect-tax .tax-count{padding:3px;border:1px solid #aaa;background:#eee}
+.purchase-inspect-summary{display:grid;grid-template-columns:195px 195px 1fr;gap:6px 10px;margin-top:12px}.purchase-inspect-summary label{justify-content:space-between}.purchase-inspect-summary output{min-width:82px;text-align:right;background:#fff;border:1px solid #aaa;padding:3px 5px}.purchase-inspect-summary .purchase-total output,.purchase-inspect-bottom .purchase-total output{background:#050505;color:#ffef00;font-weight:bold;font-size:16px;min-width:150px;text-align:right;padding:3px 8px}.purchase-inspect-summary input[type=checkbox]{width:14px;height:14px}.purchase-inspect-bottom{margin-top:8px}.purchase-inspect-note{display:flex;align-items:start;gap:10px;margin-top:8px}.purchase-inspect-note textarea{width:195px;height:34px;resize:none}.purchase-inspect-discount{display:flex;gap:25px;margin-top:12px}.purchase-inspect-discount output{background:#bee4e8;border:1px solid #aaa;min-width:135px;text-align:right;padding:3px 8px}
+#detailDialog .purchase-inspect-actions .actions{width:430px;box-sizing:border-box;border:1px solid #aaa;padding:6px;min-height:35px;margin:0}#detailDialog .purchase-inspect-actions button{border-radius:0}#detailDialog .purchase-inspect-actions #deleteInvoice{font-size:0}#detailDialog .purchase-inspect-actions #deleteInvoice::after{content:'Eliminar';font-size:12px}
+@media(max-width:800px){.detail-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){.detail-fields{grid-template-columns:1fr}}
+  </style>
+  <link rel="stylesheet" href="theme-corralon.css">
+  <script src="nav-helper.js"></script>
+  <script src="menu-auth-guard.js" data-menu-guard="cargar_facturas"></script>
+  <script src="funciones.js"></script>
+  <script src="corralon-system.js"></script>
+</head>
+<body data-page-theme="cargar-facturas">
+  <main class="app">
+    <header class="topbar">
+      <h1>Cargar facturas</h1><span id="todayLabel"></span>
+      <button id="accountButton" type="button" disabled>Ctas. Ctes.</button>
+      <button id="ivaButton" type="button" disabled>IVA Compras</button>
+      <a href="menu.html" class="back">Menú</a>
+    </header>
+    <form id="purchaseForm" class="panel" autocomplete="off">
+      <fieldset id="purchaseFields" disabled>
+        <div class="purchase-layout">
+        <div class="fields document-fields">
+          <label>Tipo Comp.:<input id="type" type="text" data-sql-list="type" data-flow></label>
+          <label>Nº Comp.:<input id="number" maxlength="15" data-flow placeholder="0000-00000000"></label>
+          <label>Fecha Compra:<input id="date" data-date data-flow placeholder="dd/mm/aaaa"></label>
+        </div>
+        <div class="fields supplier-fields">
+          <label class="supplier">Proveedor<input id="provider" data-sql-list="provider" data-flow placeholder="Buscar por nombre o código"></label>
+          <input id="providerCode" type="hidden">
+          <input id="providerName" class="provider-name" aria-label="Razón social del proveedor" readonly tabindex="-1">
+          <button id="providerButton" type="button">Ver proveedor</button>
+        </div>
+        <div class="fields tax-fields">
+          <label>CUIT:<input id="cuit" maxlength="13" data-flow></label>
+          <label>Período de IVA:<input id="period" data-flow placeholder="mm/aaaa"></label>
+          <label>Fecha de Vto.:<input id="due" data-date data-flow placeholder="dd/mm/aaaa"></label>
+          <label>Tipo de Bien:<select id="goods" data-flow></select></label>
+        </div>
+        <div class="fields account-fields">
+          <label>Cuenta:<input id="account" type="text" data-sql-list="account" data-flow></label>
+          <label>Pago:<input id="payment" type="text" data-sql-list="payment" data-flow></label>
+        </div>
+        <div class="fields concept-fields">
+          <label class="concept">Concepto:<input id="concept" maxlength="100" data-flow></label>
+          <label class="quick-total">Total:<input id="quickTotal" inputmode="decimal" data-flow data-number-format="currency" placeholder="$ 0,00"></label>
+        </div>
+        <div class="tax-layout">
+          <section class="tax-card" aria-label="Detalle de impuestos">
+            <div class="table-scroll"><table class="grid" id="taxTable"><thead><tr><th class="row-marker" aria-label="Registro"></th><th>Impuesto</th><th>Nº Neto</th><th>Importe</th><th>% Imp.</th><th class="secondary-tax" hidden aria-hidden="true">Impuesto</th><th class="grid-spacer" aria-hidden="true"></th><th aria-label="Eliminar"></th></tr></thead><tbody id="taxRows"></tbody></table></div>
+            <div class="recordbar"><span id="rowCount">0 registros</span><button id="addRow" type="button">+ Renglón</button></div>
+          </section>
+          <aside class="calculator" aria-label="Calculadora de IVA">
+            <h2 class="sr-only">Calculadora de IVA</h2>
+            <label>% IVA<select id="calculatorRate" data-flow></select></label>
+            <label>$ IVA:<input id="calculatorIva" inputmode="decimal" data-flow data-number-format="currency"></label>
+            <label>Neto:<input id="calculatorNet" inputmode="decimal" data-flow data-number-format="currency"></label>
+          </aside>
+        </div>
+        <div class="fields bottom-fields">
+          <label class="remito">Nº Remito de Merc.:<input id="remito" maxlength="15" data-flow placeholder="0000-00000000"></label>
+          <label class="grand-total">Total:<output id="total" class="total">$ 0,00</output></label>
+          <label class="last-number">Últ. Nº Comp.:<input id="lastNumber" readonly tabindex="-1"></label>
+          <label class="note">Nota:<textarea id="note" rows="2" data-flow></textarea></label>
+          <label class="movement">Nº Mov. Stock:<input id="movement" type="text" data-sql-list="movement" data-flow placeholder="Sin movimiento asociado"></label>
+          <label class="check">En Movs. de Stock:<input id="inStock" type="checkbox" checked data-flow></label>
+          <label class="discount">Imp. Dto.:<input id="discount" inputmode="decimal" data-flow data-number-format="percent" value="0,00%" title="Porcentaje de descuento"></label>
+          <label class="discount-amount">Descuento:<output id="discountAmount">$ 0,00</output></label>
+          <label class="discount-total">Total c/Dto.:<output id="discountTotal">$ 0,00</output></label>
+        </div>
+        </div>
+        <details class="form-options">
+          <summary>Opciones de carga</summary>
+          <div class="options-fields">
+            <label>Sucursal / punto de venta<select id="point" data-flow></select></label>
+            <button id="splitTotal" type="button">Cargar neto e IVA</button>
+            <button id="new" type="button" disabled>Nuevo</button>
+            <button id="search" type="button" disabled>Buscar factura</button>
+          </div>
+        </details>
+      </fieldset>
+      <footer class="purchase-actions">
+        <div class="confirmation-actions">
+          <button id="confirm" type="button" class="primary" disabled>Confirmar</button>
+          <button id="cancel" type="button" disabled>Cancelar</button>
+          <button id="consult" type="button" disabled>Consultar</button>
+        </div>
+        <label class="search-fact">Buscar Fact:<input id="searchNumber" maxlength="100" placeholder="Número o proveedor"></label>
+      </footer>
+    </form>
+    <div class="form-status"><span id="activeUser"></span><p id="status" class="status" role="status" aria-live="polite">Validando usuario…</p></div>
+  </main>
+  <dialog id="reportDialog" aria-labelledby="reportTitle">
+    <header class="dialogbar"><h2 id="reportTitle">Consultar</h2><button id="printReport" type="button">Imprimir</button><button type="button" data-close="reportDialog">Cerrar ✕</button></header>
+    <form id="reportFilters" class="filters">
+      <label>Desde<input id="reportFrom" data-date placeholder="dd/mm/aaaa"></label>
+      <label>Hasta<input id="reportTo" data-date placeholder="dd/mm/aaaa"></label>
+      <label>Proveedor<select id="reportProvider"></select></label>
+      <label id="reportSearchLabel">Buscar<input id="reportSearch" maxlength="100"></label>
+      <button type="submit">Consultar</button>
+    </form>
+    <p id="reportStatus" class="status" role="status"></p><div id="reportBody" class="report-scroll"></div>
+    <footer class="actions"><span id="reportTotals"></span><button id="loadMore" type="button" hidden>Cargar más</button></footer>
+  </dialog>
+  <dialog id="detailDialog" aria-labelledby="detailTitle">
+    <header class="dialogbar"><h2 id="detailTitle">Detalle</h2><button id="printDetail" type="button">Imprimir</button><button type="button" data-close="detailDialog">Cerrar ✕</button></header>
+    <div id="detailBody" class="detail-body"></div>
+    <footer class="actions"><a id="openStock" href="cargastock.html" hidden>Cargar stock</a><button id="deleteInvoice" type="button" hidden style="color:var(--corralon-red)">Eliminar movimiento</button></footer>
+  </dialog>
+  <dialog id="deleteInvoiceDialog" aria-labelledby="deleteInvoiceTitle">
+    <header class="dialogbar"><h2 id="deleteInvoiceTitle">Eliminar movimiento</h2><button type="button" data-close="deleteInvoiceDialog">Cerrar ✕</button></header>
+    <div class="detail-body" id="deleteInvoiceBody"></div>
+    <p id="deleteInvoiceStatus" class="status" role="status"></p>
+    <footer class="actions"><button id="confirmDeleteInvoice" type="button" class="primary" disabled>Eliminar definitivamente</button><button type="button" data-close="deleteInvoiceDialog">Cancelar</button></footer>
+  </dialog>
+  <div id="purchaseComboMenu" class="combo-menu purchase-combo-menu" role="listbox" aria-label="Opciones disponibles"></div>
+  <div id="providerWebMenu" hidden style="position:fixed;z-index:10000;padding:4px;background:var(--corralon-panel,#fff);border:1px solid #ccc;box-shadow:0 4px 15px #0003"><button id="openProviderWeb" type="button">Ver en Proveedores web</button></div>
+  <dialog id="providerWebDialog" aria-label="Proveedor web" style="width:min(1200px,96vw);max-width:96vw;padding:0">
+    <header class="dialogbar"><h2>Proveedor web</h2><button type="button" data-close="providerWebDialog">Cerrar ✕</button></header>
+    <iframe id="providerWebFrame" title="Proveedor web" style="display:block;width:100%;height:min(740px,82vh);border:0"></iframe>
+  </dialog>
+  <dialog id="providerDialog" aria-label="Cargar proveedor" style="width:min(1000px,96vw);max-width:96vw;padding:0">
+    <header class="dialogbar"><h2>Cargar proveedor</h2><button type="button" data-close="providerDialog">Cerrar ✕</button></header>
+    <iframe id="providerFrame" title="Formulario de proveedor SQL" style="display:block;width:100%;height:min(690px,80vh);border:0"></iframe>
+  </dialog>
+  <script id="cargar-facturas-script">
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const FX = window.CorralonFunciones;
+function htmlNotice(text, confirmation = true, onAccept = null) {
+  return new Promise(resolve => {
+    const previous = document.activeElement;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'html-notice';
+    dialog.setAttribute('aria-label', confirmation ? 'Confirmar acción' : 'Aviso');
+    dialog.style.cssText = 'width:min(460px,calc(100vw - 32px));max-height:90vh;padding:20px;border:1px solid #bbb;border-radius:10px;background:var(--corralon-white,#fff);color:var(--corralon-text,#222);box-shadow:0 12px 40px #0004';
+    const title = document.createElement('h2');
+    title.textContent = confirmation ? 'Confirmar acción' : 'Aviso';
+    title.style.cssText = 'margin:0 0 14px;font-size:20px';
+    const message = document.createElement('p');
+    message.textContent = text;
+    message.style.cssText = 'white-space:pre-wrap;margin:0 0 20px';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px';
+    const accept = document.createElement('button');
+    accept.type = 'button';
+    accept.textContent = confirmation ? 'Confirmar' : 'Aceptar';
+    accept.style.cssText = 'background:var(--corralon-red,#f50916);color:white;padding:9px 16px;border:0';
+    const finish = accepted => { dialog.close(); dialog.remove(); previous?.focus(); resolve(accepted); };
+    if (confirmation) {
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.textContent = 'Cancelar';
+      cancel.style.cssText = 'padding:9px 16px';
+      cancel.onclick = () => finish(false);
+      actions.append(cancel);
+    }
+    accept.onclick = () => { onAccept?.(); finish(true); };
+    actions.append(accept);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); finish(false); });
+    dialog.append(title, message, actions);
+    document.body.append(dialog);
+    dialog.showModal();
+    accept.focus();
+  });
+}
+  const money = value => FX.formatCurrencyText(Number(value || 0));
+  const numeric = value => FX.parseLocaleNumber(String(value ?? '')) || 0;
+  const currencyNumber = value => FX.parseCurrencyNumber(value);
+  const decimal = value => FX.formatLocaleNumber(Number(value || 0), { decimals: 2 });
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+  const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const dateText = date => date ? date.split('-').reverse().join('/') : '';
+  const parsedDateKey = parsed => `${parsed.year}-${String(parsed.month).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`;
+  function sqlDate(value) {
+    const match = /\/Date\((-?\d+)/.exec(String(value));
+    if (match) {
+      const date = new Date(Number(match[1]));
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }
+    return String(value || '').slice(0, 10);
+  }
+  const cleanNote = value => String(value || '').replace(/\[WEBFACTURA:[^\]]*\]\[HASH:[^\]]*\]\s*\[USUARIO:[^\]]*\]\s*/, '');
+  let user, options, draft, rows = [], busy = false, initialized = false, stockSequence = 0;
+  let reportMode = 'buscar', reportRows = [], reportBalances = false, detailReturnFocus = null;
+  let detailInvoiceId = 0, removalPreview = null, removingInvoice = false;
+  const fields = ['type', 'number', 'date', 'point', 'provider', 'cuit', 'period', 'due', 'goods', 'account', 'payment', 'concept', 'remito', 'note', 'movement', 'discount', 'quickTotal', 'calculatorRate', 'calculatorIva', 'calculatorNet'];
+  const storageKey = () => `corralon_cargar_facturas_borrador_v1:${user.id}`;
+  const lastKey = () => `corralon_cargar_facturas_ultimo_v1:${user.id}`;
+  const comboLists = new Map();
+  let purchaseCombo = { input: null, items: [], active: 0 }, pickingPurchaseCombo = false;
+  const selectedType = () => comboItem('type');
+  const selectedProvider = () => comboItem('provider');
+  const rowId = () => crypto.randomUUID();
+  const blankRow = () => ({ key: rowId(), impuesto: 0, neto: 0, importe: 0, porcentaje: .21, descripcion: 'NETO', empty: true });
+  function message(text, error = false) { $('status').textContent = text; $('status').classList.toggle('error', error); }
+  function saveDraft() {
+    if (!user || !draft) return;
+    updateStockEligibility();
+    draft.fields = Object.fromEntries(fields.map(id => [id, $(id).value]));
+    draft.inStock = $('inStock').checked;
+    draft.rows = rows;
+    try { localStorage.setItem(storageKey(), JSON.stringify(draft)); }
+    catch { message('El navegador no pudo conservar el borrador. Mantené esta pestaña abierta.', true); }
+  }
+  function setBusy(value) {
+    if (value) hidePurchaseCombo();
+    busy = value;
+    const locked = busy || Boolean(draft?.pending);
+    $('purchaseFields').disabled = locked || !options;
+    $('confirm').disabled = busy || !options;
+    $('confirm').textContent = draft?.pending ? 'Reintentar confirmación' : 'Confirmar';
+    ['new', 'cancel'].forEach(id => { $(id).disabled = locked || !options; });
+    ['consult', 'search', 'accountButton', 'ivaButton'].forEach(id => { $(id).disabled = busy || !options; });
+  }
+  async function api(params = {}, body = null) {
+    const url = new URL('/api/facturacion/cargar-facturas', location.href);
+    Object.entries({ ...params, usuarioId: user.id }).forEach(([key, value]) => url.searchParams.set(key, value));
+    const response = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, usuarioId: user.id, idOperador: Number(user.idOperador) || null }) } : { cache: 'no-store' });
+    let result;
+    try { result = await response.json(); } catch { throw new Error('El servidor no devolvió una respuesta válida.'); }
+    if (!response.ok || !result.ok) {
+      const error = new Error(result.error || 'No se pudo completar la consulta SQL.');
+      error.definitive = response.status >= 400 && response.status < 500 && result.ok === false;
+      throw error;
+    }
+    return result;
+  }
+  function fillSelect(id, items, placeholder = '') {
+    $(id).innerHTML = (placeholder ? `<option value="">${esc(placeholder)}</option>` : '') + items.map(item => `<option value="${esc(item.id)}">${esc(item.nombre)}</option>`).join('');
+    if (purchaseCombo.input === $(id)) showPurchaseCombo($(id));
+  }
+  const normalizedChoice = value => String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-AR');
+  function comboLabel(id, item) {
+    if (id === 'type') return item.codigo;
+    if (id === 'provider') return `${String(item.nombre || '').toLocaleUpperCase('es-AR')} · ${item.id}`;
+    if (id === 'account') return `${item.nombre} · ${item.id}`;
+    if (id === 'movement') return `${item.numero} · ${item.fecha} · ${money(item.total)}${item.remito ? ` · ${item.remito}` : ''}`;
+    return item.nombre;
+  }
+  function fillCombo(id, items, placeholder = '') {
+    comboLists.set(id, items);
+    if ($(id)) $(id).placeholder = placeholder;
+    if (purchaseCombo.input?.dataset.sqlList === id) showPurchaseCombo(purchaseCombo.input);
+  }
+  function purchaseComboItems(input) {
+    const id = input.dataset.sqlList;
+    if (!id) return [...input.options].map(item => ({ value: item.value, code: item.value || '—', text: item.textContent, detail: '' }));
+    // Siempre devolver la lista completa: el texto escrito no filtra las opciones.
+    return (comboLists.get(id) || []).map(item => ({ value: comboLabel(id, item),
+      code: id === 'type' ? item.codigo : id === 'movement' ? item.numero : item.id,
+      text: id === 'movement' ? `${item.fecha}${item.remito ? ` · ${item.remito}` : ''}` : item.nombre,
+      detail: id === 'movement' ? money(item.total) : id === 'tax' ? `${decimal(item.porcentaje * 100)}%` : id === 'provider' ? item.cuit || '' : '' }));
+  }
+  function decoratePurchaseCombos(root) {
+    for (const input of root.querySelectorAll?.('input[data-sql-list],select:not([data-generate])') || []) {
+      if (input.dataset.purchaseCombo) continue;
+      const wrap = document.createElement('span'); wrap.className = 'purchase-combo';
+      input.parentNode.insertBefore(wrap, input); wrap.appendChild(input);
+      input.dataset.purchaseCombo = '1'; input.autocomplete = 'off';
+      input.setAttribute('role', 'combobox'); input.setAttribute('aria-haspopup', 'listbox');
+      input.setAttribute('aria-controls', 'purchaseComboMenu'); input.setAttribute('aria-expanded', 'false');
+      const button = document.createElement('button'); button.type = 'button'; button.tabIndex = -1;
+      button.className = 'purchase-combo-drop'; button.textContent = '▾'; button.setAttribute('aria-label', 'Desplegar lista completa');
+      wrap.appendChild(button);
+    }
+  }
+  function hidePurchaseCombo() {
+    const input = purchaseCombo.input;
+    if (input) { input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); input.closest('.purchase-combo')?.classList.remove('combo-open'); }
+    $('purchaseComboMenu').classList.remove('visible'); purchaseCombo = { input: null, items: [], active: 0 };
+  }
+  function showPurchaseCombo(input) {
+    if (pickingPurchaseCombo || !input || input.matches(':disabled') || input.readOnly) return;
+    if (purchaseCombo.input !== input) hidePurchaseCombo();
+    const items = purchaseComboItems(input), query = normalizedChoice(input.value);
+    let selected = items.findIndex(item => normalizedChoice(item.value) === query);
+    if (selected < 0 && query && input.dataset.sqlList === 'tax') {
+      selected = items.findIndex(item => normalizedChoice(item.text).startsWith(query) || normalizedChoice(item.detail).startsWith(query));
+    }
+    if (selected < 0 && query) {
+      const fields = items.map(item => [item.code, item.text, item.detail].map(normalizedChoice));
+      selected = fields.findIndex(values => values.some(value => value === query));
+      if (selected < 0) selected = fields.findIndex(values => values.some(value => value.startsWith(query)));
+      if (selected < 0) selected = fields.findIndex(values => query.split(/\s+/).every(word => values.some(value => value.includes(word))));
+    }
+    const createProvider = input.dataset.sqlList === 'provider' && Boolean(query) && selected < 0 && FX.menuUserHasAccess('proveedores_sql');
+    purchaseCombo = { input, items, active: createProvider ? -1 : Math.max(0, selected) };
+    const menu = $('purchaseComboMenu'), host = input.closest('dialog') || document.body;
+    if (menu.parentNode !== host) host.appendChild(menu);
+    menu.innerHTML = items.map((item, index) => `<div id="purchase-combo-option-${index}" class="combo-option purchase-combo-option ${index === purchaseCombo.active ? 'active' : ''}" role="option" aria-selected="${index === purchaseCombo.active}" data-purchase-option="${index}"><span>${esc(item.code)}</span><span>${esc(item.text)}</span><span class="purchase-combo-value">${esc(item.detail)}</span></div>`).join('') || '<div class="purchase-combo-empty">Sin opciones disponibles</div>';
+    if (createProvider) menu.insertAdjacentHTML('afterbegin', '<button type="button" data-create-provider style="width:100%;padding:10px;color:var(--corralon-red);font-weight:bold">Proveedor no encontrado · Cargar proveedor</button>');
+    const rect = input.getBoundingClientRect(), width = Math.min(Math.max(rect.width, input.dataset.sqlList === 'provider' || input.dataset.sqlList === 'movement' ? 620 : 460), Math.max(1, window.innerWidth - 16));
+    const below = window.innerHeight - rect.bottom - 8, above = rect.top - 8, down = below >= Math.min(280, Math.max(40, items.length * 31)) || below >= above;
+    menu.style.width = `${width}px`; menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+    menu.style.maxHeight = `${Math.max(30, Math.min(280, down ? below : above))}px`;
+    menu.style.top = down ? `${rect.bottom + 3}px` : 'auto'; menu.style.bottom = down ? 'auto' : `${window.innerHeight - rect.top + 3}px`;
+    menu.style.paddingBottom = '0px';
+    menu.classList.add('visible'); input.setAttribute('aria-expanded', 'true'); input.closest('.purchase-combo')?.classList.add('combo-open');
+    markPurchaseComboActive(true);
+    if (createProvider) { menu.scrollTop = 0; input.removeAttribute('aria-activedescendant'); }
+  }
+  function markPurchaseComboActive(firstVisible = false) {
+    const menu = $('purchaseComboMenu');
+    menu.querySelectorAll('[data-purchase-option]').forEach(item => {
+      const active = Number(item.dataset.purchaseOption) === purchaseCombo.active;
+      item.classList.toggle('active', active); item.setAttribute('aria-selected', String(active));
+    });
+    const selected = menu.querySelector(`[data-purchase-option="${purchaseCombo.active}"]`);
+    if (selected) {
+      purchaseCombo.input.setAttribute('aria-activedescendant', selected.id);
+      const top = selected.offsetTop, bottom = top + selected.offsetHeight;
+      if (firstVisible) {
+        menu.style.paddingBottom = `${Math.max(0, menu.clientHeight - selected.offsetHeight)}px`;
+        menu.scrollTop = top;
+      }
+      else if (top < menu.scrollTop) menu.scrollTop = top;
+      else if (bottom > menu.scrollTop + menu.clientHeight) menu.scrollTop = bottom - menu.clientHeight;
+    }
+  }
+  function movePurchaseCombo(step) {
+    if (!purchaseCombo.items.length) return;
+    purchaseCombo.active = Math.max(0, Math.min(purchaseCombo.items.length - 1, purchaseCombo.active + step)); markPurchaseComboActive();
+  }
+  function pickPurchaseCombo(index = purchaseCombo.active) {
+    const input = purchaseCombo.input, item = purchaseCombo.items[index];
+    if (!input || !item || input.matches(':disabled')) return false;
+    pickingPurchaseCombo = true;
+    try {
+      input.value = String(item.value); hidePurchaseCombo();
+      input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.focus();
+    } finally { pickingPurchaseCombo = false; }
+    return true;
+  }
+  function comboItem(id, value = $(id)?.value) {
+    const text = normalizedChoice(value);
+    if (!text) return null;
+    const items = comboLists.get(id) || [];
+    const exact = items.filter(item => normalizedChoice(comboLabel(id, item)) === text);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) return null;
+    const aliases = items.filter(item => (id === 'movement' ? [item.numero] : id === 'tax' ? [item.nombre] : [item.id, item.codigo, item.nombre])
+      .some(alias => alias !== undefined && normalizedChoice(alias) === text));
+    return aliases.length === 1 ? aliases[0] : null;
+  }
+  function setComboValue(id, value) {
+    const item = (comboLists.get(id) || []).find(candidate => String(candidate.id) === String(value)) || comboItem(id, value);
+    $(id).value = item ? comboLabel(id, item) : String(value ?? '');
+  }
+  function comboId(id, required = false) {
+    const item = comboItem(id);
+    if (!item && required) throw new Error(`Seleccioná ${({ type: 'un tipo de comprobante', account: 'una cuenta', payment: 'un pago', movement: 'un movimiento de stock' })[id]} de la lista SQL.`);
+    return item ? item.id : '';
+  }
+  function refreshAccounts() {
+    const previous = comboItem('account')?.id ?? $('account').value;
+    const point = options.puntosVenta.find(item => String(item.id) === $('point').value);
+    fillCombo('account', options.cuentas.filter(item => Number(item.empresa) === Number(point?.empresa)), 'Seleccionar cuenta');
+    setComboValue('account', previous);
+    if (!comboItem('account')) $('account').value = '';
+  }
+  function updateStockEligibility() {
+    const freight = Number(comboItem('account')?.id) === 11;
+    $('inStock').disabled = freight;
+    $('movement').disabled = freight;
+    if (freight) {
+      $('inStock').checked = false;
+      $('movement').value = '';
+      stockSequence++;
+      if (purchaseCombo.input === $('movement')) hidePurchaseCombo();
+    }
+  }
+  async function refreshStock() {
+    updateStockEligibility();
+    const sequence = ++stockSequence, previous = comboItem('movement')?.id ?? $('movement').value;
+    fillCombo('movement', [], 'Sin movimiento asociado'); $('movement').value = '';
+    if (!selectedProvider() || !$('inStock').checked) return;
+    try {
+      const result = await api({ consulta: 'movimientos', proveedor: selectedProvider().id, puntoVenta: $('point').value });
+      if (sequence !== stockSequence) return;
+      const typedDuringLoad = $('movement').value;
+      fillCombo('movement', result.movimientos, 'Sin movimiento asociado');
+      if (typedDuringLoad) {
+        const item = comboItem('movement', typedDuringLoad);
+        $('movement').value = item ? comboLabel('movement', item) : typedDuringLoad;
+      } else {
+        setComboValue('movement', previous);
+        if (!comboItem('movement')) $('movement').value = '';
+      }
+    } catch (error) { if (sequence === stockSequence) message(error.message, true); }
+  }
+  async function onTypeChange() {
+    const type = selectedType();
+    if (currencyNumber($('quickTotal').value) > 0) loadQuickTotal();
+    $('number').readOnly = Boolean(type?.automatico);
+    if (type?.automatico) {
+      try {
+        const result = await api({ consulta: 'numero', tipo: type.id });
+        if (selectedType()?.id === type.id) { $('number').value = result.numero; saveDraft(); }
+      } catch (error) { message(error.message, true); }
+    }
+    saveDraft();
+  }
+  function renderRows(appendOnly = false) {
+    if (!appendOnly) hidePurchaseCombo();
+    if (!rows.some(row => row.empty)) rows.push(blankRow());
+    const generator = '<option value="">Elegir…</option>' + options.impuestos.filter(item => item.id !== 0).map(item => `<option value="${item.id}">${esc(item.nombre)}</option>`).join('');
+    const markup = row => `<tr data-row="${row.key}">
+      <td class="row-marker" aria-hidden="true">${row.importe ? '' : '*'}</td>
+      <td><input type="text" data-sql-list="tax" data-field="impuesto" data-flow aria-label="Impuesto" value="${row.empty ? '' : esc(row.invalidTax ? row.taxText : options.impuestos.find(item => item.id === row.impuesto)?.nombre || '')}"></td>
+      <td><input data-field="neto" data-flow inputmode="numeric" value="${row.empty ? '' : row.neto}"></td>
+      <td><input data-field="importe" data-flow data-number-format="currency" class="numeric" inputmode="decimal" value="${row.importe ? esc(money(row.importe)) : ''}"></td>
+      <td><input data-field="porcentaje" data-flow data-number-format="percent" class="numeric" inputmode="decimal" value="${row.empty ? '' : decimal(row.porcentaje * 100)}"></td>
+      <td class="secondary-tax" hidden aria-hidden="true"><select data-generate tabindex="-1">${generator}</select></td>
+      <td class="grid-spacer" aria-hidden="true"></td>
+      <td><button type="button" data-remove aria-label="Eliminar renglón">×</button></td></tr>`;
+    if (appendOnly) $('taxRows').insertAdjacentHTML('beforeend', markup(rows[rows.length - 1]));
+    else $('taxRows').innerHTML = rows.map(markup).join('');
+    decoratePurchaseCombos($('taxRows'));
+    $('rowCount').textContent = `${rows.length} ${rows.length === 1 ? 'registro' : 'registros'}`;
+    updateTotals();
+  }
+  function applyTaxChoice(input, canonical = false) {
+    const cell = input.closest('[data-row]');
+    const row = rows.find(item => item.key === cell?.dataset.row);
+    if (!row) return;
+    const tax = comboItem('tax', input.value);
+    if (!tax) { row.invalidTax = true; row.taxText = input.value; return; }
+    const fresh = Boolean(row.empty) || !row.neto, changed = fresh || row.impuesto !== tax.id;
+    if (fresh || (changed && tax.id === 0)) {
+      const last = Math.max(0, ...rows.filter(item => item !== row && !item.empty && !item.invalidTax && item.impuesto === 0).map(item => item.neto));
+      row.neto = tax.id === 0 ? last + 1 : Math.max(1, last);
+    }
+    row.impuesto = tax.id; row.descripcion = tax.nombre;
+    delete row.invalidTax; delete row.taxText;
+    if (canonical) input.value = comboLabel('tax', tax);
+    if (changed) {
+      row.porcentaje = tax.id === 0 ? .21 : Number(tax.porcentaje || 0);
+      if (tax.id !== 0 && row.porcentaje) row.importe = calculateTaxAmount(row);
+      cell.querySelector('[data-field="neto"]').value = row.neto;
+      cell.querySelector('[data-field="porcentaje"]').value = decimal(row.porcentaje * 100);
+      cell.querySelector('[data-field="importe"]').value = money(row.importe);
+    }
+  }
+  function calculateTaxAmount(row) {
+    const tax = options.impuestos.find(item => item.id === row.impuesto);
+    const name = normalizedChoice(tax?.nombre);
+    const isIva = /\biva\b/.test(name) && !/percep|reten|gananc|brutos|hogar/.test(name)
+      && [.105, .21, .27].some(rate => Math.abs(Number(tax?.porcentaje || row.porcentaje) - rate) < .00001);
+    const base = rows.filter(item => !item.empty && !item.invalidTax && item.impuesto === 0 && (!isIva || item.neto === row.neto))
+      .reduce((sum, item) => sum + Number(item.importe || 0), 0);
+    return Math.round(base * row.porcentaje * 100) / 100;
+  }
+  function updateTotals() {
+    if (options) rows.forEach(row => {
+      if (row.empty || row.invalidTax || row.impuesto === 0) return;
+      row.importe = calculateTaxAmount(row);
+      const input = $('taxRows').querySelector(`[data-row="${row.key}"] [data-field="importe"]`);
+      if (input && input !== document.activeElement) input.value = money(row.importe);
+    });
+    const total = rows.reduce((sum, row) => sum + row.importe, 0);
+    const discount = numeric($('discount').value) / 100;
+    const discountAmount = Math.round(total * discount * 100) / 100;
+    if (document.activeElement !== $('discount')) $('discount').value = `${decimal(discount * 100)}%`;
+    $('total').textContent = money(total);
+    $('discountAmount').textContent = money(discountAmount);
+    $('discountTotal').textContent = money(total - discountAmount);
+  }
+  function addRow() { if (!rows.some(row => row.empty)) renderRows(); saveDraft(); $('taxRows').querySelector(`[data-row="${rows.find(row => row.empty).key}"] [data-field="impuesto"]`)?.focus(); }
+  function applyProvider() {
+    const provider = selectedProvider();
+    $('providerCode').value = provider?.id || '';
+    $('providerName').value = provider?.nombre || '';
+    if (provider) {
+      $('cuit').value = provider.cuit || '';
+      setComboValue('account', provider.cuenta);
+      $('concept').value = comboItem('account')?.nombre || '';
+    }
+    refreshStock(); saveDraft();
+  }
+  function parseFieldDate(id) {
+    const parsed = FX.parseFechaFlexible($(id).value);
+    if (!parsed) throw new Error(`Revisá ${id === 'date' ? 'la fecha de compra' : id === 'due' ? 'el vencimiento' : 'las fechas del informe'}.`);
+    $(id).value = parsed.text;
+    return parsedDateKey(parsed);
+  }
+  function parsePeriod() {
+    const match = /^\s*(\d{1,2})[\s/.-]+(\d{4})\s*$/.exec($('period').value);
+    if (!match || Number(match[1]) < 1 || Number(match[1]) > 12) throw new Error('Ingresá el período de IVA como mes/año.');
+    return `${match[2]}-${match[1].padStart(2, '0')}-01`;
+  }
+  function confirmationPayload() {
+    updateStockEligibility();
+    const provider = selectedProvider();
+    if (!provider) throw new Error('Seleccioná un proveedor de SQL.');
+    const taxes = rows.filter(row => row.importe !== 0).map(({ key, invalidTax, taxText, ...row }) => {
+      if (invalidTax) throw new Error('Seleccioná el impuesto de cada renglón de la lista SQL.');
+      return { ...row, importe: Math.round(row.importe * 100) / 100 };
+    });
+    if (!taxes.length) throw new Error('Cargá los importes de la factura.');
+    const number = FX.formatComprobanteNumber($('number').value);
+    $('number').value = number;
+    return { id: draft.id, tipo: Number(comboId('type', true)), numero: number, fecha: parseFieldDate('date'), periodo: parsePeriod(),
+      vencimiento: parseFieldDate('due'), proveedor: provider.id, puntoVenta: Number($('point').value), cuit: $('cuit').value.trim(),
+      cuenta: String(comboId('account', true)), pago: Number(comboId('payment', true)), tipoBien: Number($('goods').value), concepto: $('concept').value.trim(),
+      remito: FX.formatComprobanteNumber($('remito').value), nota: $('note').value, enStock: $('inStock').checked,
+      movimiento: Number(comboId('movement', Boolean($('movement').value.trim())) || 0), descuento: numeric($('discount').value) / 100, impuestos: taxes };
+  }
+  function resetDraft() {
+    const point = $('point').value || String(options.puntosVenta[0]?.id || '');
+    fields.forEach(id => { $(id).value = ''; });
+    $('point').value = point; refreshAccounts();
+    $('date').value = dateText(today()); $('period').value = `${today().slice(5, 7)}/${today().slice(0, 4)}`;
+    const due = new Date(`${today()}T12:00:00`); due.setDate(due.getDate() + 30);
+    $('due').value = `${due.getDate()}/${due.getMonth() + 1}/${due.getFullYear()}`;
+    setComboValue('type', options.tipos[0]?.id || ''); setComboValue('payment', 1); $('goods').value = '2';
+    $('discount').value = '0,00%'; $('calculatorRate').value = '1'; $('inStock').checked = true;
+    $('providerCode').value = ''; $('providerName').value = ''; $('lastNumber').value = localStorage.getItem(lastKey()) || '';
+    rows = []; rows.push(blankRow()); draft = { id: rowId() };
+    renderRows(); refreshStock(); onTypeChange(); setBusy(false); saveDraft();
+  }
+  async function confirmPurchase() {
+    if (busy || !options || !draft) return;
+    let stockReference = null;
+    try {
+      const payload = draft.pending || confirmationPayload();
+      const sendToStock = payload.enStock && !payload.movimiento && FX.menuUserHasAccess('carga_stock');
+      const stockKey = `corralon_stock_factura_${user.id}`;
+      if (!draft.pending && !(await htmlNotice(`Confirmar la factura ${payload.numero || '(numeración automática)'} de ${selectedProvider().nombre} por ${money(rows.reduce((sum, row) => sum + row.importe, 0))}?`, true, () => {
+        const tab = JSON.parse(localStorage.getItem(`${stockKey}_tab`) || 'null');
+        if (sendToStock && tab?.reusable && Date.now() - tab.time < 120000) stockReference = window.open('', 'corralon-carga-stock');
+      }))) return;
+      draft.pending = payload; saveDraft(); setBusy(true);
+      let result;
+      try { result = await api({}, { ...payload, accion: 'confirmar' }); }
+      catch (error) {
+        if (error.definitive) { delete draft.pending; saveDraft(); }
+        else message('La confirmación quedó pendiente de verificar. Usá Reintentar confirmación para recuperar el resultado sin duplicar la factura.', true);
+        throw error;
+      }
+      const invoice = result.factura[0];
+      if (!invoice) throw new Error('No pude verificar la factura guardada. Reintentá la misma confirmación.');
+      localStorage.setItem(lastKey(), invoice.NroFactura);
+      resetDraft();
+      message(`Factura ${invoice.NroFactura} confirmada. Ya podés cargar la siguiente.`);
+      if (sendToStock && !invoice.IDMovStk) {
+        const stockTab = await new Promise(resolve => {
+          const request = crypto.randomUUID();
+          let timer;
+          const receive = event => {
+            if (event.key !== `${stockKey}_reply` || !event.newValue) return;
+            const reply = JSON.parse(event.newValue);
+            if (reply.request !== request) return;
+            clearTimeout(timer); window.removeEventListener('storage', receive); resolve(reply);
+          };
+          window.addEventListener('storage', receive);
+          timer = setTimeout(() => { window.removeEventListener('storage', receive); resolve(null); }, 700);
+          localStorage.setItem(`${stockKey}_ping`, request);
+        });
+        localStorage.setItem(stockKey, JSON.stringify({
+          id: invoice.IDRecibo, usuarioId: user.id, proveedorId: invoice.IDProveedor,
+          proveedor: invoice.Proveedor, numero: invoice.NroFactura,
+          sucursal: invoice.sucursalReal || invoice.IDSuc, time: Date.now(),
+          target: stockTab?.id || null
+        }));
+        if (!stockTab) location.assign('cargastock.html');
+        else {
+          if (stockTab.reusable) {
+            stockReference = stockReference || window.open('', 'corralon-carga-stock');
+            stockReference?.focus();
+          }
+          message('Factura confirmada. La carga de stock está preparada en la pestaña abierta.');
+        }
+      }
+    } catch (error) {
+      message(draft?.pending ? `Confirmación pendiente de verificar: ${error.message}. Reintentá con el mismo borrador.` : error.message, true);
+    } finally { setBusy(false); }
+  }
+  function openDetail(title, content) {
+    $('detailDialog').querySelector('[data-save-purchase-header]')?.remove();
+    const actions = $('detailDialog').querySelector('.actions');
+    if (actions) $('detailDialog').append(actions);
+    detailInvoiceId = 0; $('deleteInvoice').hidden = true;
+    detailReturnFocus = document.activeElement;
+    $('detailTitle').textContent = title; $('detailBody').innerHTML = content;
+    if (!$('detailDialog').open) $('detailDialog').showModal();
+  }
+  function detailField(label, value) { return `<div><dt>${esc(label)}</dt><dd>${esc(value || '—')}</dd></div>`; }
+  function showInvoice(result) {
+    const p = result.factura[0];
+    if (!p) throw new Error('Factura no encontrada.');
+    const total = Number(p.Total || 0);
+    const creditAmount = (result.credito || []).reduce((sum, row) => sum + Number(row.Total || 0), 0);
+    const discountAmount = result.credito?.length ? Math.abs(creditAmount) : Math.round(Math.abs(total) * Number(p.ImpDto || 0) * 100) / 100;
+    const totalAfterDiscount = result.credito?.length ? total + creditAmount : total - Math.sign(total) * discountAmount;
+    const header = [ ['Proveedor', p.Proveedor], ['Tipo', `${p.tipo} · ${p.tipoNombre}`], ['Nº comprobante', p.NroFactura], ['Fecha compra', dateText(sqlDate(p.Fecha))], ['Período IVA', dateText(sqlDate(p.FechaIVA)).slice(3)], ['Vencimiento', dateText(sqlDate(p.FechaVto))], ['CUIT', p.CUIT], ['Cuenta', p.Cuenta], ['Pago', p.pago], ['Tipo de bien', p.TipoBien], ['Sucursal / punto de venta', p.puntoVentaNombre], ['Nº remito', p.NroRemMerc], ['Movimiento de stock', p.stockNumero || p.IDMovStk], ['Concepto', p.Concepto], ['Total', money(p.Total)], ['Descuento', money(discountAmount)], ['Total c/dto.', money(totalAfterDiscount)] ];
+    const taxes = `<div class="purchase-inspect-tax"><strong>Detalle de Impuestos</strong><div class="tax-scroll"><table><thead><tr><th>Impuesto</th><th>Nº Neto</th><th>% Imp.</th><th>Importe</th><th></th><th></th></tr></thead><tbody>${result.impuestos.map(row => `<tr><td>${esc(row.descripcion || row.nombre)}</td><td>${esc(row.neto)}</td><td class="numeric">${decimal(row.porcentaje * 100)}%</td><td class="numeric">${money(row.importe)}</td><td></td><td></td></tr>`).join('')}${Array.from({length:Math.max(1,5-result.impuestos.length)},()=>'<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}</tbody></table></div><div class="tax-count">${result.impuestos.length} registros</div></div>`;
+    const payments = result.pagos.length ? `<h3>Órdenes de pago</h3><table><thead><tr><th>Nº OP</th><th>Pago</th><th>Importe</th></tr></thead><tbody>${result.pagos.map(row => `<tr><td>${row.NroOP}</td><td>${esc(row.TipoPago)}</td><td class="numeric">${money(row.Importe)}</td></tr>`).join('')}</tbody></table>` : '';
+    const credit = result.credito.length ? `<p>Crédito por descuento: ${esc(result.credito[0].NroFactura)} · ${money(result.credito[0].Total)} (registro ${result.credito[0].IDRecibo}).</p>` : '';
+    $('openStock').hidden = !(p.EnMovStk && !p.IDMovStk && FX.menuUserHasAccess('carga_stock'));
+    const canEdit = FX.menuUserHasAccess('cargar_facturas');
+    const field=(label,value,width)=>`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':'readonly'} style="--width:${width}px" value="${esc(value??'')}"></label>`;
+    const taxTotal=(rate,net)=>result.impuestos.filter(row=>Math.abs(Number(row.porcentaje)-rate)<.00001&&(net?Number(row.impuesto)===0:/\biva\b/i.test(row.nombre||row.descripcion||''))).reduce((sum,row)=>sum+Number(row.importe||0),0);
+    const summary=[['ImpNeto21',.21],['ImpNeto105',.105],['ImpNeto27',.27]].map(([label,rate],index)=>`<label>${label}:<output>${money(taxTotal(rate,true))}</output></label><label>ImpIVA${index===0?'21':index===1?'105':'27'}:<output>${money(taxTotal(rate,false))}</output></label>${index===0?`<label class="purchase-total">Total:<output>${money(total)}</output></label>`:index===1?`<label>En Movs. de Stock:<input type="checkbox" disabled ${p.EnMovStk?'checked':''}></label>`:field('Nº Mov. Stock',p.stockNumero||p.IDMovStk||'',95)}`).join('');
+    openDetail('Consultar Compras a Proveedores', `<div class="purchase-inspect">
+      <div class="purchase-inspect-row">${field('Comprobante',p.tipo,70)}${field('Nº',p.NroFactura,105)}${field('Fecha',dateText(sqlDate(p.Fecha)),75)}${field('Período IVA',dateText(sqlDate(p.FechaIVA)).slice(3),75)}${field('Carga',p.FechaCarga?dateText(sqlDate(p.FechaCarga)):'',75)}</div>
+      <div class="purchase-inspect-row">${field('Proveedor',p.Proveedor,300)}${field('ID',p.IDProveedor,50)}${field('TC',p.tipoNombre,155)}</div>
+      <div class="purchase-inspect-columns"><div class="purchase-inspect-left"><div class="purchase-inspect-row">${field('CUIT',p.CUIT,85)}${field('Forma de Pago',p.pago,110)}</div>${field('Concepto',p.Concepto,280)}${field('Cuenta',p.Cuenta,285)}</div><div class="purchase-inspect-right">${field('Oper',p.operadorNombre||p.IDOper,125)}${field('Vence',dateText(sqlDate(p.FechaVto)),75)}${field('Tipo de Bien',p.TipoBien,110)}</div></div>
+      ${taxes}<div class="purchase-inspect-summary">${summary}</div>
+      <div class="purchase-inspect-row purchase-inspect-bottom">${field('Nº Remito de Merc.',p.NroRemMerc,125)}<label class="purchase-total" style="margin-left:50px">Total Real:<output>${money(total)}</output></label></div>
+      <div class="purchase-inspect-note"><label>Nota:<textarea readonly>${esc(cleanNote(p.Nota))}</textarea></label><div class="purchase-inspect-actions"></div></div>
+      <div class="purchase-inspect-discount">${field('Imp. Dto.',`${decimal(Number(p.ImpDto||0)*100)}%`,105)}<label>Total c/Dto.:<output>${money(totalAfterDiscount)}</output></label></div>
+      </div>${payments}${credit}`);
+    detailInvoiceId = Number(p.IDRecibo); $('deleteInvoice').hidden = false;
+    $('detailBody').querySelector('.purchase-inspect-actions').append($('detailDialog').querySelector('.actions'));
+    const stockCheck=$('detailBody').querySelector('.purchase-inspect-summary input[type="checkbox"]');
+    stockCheck.disabled=!canEdit||Number(p.CodCuentaCpra)===11;
+    const numberInput=$('editPurchaseNumber');
+    if(numberInput)FX.bindComprobanteNumber(numberInput);
+    $('detailDialog').querySelector('[data-save-purchase-header]')?.remove();
+    if(canEdit){
+      const save=document.createElement('button');save.type='button';save.dataset.savePurchaseHeader='1';save.textContent='Guardar cambios';save.disabled=true;
+      $('deleteInvoice').before(save);
+      const track=()=>{save.disabled=numberInput.value.trim()===p.NroFactura&&stockCheck.checked===Boolean(p.EnMovStk);};
+      numberInput.addEventListener('input',track);numberInput.addEventListener('change',track);stockCheck.addEventListener('change',track);
+      save.onclick=async()=>{
+        save.disabled=true;numberInput.disabled=true;stockCheck.disabled=true;
+        try{
+          const updated=await api({}, {accion:'editar-cabecera',id:p.IDRecibo,numero:numberInput.value.trim(),enStock:stockCheck.checked,numeroAnterior:p.NroFactura,enStockAnterior:Boolean(p.EnMovStk)});
+          showInvoice(updated);if($('reportDialog').open)await loadReport();message('Número de boleta y opción de stock guardados en SQL.');
+        }catch(error){await htmlNotice(error.message,false);numberInput.disabled=false;stockCheck.disabled=Number(p.CodCuentaCpra)===11;track();}
+      };
+    }
+  }
+  async function previewInvoiceRemoval() {
+    if (!detailInvoiceId || removingInvoice) return;
+    removalPreview = null; $('confirmDeleteInvoice').disabled = true;
+    $('deleteInvoiceBody').innerHTML = ''; $('deleteInvoiceStatus').textContent = 'Consultando pagos y cargas de stock en SQL…';
+    $('deleteInvoiceDialog').showModal();
+    try {
+      const state = await api({ consulta: 'previsualizar-eliminacion', id: detailInvoiceId });
+      removalPreview = { id: detailInvoiceId, version: state.version };
+      const movements = state.facturas.map(row => `<li>Registro ${Number(row.IDRecibo)} · ${esc(row.NroFactura)} · ${esc(row.Proveedor)} · ${money(row.Total)}${Number(row.IDRecibo) !== detailInvoiceId ? ' · crédito de descuento vinculado' : ''}</li>`).join('');
+      const payments = state.pagos.length ? `<h3>Pagos vinculados</h3><ul>${state.pagos.map(row => `<li>OP ${esc(row.NroOP || row.NroOrden)} · registro ${Number(row.IDFactura)} · ${money(row.Importe)}</li>`).join('')}</ul>` : '<p>Sin pagos vinculados.</p>';
+      const stock = state.stock.length ? `<h3>Cargas de stock vinculadas</h3><ul>${state.stock.map(row => `<li>Movimiento ${Number(row.NroMov)} · registro ${Number(row.IDRecibo)} · sucursal ${Number(row.IDSuc)}</li>`).join('')}</ul>` : '<p>Sin cargas de stock vinculadas.</p>';
+      const parents = state.padres.length ? `<p>También se quitará el vínculo y el porcentaje de descuento de la compra ${state.padres.map(row => Number(row.IDRecibo)).join(', ')}.</p>` : '';
+      $('deleteInvoiceBody').innerHTML = `<p>Se eliminarán estos registros de compra y sus renglones de impuestos:</p><ul>${movements}</ul>${payments}${stock}${parents}`;
+      $('deleteInvoiceStatus').textContent = state.bloqueado ? state.motivos.join(' ') : 'No tiene pagos ni carga de stock vinculados. Confirmá para eliminar definitivamente.';
+      $('confirmDeleteInvoice').disabled = state.bloqueado;
+    } catch (error) { $('deleteInvoiceStatus').textContent = error.message; }
+  }
+  async function removeInvoice() {
+    if (!removalPreview || removingInvoice || $('confirmDeleteInvoice').disabled) return;
+    removingInvoice = true; $('confirmDeleteInvoice').disabled = true;
+    $('deleteInvoiceStatus').textContent = 'Verificando vinculaciones y eliminando en SQL…';
+    try {
+      const removedId = removalPreview.id;
+      await api({}, { accion: 'eliminar', ...removalPreview });
+      removalPreview = null; $('deleteInvoiceDialog').close(); $('detailDialog').close();
+      message(`Movimiento ${removedId} eliminado de SQL.`);
+      if ($('reportDialog').open) await loadReport();
+    } catch (error) {
+      $('deleteInvoiceStatus').textContent = error.message + (error.definitive ? ' Cerrá y volvé a consultar las vinculaciones.' : ' Reintentá esta misma solicitud para verificar el resultado.');
+      $('confirmDeleteInvoice').disabled = Boolean(error.definitive);
+    } finally { removingInvoice = false; }
+  }
+  function openProviderDialog() {
+    if (!FX.menuUserHasAccess('proveedores_sql')) { message('Tu usuario necesita el permiso Proveedores SQL para cargar un proveedor.', true); return; }
+    const name = $('provider').value.trim(); hidePurchaseCombo();
+    $('providerFrame').src = `proveedores-sql.html?dialogo=1&nombre=${encodeURIComponent(name)}`;
+    $('providerDialog').showModal();
+  }
+  async function showProvider() {
+    if (!selectedProvider()) { openProviderDialog(); return; }
+    if (!selectedProvider()) { message('Seleccioná un proveedor.', true); return; }
+    try {
+      const result = await api({ consulta: 'proveedor', proveedor: selectedProvider().id });
+      const p = result.proveedor[0]; if (!p) throw new Error('Proveedor no encontrado.');
+      $('openStock').hidden = true;
+      openDetail(`Proveedor · ${p.nombre}`, `<dl class="detail-fields">${[['Código', p.IDProveedor], ['Razón social', p.nombre], ['CUIT', p.CUIT], ['Condición IVA', p.condicionIva], ['Dirección', p.direccion], ['Localidad', p.Localidad], ['Teléfono', p.telefono], ['Email', p.Email], ['Web', p.Web]].map(([label, value]) => detailField(label, value)).join('')}</dl><p class="detail-note">${esc(p.Nota)}</p>`);
+    } catch (error) { message(error.message, true); }
+  }
+  async function openReport(mode, search = '') {
+    reportMode = mode; reportRows = [];
+    $('reportTitle').textContent = ({ buscar: 'Consultar facturas', iva: 'IVA Compras', 'cuenta-corriente': 'Cuenta corriente del proveedor' })[mode];
+    const from = new Date(`${today()}T12:00:00`); if (mode === 'iva') from.setDate(1); else from.setDate(from.getDate() - 90);
+    $('reportFrom').value = `${from.getDate()}/${from.getMonth() + 1}/${from.getFullYear()}`; $('reportTo').value = dateText(today());
+    $('reportProvider').value = mode === 'cuenta-corriente' ? String(selectedProvider()?.id || '') : '';
+    $('reportSearch').value = search; $('reportSearchLabel').hidden = mode !== 'buscar';
+    if (!$('reportDialog').open) $('reportDialog').showModal();
+    await loadReport();
+  }
+  async function loadReport(more = false) {
+    if (reportMode === 'buscar') $('reportSearch').value = FX.formatComprobanteNumber($('reportSearch').value);
+    $('reportStatus').textContent = 'Consultando SQL…'; $('loadMore').hidden = true;
+    try {
+      const params = { consulta: reportMode, desde: parseFieldDate('reportFrom'), hasta: parseFieldDate('reportTo'), proveedor: $('reportProvider').value || 0,
+        buscar: $('reportSearch').value.trim(), antes: more ? reportRows.at(-1)?.id || 0 : 0 };
+      const result = await api(params);
+      const loaded = result.facturas || result.filas || result.movimientos || result.saldos;
+      reportBalances = Boolean(result.saldos);
+      reportRows = more ? [...reportRows, ...loaded] : loaded;
+      $('loadMore').hidden = !result.hayMas;
+      renderReport(); $('reportStatus').textContent = `${reportRows.length} registros${result.hayMas ? ' · hay más disponibles' : ''}`;
+    } catch (error) { $('reportStatus').textContent = error.message; }
+  }
+  function renderReport() {
+    const columns = reportBalances ? [['id', 'Código'], ['proveedor', 'Proveedor'], ['saldo', 'Saldo'], ['vencido', 'Saldo vencido']]
+      : reportMode === 'buscar' ? [['fecha', 'Fecha'], ['tipo', 'Tipo'], ['numero', 'Nº comprobante'], ['proveedor', 'Proveedor'], ['total', 'Total'], ['movimiento', 'Mov. stock']]
+      : reportMode === 'iva' ? [['fecha', 'Fecha'], ['periodo', 'Período'], ['tipo', 'Tipo'], ['numero', 'Nº comp.'], ['proveedor', 'Proveedor'], ['CUIT', 'CUIT'], ['neto', 'Neto'], ['iva', 'IVA'], ['otros', 'Otros'], ['total', 'Total']]
+      : [['fecha', 'Fecha'], ['tipo', 'Tipo'], ['numero', 'Comprobante'], ['debe', 'Debe'], ['haber', 'Haber'], ['saldo', 'Saldo']];
+    const amountFields = ['total', 'neto', 'iva', 'otros', 'debe', 'haber', 'saldo', 'vencido'];
+    const canOpen = reportMode !== 'cuenta-corriente' || reportBalances;
+    $('reportBody').innerHTML = `<table><thead><tr>${columns.map(([, label]) => `<th>${label}</th>`).join('')}</tr></thead><tbody>${reportRows.map(row => `<tr ${canOpen ? `${reportBalances ? 'data-provider' : 'data-invoice'}="${row.id}" style="cursor:pointer"` : ''}>${columns.map(([key]) => `<td class="${amountFields.includes(key) ? 'numeric' : ''}">${esc(amountFields.includes(key) ? money(row[key]) : row[key] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>${reportRows.length ? '' : '<p class="empty">No hay registros en esta consulta.</p>'}`;
+    $('reportTotals').textContent = reportMode === 'cuenta-corriente' && !reportBalances ? `Saldo al último movimiento: ${money(reportRows[0]?.saldo || 0)}`
+      : columns.filter(([key]) => amountFields.includes(key)).map(([key, label]) => `${label}: ${money(reportRows.reduce((sum, row) => sum + Number(row[key] || 0), 0))}`).join(' · ');
+  }
+  function printBody(title, content) {
+    const popup = window.open('', '_blank');
+    if (!popup) { message('Permití abrir la ventana de impresión.', true); return; }
+    popup.opener = null;
+    popup.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:12mm}body{font:12px Arial}h1{font-size:22px}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #bbb;padding:5px;text-align:left}thead{display:table-header-group}tr{break-inside:avoid}.numeric{text-align:right}button{display:none}.detail-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}dt{font-size:10px;color:#555}dd{margin:3px 0;font-weight:bold}.detail-note{white-space:pre-wrap}</style></head><body><h1>${esc(title)}</h1>${content}<p>Corralón Progreso · ${esc(user.nombre || user.usuario)} · ${dateText(today())}</p></body></html>`);
+    popup.document.close(); popup.focus(); popup.print();
+  }
+  async function initialize(validatedUser) {
+    if (initialized) return;
+    user = validatedUser; initialized = true;
+    $('activeUser').textContent = user.nombre || user.usuario;
+    try {
+      const lookupCacheKey = `corralon_facturas_opciones_sql_v1:${user.id}`;
+      let cachedOptions;
+      try { cachedOptions = JSON.parse(localStorage.getItem(lookupCacheKey) || 'null'); } catch (_) {}
+      const cachedReady = cachedOptions && ['tipos','proveedores','puntosVenta','bienes','pagos','impuestos','cuentas'].every(key => Array.isArray(cachedOptions[key]));
+      const freshOptions = api({ consulta: 'opciones' }).then(data => {
+        try { localStorage.setItem(lookupCacheKey, JSON.stringify(data)); } catch (_) {}
+        return data;
+      });
+      if (cachedReady) freshOptions.catch(() => {});
+      options = cachedReady ? cachedOptions : await freshOptions;
+      const reportProviders = options.proveedores;
+      options.proveedores = options.proveedores.filter(provider => !provider.suspendido);
+      fillCombo('type', options.tipos);
+      fillSelect('point', options.puntosVenta); fillSelect('goods', options.bienes); fillCombo('payment', options.pagos);
+      fillCombo('tax', options.impuestos);
+      fillSelect('calculatorRate', options.impuestos.filter(item => item.codigoIva).map(item => ({ ...item, nombre: `${decimal(item.porcentaje * 100)}%` })));
+      fillSelect('reportProvider', reportProviders, 'Todos');
+      fillCombo('provider', options.proveedores);
+      let saved; try { saved = JSON.parse(localStorage.getItem(storageKey()) || 'null'); } catch {}
+      resetDraft();
+      if (saved?.id && Array.isArray(saved.rows)) {
+        draft = saved; rows = saved.rows;
+        fields.forEach(id => {
+          if (id === 'account' || saved.fields?.[id] === undefined) return;
+          if (comboLists.has(id)) setComboValue(id, saved.fields[id]); else $(id).value = saved.fields[id];
+        });
+        refreshAccounts(); setComboValue('account', saved.fields?.account || ''); $('inStock').checked = saved.inStock;
+        $('providerCode').value = selectedProvider()?.id || '';
+        $('providerName').value = selectedProvider()?.nombre || '';
+        $('number').readOnly = Boolean(selectedType()?.automatico);
+        renderRows(); await refreshStock(); setBusy(false);
+        saveDraft();
+        message(saved.pending ? 'Hay una confirmación pendiente de verificar. Reintentá con este mismo borrador.' : 'Borrador recuperado. Datos de proveedores e impuestos consultados en SQL.');
+      } else message('Listo para cargar una factura. Datos consultados en SQL.');
+      if (cachedReady) freshOptions.then(data => {
+        const selectValues = Object.fromEntries(['point','goods','calculatorRate','reportProvider'].map(id => [id, $(id).value]));
+        const accountText = $('account').value;
+        options = { ...data, proveedores: data.proveedores.filter(provider => !provider.suspendido) };
+        fillCombo('type', options.tipos); fillCombo('payment', options.pagos); fillCombo('tax', options.impuestos); fillCombo('provider', options.proveedores);
+        fillSelect('point', options.puntosVenta); fillSelect('goods', options.bienes);
+        fillSelect('calculatorRate', options.impuestos.filter(item => item.codigoIva).map(item => ({ ...item, nombre: `${decimal(item.porcentaje * 100)}%` })));
+        fillSelect('reportProvider', data.proveedores, 'Todos');
+        Object.entries(selectValues).forEach(([id, value]) => { if ([...$(id).options].some(item => item.value === value)) $(id).value = value; });
+        refreshAccounts(); setComboValue('account', accountText);
+      }).catch(error => message(`Listas en caché disponibles. No se pudieron actualizar desde SQL: ${error.message}`, true));
+    } catch (error) { options = null; message(error.message, true); initialized = false; setBusy(false); }
+  }
+  $('todayLabel').textContent = new Intl.DateTimeFormat('es-AR', { dateStyle: 'full' }).format(new Date());
+  window.addEventListener('menu-user-validated', event => initialize(event.detail.user));
+  // El guard puede validar antes de que un script diferido llegue a ejecutarse.
+  if (document.documentElement.style.visibility !== 'hidden') {
+    const currentUser = FX.menuSessionUser(); if (currentUser && FX.menuUserHasAccess('cargar_facturas')) initialize(currentUser);
+  }
+  $('purchaseForm').addEventListener('submit', event => event.preventDefault());
+  decoratePurchaseCombos(document);
+  document.addEventListener('keydown', event => {
+    const taxInput = event.target.closest('#taxRows input[data-field]');
+    if (event.key === 'Enter' && !event.isComposing && taxInput && ['impuesto', 'importe'].includes(taxInput.dataset.field)) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const rowKey = taxInput.closest('[data-row]').dataset.row;
+      if (taxInput.dataset.field === 'impuesto') {
+        if (!taxInput.value.trim() && rows.find(row => row.key === rowKey)?.empty) {
+          hidePurchaseCombo();
+          $('discount').focus(); $('discount').select();
+          return;
+        }
+        if (purchaseCombo.input !== taxInput) showPurchaseCombo(taxInput);
+        if (!pickPurchaseCombo()) return;
+        const amount = $('taxRows').querySelector(`[data-row="${rowKey}"] [data-field="importe"]`);
+        amount?.focus(); amount?.select();
+      } else {
+        taxInput.dispatchEvent(new Event('change', { bubbles: true }));
+        const currentRow = $('taxRows').querySelector(`[data-row="${rowKey}"]`);
+        const nextTax = currentRow?.nextElementSibling?.querySelector('[data-field="impuesto"]');
+        nextTax?.focus(); nextTax?.select();
+      }
+      return;
+    }
+    const input = event.target.closest('[data-purchase-combo]');
+    if (!input) return;
+    const open = purchaseCombo.input === input;
+    if (event.key === 'Tab') { if (open) hidePurchaseCombo(); return; }
+    if (event.key === 'F4' || (event.altKey && event.key === 'ArrowDown')) {
+      event.preventDefault(); event.stopImmediatePropagation(); if (open) hidePurchaseCombo(); else showPurchaseCombo(input); return;
+    }
+    if (event.key === 'Escape') { if (open) hidePurchaseCombo(); return; }
+    if (!['ArrowDown', 'ArrowUp', 'Enter', 'Home', 'End'].includes(event.key) || !open) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (!open) { showPurchaseCombo(input); return; }
+    if (event.key === 'Enter') { if (purchaseCombo.active < 0 && input.dataset.sqlList === 'provider') openProviderDialog(); else if (input.value.trim()) pickPurchaseCombo(); else hidePurchaseCombo(); }
+    else if (event.key === 'Escape') hidePurchaseCombo();
+    else movePurchaseCombo(event.key === 'Home' ? -purchaseCombo.items.length : event.key === 'End' ? purchaseCombo.items.length : event.key === 'ArrowDown' ? 1 : -1);
+  }, true);
+  $('purchaseForm').addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.isComposing || !['quickTotal', 'discount'].includes(event.target.id)) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const target = event.target.id === 'discount' ? $('confirm')
+      : currencyNumber($('quickTotal').value) > 0 ? $('discount')
+      : $('taxRows').querySelector('[data-field="impuesto"]');
+    target?.focus();
+    if (target?.tagName === 'INPUT') target.select();
+  }, true);
+  FX.bindLinearNavigation({ root: $('purchaseForm'), selector: '[data-flow]', selectOnAnyFocus: true, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
+  FX.bindLiveCurrency({ root: $('purchaseForm') });
+  FX.bindLiveLocaleNumber({ root: $('purchaseForm'), selector: '#discount', decimals: 2, suffix: '%', fixedOnInput: true, selectOnFocus: false });
+  FX.bindLiveLocaleNumber({ root: $('taxTable'), selector: '[data-field="neto"]', decimals: 0, selectOnFocus: false, preserveEmpty: true });
+  FX.bindLiveLocaleNumber({ root: $('taxTable'), selector: '[data-field="porcentaje"]', decimals: 2, selectOnFocus: false, preserveEmpty: true });
+  FX.bindEditableTable({ root: $('taxTable'), readRow: key => rows.find(row => row.key === key),
+    restoreRow: (key, previous) => { const index = rows.findIndex(row => row.key === key); if (index < 0) return; rows[index] = previous; renderRows(); saveDraft(); },
+    deleteRows: keys => { rows = rows.filter(row => !keys.includes(row.key)); renderRows(); saveDraft(); },
+    newRowTarget: () => $('taxRows').lastElementChild?.querySelector('[data-field="impuesto"]') });
+  const taxSelection = FX.bindTableSelectPaste({ root: $('taxTable'), cellSelector: 'tbody td:has(input[data-field])',
+    columnSelector: 'th[data-col]', selectOnCellMouseDown: false, clearOnDelete: false,
+    getPosition: cell => ({ row: [...$('taxRows').children].indexOf(cell.closest('tr')), col: cell.cellIndex - 1 }),
+    findCell: (row, col) => $('taxRows').children[row]?.children[col + 1],
+    getCellValue: cell => cell.querySelector('input').value,
+    setCellValue: (cell, value) => { const input = cell.querySelector('input'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); },
+    afterPaste: () => { updateTotals(); saveDraft(); } });
+  ['impuesto', 'neto', 'importe', 'porcentaje'].forEach((key, index) => { const header = $('taxTable').tHead.rows[0].cells[index + 1]; header.dataset.col = index; header.dataset.sortKey = key; });
+  FX.bindTableSort({ root: $('taxTable'), sort: (key, direction) => {
+    if (!key) return;
+    rows.sort((a, b) => (key === 'impuesto' ? (options.impuestos.find(item => item.id === a.impuesto)?.nombre || '').localeCompare(options.impuestos.find(item => item.id === b.impuesto)?.nombre || '', 'es', { numeric: true }) : a[key] - b[key]) * (direction === 'desc' ? -1 : 1));
+    taxSelection.clearSelection(); renderRows(); saveDraft();
+  } });
+  ['number', 'remito', 'reportSearch', 'searchNumber'].forEach(id => FX.bindComprobanteNumber($(id)));
+  FX.bindFieldRestore({ root: $('purchaseForm') });
+  FX.bindDropdownOnlyWhenTyping({ root: document, inputSelector: '[data-purchase-combo]', buttonSelector: '.purchase-combo-drop',
+    show: showPurchaseCombo, hide: hidePurchaseCombo, isOpen: input => purchaseCombo.input === input,
+    moveActive: (_, step) => movePurchaseCombo(step), pickActive: () => pickPurchaseCombo(), openOnTyping: true, buttonOnlyWhenFocused: false });
+  document.addEventListener('mousedown', event => {
+    const input = event.target.closest('select[data-purchase-combo]');
+    if (input && !input.matches(':disabled')) { event.preventDefault(); input.focus(); showPurchaseCombo(input); }
+  });
+  $('purchaseComboMenu').addEventListener('pointerdown', event => {
+    if (event.target.closest('[data-create-provider]')) { event.preventDefault(); openProviderDialog(); return; }
+    const item = event.target.closest('[data-purchase-option]');
+    if (item) { event.preventDefault(); pickPurchaseCombo(Number(item.dataset.purchaseOption)); }
+  });
+  document.addEventListener('pointerdown', event => {
+    if (purchaseCombo.input && !event.target.closest('.purchase-combo') && !$('purchaseComboMenu').contains(event.target)) hidePurchaseCombo();
+  });
+  document.addEventListener('focusin', event => { if (purchaseCombo.input && event.target !== purchaseCombo.input && !$('purchaseComboMenu').contains(event.target)) hidePurchaseCombo(); });
+  document.addEventListener('scroll', event => { if (purchaseCombo.input && !$('purchaseComboMenu').contains(event.target)) hidePurchaseCombo(); }, true);
+  window.addEventListener('resize', hidePurchaseCombo);
+  window.addEventListener('message', async event => {
+    if (event.origin !== location.origin || event.source !== $('providerFrame').contentWindow) return;
+    if (event.data?.type === 'corralon-proveedor-cerrar') { $('providerDialog').close(); return; }
+    if (event.data?.type !== 'corralon-proveedor-guardado') return;
+    try {
+      const fresh = await api({ consulta: 'opciones', puntoVenta: $('point').value });
+      options.proveedores = fresh.proveedores;
+      fillCombo('provider', options.proveedores, 'Buscar por nombre o código');
+      setComboValue('provider', event.data.id); applyProvider(); saveDraft();
+      $('providerDialog').close(); $('provider').focus(); message('Proveedor guardado en SQL y seleccionado en la factura.');
+    } catch (error) { message(`El proveedor se guardó, pero no se pudo actualizar la lista: ${error.message}`, true); }
+  });
+  $('providerDialog').addEventListener('close', () => $('provider').focus());
+  document.querySelectorAll('[data-date]').forEach(input => input.addEventListener('blur', () => {
+    const parsed = FX.parseFechaFlexible(input.value); if (parsed) input.value = parsed.text;
+  }));
+  $('purchaseForm').addEventListener('change', event => {
+    const id = event.target.dataset.sqlList;
+    if (!id || id === 'tax') return;
+    const item = comboItem(id, event.target.value);
+    if (item) event.target.value = comboLabel(id, item);
+  }, true);
+  $('purchaseForm').addEventListener('input', event => {
+    if (event.target.id === 'provider') {
+      const start = event.target.selectionStart, end = event.target.selectionEnd;
+      event.target.value = event.target.value.toLocaleUpperCase('es-AR');
+      event.target.setSelectionRange(start, end);
+    }
+    const field = event.target.dataset.field;
+    if (field) {
+      const row = rows.find(item => item.key === event.target.closest('[data-row]').dataset.row);
+      if (field === 'impuesto') applyTaxChoice(event.target);
+      else {
+        if (row.empty) {
+          row.neto = Math.max(0, ...rows.filter(item => item !== row && !item.empty && item.impuesto === 0).map(item => item.neto)) + 1;
+          event.target.closest('[data-row]').querySelector('[data-field="neto"]').value = row.neto;
+        }
+        row[field] = field === 'importe' ? currencyNumber(event.target.value) : numeric(event.target.value) / (field === 'porcentaje' ? 100 : 1);
+      }
+      if (row.empty) { delete row.empty; renderRows(true); }
+      updateTotals();
+    }
+    if (event.target.id === 'discount') updateTotals();
+    saveDraft();
+  });
+  $('taxRows').addEventListener('change', event => {
+    const row = rows.find(item => item.key === event.target.closest('[data-row]')?.dataset.row);
+    if (!row) return;
+    if (event.target.dataset.field === 'impuesto') {
+      applyTaxChoice(event.target, true);
+    } else if (event.target.matches('[data-generate]') && event.target.value) {
+      const tax = options.impuestos.find(item => item.id === Number(event.target.value));
+      rows.push({ key: rowId(), impuesto: tax.id, neto: row.neto, importe: Math.round(row.importe * Number(tax.porcentaje || 0) * 100) / 100, porcentaje: Number(tax.porcentaje || 0), descripcion: tax.nombre });
+      renderRows();
+    }
+    updateTotals(); saveDraft();
+  });
+  $('taxRows').addEventListener('focusout', event => {
+    if (event.target.dataset.field === 'importe' && event.target.value.trim()) event.target.value = money(currencyNumber(event.target.value));
+  });
+  $('taxRows').addEventListener('click', event => {
+    if (!event.target.closest('[data-remove]')) return;
+    const key = event.target.closest('[data-row]').dataset.row; rows = rows.filter(row => row.key !== key); renderRows(); saveDraft();
+  });
+  $('purchaseForm').addEventListener('change', event => {
+    if (event.target.id === 'date') {
+      const parsed = FX.parseFechaFlexible($('date').value);
+      if (parsed) { const key = parsedDateKey(parsed); $('period').value = `${key.slice(5, 7)}/${key.slice(0, 4)}`; const date = new Date(`${key}T12:00:00`); date.setDate(date.getDate() + 30); $('due').value = `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`; }
+    }
+    saveDraft();
+  });
+  $('type').addEventListener('change', onTypeChange); $('provider').addEventListener('change', applyProvider);
+  $('provider').addEventListener('contextmenu', event => {
+    event.preventDefault(); hidePurchaseCombo();
+    const menu = $('providerWebMenu'); menu.hidden = false;
+    $('openProviderWeb').disabled = !FX.menuUserHasAccess('proveedores');
+    menu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - menu.offsetWidth))}px`;
+    menu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - menu.offsetHeight))}px`;
+  });
+  $('openProviderWeb').addEventListener('click', () => {
+    $('providerWebMenu').hidden = true;
+    if (!FX.menuUserHasAccess('proveedores')) return;
+    const provider = selectedProvider();
+    const name = provider?.nombre || $('provider').value.trim();
+    if (!name) { message('Escribí o seleccioná un proveedor.', true); return; }
+    const query = new URLSearchParams({proveedorNombre:name,dialogo:'1'});
+    if(provider?.id)query.set('idProveedor',provider.id);
+    $('providerWebFrame').src = `proveedores.html?${query}`;
+    $('providerWebDialog').showModal();
+  });
+  document.addEventListener('pointerdown', event => { if (!$('providerWebMenu').contains(event.target)) $('providerWebMenu').hidden = true; });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') $('providerWebMenu').hidden = true; });
+  $('point').addEventListener('change', () => { refreshAccounts(); refreshStock(); saveDraft(); });
+  $('inStock').addEventListener('change', () => { if (!$('inStock').checked) $('movement').value = ''; refreshStock(); });
+  $('account').addEventListener('change', () => { $('concept').value = comboItem('account')?.nombre || ''; saveDraft(); });
+  $('addRow').addEventListener('click', addRow);
+  function loadQuickTotal(showErrors = false) {
+    if (!options || draft.pending) return;
+    const total = currencyNumber($('quickTotal').value); if (total <= 0) { if (showErrors) message('Ingresá el total de la factura.', true); return; }
+    const type = selectedType(); if (!type) { if (showErrors) message('Seleccioná un tipo de comprobante de la lista SQL.', true); return; }
+    const tax = options.impuestos.find(item => item.id === Number($('calculatorRate').value)) || options.impuestos.find(item => item.codigoIva && Math.abs(Number(item.porcentaje) - .21) < .00001);
+    const rate = type.libroIva ? Number(tax?.porcentaje || 0) : 0;
+    const net = Math.round(total / (1 + rate) * 100) / 100;
+    rows = [{ key: rowId(), impuesto: 0, neto: 1, importe: net, porcentaje: rate, descripcion: 'COMPRA NETA' }];
+    if (rate) rows.push({ key: rowId(), impuesto: tax.id, neto: 1, importe: Math.round((total - net) * 100) / 100, porcentaje: rate, descripcion: tax.nombre });
+    renderRows(); saveDraft();
+  }
+  $('quickTotal').addEventListener('input', () => loadQuickTotal());
+  $('quickTotal').addEventListener('change', () => loadQuickTotal(true));
+  $('splitTotal').addEventListener('click', () => loadQuickTotal(true));
+  function updateCalculator(source) {
+    const rate = Number(options.impuestos.find(item => item.id === Number($('calculatorRate').value))?.porcentaje || 0);
+    if (source === 'calculatorIva') $('calculatorNet').value = money(rate ? currencyNumber($('calculatorIva').value) / rate : 0);
+    else $('calculatorIva').value = money(currencyNumber($('calculatorNet').value) * rate);
+    saveDraft();
+  }
+  ['calculatorIva', 'calculatorNet', 'calculatorRate'].forEach(id => $(id).addEventListener('change', () => { updateCalculator(id); if (id === 'calculatorRate' && currencyNumber($('quickTotal').value) > 0) loadQuickTotal(); }));
+  $('confirm').addEventListener('click', confirmPurchase);
+  ['cancel', 'new'].forEach(id => $(id).addEventListener('click', async () => { if (!draft.pending && await htmlNotice('¿Descartar este borrador e iniciar una factura nueva?')) { resetDraft(); message('Carga nueva.'); } }));
+  $('providerButton').addEventListener('click', showProvider);
+  $('deleteInvoice').addEventListener('click', previewInvoiceRemoval);
+  $('confirmDeleteInvoice').addEventListener('click', removeInvoice);
+  $('deleteInvoiceDialog').addEventListener('cancel', event => { if (removingInvoice) event.preventDefault(); });
+  $('consult').addEventListener('click', () => openReport('buscar'));
+  $('search').addEventListener('click', () => openReport('buscar', $('searchNumber').value));
+  $('searchNumber').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); openReport('buscar', event.target.value); } });
+  $('accountButton').addEventListener('click', () => openReport('cuenta-corriente'));
+  $('ivaButton').addEventListener('click', () => openReport('iva'));
+  $('reportFilters').addEventListener('submit', event => { event.preventDefault(); loadReport(); });
+  $('loadMore').addEventListener('click', () => loadReport(true));
+  $('reportBody').addEventListener('click', async event => {
+    const providerButton = event.target.closest('[data-provider]');
+    if (providerButton) { $('reportProvider').value = providerButton.dataset.provider; await loadReport(); return; }
+    const button = event.target.closest('[data-invoice]'); if (!button) return;
+    try { showInvoice(await api({ consulta: 'detalle', id: button.dataset.invoice })); } catch (error) { $('reportStatus').textContent = error.message; }
+  });
+  document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
+  $('detailDialog').addEventListener('close', () => detailReturnFocus?.focus());
+  $('printDetail').addEventListener('click', () => printBody($('detailTitle').textContent, $('detailBody').innerHTML));
+  $('printReport').addEventListener('click', () => printBody($('reportTitle').textContent, `<p>${esc($('reportFrom').value)} al ${esc($('reportTo').value)} · ${esc($('reportProvider').selectedOptions[0]?.textContent)}</p>${$('reportBody').innerHTML}<p>${esc($('reportTotals').textContent)}</p>`));
+  document.addEventListener('keydown', event => {
+    if (!options || document.querySelector('dialog[open]')) return;
+    if (event.key === 'F1') { event.preventDefault(); openReport('buscar', $('lastNumber').value); }
+    if (event.key === 'F3') { event.preventDefault(); openReport('cuenta-corriente'); }
+  });
+})();
+  </script>
+</body>
+</html>

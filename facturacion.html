@@ -193,7 +193,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.22"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.23"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 const SQL_CONNECTION_MESSAGE='No hay conexión con la base de datos.';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let db=null,catalog=[],catalogOrdered=[],customerCatalog=[],customerCatalogReady=false,articles=[],payments=[],draftId='',lastSaved=null,activeSuggestionInput=null,suggestionItems=[],suggestionIndex=-1,suggestionPage=null,suggestionPaging=false,paymentReconcileTimer=null,saveTimer=null,sqlConfig=null,issuedReceipt=null,previewDraft=null,recoveryPending=false,recoveryCanRetry=false,issueInProgress=false,printInProgress=false,printerSelectionPending=false,browserPrintPending=false,recoveryPollBusy=false,stockRefreshBusy=false,stockRefreshAgain=false,localDraftStoreReady=false,paymentRules=CorralonMediosPago.normalize(null),paymentRulesReady=false,paymentRulesLoading=null,paymentRulesListener=null;const SQL_PREPARACION=`${location.origin}/api/facturacion`,LOCAL_PRINTER_API='http://127.0.0.1:8082',BROWSER_PRINTER='browser:',TICKET_PRINTER_KEY='facturacion_ticket_printer_v1',WORKSTATION_KEY='facturacion_puesto_v1',PAYMENT_RULES_CACHE_KEY='corralon_facturacion_medios_pago_v1';
@@ -1016,7 +1016,7 @@ function pickSuggestion(i){
   refreshSelectedStock().catch(console.warn);
   setTimeout(()=>$('#articleBody [data-row="'+row+'"][data-a="cantidad"]')?.focus(),0);
 }
-function formData(){const t=totals(),u=uid();return{id:draftId||newDraftId(),updatedAt:Date.now(),createdAt:lastSaved?.createdAt||Date.now(),usuarioId:String(u.id||''),usuario:String(u.nombre||u.usuario||''),sucursal:$('#branch').value,idPuntoVenta:Number($('#pos').value)||0,idCliente:Number($('#customerName').dataset.idCliente??'1'),puntoVenta:$('#pos').selectedOptions[0]?.textContent||'',idComprobante:Number($('#voucherType').value)||0,tipoComprobante:$('#voucherType').selectedOptions[0]?.textContent||'',fecha:$('#date').value,cae:$('#cae').value,facturaAsociada:[5,6,7,8,29].includes(Number($('#voucherType').value))?$('#invoiceReference').value.trim():'',vendedor:$('#seller').value,listaPrecios:$('#priceList').value,cliente:{tipoDocumento:$('#docType').value,numeroDocumento:$('#docNumber').value,nombre:customerUpper($('#customerName').value),condicionIva:$('#customerTax').value,telefono:$('#customerPhone').value,direccion:$('#customerAddress').value,email:$('#customerEmail').value},articulos:structuredClone(articles.filter(r=>String(r.idart||'').trim()&&n(r.cantidad)>0)),valores:payments.filter(r=>n(r.importe)>0).map(r=>({...r,idTipoPago:Number(r.idTipoPago)||Number((sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(r.tipo))?.id)||0})),nota:$('#note').value,totales:t,estado:issuedReceipt?'emitido':'borrador',emision:issuedReceipt,recoveryPending}}
+function formData(){const t=totals(),u=uid();return{id:draftId||newDraftId(),updatedAt:Date.now(),createdAt:lastSaved?.createdAt||Date.now(),usuarioId:String(u.id||''),idOperador:Number(u.idOperador)||null,usuario:String(u.nombre||u.usuario||''),sucursal:$('#branch').value,idPuntoVenta:Number($('#pos').value)||0,idCliente:Number($('#customerName').dataset.idCliente??'1'),puntoVenta:$('#pos').selectedOptions[0]?.textContent||'',idComprobante:Number($('#voucherType').value)||0,tipoComprobante:$('#voucherType').selectedOptions[0]?.textContent||'',fecha:$('#date').value,cae:$('#cae').value,facturaAsociada:[5,6,7,8,29].includes(Number($('#voucherType').value))?$('#invoiceReference').value.trim():'',vendedor:$('#seller').value,listaPrecios:$('#priceList').value,cliente:{tipoDocumento:$('#docType').value,numeroDocumento:$('#docNumber').value,nombre:customerUpper($('#customerName').value),condicionIva:$('#customerTax').value,telefono:$('#customerPhone').value,direccion:$('#customerAddress').value,email:$('#customerEmail').value},articulos:structuredClone(articles.filter(r=>String(r.idart||'').trim()&&n(r.cantidad)>0)),valores:payments.filter(r=>n(r.importe)>0).map(r=>({...r,idTipoPago:Number(r.idTipoPago)||Number((sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(r.tipo))?.id)||0})),nota:$('#note').value,totales:t,estado:issuedReceipt?'emitido':'borrador',emision:issuedReceipt,recoveryPending}}
 let associatedReceiptId=0;
 const formDataWithoutAssociation=formData;
 formData=function(){const data=formDataWithoutAssociation(),associate=[5,6,7,8,29].includes(Number(data.idComprobante));return{...data,boletaOrigen:$('#invoiceReference').value.trim(),idBoletaOrigen:associatedReceiptId,idFacturaAsociada:associate?associatedReceiptId:0}};
@@ -2360,14 +2360,7 @@ function invoiceDateWarning(value){
 function reviewInvoiceDateOnOpen(){
   const field=$('#date');
   if(field.value===today())return;
-  if(!canBackdateInvoice()){
-    alert(invoiceDatePermissionMessage()+' El borrador se abrirá con la fecha de hoy.');
-    field.value=today();setMsg('Se actualizó la fecha del borrador a hoy.','ok');saveDraft(true).catch(console.warn);return;
-  }
-  if(invoiceDateAllowed(field.value)&&confirm(invoiceDateWarning(field.value)))return;
-  if(!invoiceDateAllowed(field.value))alert('Fecha inválida: está fuera del período permitido. El borrador se abrirá con la fecha de hoy.');
   field.value=today();
-  setMsg('Se actualizó la fecha del borrador a hoy.','ok');
   saveDraft(true).catch(console.warn);
 }
 function confirmInvoiceDate(){
@@ -2381,7 +2374,10 @@ function confirmInvoiceDate(){
 }
 $('#date').value=today();
 updateInvoiceDateLimits();
-window.addEventListener('pageshow',updateInvoiceDateLimits);
+window.addEventListener('pageshow',()=>{
+  updateInvoiceDateLimits();
+  if(draftId&&!issuedReceipt&&!recoveryPending&&!issueInProgress)reviewInvoiceDateOnOpen();
+});
 window.addEventListener('menu-user-validated',updateInvoiceDateLimits);
 window.addEventListener('storage',updateInvoiceDateLimits);
 $('#seller').value='';

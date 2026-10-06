@@ -17,7 +17,85 @@
   const get=selector=>overlay.querySelector(selector),status=get('[data-status]');
   const detail=document.createElement('div');detail.className='invoice-history-overlay';detail.hidden=true;detail.style.zIndex='96';detail.setAttribute('role','dialog');detail.setAttribute('aria-modal','true');detail.setAttribute('aria-label','Detalle de boleta');
   detail.innerHTML=`<section class="invoice-history-card"><header class="invoice-history-head"><h2 data-title>Boleta</h2><button data-detail-prev type="button" aria-label="Boleta anterior">‹</button><span data-detail-position></span><button data-detail-next type="button" aria-label="Boleta siguiente">›</button><button data-detail-close type="button">Cerrar</button></header><div class="invoice-history-scroll invoice-history-detail" data-detail-body></div><footer class="invoice-history-footer"><span data-action-status role="status"></span><div><button data-reprint type="button" disabled>Reimprimir</button> <button data-recall class="primary" type="button" disabled>Llamar a facturar</button></div></footer></section>`;document.body.appendChild(detail);
-  let rows=[],page=0,hasMore=false,listController=null,detailController=null,sequence=0,detailSequence=0,detailIndex=-1,searchTimer=null,actionBusy=false;
+  let rows=[],page=0,hasMore=false,listController=null,detailController=null,sequence=0,detailSequence=0,detailIndex=-1,searchTimer=null,actionBusy=false,detailData=null;
+  const warrantyMenu=document.createElement('div');warrantyMenu.hidden=true;
+  warrantyMenu.style.cssText='position:fixed;z-index:98;padding:4px;background:var(--corralon-white,#fff);border:1px solid var(--corralon-line-strong,#bbb);border-radius:7px;box-shadow:0 5px 18px #0003';
+  warrantyMenu.innerHTML='<button type="button" style="padding:9px 14px;border:0;background:var(--corralon-white,#fff);color:var(--corralon-text,#222);font:700 14px Barlow,Arial;cursor:pointer">Generar garantía</button>';
+  document.body.appendChild(warrantyMenu);
+  let warrantyArticleIndex=-1,warrantyBridge=null;
+  function loadWarrantyBridge(){
+    if(warrantyBridge)return warrantyBridge;
+    const frame=document.createElement('iframe');frame.hidden=true;frame.title='Generador de garantías';
+    warrantyBridge=new Promise((resolve,reject)=>{
+      let observer;
+      const timer=setTimeout(()=>{observer?.disconnect();reject(new Error('No se pudo cargar Garantías. Revisá la conexión y los permisos de usuario.'));},20000);
+      const ready=()=>{
+        try{
+          const generator=frame.contentWindow.CorralonGarantiaDesdeFacturacion;
+          if(typeof generator!=='function'||frame.contentDocument.documentElement.style.visibility==='hidden')return;
+          clearTimeout(timer);observer?.disconnect();resolve(generator);
+        }catch(error){clearTimeout(timer);reject(error);}
+      };
+      frame.onload=()=>{
+        try{
+          observer=new MutationObserver(ready);
+          observer.observe(frame.contentDocument.documentElement,{attributes:true,attributeFilter:['style']});
+          frame.contentWindow.addEventListener('menu-user-validated',ready);ready();
+        }
+        catch(error){clearTimeout(timer);reject(error);}
+      };
+      frame.onerror=()=>{clearTimeout(timer);reject(new Error('No se pudo cargar el generador de garantías.'));};
+      frame.src='garant%C3%ADas.html?desdeFacturacion=1';document.body.appendChild(frame);
+    }).catch(error=>{frame.remove();warrantyBridge=null;throw error;});
+    return warrantyBridge;
+  }
+  detail.addEventListener('contextmenu',event=>{
+    const line=event.target.closest('[data-warranty-article]');
+    if(!line||!detailData||actionBusy)return;
+    event.preventDefault();warrantyArticleIndex=Number(line.dataset.warrantyArticle);
+    const allowed=window.CorralonFunciones?.menuUserHasAccess('garantias');
+    const confirmed=Number(detailData.comprobante.confirmado)&&!Number(detailData.comprobante.anulada);
+    const action=warrantyMenu.querySelector('button');action.disabled=!allowed||!confirmed;
+    action.title=!allowed?'Tu usuario no tiene permiso para Garantías':!confirmed?'La boleta debe estar confirmada y sin anular':'';
+    warrantyMenu.hidden=false;
+    warrantyMenu.style.left=Math.max(8,Math.min(event.clientX,innerWidth-warrantyMenu.offsetWidth-8))+'px';
+    warrantyMenu.style.top=Math.max(8,Math.min(event.clientY,innerHeight-warrantyMenu.offsetHeight-8))+'px';
+    action.focus();
+  });
+  warrantyMenu.querySelector('button').addEventListener('click',async()=>{
+    const article=detailData?.articulos?.[warrantyArticleIndex],header=detailData?.comprobante,invoice=rows[detailIndex];
+    warrantyMenu.hidden=true;
+    if(!article||!header||!invoice||actionBusy||!window.CorralonFunciones?.menuUserHasAccess('garantias'))return;
+    const payload={codigo:String(article.idart||''),descripcion:article.descripcion,cliente:String(header.cliente||invoice.cliente||'').toUpperCase(),boleta:invoice.numero,fechaIso:String(header.fechaComprobante||'').slice(0,10)};
+    const pdfWindow=window.open('about:blank','_blank');
+    if(pdfWindow){pdfWindow.document.title='Garantía';pdfWindow.document.body.textContent='Generando garantía…';pdfWindow.document.body.style.cssText='font:18px Arial;padding:24px';pdfWindow.opener=null;}
+    let pdfShown=false,generationTimer;
+    const showPdf=blob=>{
+      if(pdfShown)return;
+      const pdfUrl=URL.createObjectURL(blob);
+      if(pdfWindow&&!pdfWindow.closed)pdfWindow.location.replace(pdfUrl);
+      else{const link=document.createElement('a');link.href=pdfUrl;link.download=`Garantia-${payload.boleta}-${payload.codigo}.pdf`;document.body.appendChild(link);link.click();link.remove();}
+      pdfShown=true;setTimeout(()=>URL.revokeObjectURL(pdfUrl),300000);
+    };
+    actionBusy=true;const notice=detail.querySelector('[data-action-status]');notice.textContent='Generando garantía y notificación…';
+    detail.querySelectorAll('[data-reprint],[data-recall],[data-detail-prev],[data-detail-next]').forEach(control=>control.disabled=true);
+    try{
+      const generator=await loadWarrantyBridge();
+      const result=await Promise.race([
+        generator(payload,showPdf),
+        new Promise((_,reject)=>{generationTimer=setTimeout(()=>reject(new Error(pdfShown?'El PDF está generado, pero el historial y la notificación siguen pendientes de respuesta.':'La generación del PDF no respondió. Reintentá desde Facturación.')),35000);})
+      ]);
+      if(!result?.blob)throw new Error('Garantías no devolvió el PDF.');
+      showPdf(result.blob);
+      notice.textContent=result.historial.existente?'PDF generado. La garantía ya estaba registrada; se conservó su notificación.':'Garantía generada y registrada en Notificaciones.';
+    }catch(error){if(!pdfShown&&pdfWindow&&!pdfWindow.closed){pdfWindow.document.body.textContent=error.message;}notice.textContent=error.message;}
+    finally{
+      clearTimeout(generationTimer);
+      actionBusy=false;
+      if(!detail.hidden){const unavailable=!Number(header.confirmado)||Boolean(Number(header.anulada));detail.querySelector('[data-reprint]').disabled=unavailable;detail.querySelector('[data-recall]').disabled=unavailable;detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;}
+    }
+  });
+  document.addEventListener('pointerdown',event=>{if(!warrantyMenu.contains(event.target))warrantyMenu.hidden=true;});
   function dateText(date){return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`}
   function dateInput(field){
     const parsed=window.CorralonFunciones?.parseFechaFlexible(field.value);if(!parsed){field.setCustomValidity('Ingresá una fecha válida.');field.reportValidity();return null}
@@ -41,11 +119,11 @@
     }catch(error){if(request===sequence&&!overlay.hidden){message(controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a consultar.':error.message,true)}}
   }
   async function openDetail(index){
-    const row=rows[index];if(!row||actionBusy)return;detailIndex=index;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;detail.querySelector('[data-action-status]').textContent='';detail.hidden=false;detailController?.abort();const controller=detailController=new AbortController(),request=++detailSequence;
+    const row=rows[index];if(!row||actionBusy)return;warrantyMenu.hidden=true;detailData=null;detailIndex=index;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;detail.querySelector('[data-action-status]').textContent='';detail.hidden=false;detailController?.abort();const controller=detailController=new AbortController(),request=++detailSequence;
     detail.querySelector('[data-title]').textContent='Boleta '+row.numero;detail.querySelector('[data-detail-position]').textContent=`${index+1} de ${rows.length}`;detail.querySelector('[data-detail-prev]').disabled=index===0;detail.querySelector('[data-detail-next]').disabled=index===rows.length-1;
     const body=detail.querySelector('[data-detail-body]');body.textContent='Consultando detalle…';
-    try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;detail.querySelector('[data-reprint]').disabled=unavailable;detail.querySelector('[data-recall]').disabled=unavailable;
-      body.innerHTML=`<div class="invoice-history-detail-summary"><div>Cliente<strong>${escape(String(h.cliente||'').toUpperCase())}</strong></div><div>Sucursal<strong>${escape(row.sucursal||'Sin sucursal')}</strong></div><div>Fecha<strong>${escape(String(h.fechaComprobante||'').split('-').reverse().join('/'))}</strong></div><div>Tipo<strong>${escape(row.tipo)}</strong></div><div>Estado<strong>${Number(h.anulada)?'Anulada':Number(h.confirmado)?'Confirmada':'Sin confirmar'}</strong></div>${h.cae?`<div>CAE<strong>${escape(h.cae)}</strong></div>`:''}</div><h3>Artículos</h3><table class="invoice-history-table"><thead><tr><th>IDArt</th><th>Descripción</th><th class="money">Cantidad</th><th class="money">Precio unit.</th><th class="money">Importe</th></tr></thead><tbody>${result.articulos.map(a=>`<tr><td>${escape(a.idart)}</td><td>${escape(a.descripcion)}</td><td class="money">${escape(number(a.cantidad))}</td><td class="money">${escape(money(a.precio))}</td><td class="money">${escape(money(a.importe))}</td></tr>`).join('')}</tbody></table><h3>Valores recibidos</h3><table class="invoice-history-table"><thead><tr><th>Medio</th><th>Descripción</th><th class="money">Importe</th><th class="money">Dto./rec.</th><th class="money">Total</th></tr></thead><tbody>${result.valores.map(v=>`<tr><td>${escape(v.tipo||v.idTipoPago)}</td><td>${escape(v.descripcion)}</td><td class="money">${escape(money(v.importe))}</td><td class="money">${escape(money(v.impRec))}</td><td class="money">${escape(money(v.total))}</td></tr>`).join('')}</tbody></table><div class="invoice-history-detail-total">Total: ${escape(money(h.total))}</div>`;
+    try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;detailData=result;const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;detail.querySelector('[data-reprint]').disabled=unavailable;detail.querySelector('[data-recall]').disabled=unavailable;
+      body.innerHTML=`<div class="invoice-history-detail-summary"><div>Cliente<strong>${escape(String(h.cliente||'').toUpperCase())}</strong></div><div>Sucursal<strong>${escape(row.sucursal||'Sin sucursal')}</strong></div><div>Fecha<strong>${escape(String(h.fechaComprobante||'').split('-').reverse().join('/'))}</strong></div><div>Tipo<strong>${escape(row.tipo)}</strong></div><div>Estado<strong>${Number(h.anulada)?'Anulada':Number(h.confirmado)?'Confirmada':'Sin confirmar'}</strong></div>${h.cae?`<div>CAE<strong>${escape(h.cae)}</strong></div>`:''}</div><h3>Artículos</h3><table class="invoice-history-table"><thead><tr><th>IDArt</th><th>Descripción</th><th class="money">Cantidad</th><th class="money">Precio unit.</th><th class="money">Importe</th></tr></thead><tbody>${result.articulos.map((a,articleIndex)=>`<tr data-warranty-article="${articleIndex}"><td>${escape(a.idart)}</td><td>${escape(a.descripcion)}</td><td class="money">${escape(number(a.cantidad))}</td><td class="money">${escape(money(a.precio))}</td><td class="money">${escape(money(a.importe))}</td></tr>`).join('')}</tbody></table><h3>Valores recibidos</h3><table class="invoice-history-table"><thead><tr><th>Medio</th><th>Descripción</th><th class="money">Importe</th><th class="money">Dto./rec.</th><th class="money">Total</th></tr></thead><tbody>${result.valores.map(v=>`<tr><td>${escape(v.tipo||v.idTipoPago)}</td><td>${escape(v.descripcion)}</td><td class="money">${escape(money(v.importe))}</td><td class="money">${escape(money(v.impRec))}</td><td class="money">${escape(money(v.total))}</td></tr>`).join('')}</tbody></table><div class="invoice-history-detail-total">Total: ${escape(money(h.total))}</div>`;
     }catch(error){if(request===detailSequence&&!detail.hidden)body.textContent=controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a abrir la boleta.':error.message}
   }
   async function detailAction(action){
@@ -58,7 +136,7 @@
   }
   detail.querySelector('[data-reprint]').addEventListener('click',()=>detailAction('reprint'));
   detail.querySelector('[data-recall]').addEventListener('click',()=>detailAction('recall'));
-  function closeDetail(){detail.hidden=true;detailSequence++;detailController?.abort();detail.querySelector('[data-detail-body]').textContent='';get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus()}
+  function closeDetail(){warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;detailController?.abort();detail.querySelector('[data-detail-body]').textContent='';get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus()}
   function close(){clearTimeout(searchTimer);closeDetail();overlay.hidden=true;sequence++;listController?.abort();rows=[];get('[data-rows]').textContent='';button.focus()}
   button.addEventListener('click',async()=>{
     if(!overlay.hidden)return;overlay.hidden=false;get('[data-search]').value='';page=0;const current=dateText(new Date());get('[data-from]').value=current;get('[data-to]').value=current;get('[data-branch]').innerHTML='<option value="0">Todas las sucursales</option>';
@@ -78,5 +156,5 @@
     if(event.key==='Enter'){event.preventDefault();if(index<controls.length-1){if(event.target.classList.contains('date')&&!dateInput(event.target))return;controls[index+1].focus();controls[index+1].select?.()}else load()}
   });
   detail.querySelector('[data-detail-close]').addEventListener('click',closeDetail);detail.querySelector('[data-detail-prev]').addEventListener('click',()=>openDetail(detailIndex-1));detail.querySelector('[data-detail-next]').addEventListener('click',()=>openDetail(detailIndex+1));
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!detail.hidden){event.preventDefault();closeDetail()}else if(event.key==='Escape'&&!overlay.hidden){event.preventDefault();close()}});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!warrantyMenu.hidden){event.preventDefault();warrantyMenu.hidden=true;}else if(event.key==='Escape'&&!detail.hidden){event.preventDefault();closeDetail()}else if(event.key==='Escape'&&!overlay.hidden){event.preventDefault();close()}});
 })();

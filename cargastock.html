@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.32"></script>
+<script src="corralon-system.js?v=1.0.33"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -289,6 +289,31 @@
   </style>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-20">
   <link rel="stylesheet" href="cargastock-sql.css">
+  <style>
+    body[data-page-theme="cargastock"] #stockMovementPopup{gap:8px;background:var(--corralon-bg,#f4f4f2)}
+    #stockMovementPopup .stock-movement-header{display:flex;flex-direction:column;gap:7px;overflow-x:auto}
+    #stockMovementPopup .stock-movement-header .movement-header-row{display:flex;align-items:center;gap:16px;min-width:1080px;white-space:nowrap}
+    #stockMovementPopup .stock-movement-header label{display:flex;gap:5px;align-items:center;font-weight:bold;flex:none}
+    #stockMovementPopup .stock-movement-header input{width:var(--field-width,65px);height:25px;min-height:0;padding:2px 6px;box-sizing:border-box;border-radius:0}
+    #stockMovementPopup .stock-movement-header input[type="checkbox"]{width:14px;height:14px}
+    #stockMovementPopup .movement-provider-id{width:65px!important}
+    #stockMovementPopup .movement-header-row button{height:28px;min-height:0;border-radius:0;padding:2px 12px}
+    #stockMovementPopup .stock-popup-table{flex:0 1 auto;height:clamp(220px,48vh,560px);background:#fff}
+    #stockMovementPopup .stock-movement-totals{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;font-weight:bold}
+    #stockMovementPopup .stock-movement-totals output{display:inline-block;min-width:105px;padding:3px 8px;background:#fff;border:1px solid #aaa;text-align:right}
+    #stockMovementPopup .stock-movement-bottom{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:12px}
+    #stockMovementPopup .stock-movement-bottom strong{margin-left:auto;font-size:22px}
+    #stockMovementPopup .stock-movement-bottom strong output{background:#ffef00;padding:4px 14px;border:1px solid #999}
+    #stockMovementPopup .stock-movement-actions{display:flex;justify-content:center;gap:12px;padding:10px;border:1px solid #ccc}
+    #stockMovementPopup .stock-movement-actions button{min-width:110px}
+    #stockMovementPopup [data-movement-row]{cursor:pointer}#stockMovementPopup [data-movement-row].selected>td{background:var(--corralon-selection,#b8dcf0)!important}
+  </style>
+  <style>
+    body[data-page-theme="cargastock"] #stockHeaderOptions{background:var(--corralon-white);border-color:var(--corralon-line-strong);border-radius:6px;box-shadow:var(--corralon-shadow)}
+    body[data-page-theme="cargastock"] #stockHeaderOptions button[data-stock-header-option]{background:var(--corralon-white)!important;color:var(--corralon-text)!important;font-family:inherit;padding:7px 10px}
+    body[data-page-theme="cargastock"] #stockHeaderOptions button[data-stock-header-option]:hover,
+    body[data-page-theme="cargastock"] #stockHeaderOptions button[data-stock-header-option][aria-selected="true"]{background:var(--corralon-red)!important;color:var(--corralon-white)!important}
+  </style>
 </head>
 <body data-page-theme="cargastock">
 <div class="app">
@@ -300,6 +325,7 @@
       <button id="viewProviderBtn" type="button">Proveedor</button>
       <button id="priceComparatorBtn" type="button">Comparador <span class="price-comparator-count" id="priceComparatorCount">0</span></button>
       <button id="applyPricesBtn" type="button" disabled>Aplicar precios</button>
+      <button id="openPurchaseInvoiceBtn" type="button">Cargar factura</button>
 
       <button data-nav-url="menu.html" type="button">Menu</button>
     </div>
@@ -316,7 +342,11 @@
   </section>
   <section class="stock-provider">
     <label>Proveedor<div class="combo-field" id="providerCombo"><input id="providerInput" type="text" autocomplete="off" placeholder="Buscar proveedor…"><div class="combo-list" id="providerList"></div></div></label>
-    <label class="stock-filter"><input id="stockFilterProvider" type="checkbox" data-stock-header checked> Filtrar por proveedor</label>
+    <label>Filtro de artículos<select id="stockArticleFilter" data-stock-header>
+      <option value="sql" selected>Filtrar artículos SQL</option>
+      <option value="listas">Filtrar por proveedor en listas</option>
+      <option value="proveedor-sql">Filtrar por proveedor en SQL</option>
+    </select></label>
     <label>Factura de compra<div class="stock-purchase-fields"><input id="stockIngresoFactura" maxlength="20" autocomplete="off" data-stock-header placeholder="0000-00000000"><button type="button" id="stockPurchaseToggle" aria-label="Ver facturas pendientes">▼</button><div id="stockPurchaseList" hidden></div><select id="stockCompra" hidden data-stock-header title="Asociar factura de compra de SQL"><option value="">Sin asociar</option></select></div></label>
     <label>Nº remito<input id="stockRemito" maxlength="20" autocomplete="off" data-stock-header placeholder="0000-00000000"></label>
   </section>
@@ -616,6 +646,7 @@ let mouseEditTarget = null;
 let activeToolbarField = null;
 let providerMouseEdit = false;
 let providerArticles = [];
+let stockProviderListArticles = [];
 let providerArticlesOrdered = [];
 let providerArticlesLoadSeq = 0;
 let providerArticleSearch = new WeakMap();
@@ -647,6 +678,46 @@ let newArticlesImporting = false;
 let newArticlesServerError = '';
 
 const FX = window.CorralonFunciones || {};
+document.getElementById('openPurchaseInvoiceBtn').addEventListener('click', () => {
+  if (!FX.menuUserHasAccess('cargar_facturas')) { htmlNotice('Tu usuario no tiene permiso para Cargar facturas.', false); return; }
+  window.open('cargar-facturas.html', '_blank');
+});
+function htmlNotice(text, confirmation = true) {
+  return new Promise(resolve => {
+    const previous = document.activeElement;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'html-notice';
+    dialog.setAttribute('aria-label', confirmation ? 'Confirmar acción' : 'Aviso');
+    dialog.style.cssText = 'width:min(460px,calc(100vw - 32px));max-height:90vh;padding:20px;border:1px solid #bbb;border-radius:10px;background:var(--corralon-white,#fff);color:var(--corralon-text,#222);box-shadow:0 12px 40px #0004';
+    const title = document.createElement('h2');
+    title.textContent = confirmation ? 'Confirmar acción' : 'Aviso';
+    title.style.cssText = 'margin:0 0 14px;font-size:20px';
+    const message = document.createElement('p');
+    message.textContent = text;
+    message.style.cssText = 'white-space:pre-wrap;margin:0 0 20px';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px';
+    const accept = document.createElement('button');
+    accept.type = 'button';
+    accept.textContent = confirmation ? 'Confirmar' : 'Aceptar';
+    accept.style.cssText = 'background:var(--corralon-red,#f50916);color:white;padding:9px 16px;border:0';
+    const finish = accepted => { dialog.close(); dialog.remove(); previous?.focus(); resolve(accepted); };
+    if (confirmation) {
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.textContent = 'Cancelar';
+      cancel.style.cssText = 'padding:9px 16px';
+      cancel.onclick = () => finish(false);
+      actions.append(cancel);
+    }
+    accept.onclick = () => finish(true);
+    actions.append(accept);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); finish(false); });
+    dialog.append(title, message, actions);
+    document.body.append(dialog);
+    dialog.showModal();
+    accept.focus();
+  });
+}
 
 const el = {
   status: document.getElementById('status'),
@@ -803,7 +874,8 @@ document.addEventListener('keydown', (event) => {
 let rowsSaveTimer = null;
 let rowsSavePromise = Promise.resolve();
 const STOCK_WORKSPACE_KEY = 'corralon_stock_two_drafts_v1';
-let stockActiveWorkspace = Number(localStorage.getItem(STOCK_WORKSPACE_KEY + '_active')) === 2 ? 2 : 1;
+let stockActiveWorkspace = Math.max(1, Number(localStorage.getItem(STOCK_WORKSPACE_KEY + '_active')) || 1);
+let stockWorkspaceCount = Math.max(2, stockActiveWorkspace, Number(localStorage.getItem(STOCK_WORKSPACE_KEY + '_count')) || 2);
 let stockWorkspaceReady = false;
 let stockWorkspaceSwitching = false;
 let stockWorkspaceRestored = null;
@@ -824,9 +896,9 @@ function stockWorkspaceIndicator() {
     indicator = document.createElement('span'); indicator.id = 'stockWorkspaceIndicator';
     stockField('stockNextBtn').before(indicator);
   }
-  indicator.textContent = `Carga ${stockActiveWorkspace} de 2`;
+  indicator.textContent = `Carga ${stockActiveWorkspace} de ${stockWorkspaceCount}`;
   stockField('stockPrevBtn').disabled = stockIngresoBusy || stockWorkspaceSwitching || stockActiveWorkspace === 1;
-  stockField('stockNextBtn').disabled = stockIngresoBusy || stockWorkspaceSwitching || stockActiveWorkspace === 2;
+  stockField('stockNextBtn').disabled = stockIngresoBusy || stockWorkspaceSwitching || stockActiveWorkspace === stockWorkspaceCount;
 }
 function flushRowsSave() {
   clearTimeout(rowsSaveTimer);
@@ -1324,6 +1396,7 @@ function selectedProviderIdentityKeys() {
 }
 function isGreen(row) {
   if (!codeKey(row.codigo) || !stockSqlMeta) return false;
+  if (row.idartManual && stockSqlById.has(String(row.idart))) return true;
   const matches = stockMatchesForRow(row);
   return row.idart ? matches.some(article=>codeKey(article.idart)===codeKey(row.idart)) : matches.length===1;
 }
@@ -1331,6 +1404,7 @@ function stockCostOptionsActive() {
   return Boolean(document.getElementById('stockCostOptions')?.open);
 }
 document.getElementById('stockCostOptions').addEventListener('toggle', () => {
+  stockRebuildArticleOptions();
   render();
 });
 function calcPrecioFinal(row) {
@@ -1457,30 +1531,45 @@ function hideArticleProviderToggle() {
   el.articleProviderToggle.classList.remove('visible');
   articleProviderButtonCell = null;
 }
-function loadProviderArticles() {
-  providerArticlesLoadSeq += 1;
+async function loadProviderArticles() {
+  const seq = ++providerArticlesLoadSeq;
+  stockProviderListArticles = [];
+  stockRebuildArticleOptions();
+  const current = selectedProvider();
+  if (!current || !(stockField('stockArticleFilter').value === 'listas')) return;
+  const articles = await CorralonSystem.faltantes.loadSingleProviderCached(providerLabel(current), String(CorralonSystem.providerIdentity.externalId(current)));
+  if (seq !== providerArticlesLoadSeq) return;
+  stockProviderListArticles = articles.map(item => ({...item,source:'proveedores',codProv:item.codProv || item.codigo || ''}));
   stockRebuildArticleOptions();
 }
 function filteredProviderArticles(cell) {
   const rowIndex = Number(cell?.dataset?.row);
   const row = rowsData[rowIndex] || {};
-  if(cell?.dataset?.field==='idart'){
-    articleProviderPage=null;
-    return stockMatchesForRow(row);
-  }
+  const bySqlId = cell?.dataset?.field === 'idart';
+  const idArticles = bySqlId && ((stockField('stockArticleFilter').value === 'proveedor-sql') || (stockField('stockArticleFilter').value === 'listas')) && provider
+    ? stockSqlArticles.filter(item => Number(item.proveedor) === stockProviderId()) : stockSqlArticles;
+  const ordered = bySqlId ? CorralonSystem.articleOptionPager.prepare(idArticles, CorralonSystem.articleOptionPager.defaultKey, CorralonSystem.articleOptionPager.defaultDescription) : providerArticlesOrdered;
   const terms = norm(cell?.textContent || '').split(' ').filter(Boolean);
   const descriptionMatches = (item) => {
-    const hay = providerArticleSearch.get(item)?.text || '';
+    const hay = providerArticleSearch.get(item)?.text || norm(`${item.codProv || ''} ${item.idart || ''} ${item.descripcion || ''}`);
     return terms.every((term) => hay.includes(term));
   };
-  const typedCode = codeKey(row.codigo);
+  const typedCode = cell?.dataset?.field === 'descripcion' ? codeKey(row.codigo) : codeKey(cell?.textContent);
   const exactRank = (item) => {
-    const indexed = providerArticleSearch.get(item);
-    return indexed?.code === typedCode ? 0 : indexed?.id === typedCode ? 1 : 10;
+    const indexed = providerArticleSearch.get(item) || {code:codeKey(item.codProv),id:codeKey(item.idart)};
+    return (cell?.dataset?.field === 'idart' ? indexed?.id === typedCode : indexed?.code === typedCode) ? 0 : 10;
   };
-  articleProviderPage = CorralonSystem.articleOptionPager.create(providerArticlesOrdered, {
+  const matches = item => cell?.dataset?.field === 'descripcion' && terms.length
+    ? descriptionMatches(item) : (typedCode && exactRank(item) < 10) || descriptionMatches(item);
+  let matchingArticles = terms.length || typedCode ? ordered.filter(matches) : ordered;
+  let linkedArticleMatch = false;
+  if (!matchingArticles.length && cell?.dataset?.field === 'descripcion' && row.idart && typedCode) {
+    matchingArticles = ordered.filter(item => String(item.idart) === String(row.idart) && codeKey(item.codProv) === typedCode);
+    linkedArticleMatch = matchingArticles.length > 0;
+  }
+  articleProviderPage = CorralonSystem.articleOptionPager.create(matchingArticles, {
     preordered: true,
-    isMatch: item => (typedCode && exactRank(item) < 10) || descriptionMatches(item),
+    isMatch: item => linkedArticleMatch || matches(item),
     rank: exactRank,
     hasSearch: Boolean(typedCode || terms.length),
     beforeCount: 20,
@@ -1493,6 +1582,19 @@ function renderArticleProviderList() {
   el.articleProviderMenu.innerHTML = articleProviderOptions.length
     ? articleProviderOptions.map((item, index) => `<div class="article-provider-option${item.source !== 'proveedores' ? ' sql-option' : ''}${index === articleProviderActive ? ' active' : ''}" data-article-option="${index}"><b>${escapeHtml(item.codProv || '-')}</b>${item.source !== 'proveedores' ? `<span title="IDArt">${escapeHtml(item.idart || '')}</span>` : ''}<span>${escapeHtml(item.descripcion || '')}</span>${item.source !== 'proveedores' ? `<span class="sql-cost" title="Costo sin IVA SQL">${money(item.precioCosto ?? 0)}</span>` : ''}</div>`).join('')
     : '<div class="article-provider-option"><span>Sin coincidencias</span></div>';
+  if (stockCanOfferArticleImport(articleProviderCell)) {
+    el.articleProviderMenu.insertAdjacentHTML('afterbegin', `<div class="article-provider-option${articleProviderActive === -1 ? ' active' : ''}" data-article-create style="color:var(--corralon-red,#f50916);font-weight:bold;cursor:pointer"><span>Cargar artículo: ${escapeHtml(articleProviderCell.textContent.trim())}</span></div>`);
+  }
+}
+function stockCanOfferArticleImport(cell) {
+  return false;
+}
+function stockImportArticleFromCell(cell) {
+  if (!stockCanOfferArticleImport(cell)) return;
+  const index = Number(cell.dataset.row);
+  rowsData[index].descripcion = String(cell.textContent || '').trim();
+  commitCellEditSnapshot(cell); saveRows(); closeArticleProviderList();
+  openNewArticlesModal(index).catch(error => stockIngresoMessage(error.message, 'error'));
 }
 function openArticleProviderList(cell) {
   if (!cell) return;
@@ -1500,7 +1602,7 @@ function openArticleProviderList(cell) {
   articleProviderInputTimer = null;
   articleProviderCell = cell;
   articleProviderOptions = filteredProviderArticles(cell);
-  articleProviderActive = articleProviderPage?.focusIndex || 0;
+  articleProviderActive = stockCanOfferArticleImport(cell) ? -1 : articleProviderPage?.focusIndex || 0;
   renderArticleProviderList();
   const rect = cell.getBoundingClientRect();
   const viewportMargin = 8;
@@ -1521,7 +1623,7 @@ function openArticleProviderList(cell) {
     ? `${Math.max(viewportMargin, rect.top - gap - renderedHeight)}px`
     : `${rect.bottom + gap}px`;
   requestAnimationFrame(() => {
-    const active = el.articleProviderMenu.querySelector(`[data-article-option="${articleProviderActive}"]`);
+    const active = articleProviderActive === -1 ? el.articleProviderMenu.querySelector('[data-article-create]') : el.articleProviderMenu.querySelector(`[data-article-option="${articleProviderActive}"]`);
     if (active) el.articleProviderMenu.scrollTop = Math.max(0, active.offsetTop);
   });
 }
@@ -1549,6 +1651,7 @@ function extendArticleProviderList(direction) {
   articleProviderPaging = false;
 }
 function pickArticleProviderOption(index = articleProviderActive) {
+  if (index === -1 && stockCanOfferArticleImport(articleProviderCell)) { stockImportArticleFromCell(articleProviderCell); return true; }
   const item = articleProviderOptions[index];
   const cell = articleProviderCell;
   if (!item || !cell) return false;
@@ -1556,7 +1659,8 @@ function pickArticleProviderOption(index = articleProviderActive) {
   const row = rowsData[rowIndex];
   if (!row) return false;
   row.idart = item.source === 'proveedores' ? '' : String(item.idart || ''); row.stock = item.stock ?? null;
-  row.codigo = String(item.codProv || '').trim();
+  row.idartManual = Boolean(row.idart);
+  if (cell.dataset.field !== 'descripcion' || !String(row.codigo || '').trim()) row.codigo = String(item.codProv || '').trim();
   row.descripcion = String(item.descripcion || '').trim();
   if (!moneyNumber(row.precio)) {
     row.precio = precioUnitarioDesdeFinal(row, moneyNumber(item.precioFinal || item.precioCosto || 0));
@@ -1580,13 +1684,15 @@ function applyExactProviderCode(cell) {
   const typedCode = codeKey(cell.textContent || row?.codigo);
   if (!row || !typedCode) return false;
   const matches = stockMatchesForRow({ codigo: typedCode });
-  const item = stockField('stockFilterProvider').checked
+  row.idartManual = false;
+  const item = (stockField('stockArticleFilter').value === 'listas')
     ? providerArticles.find((article) => codeKey(article.codProv) === typedCode)
     : (matches.length === 1 ? matches[0] : null);
   if (!item) {
     row.codigo = String(cell.textContent || row.codigo || '').trim();
     row.idart = ''; row.stock = null;
-    render(); saveRows();
+    cell.closest('.row')?.querySelector('[data-field="idart"]')?.replaceChildren();
+    updateCalculatedCells(rowIndex); saveRows();
     return false;
   }
 
@@ -1620,7 +1726,7 @@ function setProvider(nextProvider, options = {}) {
   rowsData.forEach((row) => row.descuento = desc);
   saveRows();
   render();
-  if (!options.skipProviderArticles) loadProviderArticles(provider);
+  loadProviderArticles().catch(error => stockIngresoMessage(error.message, 'error'));
   stockRebuildArticleOptions(); stockRefreshRelations();
 }
 function applyProvider() {
@@ -1871,13 +1977,13 @@ async function validateNewArticlesAccessMax() {
     return false;
   }
 }
-async function openNewArticlesModal() {
+async function openNewArticlesModal(rowIndex = null) {
   const currentProvider = selectedProvider();
   if (!currentProvider?.id_proveedor) {
     show('Primero elegí un proveedor');
     return;
   }
-  const candidates = selectedRedRowsForNewArticles();
+  const candidates = Number.isInteger(rowIndex) && rowsData[rowIndex] ? [rowsData[rowIndex]] : selectedRedRowsForNewArticles();
   if (!candidates.length && !hasLocalArticleImportDraft()) {
     show(selectedRows.size
       ? 'Las filas seleccionadas ya existen o no se pueden importar'
@@ -2212,7 +2318,7 @@ async function deleteProviderModal() {
   const id = modalEditingProviderId;
   const current = providers.find((item) => String(item.id_proveedor) === String(id));
   if (id === null || !current) return;
-  if (!confirm(`¿Eliminar el proveedor ${providerLabel(current)}?`)) return;
+  if (!(await htmlNotice(`¿Eliminar el proveedor ${providerLabel(current)}?`))) return;
   const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/${CorralonSystem.TABLES.providers}?id_proveedor=eq.${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: CorralonSystem.headers({ Prefer: 'return=minimal' })
@@ -2430,7 +2536,8 @@ function handleRuleNavigation(event) {
   const isTable = target.matches('[data-field][data-row][data-col]');
   const providerListOpen = target === el.providerInput && el.providerList.classList.contains('open');
   if (providerListOpen && (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter')) return;
-  const articleListOpen = target.dataset.field === 'descripcion' && el.articleProviderMenu.classList.contains('open');
+  if (['descripcion','codigo','idart'].includes(target.dataset.field) && articleProviderInputTimer && ['ArrowDown','ArrowUp','Enter'].includes(key)) openArticleProviderList(target);
+  const articleListOpen = ['descripcion','codigo','idart'].includes(target.dataset.field) && articleProviderCell === target && el.articleProviderMenu.classList.contains('open');
   if (articleListOpen && (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter')) return;
   if (isTable && target.dataset.field === 'codigo' && (key === 'Enter' || key === 'Tab') && applyExactProviderCode(target)) {
     event.preventDefault();
@@ -2446,7 +2553,8 @@ function handleRuleNavigation(event) {
     return;
   }
   if (key === 'Tab') {
-    moved = moveNavigation(target, event.shiftKey ? -1 : 1);
+    closeArticleProviderList();
+    moved = isTable ? moveTableNavigation(target, 0, event.shiftKey ? -1 : 1) : moveNavigation(target, event.shiftKey ? -1 : 1);
   } else if (key === 'Enter') {
     moved = isTable
       ? (target.dataset.field === 'precio' && !event.shiftKey
@@ -2471,6 +2579,7 @@ function handleRuleNavigation(event) {
 function normalizeRow(row = {}, index = 0) {
   return {
     idart: String(row.idart || ''), stock: row.stock ?? null, conteo: row.conteo ?? null,
+    idartManual: Boolean(row.idartManual),
     id: row.id || `${Date.now()}_${index}_${Math.random().toString(16).slice(2)}`,
     codigo: String(row.codigo ?? '').trim(),
     descripcion: String(row.descripcion ?? '').trim(),
@@ -2498,9 +2607,11 @@ function parsePasted(text) {
   const headerField = (value) => {
     const key = norm(value).replace(/[^A-Z0-9]/g, '');
     if (['CODIGO', 'COD', 'CODPROV', 'CODIGOPROVEEDOR'].includes(key)) return 'codigo';
+    if (key === 'IDART') return 'idart';
     if (['DESCRIPCION', 'DESCRIP', 'ARTICULO', 'PRODUCTO'].includes(key)) return 'descripcion';
     if (['CANTIDAD', 'CANT', 'UNIDADES'].includes(key)) return 'cantidad';
     if (['PRECIO', 'PRECIOUNIT', 'PRECIOUNITARIO', 'PRECIOUNI'].includes(key)) return 'precio';
+    if (key === 'PRECIOFINAL') return 'precioFinal';
     if (['DESCUENTO', 'DESC', 'DESCPORC', 'PORCDESC', 'DESCUENTOADICIONAL'].includes(key)) return 'descuentoAdicional';
     return '';
   };
@@ -2520,7 +2631,10 @@ function parsePasted(text) {
         ? (headerIndex < 0 && cols.length >= 5 ? parsePercent(cols[4]) : 0)
         : parsePercent(cols[columnMap.descuentoAdicional]);
       if (!codigo && !descripcion && !cantidad && !precio) return null;
-      return normalizeRow({ codigo, descripcion, cantidad, precio, descuento: providerDiscountValue(), descuentoAdicional }, index);
+      const row = normalizeRow({ codigo, descripcion, cantidad, precio, descuento: providerDiscountValue(), descuentoAdicional }, index);
+      if (columnMap.idart != null) { row.idart = String(cols[columnMap.idart] || '').trim(); row.idartManual = Boolean(row.idart); }
+      if (columnMap.precioFinal != null) row.precio = precioUnitarioDesdeFinal(row, moneyNumber(cols[columnMap.precioFinal]));
+      return row;
     })
     .filter(Boolean);
 }
@@ -2582,6 +2696,12 @@ let calculatedTotalsFrame = null;
 function updateCalculatedCells(rowIndex = null) {
   const refreshRow = (row, rowEl) => {
     if (!rowEl) return;
+    stockArticleForRow(row);
+    const blank = isBlankStockRow(row), valid = isGreen(row);
+    rowEl.classList.toggle('ok', stockCostOptionsActive() && !blank && valid);
+    rowEl.classList.toggle('bad', stockCostOptionsActive() && !blank && !valid);
+    const idCell = rowEl.querySelector('[data-field="idart"]');
+    if (idCell && document.activeElement !== idCell) idCell.textContent = row.idart || '';
     const finalCell = rowEl.querySelector('[data-col="5"]');
     if (finalCell && document.activeElement !== finalCell) finalCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinal(row));
     if(finalCell){
@@ -3428,12 +3548,12 @@ function deleteSelectedRows() {
   show('Filas borradas');
   return true;
 }
-function clearStockTable() {
+async function clearStockTable() {
   if (!rowsData.length) {
     show('La tabla ya está vacía');
     return;
   }
-  if (!confirm('¿Limpiar toda la tabla?')) return;
+  if (!(await htmlNotice('¿Limpiar toda la tabla?'))) return;
   pushUndoSnapshot();
   rowsData = [];
   clearTableSelections();
@@ -4169,7 +4289,7 @@ async function stockSwitchWorkspace(number) {
     await window.CorralonCacheDB.set(STOCK_WORKSPACE_KEY + '_' + stockActiveWorkspace, stockWorkspaceSnapshot());
     const next = await window.CorralonCacheDB.get(STOCK_WORKSPACE_KEY + '_' + number) || {
       rows: [], provider: null, providerText: '', costsOpen: false, pending: null,
-      header: { stockIngresoSucursal: stockField('stockIngresoSucursal').value, stockTipoMovimiento: '23', stockFecha: stockToday(), stockFilterProvider: false }
+      header: { stockIngresoSucursal: stockField('stockIngresoSucursal').value, stockTipoMovimiento: '23', stockFecha: stockToday(), stockArticleFilter: 'sql' }
     };
     stockActiveWorkspace = number;
     localStorage.setItem(STOCK_WORKSPACE_KEY + '_active', String(number));
@@ -4179,7 +4299,7 @@ async function stockSwitchWorkspace(number) {
     rowsData = (next.rows || []).map(normalizeRow);
     document.querySelectorAll('[data-stock-header]').forEach(field => {
       if (field.type === 'checkbox') field.checked = Boolean(next.header[field.id]);
-      else field.value = next.header[field.id] ?? '';
+      else field.value = next.header[field.id] ?? (field.id === 'stockArticleFilter' ? 'sql' : '');
     });
     setProvider(next.provider, { skipUndo: true, skipProviderArticles: true });
     el.providerInput.value = next.providerText || '';
@@ -4202,7 +4322,7 @@ async function stockSwitchWorkspace(number) {
   }
 }
 async function stockSqlGet(query = '', params = {}) {
-  const search = new URLSearchParams({consulta:query, sucursal:stockField('stockIngresoSucursal').value, proveedor:String(stockProviderId()), ...params});
+  const search = new URLSearchParams({consulta:query, sucursal:stockField('stockIngresoSucursal').value, proveedor:String(stockProviderId()), ...params, usuarioId: FX.menuSessionUser()?.id || ''});
   const response = await fetch(`/api/facturacion/stock-ingreso?${search}`, {cache:'no-store'});
   const data = await response.json();
   if (!response.ok || !data.ok) throw new Error(data.error || 'No se pudo consultar SQL.');
@@ -4210,7 +4330,7 @@ async function stockSqlGet(query = '', params = {}) {
 }
 function stockMatchesForRow(row) {
   if(!row?.codigo)return [];
-  const providerId = stockArticleProviderFilterId();
+  const providerId = Number(stockField('stockTipoMovimiento').value) === 23 ? stockProviderId() : stockArticleProviderFilterId();
   if(!providerId){
     const code=codeKey(row.codigo);
     return stockSqlArticles.filter(article=>codeKey(article.codProv)===code);
@@ -4457,12 +4577,12 @@ async function stockOpenBudgets() {
   if (!stockSqlArticles.length) await stockRefreshSql();
   await stockSyncNewBudgets();
 }
-function stockImportBudget(index) {
+async function stockImportBudget(index) {
   if (stockConfirmed || stockIngresoBusy) return;
   const budget = stockWebBudgets[index]; if (!budget) return;
   const lines = stockBudgetLines(budget);
   if (!lines.length || lines.some(line => !line.article || !Number.isFinite(line.cantidad) || line.cantidad <= 0)) { show('El presupuesto tiene artículos o cantidades sin resolver.'); return; }
-  if (rowsData.some(row => !isBlankStockRow(row)) && !window.confirm('¿Reemplazar las filas actuales por este presupuesto?')) return;
+  if (rowsData.some(row => !isBlankStockRow(row)) && !(await htmlNotice('¿Reemplazar las filas actuales por este presupuesto?'))) return;
   pushUndoSnapshot();
   rowsData = lines.map((line, lineIndex) => {
     const article = line.article;
@@ -4489,6 +4609,7 @@ function stockCompleteIdArt(cell, focusQuantity = true){
   const article=stockSqlById.get(id);
   if(!article){stockIngresoMessage(`No existe el artículo ${id} en SQL.`,'error');return false;}
   row.idart=String(article.idart);row.codigo=String(article.codProv||'').trim();
+  row.idartManual = true;
   cell.textContent=row.idart;
   row.descripcion=String(article.descripcion||'');row.stock=Number(article.stock||0);
   if(!moneyNumber(row.precio))row.precio=precioUnitarioDesdeFinal(row,Number(article.precioCosto)||0);
@@ -4500,8 +4621,7 @@ function stockCompleteIdArt(cell, focusQuantity = true){
 function stockArticleForRow(row) {
   if (!row) return null;
   let article = stockSqlById.get(String(row.idart || ''));
-  const providerId = stockArticleProviderFilterId();
-  if (!stockConfirmed && article && row.codigo && providerId && Number(article.proveedor) !== providerId) {
+  if (article && !stockConfirmed && !row.idartManual && stockCostOptionsActive() && Number(stockField('stockTipoMovimiento').value) === 23 && stockProviderId() && Number(article.proveedor) !== stockProviderId()) {
     row.idart = ''; row.stock = null; article = null;
   }
   if (article && !String(article.codProv || '').trim() && codeKey(row.codigo) === codeKey(article.idart)) row.codigo = '';
@@ -4514,15 +4634,15 @@ function stockArticleForRow(row) {
   return article;
 }
 function stockArticleProviderFilterId() {
-  return Number(stockField('stockTipoMovimiento').value) === 23 ? stockProviderId() : 0;
+  return Number(stockField('stockTipoMovimiento').value) === 23 && stockField('stockArticleFilter').value !== 'sql' ? stockProviderId() : 0;
 }
 function stockSqlArticlesForProvider() {
   const providerId = stockArticleProviderFilterId();
   return providerId ? stockSqlArticles.filter(article => Number(article.proveedor) === providerId) : stockSqlArticles;
 }
 function stockRebuildArticleOptions() {
-  const filterProvider = stockField('stockFilterProvider').checked && provider;
-  providerArticles = filterProvider ? stockSqlArticles.filter(article=>Number(article.proveedor)===stockProviderId()) : stockSqlArticles;
+  const filterProvider = (stockField('stockArticleFilter').value === 'listas') && provider;
+  providerArticles = filterProvider ? stockProviderListArticles : (stockField('stockArticleFilter').value === 'proveedor-sql') && provider ? stockSqlArticles.filter(article=>Number(article.proveedor)===stockProviderId()) : stockSqlArticles;
   articleProviderPage = null;
   articleProviderOptions = [];
   closeArticleProviderList();
@@ -4597,6 +4717,9 @@ function stockIngresoData() {
   return {sucursal:branch,puntoVenta:Number(point.id),proveedor:stockProviderId(),tipoMovimiento:Number(stockField('stockTipoMovimiento').value),sucursalDestino:Number(stockField('stockDestino').value),idFactura:Number(stockField('stockCompra').value),idRelacionado:Number(stockField('stockRelacionado').value),numeroFactura:stockField('stockIngresoFactura').value.trim(),numeroRemito:stockField('stockRemito').value.trim(),nota:stockField('stockIngresoNota').value.trim(),articulos};
 }
 async function stockIngresoCall(data, action) {
+  const actor = FX.menuSessionUser();
+  if (!actor?.id) throw new Error('Iniciá sesión desde el menú.');
+  data = { ...data, usuarioId: data.usuarioId || actor.id, idOperador: Number(actor.idOperador) || null };
   const response = await fetch('/api/facturacion/stock-ingreso',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,accion:action})});
   const result = await response.json();
   if (!response.ok || !result.ok) { const error=new Error(result.error || 'No se pudo confirmar el movimiento.'); error.definitive=response.status===409; throw error; }
@@ -4625,7 +4748,7 @@ async function confirmStockIngreso() {
     const preview=await stockIngresoCall(request,'previsualizar');
     const hasDocument = Number(data.idFactura)>0 || [data.numeroFactura,data.numeroRemito].some(value=>String(value||'').replace(/[^a-z0-9]/gi,'').replace(/^0+$/,'').length>0);
     const documentWarning = hasDocument ? '' : 'Este movimiento no tiene factura ni remito vinculado.\nPodés continuar igualmente.\n\n';
-    if (!preview.yaCargado && !window.confirm(`${documentWarning}¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${data.articulos.length} artículos · Total ${money(preview.total)}`)) return;
+    if (!preview.yaCargado && !(await htmlNotice(`${documentWarning}¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${data.articulos.length} artículos · Total ${money(preview.total)}`))) return;
     pending.status='uncertain'; localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));
     const result=preview.yaCargado ? preview : await stockIngresoCall(request,'confirmar');
     pending.status='confirmed';pending.numeroMovimiento=result.numeroMovimiento;pending.idRecibo=result.idRecibo;pending.resultado=result.articulos;localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));
@@ -4644,8 +4767,8 @@ async function confirmStockIngreso() {
   }
   finally { stockIngresoBusy=false; stockFreeze(stockConfirmed); }
   if(confirmedNumber!==null){
-    window.alert(`Movimiento confirmado\nNº ${confirmedNumber}${budgetResolutionWarning}`);
-    stockReset();
+    await htmlNotice(`Movimiento confirmado\nNº ${confirmedNumber}${budgetResolutionWarning}`, false);
+    await stockReset();
     stockIngresoMessage('Nueva carga lista.','ok');
     el.providerInput.focus();
   }
@@ -4665,7 +4788,7 @@ function stockMovementFields() {
     }
     if(!stockConfirmed){
       const transferProvider=providers.find(item=>norm(providerLabel(item))===norm('CORRALON PROGRESO'));
-      stockField('stockFilterProvider').checked=false;
+      stockField('stockArticleFilter').value='sql';
       if(transferProvider && String(provider?.id_proveedor)!==String(transferProvider.id_proveedor)){
         setProvider(transferProvider,{skipUndo:true,skipProviderArticles:true});
       }
@@ -4689,11 +4812,11 @@ async function stockRefreshRelations() {
     stockMovementFields();
   }catch(error){stockIngresoMessage(error.message,'error');}
 }
-function stockReset() {
-  if(stockIngresoBusy) return;
+async function stockReset() {
+  if(stockIngresoBusy) return false;
   const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
-  if(pending?.status==='uncertain'){stockIngresoMessage('Reintentá Confirmar para recuperar el ingreso pendiente antes de limpiar la pantalla.','error');return;}
-  if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !window.confirm('¿Descartar esta carga sin confirmar?')) return;
+  if(pending?.status==='uncertain'){stockIngresoMessage('Reintentá Confirmar para recuperar el ingreso pendiente antes de limpiar la pantalla.','error');return false;}
+  if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !(await htmlNotice('¿Descartar esta carga sin confirmar?'))) return false;
   pushUndoSnapshot(); rowsData=[]; stockConfirmed=false; localStorage.removeItem(STOCK_INGRESO_DRAFT_KEY);
   ['stockNumero','stockIngresoFactura','stockRemito','stockIngresoNota','stockCompra','stockRelacionado','stockDestino'].forEach(id=>stockField(id).value='');
   stockField('stockTipoMovimiento').value='23'; stockField('stockFecha').value=stockToday(); stockField('stockPrintBtn').hidden=true;
@@ -4701,7 +4824,80 @@ function stockReset() {
   setProvider(null,{skipUndo:true,skipProviderArticles:true});
   closeProviderList();closeArticleProviderList();
   stockMovementFields(); stockFreeze(false); render();saveRows();stockHeaderSave();stockRefreshSql(); stockRefreshRelations();
+  return true;
 }
+let stockInvoiceUser = String(FX.menuSessionUser()?.id || '');
+let stockInvoiceKey = `corralon_stock_factura_${stockInvoiceUser}`;
+const stockInvoiceTabId = sessionStorage.getItem('corralon_stock_tab_id') || crypto.randomUUID();
+sessionStorage.setItem('corralon_stock_tab_id', stockInvoiceTabId);
+let stockInvoiceReady = false, stockInvoiceApplying = false;
+window.name = 'corralon-carga-stock';
+window.addEventListener('menu-user-validated', event => {
+  stockInvoiceUser = String(event.detail.user.id);
+  stockInvoiceKey = `corralon_stock_factura_${stockInvoiceUser}`;
+  window.name = 'corralon-carga-stock';
+  stockInvoicePresence();
+  stockReceiveInvoice();
+});
+function stockInvoicePresence() {
+  if (stockInvoiceUser) localStorage.setItem(`${stockInvoiceKey}_tab`, JSON.stringify({id:stockInvoiceTabId,time:Date.now(),reusable:Boolean(window.opener)}));
+}
+stockInvoicePresence();
+setInterval(stockInvoicePresence, 4000);
+window.addEventListener('focus', stockInvoicePresence);
+window.addEventListener('pagehide', () => {
+  const tab = JSON.parse(localStorage.getItem(`${stockInvoiceKey}_tab`) || 'null');
+  if (tab?.id === stockInvoiceTabId) localStorage.removeItem(`${stockInvoiceKey}_tab`);
+});
+async function stockReceiveInvoice() {
+  if (!stockInvoiceReady || stockInvoiceApplying) return;
+  const transfer = JSON.parse(localStorage.getItem(stockInvoiceKey) || 'null');
+  if (!transfer || String(transfer.usuarioId) !== stockInvoiceUser || (transfer.target && transfer.target !== stockInvoiceTabId)) return;
+  stockInvoiceApplying = true;
+  window.focus();
+  try {
+    if (stockIngresoBusy || stockWorkspaceSwitching) throw new Error('Terminá la operación de stock en curso antes de recibir la factura.');
+    const pending = JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY) || 'null');
+    if (pending?.status === 'uncertain') throw new Error('Recuperá la confirmación pendiente antes de recibir la factura. La carga anterior está conservada.');
+    const occupied = !stockConfirmed && (rowsData.some(row => !isBlankStockRow(row)) || el.providerInput.value.trim() || stockField('stockIngresoFactura').value.trim() || pending);
+    if (occupied) {
+      let nextWorkspace = 0;
+      for (let number = 1; number <= stockWorkspaceCount; number++) {
+        if (number === stockActiveWorkspace) continue;
+        const saved = await window.CorralonCacheDB.get(STOCK_WORKSPACE_KEY + '_' + number);
+        if (!saved || (!saved.pending && !saved.providerText && !saved.header?.stockIngresoFactura && !(saved.rows || []).some(row => !isBlankStockRow(row)))) { nextWorkspace = number; break; }
+      }
+      if (!nextWorkspace) {
+        nextWorkspace = ++stockWorkspaceCount;
+        localStorage.setItem(STOCK_WORKSPACE_KEY + '_count', String(stockWorkspaceCount));
+      }
+      await stockSwitchWorkspace(nextWorkspace);
+      if (stockActiveWorkspace !== nextWorkspace) throw new Error('No se pudo guardar la carga anterior. La factura queda pendiente de recibir.');
+    }
+    if (!(await stockReset())) return;
+    stockField('stockIngresoSucursal').value = String(transfer.sucursal);
+    const nextProvider = providers.find(item => Number(CorralonSystem.providerIdentity.externalId(item)) === Number(transfer.proveedorId))
+      || {id_proveedor:String(transfer.proveedorId),proveedor:transfer.proveedor};
+    setProvider(nextProvider, {skipUndo:true,skipProviderArticles:true});
+    stockField('stockIngresoFactura').value = transfer.numero;
+    await stockRefreshSql({throwOnError:true});
+    await stockRefreshRelations();
+    stockField('stockCompra').value = String(transfer.id);
+    if (stockField('stockCompra').value !== String(transfer.id)) throw new Error('No se encontró la compra para vincularla. Volvé a seleccionar la factura antes de confirmar stock.');
+    stockHeaderSave(); saveRows();
+    if (JSON.parse(localStorage.getItem(stockInvoiceKey) || 'null')?.id === transfer.id) localStorage.removeItem(stockInvoiceKey);
+    stockIngresoMessage(`Carga ${stockActiveWorkspace} · ${transfer.proveedor} · Factura ${transfer.numero}. Las cargas anteriores siguen disponibles con las flechas.`, 'ok');
+    el.providerInput.focus();
+  } catch (error) { stockIngresoMessage(error.message, 'error'); }
+  finally { stockInvoiceApplying = false; }
+}
+window.addEventListener('storage', event => {
+  if (event.key === `${stockInvoiceKey}_ping` && event.newValue) {
+    stockInvoicePresence();
+    localStorage.setItem(`${stockInvoiceKey}_reply`, JSON.stringify({request:event.newValue,id:stockInvoiceTabId,reusable:Boolean(window.opener)}));
+  }
+  if (event.key === stockInvoiceKey) stockReceiveInvoice();
+});
 let stockConsultFilters=null;
 let stockConsultRequest=0,stockConsultMore=false,stockConsultTotal=0,stockConsultLoading=false;
 function stockRenderConsult() {
@@ -4786,9 +4982,51 @@ async function stockOpenMovementPopup(index){
     const lines=result.articulos||[],units=lines.reduce((sum,line)=>sum+Number(line.cantidad||0),0);
     const note=String(item.nota||'').replace(/\[WEBSTOCK:[^\]]*\]\[HASH:[^\]]*\]\s*/,'');
     popup.innerHTML=`<div class="stock-popup-head"><strong>${escapeHtml(item.nombre)} Nº ${escapeHtml(item.numero)}</strong>${stockPopupNavigation(index)}</div>
-      <div class="stock-popup-info"><span><b>Fecha:</b> ${escapeHtml(item.fecha)}</span><span><b>Proveedor:</b> ${escapeHtml(item.proveedorNombre||'—')}</span><span><b>Factura:</b> ${escapeHtml(item.factura||'—')}</span><span><b>Remito:</b> ${escapeHtml(item.remito||'—')}</span></div>
-      <div class="stock-popup-table"><table><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Descripción</th><th>Cantidad</th><th>Costo unitario</th><th>Importe</th><th>Stock actual</th></tr></thead><tbody>${lines.map(line=>`<tr><td>${escapeHtml(line.idart)}</td><td>${escapeHtml(line.codigo||'')}</td><td>${escapeHtml(line.descripcion)}</td><td class="num">${escapeHtml(Number(line.cantidad||0).toLocaleString('es-AR'))}</td><td class="num">${money(line.precioUnitario)}</td><td class="num">${money(line.importe)}</td><td class="num">${escapeHtml(Number(line.stock||0).toLocaleString('es-AR'))}</td></tr>`).join('')}</tbody></table></div>
-      <div class="stock-popup-footer"><span>${escapeHtml(note)}</span><b>${lines.length} artículos · ${escapeHtml(units.toLocaleString('es-AR'))} unidades</b><strong>Total: ${money(item.total)}</strong></div>`;
+      <div class="stock-movement-header">
+        <div class="movement-header-row">
+          ${[['P.V.',item.puntoVenta,35],['Tipo',Number(item.tipo)===23?'COMPR':item.tipo,75],['Nº',item.numero,70],['Fecha',item.fecha,100],['Vendedor',item.vendedor,35],['Oper.',item.operador,35],['idsuc.',item.sucursal,35]].map(([label,value,width])=>`<label>${escapeHtml(label)}:<input readonly style="--field-width:${width}px" value="${escapeHtml(value??'—')}"></label>`).join('')}
+          <label style="margin-left:100px">Anulado:<input type="checkbox" disabled ${item.anulado?'checked':''}></label>
+        </div>
+        <div class="movement-header-row">
+          <label>Proveedor:<input readonly style="--field-width:228px" value="${escapeHtml(item.proveedorNombre||'')}"></label>
+          <input readonly class="movement-provider-id" aria-label="IDProveedor" value="${escapeHtml(item.proveedor??'')}">
+          <button type="button" data-movement-provider>Ver Prov.</button>
+          <label>Nº Factura:<input readonly style="--field-width:165px" value="${escapeHtml(item.factura||'')}"></label>
+          <label>Nº Remito:<input readonly style="--field-width:165px" value="${escapeHtml(item.remito||'')}"></label>
+        </div>
+        <div class="movement-header-row">
+          <label>Nº Pedido:<input readonly style="--field-width:70px" value="${escapeHtml(item.relacionado||'')}"></label>
+          <label style="margin-left:22px">Suc. Destino:<input readonly style="--field-width:130px" value="${escapeHtml(item.destino||'')}"></label>
+        </div>
+      </div>
+      <div class="stock-popup-table"><table><thead><tr><th>IDArt</th><th>CodProv</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th><th>Stock actual</th></tr></thead><tbody>${lines.map((line,rowIndex)=>`<tr data-movement-row="${rowIndex}" class="${rowIndex===0?'selected':''}"><td>${escapeHtml(line.idart)}</td><td>${escapeHtml(line.codigo||'')}</td><td>${escapeHtml(line.descripcion)}</td><td class="num">${escapeHtml(Number(line.cantidad||0).toLocaleString('es-AR'))}</td><td class="num">${money(line.precioUnitario)}</td><td class="num">${money(line.importe)}</td><td class="num">${escapeHtml(Number(line.stock||0).toLocaleString('es-AR'))}</td></tr>`).join('')}</tbody></table></div>
+      <div class="stock-movement-totals"><span>${lines.length} artículos · ${escapeHtml(units.toLocaleString('es-AR'))} unidades</span><span>Total movimiento: <output>${money(item.total)}</output></span></div>
+      <div class="stock-movement-bottom"><span><b>IDArt:</b> <output data-selected-movement-article>${escapeHtml(lines[0]?.idart||'—')}</output></span><span><b>Nº Factura:</b> ${escapeHtml(item.factura||'—')}</span><strong>Total: <output>${money(item.total)}</output></strong></div>
+      <div class="stock-movement-actions"><button type="button" data-copy-movement>Copiar contenido</button><button type="button" data-print-movement>Imprimir</button><button type="button" data-cancel-movement style="color:var(--corralon-red,#ed0012)">Anular carga</button></div>
+      <p data-movement-status role="status" style="margin:0"></p>
+      <div class="stock-popup-footer"><span>${escapeHtml(note)}</span></div>`;
+    popup.querySelectorAll('[data-movement-row]').forEach(row=>row.addEventListener('click',()=>{popup.querySelectorAll('[data-movement-row]').forEach(other=>other.classList.toggle('selected',other===row));popup.querySelector('[data-selected-movement-article]').textContent=lines[Number(row.dataset.movementRow)].idart;}));
+    popup.querySelector('[data-copy-movement]').onclick=()=>{
+      const clean=value=>String(value??'').replace(/[\t\r\n]+/g,' ');
+      const text=[['IDArt','Código proveedor','Descripción','Cantidad','Precio final'],...lines.map(line=>[line.idart,line.codigo,line.descripcion,rawNumber(Number(line.cantidad||0)),rawNumber(Number(line.precioUnitario||0))])].map(row=>row.map(clean).join('\t')).join('\n');
+      copyTextForContextMenu(text);
+      popup.querySelector('[data-movement-status]').textContent='Contenido copiado. En una carga nueva, elegí la sucursal y el proveedor y pegá en la tabla con Ctrl+V.';
+    };
+    const cancelButton=popup.querySelector('[data-cancel-movement]');cancelButton.disabled=!FX.menuUserHasAccess('carga_stock');
+    cancelButton.onclick=async()=>{
+      if (!(await htmlNotice(`¿Anular ${item.nombre} Nº ${item.numero}?\nSe revertirá el stock y se borrarán los vínculos de factura y Nº Mov. Stock de la compra.${Number(item.tipo)===57?' La salida y la entrada de la transferencia se anularán juntas.':''}`))) return;
+      cancelButton.disabled=true;
+      const status=popup.querySelector('[data-movement-status]');status.textContent='Anulando movimiento…';
+      try {
+        const response=await fetch('/api/facturacion/stock-ingreso',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accion:'anular',recibo:item.id,sucursal:item.sucursal,usuarioId:FX.menuSessionUser()?.id||''})});
+        const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'No se pudo anular el movimiento.');
+        popup.hidden=true;stockMovementPopupRequest++;
+        await stockRefreshSql();await stockRefreshRelations();await stockLoadConsult(false);
+        await htmlNotice(data.yaAnulado?'El movimiento ya estaba anulado.':'Carga anulada. Stock revertido como en Access.',false);
+      } catch(error) {status.textContent=error.message+' Podés reintentar: un movimiento anulado no vuelve a descontar stock.';cancelButton.disabled=false;}
+    };
+    const providerButton=popup.querySelector('[data-movement-provider]');providerButton.disabled=!item.proveedor||!FX.menuUserHasAccess('proveedores_sql');providerButton.onclick=()=>{const dialog=document.createElement('dialog');dialog.style.cssText='width:min(1000px,96vw);max-width:96vw;padding:8px';dialog.innerHTML=`<button type="button" style="float:right">Cerrar ✕</button><iframe title="Proveedor SQL" style="width:100%;height:75vh;border:0" src="proveedores-sql.html?dialogo=1&id=${encodeURIComponent(item.proveedor)}"></iframe>`;dialog.querySelector('button').onclick=()=>dialog.close();dialog.addEventListener('close',()=>dialog.remove());document.body.append(dialog);dialog.showModal();};
+    popup.querySelector('[data-print-movement]').onclick=()=>{const page=window.open('','_blank');if(!page)return;page.document.write('<!doctype html><html><head><title>Movimiento '+escapeHtml(item.numero)+'</title><style>body{font:14px Arial}table{width:100%;border-collapse:collapse}td,th{padding:4px;border:1px solid #ccc;text-align:left}.stock-popup-nav,.stock-movement-actions{display:none}.stock-movement-header{display:flex;flex-wrap:wrap;gap:10px}input{border:0} .num{text-align:right}</style></head><body>'+popup.innerHTML+'</body></html>');page.document.close();page.focus();page.print();};
     bindClose();popup.querySelector('[data-close-stock-popup]').focus();
   }catch(error){if(request===stockMovementPopupRequest){popup.innerHTML='<div class="stock-popup-head"><strong>No se pudo cargar el movimiento</strong><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div><p>'+escapeHtml(error.message)+'</p>';bindClose();}}
 }
@@ -4802,7 +5040,7 @@ async function stockViewMovement(index) {
   if(stockIngresoBusy || !stockMovements[index]) return;
   const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
   if(pending?.status==='uncertain'){stockIngresoMessage('Primero recuperá la confirmación pendiente.','error');return;}
-  if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !window.confirm('¿Descartar el borrador y consultar este movimiento?'))return;
+  if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !(await htmlNotice('¿Descartar el borrador y consultar este movimiento?')))return;
   try {
     const item=stockMovements[index], result=await stockSqlGet('detalle',{recibo:item.id,sucursal:item.sucursal||Number(stockField('stockIngresoSucursal').value)}); stockField('stockIngresoSucursal').value=String(item.sucursal||Number(stockField('stockIngresoSucursal').value));stockMovementIndex=index;stockConfirmed=true;
     const selected=providers.find(p=>Number(CorralonSystem.providerIdentity.externalId(p))===Number(item.proveedor));
@@ -4851,8 +5089,8 @@ stockField('stockNewBtn').addEventListener('click',stockReset);stockField('stock
 stockField('stockConsultBtn').addEventListener('click',stockConsult);stockField('stockPrintBtn').addEventListener('click',stockPrint);
 stockField('stockPrevBtn').title = 'Ir a carga 1';
 stockField('stockNextBtn').title = 'Ir a carga 2';
-stockField('stockPrevBtn').addEventListener('click',()=>stockSwitchWorkspace(1));
-stockField('stockNextBtn').addEventListener('click',()=>stockSwitchWorkspace(2));
+stockField('stockPrevBtn').addEventListener('click',()=>stockSwitchWorkspace(stockActiveWorkspace - 1));
+stockField('stockNextBtn').addEventListener('click',()=>stockSwitchWorkspace(stockActiveWorkspace + 1));
 const stockHeaderOptions=document.createElement('div');
 stockHeaderOptions.id='stockHeaderOptions';stockHeaderOptions.hidden=true;
 stockHeaderOptions.setAttribute('role','listbox');document.body.appendChild(stockHeaderOptions);
@@ -4881,7 +5119,7 @@ stockHeaderOptions.addEventListener('click',event=>{
   select.value=option.value;stockCloseHeaderOptions();select.dispatchEvent(new Event('change',{bubbles:true}));
   if(select.id==='stockIngresoSucursal'||select.id==='stockTipoMovimiento')stockMoveHeaderFocus(select,1);else select.focus();
 });
-document.querySelectorAll('#stockIngresoSucursal,#stockTipoMovimiento,#stockDestino').forEach(select=>{
+document.querySelectorAll('#stockIngresoSucursal,#stockTipoMovimiento,#stockDestino,#stockArticleFilter').forEach(select=>{
   if(select.hidden)return;
   select.addEventListener('pointerdown',event=>{
     if(event.button!==0 || select.disabled || stockConfirmed || stockIngresoBusy)return;
@@ -4921,7 +5159,7 @@ document.addEventListener('keydown',event=>{
   closeProviderList();closeArticleProviderList();hideArticleProviderToggle();closePriceComparatorProviderList();
 },true);
 FX.bindComprobanteNumber(stockField('stockRemito'));
-document.querySelectorAll('[data-stock-header]').forEach(field=>field.addEventListener('change',()=>{stockHeaderSave();if(field.id==='stockIngresoSucursal'){stockRefreshSql();stockRefreshRelations();}if(field.id==='stockTipoMovimiento')stockMovementFields();if(field.id==='stockFilterProvider'){stockRebuildArticleOptions();render();}}));
+document.querySelectorAll('[data-stock-header]').forEach(field=>field.addEventListener('change',()=>{stockHeaderSave();if(field.id==='stockIngresoSucursal'){stockRefreshSql();stockRefreshRelations();}if(field.id==='stockTipoMovimiento')stockMovementFields();if(field.id==='stockArticleFilter'){stockHeaderSave();loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));stockRebuildArticleOptions();render();}}));
 async function stockOpenPurchaseList() {
   const list=stockField('stockPurchaseList');
   if(stockConfirmed || stockIngresoBusy || stockField('stockCompra').disabled)return;
@@ -5016,7 +5254,7 @@ stockHeaderFlowFields().forEach(field=>{
 });
 FX.bindLinearNavigation({root:document.querySelector('.app'),selector:'[data-stock-flow]',
   navigateLeftRight:true,smartCaret:true,selectOnAnyFocus:true,selectOnFirstPointerFocus:true});
-stockField('stockRelacionado').addEventListener('change',async()=>{if(!stockField('stockRelacionado').value)return;if(rowsData.some(row=>!isBlankStockRow(row))&&!window.confirm('¿Reemplazar las filas por las cantidades pendientes del comprobante?')){stockField('stockRelacionado').value='';return;}try{const result=await stockSqlGet('pendientes',{recibo:stockField('stockRelacionado').value});rowsData=(result.articulos||[]).map(line=>normalizeRow({idart:line.idart,codigo:line.codigo||'',descripcion:line.descripcion,cantidad:line.cantidad,precio:precioUnitarioDesdeFinal({},line.precioUnitario)}));render();saveRows();stockHeaderSave();}catch(error){stockIngresoMessage(error.message,'error');}});
+stockField('stockRelacionado').addEventListener('change',async()=>{if(!stockField('stockRelacionado').value)return;if(rowsData.some(row=>!isBlankStockRow(row))&&!(await htmlNotice('¿Reemplazar las filas por las cantidades pendientes del comprobante?'))){stockField('stockRelacionado').value='';return;}try{const result=await stockSqlGet('pendientes',{recibo:stockField('stockRelacionado').value});rowsData=(result.articulos||[]).map(line=>normalizeRow({idart:line.idart,codigo:line.codigo||'',descripcion:line.descripcion,cantidad:line.cantidad,precio:precioUnitarioDesdeFinal({},line.precioUnitario)}));render();saveRows();stockHeaderSave();}catch(error){stockIngresoMessage(error.message,'error');}});
 
 document.getElementById('compareStockBtn').addEventListener('click', openStockComparison);
 el.applyPricesBtn.addEventListener('click', () => {
@@ -5208,6 +5446,10 @@ document.addEventListener('paste', (event) => {
   if (event.defaultPrevented || stockConfirmed || stockIngresoBusy) return;
   if (document.getElementById('compareStockBackdrop').classList.contains('visible')) return;
   const target = event.target;
+  const movementText = event.clipboardData?.getData('text/plain') || '';
+  if (target.closest?.('.table-wrap') && movementText.startsWith('IDArt\tCódigo proveedor\tDescripción\tCantidad\tPrecio final')) {
+    event.preventDefault(); event.stopImmediatePropagation(); pasteAllText(movementText); return;
+  }
   if (target.closest?.('input, textarea, [contenteditable="true"]')) return;
   const inTable = target.closest?.('.table-wrap');
   if (!inTable && !el.corner.classList.contains('active')) return;
@@ -5237,6 +5479,7 @@ el.rows.addEventListener('change', event => {
   if(!row)return;
   pushUndoSnapshot();
   row.idart=article?String(article.idart):'';
+  row.idartManual = Boolean(article);
   row.stock=article?Number(article.stock||0):null;
   if(article && row.conteo!=null)row.cantidad=rawNumber(Number(row.conteo)-row.stock);
   render();saveRows();
@@ -5370,10 +5613,10 @@ el.copyAccessPriceContextBtn.addEventListener('click', async () => {
   closeTableContextMenu();
   const article=stockArticleForRow(row),price=row?calcPrecioFinal(row):0;
   if(!article || stockConfirmed || stockIngresoBusy || !(price>0))return;
-  if(!window.confirm(`Actualizar el costo sin IVA de ${article.idart} · ${article.descripcion}\nDe ${money(article.precioCosto)} a ${money(price)}?`))return;
+  if(!(await htmlNotice(`Actualizar el costo sin IVA de ${article.idart} · ${article.descripcion}\nDe ${money(article.precioCosto)} a ${money(price)}?`)))return;
   el.copyAccessPriceContextBtn.disabled=true;
   try{
-    const response=await fetch('/api/facturacion/stock-ingreso',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accion:'actualizar-costo',idart:article.idart,costo:price,costoAnterior:Number(article.precioCosto)})});
+    const response=await fetch('/api/facturacion/stock-ingreso',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarioId:FX.menuSessionUser()?.id||'',idOperador:Number(FX.menuSessionUser()?.idOperador)||null,accion:'actualizar-costo',idart:article.idart,costo:price,costoAnterior:Number(article.precioCosto)})});
     const result=await response.json();
     if(!response.ok || !result.ok)throw new Error(result.error||result.message||'No se pudo actualizar el costo.');
     await stockRefreshSql();
@@ -5513,8 +5756,8 @@ el.rows.addEventListener('input', (event) => {
   const row = rowsData[rowIndex];
   if (!row || row.id !== rowEl.dataset.id) return;
   const field = cell.dataset.field;
-  if (field === 'idart') return;
-  if (field === 'codigo' && codeKey(cell.textContent) !== codeKey(row.codigo)) row.idart = '';
+  if (field === 'idart') { scheduleArticleProviderList(cell); return; }
+  if (field === 'codigo' && codeKey(cell.textContent) !== codeKey(row.codigo)) { row.idart = ''; row.idartManual = false; }
   if (field === 'precio') {
     row.precio = moneyNumber(cell.textContent);
     row.precioOriginal = 0;
@@ -5535,7 +5778,7 @@ el.rows.addEventListener('input', (event) => {
   }
   saveRows();
   updateCalculatedCells(rowIndex);
-  if (field === 'descripcion') scheduleArticleProviderList(cell);
+  if (['descripcion','codigo'].includes(field)) scheduleArticleProviderList(cell);
 });
 function finalizeQuantityCell(cell) {
   if (stockTableRendering) return false;
@@ -5565,14 +5808,14 @@ el.rows.addEventListener('focusout',event=>{
 });
 el.rows.addEventListener('keydown',event=>{
   const cell=event.target.closest('[data-field="idart"]');
-  if(!cell || event.shiftKey || !String(cell.textContent||'').trim() || !['Enter','Tab'].includes(event.key))return;
+  if(!cell || event.shiftKey || (articleProviderCell === cell && el.articleProviderMenu.classList.contains('open')) || !String(cell.textContent||'').trim() || !['Enter','Tab'].includes(event.key))return;
   event.preventDefault();event.stopImmediatePropagation();
   const index=Number(cell.dataset.row);
   if(stockCompleteIdArt(cell))focusNavigationTarget(editableCellAt(index,2));
 },true);
 el.rows.addEventListener('focusout', (event) => finalizeQuantityCell(event.target.closest('[data-field="cantidad"]')));
 el.rows.addEventListener('keydown', (event) => {
-  const cell = event.target.closest('[data-field="descripcion"]');
+  const cell = event.target.closest('[data-field="descripcion"],[data-field="codigo"],[data-field="idart"]');
   if (!cell) return;
   if (event.key === 'F4') {
     event.preventDefault();
@@ -5597,7 +5840,7 @@ el.rows.addEventListener('keydown', (event) => {
     event.preventDefault();
     event.stopPropagation();
     const direction = event.key === 'ArrowDown' ? 1 : -1;
-    articleProviderActive = Math.max(0, Math.min(articleProviderOptions.length - 1, articleProviderActive + direction));
+    articleProviderActive = Math.max(stockCanOfferArticleImport(cell) ? -1 : 0, Math.min(articleProviderOptions.length - 1, articleProviderActive + direction));
     renderArticleProviderList();
     el.articleProviderMenu.querySelector('.article-provider-option.active')?.scrollIntoView({ block: 'nearest' });
     return;
@@ -5611,6 +5854,7 @@ el.rows.addEventListener('keydown', (event) => {
       moveTableNavigation(cell, 0, 1);
       return;
     }
+    if (articleProviderActive === -1 && stockCanOfferArticleImport(cell)) { stockImportArticleFromCell(cell); return; }
     if (pickArticleProviderOption()) {
       moveTableNavigation(cell, 0, 1);
     } else {
@@ -5620,6 +5864,7 @@ el.rows.addEventListener('keydown', (event) => {
   }
 });
 el.articleProviderMenu.addEventListener('mousedown', (event) => {
+  if (event.target.closest('[data-article-create]')) { event.preventDefault(); stockImportArticleFromCell(articleProviderCell); return; }
   const option = event.target.closest('[data-article-option]');
   if (!option) return;
   event.preventDefault();
@@ -5630,11 +5875,11 @@ el.articleProviderMenu.addEventListener('scroll', () => {
   if (el.articleProviderMenu.scrollTop + el.articleProviderMenu.clientHeight >= el.articleProviderMenu.scrollHeight - 18) extendArticleProviderList('down');
 }, { passive: true });
 el.rows.addEventListener('mouseover', (event) => {
-  const cell = event.target.closest('[data-field="descripcion"]');
+  const cell = event.target.closest('[data-field="descripcion"],[data-field="codigo"],[data-field="idart"]');
   if (cell) showArticleProviderToggle(cell);
 });
 el.rows.addEventListener('mouseout', (event) => {
-  const cell = event.target.closest('[data-field="descripcion"]');
+  const cell = event.target.closest('[data-field="descripcion"],[data-field="codigo"],[data-field="idart"]');
   if (!cell || cell.contains(event.relatedTarget) || event.relatedTarget === el.articleProviderToggle) return;
   hideArticleProviderToggle();
 });
@@ -5653,7 +5898,7 @@ el.articleProviderToggle.addEventListener('mouseleave', (event) => {
   if (event.relatedTarget !== articleProviderButtonCell) hideArticleProviderToggle();
 });
 document.addEventListener('mousedown', (event) => {
-  const clickedDescriptionCell = event.target.closest('[data-field="descripcion"]');
+  const clickedDescriptionCell = event.target.closest('[data-field="descripcion"],[data-field="codigo"],[data-field="idart"]');
   const keepsCurrentArticleList = event.target.closest('#articleProviderMenu,#articleProviderToggle')
     || clickedDescriptionCell === articleProviderCell;
   if (!keepsCurrentArticleList) closeArticleProviderList();
@@ -5753,23 +5998,20 @@ document.addEventListener('keydown', (event) => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
   // Ctrl+V uses the native paste event, also on LAN HTTP where clipboard.readText is unavailable.
-  if (event.key === 'Delete' && selectedRows.size) {
-    event.preventDefault();
-    deleteSelectedRows();
-  }
 });
 document.querySelector('.table-wrap').addEventListener('keydown', (event) => {
-  if (event.key !== 'Delete') return;
-  const selectedCells = tableSelectionApi?.getSelectedCells?.() || [];
-  if (!selectedRows.size && !selectedCells.length) return;
-  event.preventDefault();
-  if (selectedRows.size) {
-    deleteSelectedRows();
-    return;
-  }
-  selectedCells.forEach((cell) => setEditableCellValue(cell, ''));
-  finishTableEditUndo('Celdas borradas');
-});
+  if (event.key !== 'Delete' || stockConfirmed || stockIngresoBusy) return;
+  const cell = event.target.closest('#rows [data-row][data-col]');
+  const rowElement = event.target.closest('#rows .row[data-row]');
+  if (!rowElement) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  const index = Number(rowElement.dataset.row);
+  const col = Number(cell?.dataset.col || 0);
+  if (!selectedRows.has(index)) { selectedRows.clear(); selectedRows.add(index); }
+  closeArticleProviderList(); hideArticleProviderToggle();
+  deleteSelectedRows();
+  focusNavigationTarget(editableCellAt(Math.min(index, rowsData.length - 1), col));
+}, true);
 
 initFuncionesJsBindings();
 (async()=>{
@@ -5796,6 +6038,8 @@ initFuncionesJsBindings();
   saveRows();
   stockRebuildSqlCatalog();
   render();
+  stockInvoiceReady = true;
+  await stockReceiveInvoice();
 })().catch(console.warn);
 </script>
 <script src="recargar-deslizando.js" defer></script>
