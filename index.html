@@ -4390,7 +4390,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.26"></script>
+<script src="corralon-system.js?v=1.0.27"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -11006,18 +11006,67 @@ function imprimirEtiquetasCarrito() {
       alert('El máximo por PDF es de 1.600 etiquetas.');
       return;
     }
-    const lote = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const storageKey = `corralon_etiquetas_${lote}`;
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ items: etiquetas, creado: Date.now() }));
-    } catch (_) {
-      alert('No se pudo guardar la selección para imprimir. Revisá el espacio disponible del navegador.');
-      return;
+      if (!window.jspdf?.jsPDF) throw new Error('No se pudo cargar el generador de PDF. Recargá la página e intentá nuevamente.');
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a5' });
+    doc.setProperties({ title: 'Etiquetas de precio', subject: 'A5 horizontal · etiquetas de 5 × 3 cm' });
+    const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // A5 horizontal: 210 × 148 mm; 4 columnas y 4 filas de 50 × 30 mm.
+    const left = (doc.internal.pageSize.getWidth() - 200) / 2;
+    const top = (doc.internal.pageSize.getHeight() - 120) / 2;
+    let index = 0;
+    function fittedText(value, maxSize, minSize, width) {
+      let size = maxSize;
+      doc.setFontSize(size);
+      while (size > minSize && doc.getTextWidth(value) > width) {
+        size -= 0.25;
+        doc.setFontSize(size);
+      }
+      return Math.min(width, doc.getTextWidth(value));
     }
-    const pagina = window.open(`etiquetas-precio.html?lote=${encodeURIComponent(lote)}`, '_blank');
-    if (!pagina) {
-      localStorage.removeItem(storageKey);
-      alert('Permití las ventanas emergentes para abrir el PDF de etiquetas.');
+    for (const item of etiquetas) {
+      for (let copy = 0; copy < item.cantidad; copy++, index++) {
+        if (index && index % 16 === 0) doc.addPage('a5', 'landscape');
+        const cell = index % 16;
+        const x = left + (cell % 4) * 50;
+        const y = top + Math.floor(cell / 4) * 30;
+        doc.setDrawColor(130);
+        doc.setLineWidth(0.15);
+        doc.rect(x, y, 50, 30);
+        doc.setTextColor(0);
+        doc.setFont('helvetica', 'bold');
+        const description = String(item.nombre).trim().replace(/\s+/g, ' ').toLocaleUpperCase('es-AR');
+        let size = 11.5;
+        let lines;
+        do {
+          doc.setFontSize(size);
+          lines = doc.splitTextToSize(description, 46);
+          if (lines.length * size * 0.3528 * 1.05 <= 17) break;
+          size -= 0.25;
+        } while (size > 4);
+        doc.text(lines, x + 2, y + 2, { baseline: 'top', lineHeightFactor: 1.05 });
+        const code = String(item.codigo);
+        fittedText(code, 9, 5, 46);
+        doc.text(code, x + 2, y + 26.5, { maxWidth: 46 });
+        const codeWidth = Math.min(46, doc.getTextWidth(code));
+        const price = money.format(item.precio).replace(/\s/g, ' ');
+        // El precio comparte el renglón inferior con el ID; se ajusta sin recortar cifras.
+        const priceWidth = Math.max(15, 44 - codeWidth);
+        fittedText(price, 17, 5, priceWidth);
+        doc.text(price, x + 48, y + 26.5, { align: 'right', maxWidth: priceWidth });
+      }
+    }
+      const pdfUrl = URL.createObjectURL(doc.output('blob'));
+      const pagina = window.open(pdfUrl, '_blank');
+      if (!pagina) {
+        URL.revokeObjectURL(pdfUrl);
+        alert('Permití las ventanas emergentes para abrir el PDF de etiquetas.');
+        return;
+      }
+      setTimeout(() => URL.revokeObjectURL(pdfUrl), 300000);
+    } catch (error) {
+      alert(error.message || 'No se pudo generar el PDF de etiquetas.');
     }
 }
 
