@@ -776,21 +776,15 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       $('confirmDeleteInvoice').disabled = Boolean(error.definitive);
     } finally { removingInvoice = false; }
   }
-  function openProviderDialog() {
+  function openProviderDialog(providerId = 0) {
     if (!FX.menuUserHasAccess('proveedores_sql')) { message('Tu usuario necesita el permiso Proveedores SQL para cargar un proveedor.', true); return; }
     const name = $('provider').value.trim(); hidePurchaseCombo();
-    $('providerFrame').src = `proveedores-sql.html?dialogo=1&nombre=${encodeURIComponent(name)}`;
+    $('providerDialog').querySelector('h2').textContent = providerId ? 'Proveedor SQL' : 'Cargar proveedor';
+    $('providerFrame').src = providerId ? `proveedores-sql.html?dialogo=1&id=${encodeURIComponent(providerId)}` : `proveedores-sql.html?dialogo=1&nombre=${encodeURIComponent(name)}`;
     $('providerDialog').showModal();
   }
-  async function showProvider() {
-    if (!selectedProvider()) { openProviderDialog(); return; }
-    if (!selectedProvider()) { message('Seleccioná un proveedor.', true); return; }
-    try {
-      const result = await api({ consulta: 'proveedor', proveedor: selectedProvider().id });
-      const p = result.proveedor[0]; if (!p) throw new Error('Proveedor no encontrado.');
-      $('openStock').hidden = true;
-      openDetail(`Proveedor · ${p.nombre}`, `<dl class="detail-fields">${[['Código', p.IDProveedor], ['Razón social', p.nombre], ['CUIT', p.CUIT], ['Condición IVA', p.condicionIva], ['Dirección', p.direccion], ['Localidad', p.Localidad], ['Teléfono', p.telefono], ['Email', p.Email], ['Web', p.Web]].map(([label, value]) => detailField(label, value)).join('')}</dl><p class="detail-note">${esc(p.Nota)}</p>`);
-    } catch (error) { message(error.message, true); }
+  function showProvider() {
+    openProviderDialog(selectedProvider()?.id || 0);
   }
   async function openReport(mode, search = '') {
     reportMode = mode; reportRows = [];
@@ -926,11 +920,19 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     }
     if (event.key === 'Escape') { if (open) hidePurchaseCombo(); return; }
     if (!['ArrowDown', 'ArrowUp', 'Enter', 'Home', 'End'].includes(event.key) || !open) return;
+    if (event.key === 'Enter') {
+      if (event.isComposing) return;
+      if (purchaseCombo.active < 0 && input.dataset.sqlList === 'provider') {
+        event.preventDefault(); event.stopImmediatePropagation(); openProviderDialog();
+      } else if (input.value.trim()) {
+        if (!pickPurchaseCombo()) { event.preventDefault(); event.stopImmediatePropagation(); }
+      } else hidePurchaseCombo();
+      // La navegación del formulario recibe el mismo Enter después de seleccionar.
+      return;
+    }
     event.preventDefault(); event.stopImmediatePropagation();
     if (!open) { showPurchaseCombo(input); return; }
-    if (event.key === 'Enter') { if (purchaseCombo.active < 0 && input.dataset.sqlList === 'provider') openProviderDialog(); else if (input.value.trim()) pickPurchaseCombo(); else hidePurchaseCombo(); }
-    else if (event.key === 'Escape') hidePurchaseCombo();
-    else movePurchaseCombo(event.key === 'Home' ? -purchaseCombo.items.length : event.key === 'End' ? purchaseCombo.items.length : event.key === 'ArrowDown' ? 1 : -1);
+    movePurchaseCombo(event.key === 'Home' ? -purchaseCombo.items.length : event.key === 'End' ? purchaseCombo.items.length : event.key === 'ArrowDown' ? 1 : -1);
   }, true);
   $('purchaseForm').addEventListener('keydown', event => {
     if (event.key !== 'Enter' || event.isComposing || !['quickTotal', 'discount'].includes(event.target.id)) return;
@@ -966,7 +968,13 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   ['number', 'remito', 'reportSearch', 'searchNumber'].forEach(id => FX.bindComprobanteNumber($(id)));
   FX.bindFieldRestore({ root: $('purchaseForm') });
   FX.bindDropdownOnlyWhenTyping({ root: document, inputSelector: '[data-purchase-combo]', buttonSelector: '.purchase-combo-drop',
-    show: showPurchaseCombo, hide: hidePurchaseCombo, isOpen: input => purchaseCombo.input === input,
+    show: (input, reason) => {
+      // El evento input ya abre Tipo Comp.; una tarea diferida no debe reabrirlo
+      // después de Escape, Tab o de seleccionar una opción.
+      if (input.id === 'type' && reason === 'typing-key') return;
+      if (reason === 'typing' && document.activeElement !== input) return;
+      showPurchaseCombo(input);
+    }, hide: hidePurchaseCombo, isOpen: input => purchaseCombo.input === input,
     moveActive: (_, step) => movePurchaseCombo(step), pickActive: () => pickPurchaseCombo(), openOnTyping: true, buttonOnlyWhenFocused: false });
   document.addEventListener('mousedown', event => {
     const input = event.target.closest('select[data-purchase-combo]');
@@ -981,7 +989,14 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if (purchaseCombo.input && !event.target.closest('.purchase-combo') && !$('purchaseComboMenu').contains(event.target)) hidePurchaseCombo();
   });
   document.addEventListener('focusin', event => { if (purchaseCombo.input && event.target !== purchaseCombo.input && !$('purchaseComboMenu').contains(event.target)) hidePurchaseCombo(); });
-  document.addEventListener('scroll', event => { if (purchaseCombo.input && !$('purchaseComboMenu').contains(event.target)) hidePurchaseCombo(); }, true);
+  document.addEventListener('scroll', event => {
+    const input = purchaseCombo.input, scroller = event.target;
+    if (!input || $('purchaseComboMenu').contains(scroller)) return;
+    // Reemplazar un texto seleccionado puede desplazar el cursor dentro del input.
+    // Ese scroll no mueve el campo ni debe cerrar su lista.
+    if (scroller === input || input.closest('.purchase-combo')?.contains(scroller)) return;
+    if (scroller === document || scroller === document.scrollingElement || (scroller instanceof Element && scroller.contains(input))) hidePurchaseCombo();
+  }, true);
   window.addEventListener('resize', hidePurchaseCombo);
   window.addEventListener('message', async event => {
     if (event.origin !== location.origin || event.source !== $('providerFrame').contentWindow) return;

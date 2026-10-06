@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.33"></script>
+<script src="corralon-system.js?v=1.0.34"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -4438,9 +4438,15 @@ function stockBudgetLines(budget) {
     return { idart, cantidad: Number(item.cantidad), article: stockSqlById.get(idart) };
   });
 }
+function stockBudgetDate(budget) {
+  if (budget.fecha) return String(budget.fecha);
+  if (!budget.fecha_iso) return '—';
+  const date = new Date(budget.fecha_iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
 function stockRenderBudgets() {
   const body = document.getElementById('stockBudgetBody');
-  body.innerHTML = stockWebBudgets.map((budget, index) => `<tr class="stock-budget-choice" tabindex="0" data-budget-index="${index}" aria-expanded="false"><td>▸ ${escapeHtml(budget.numero ?? '')}</td><td>${escapeHtml(budget.cliente_nombre || '')}</td><td>${escapeHtml(budget.usuario_nombre || '')}</td><td>${escapeHtml(budget.nota || '')}</td><td>${stockBudgetChip(budget)}</td></tr><tr data-budget-detail="${index}" hidden><td colspan="5"></td></tr>`).join('');
+  body.innerHTML = stockWebBudgets.map((budget, index) => `<tr class="stock-budget-choice" tabindex="0" data-budget-index="${index}" aria-expanded="false"><td>▸ ${escapeHtml(budget.numero ?? '')}</td><td style="white-space:nowrap">${escapeHtml(stockBudgetDate(budget))}</td><td>${escapeHtml(budget.cliente_nombre || '')}</td><td>${escapeHtml(budget.usuario_nombre || '')}</td><td>${escapeHtml(budget.nota || '')}</td><td>${stockBudgetChip(budget)}</td></tr><tr data-budget-detail="${index}" hidden><td colspan="6"></td></tr>`).join('');
 }
 async function stockLoadBudgets() {
   if (stockWebBudgetLoading) return;
@@ -4459,7 +4465,7 @@ async function stockLoadBudgets() {
   finally { stockWebBudgetLoading = false; more.disabled = false; }
 }
 async function stockFetchBudgetRows(filter = '', order = 'numero.desc', limit = 100) {
-  const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/presupuestos_web?select=numero,cliente_nombre,usuario_nombre,nota,items&order=${order}&limit=${limit}${filter}`, { headers: CorralonSystem.headers(), cache: 'no-store' });
+  const response = await fetch(`${CorralonSystem.SUPABASE_URL}/rest/v1/presupuestos_web?select=numero,fecha,fecha_iso,cliente_nombre,usuario_nombre,nota,items&order=${order}&limit=${limit}${filter}`, { headers: CorralonSystem.headers(), cache: 'no-store' });
   if (!response.ok) throw new Error('No se pudieron sincronizar los presupuestos web.');
   const loaded = await response.json();
   if (!Array.isArray(loaded)) throw new Error('La respuesta de presupuestos no es válida.');
@@ -4472,6 +4478,13 @@ function stockMergeBudgetRows(loaded) {
 }
 async function stockSyncNewBudgets() {
   if (!stockWebBudgets.length) { await stockLoadBudgets(); stockChangedBudgetNumbers.clear(); return; }
+  // Completar una sola vez las fechas ausentes de la caché anterior.
+  const withoutDates = stockWebBudgets.filter(row => !Object.prototype.hasOwnProperty.call(row, 'fecha')).map(row => String(row.numero));
+  for (let offset = 0; offset < withoutDates.length; offset += 100) {
+    const numbers = withoutDates.slice(offset, offset + 100).map(number => `"${number}"`).join(',');
+    const loaded = await stockFetchBudgetRows(`&numero=in.(${encodeURIComponent(numbers)})`);
+    stockMergeBudgetRows(loaded); await stockSaveBudgets();
+  }
   // Números consecutivos con formato fijo: descargar únicamente los posteriores.
   let newest = stockWebBudgets[0].numero;
   while (true) {
@@ -4500,7 +4513,7 @@ async function stockOpenBudgets() {
   if (!popup) {
     popup = document.createElement('section'); popup.id = 'stockBudgetPopup'; popup.className = 'stock-budget-popup';
     popup.setAttribute('role', 'dialog'); popup.setAttribute('aria-modal', 'true'); popup.setAttribute('aria-label', 'Importar presupuesto web');
-    popup.innerHTML = '<div class="stock-budget-title"><h2>Importar presupuesto web</h2><button type="button" data-budget-close>Cerrar</button></div><p id="stockBudgetStatus"></p><div class="stock-budget-scroll"><table><thead><tr><th>Nº presupuesto</th><th>Cliente</th><th>Usuario</th><th>Nota</th><th>Estado</th></tr></thead><tbody id="stockBudgetBody"></tbody></table></div><button type="button" id="stockBudgetMore">Cargar más</button>';
+    popup.innerHTML = '<div class="stock-budget-title"><h2>Importar presupuesto web</h2><button type="button" data-budget-close>Cerrar</button></div><p id="stockBudgetStatus"></p><div class="stock-budget-scroll"><table><thead><tr><th>Nº presupuesto</th><th>Fecha</th><th>Cliente</th><th>Usuario</th><th>Nota</th><th>Estado</th></tr></thead><tbody id="stockBudgetBody"></tbody></table></div><button type="button" id="stockBudgetMore">Cargar más</button>';
     document.body.appendChild(popup);
     popup.querySelector('[data-budget-close]').onclick = () => { popup.hidden = true; };
     popup.querySelector('#stockBudgetMore').onclick = stockLoadBudgets;

@@ -1020,6 +1020,7 @@
   .cart-item-controls { display:flex; align-items:center; gap:4px; margin-top:4px; }
   .cart-item-controls button { width:20px; height:20px; border:none; background:var(--violeta); color:#fff; border-radius:4px; font-size:14px; cursor:pointer; }
   .cart-footer { padding:16px; border-top:1px solid var(--borde); }
+  #printLabelsButton { width:100%; margin-top:10px; padding:10px 14px; border:1px solid var(--borde); border-radius:8px; background:#fff; color:#222; cursor:pointer; font-weight:600; }
   #cartTotal { font-weight:700; }
   #waModal,
   #presupuestoDatosModal { position:fixed; top:var(--popup-visual-top); left:var(--popup-visual-left); width:var(--popup-visual-width); height:var(--popup-visual-height); display:flex; align-items:flex-start; justify-content:center; z-index:99999; background:rgba(0,0,0,0.55); padding:var(--popup-top-safe) 10px var(--popup-bottom-safe); overflow-y:auto; }
@@ -4320,6 +4321,7 @@ body[data-catalog-view="mosaico"] .producto-card .card-cta .agregar-btn{grid-are
   <div class="cart-footer">
     <div id="cartTotal" style="text-align:right;font-weight:700;margin-bottom:12px;">TOTAL: $0</div>
     <div class="buy-wrap"><button id="buyButton">Comprar</button></div>
+    <button id="printLabelsButton" type="button" hidden>Imprimir etiquetas</button>
   </div>
 </div>
 
@@ -4388,7 +4390,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.25"></script>
+<script src="corralon-system.js?v=1.0.26"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -10991,6 +10993,34 @@ function abrirModalDatosPresupuesto() {
   });
 }
 
+function imprimirEtiquetasCarrito() {
+  if (!usuarioMenuPresupuestoActual().id) return;
+  const items = itemsCarritoOrdenados().map(([, item]) => item);
+  if (!items.length) { mostrarAvisoCarrito('Agregá artículos al carrito para imprimir etiquetas'); return; }
+    const etiquetas = items.map(item => ({ codigo: String(item.codigo || ''), nombre: String(item.nombre || ''), precio: Number(item.precio), cantidad: Number(item.cantidad) }));
+    if (etiquetas.some(item => !item.codigo || !item.nombre || !Number.isFinite(item.precio) || item.precio < 0 || !Number.isInteger(item.cantidad) || item.cantidad < 1)) {
+      alert('Para las etiquetas, indicá una cantidad entera de copias por artículo y un precio válido.');
+      return;
+    }
+    if (etiquetas.reduce((sum, item) => sum + item.cantidad, 0) > 1600) {
+      alert('El máximo por PDF es de 1.600 etiquetas.');
+      return;
+    }
+    const lote = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const storageKey = `corralon_etiquetas_${lote}`;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ items: etiquetas, creado: Date.now() }));
+    } catch (_) {
+      alert('No se pudo guardar la selección para imprimir. Revisá el espacio disponible del navegador.');
+      return;
+    }
+    const pagina = window.open(`etiquetas-precio.html?lote=${encodeURIComponent(lote)}`, '_blank');
+    if (!pagina) {
+      localStorage.removeItem(storageKey);
+      alert('Permití las ventanas emergentes para abrir el PDF de etiquetas.');
+    }
+}
+
 async function crearPresupuesto() {
   const items = itemsCarritoOrdenados().map(([, item]) => item);
   if (!items.length) return;
@@ -11102,6 +11132,15 @@ async function crearPresupuesto() {
 }
 
 document.getElementById('buyButton').addEventListener('click', crearPresupuesto);
+document.getElementById('printLabelsButton').addEventListener('click', imprimirEtiquetasCarrito);
+function actualizarBotonEtiquetas() {
+  document.getElementById('printLabelsButton').hidden = !usuarioMenuPresupuestoActual().id;
+}
+actualizarBotonEtiquetas();
+window.addEventListener('menu-user-validated', actualizarBotonEtiquetas);
+window.addEventListener('storage', actualizarBotonEtiquetas);
+document.getElementById('cartIcon').addEventListener('click', actualizarBotonEtiquetas);
+document.getElementById('cartIconDesktop')?.addEventListener('click', actualizarBotonEtiquetas);
 
 let logoCacheData = null;
 (function precacheLogo() {

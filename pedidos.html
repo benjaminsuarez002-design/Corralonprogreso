@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.34"></script>
+<script src="corralon-system.js?v=1.0.35"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -1854,6 +1854,19 @@ els.rows.addEventListener('click',e=>{const rowEl=e.target.closest('.row');if(!r
 els.rows.addEventListener('mousedown',e=>{const input=e.target.closest('[data-col="3"]');if(!input||document.activeElement!==input||!isAllSelected(input))return;requestAnimationFrame(()=>{if(isAllSelected(input))input.setSelectionRange(input.value.length,input.value.length)})})
 els.rows.addEventListener('mousedown',e=>{const btn=e.target.closest('[data-article-drop]');if(!btn)return;e.preventDefault();e.stopPropagation();const input=btn.closest('[data-col-wrap="3"]')?.querySelector('[data-col="3"]');if(!input)return;const wasOpen=els.comboMenu.classList.contains('visible')&&combo.input===input&&combo.mode==='article';input.focus();if(wasOpen)hideCombo();else showCombo(input,false,'article')})
 els.rows.addEventListener('contextmenu',e=>{const rowEl=e.target.closest('.row');if(rowEl){const index=Number(rowEl.dataset.row);contextRowIndex=index;if(isSelectableRow(index)&&!selectedRows.has(index))selectRow(index,e)}else contextRowIndex=-1;showRowContextMenu(e)})
+let deletingRowByKeyboard=false;
+els.rows.addEventListener('keydown',e=>{
+  if(e.key!=='Delete'&&e.key!=='Supr')return;
+  if(document.querySelector('.modal.visible,.ranking-overlay.visible'))return;
+  const rowEl=e.target.closest('.row');if(!rowEl||!els.rows.contains(rowEl))return;
+  e.preventDefault();e.stopImmediatePropagation();
+  if(e.repeat||deletingRowByKeyboard)return;
+  const index=Number(rowEl.dataset.row);if(!isSelectableRow(index))return;
+  if(!selectedRows.has(index)){clearSelection();selectedRows.add(index);lastSelectedRow=index;}
+  hideCombo();hideRowContextMenu();
+  deletingRowByKeyboard=true;
+  deleteSelectedRows().catch(console.warn).finally(()=>{deletingRowByKeyboard=false;});
+},true);
 els.rows.addEventListener('input',e=>{const input=e.target.closest('[data-col]');if(!input)return;const col=Number(input.dataset.col);if(col===2)return;updateCell(input,false);if(col===3)showCombo(input,false,'article')})
 els.rows.addEventListener('dblclick',e=>{const cell=e.target.closest('[data-provider-text]');if(!cell)return;e.preventDefault();openProviderPage(cell.textContent||cell.dataset.providerText||'')})
 els.rows.addEventListener('change',e=>{const input=e.target.closest('[data-col]');if(!input)return;const col=Number(input.dataset.col);if(col===2){applyFilterColumn(input,true);return}const rowEl=input.closest('.row');if(col===3&&rowEl&&suppressArticleChange.has(rowEl.dataset.uid)){suppressArticleChange.delete(rowEl.dataset.uid);return}updateCell(input,true)})

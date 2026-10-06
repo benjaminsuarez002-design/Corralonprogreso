@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
@@ -1133,7 +1133,7 @@ internal static class FacturacionCopiaApi
                 }
                 decimal grandTotal = gross + adjustment;
                 if (grandTotal <= 0 || Math.Abs(paidBase - gross) > .005m || Math.Abs(paid - grandTotal) > .005m)
-                    throw new InvalidOperationException("Los valores recibidos no coinciden con el total recalculado en SQL.");
+                    throw new InvalidOperationException("Los valores recibidos no coinciden con el total recalculado en SQL. Artículos: " + gross.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + "; importes de pago sin dto./rec.: " + paidBase.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + "; total con dto./rec.: " + grandTotal.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + "; valores recibidos: " + paid.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + ". Revisá Valores recibidos.");
                 if (account > 0 && !returnType && !quotation)
                 {
                     object credit = Scalar(connection, tx,
@@ -2568,10 +2568,10 @@ internal static class FacturacionCopiaApi
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/comprobante")
                 {
                     int receipt = Id(request.QueryString["id"]);
-                    var header = Rows(connection, "SELECT IDRecibo AS idRecibo,NroFactura AS numero,Fecha AS fecha,CONVERT(varchar(10),Fecha,23) AS fechaComprobante,IDComprob AS idComprobante,IDDepósito AS idPuntoVenta,Confirmado AS confirmado,Anulada AS anulada,Total AS total,TotalME AS totalAbsoluto,IDCliente AS idCliente,ApeYNom AS cliente,CUIT AS documento,CAE AS cae,CASE WHEN LEN(CodBarra)=40 THEN SUBSTRING(CodBarra,32,8) ELSE '' END AS caeExpiry,NroFacNC AS facturaAsociada,IDVend AS vendedor,IDSuc AS sucursal,Impresa AS impresa,ActStock AS stockActualizado,IDTipoIVA AS idTipoIva,IDTipoDocFis AS idTipoDoc,[Dirección] AS direccion,[Teléfono] AS telefono,Nota AS nota FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND IDComprob IN (1,2,5,6,7,8,13,29,43)", receipt);
+                    var header = Rows(connection, "SELECT IDRecibo AS idRecibo,NroFactura AS numero,Fecha AS fecha,CONVERT(varchar(10),Fecha,23) AS fechaComprobante,CONVERT(varchar(19),FechaYHora,126) AS fechaHora,IDComprob AS idComprobante,IDDepósito AS idPuntoVenta,Confirmado AS confirmado,Anulada AS anulada,Total AS total,TotalME AS totalAbsoluto,IDCliente AS idCliente,ApeYNom AS cliente,CUIT AS documento,CAE AS cae,CASE WHEN LEN(CodBarra)=40 THEN SUBSTRING(CodBarra,32,8) ELSE '' END AS caeExpiry,NroFacNC AS facturaAsociada,IDVend AS vendedor,IDSuc AS sucursal,Impresa AS impresa,ActStock AS stockActualizado,IDTipoIVA AS idTipoIva,IDTipoDocFis AS idTipoDoc,[Dirección] AS direccion,[Teléfono] AS telefono,Nota AS nota,IDOper AS operador,SubTot1 AS neto21,ImpIVA21 AS iva21,SubTot2 AS neto105,ImpIVA105 AS iva105,SubTSDto AS subtotalSinDto,SubTotal AS gravado,ImpIVA1 AS importeIva,TotalEF AS efectivo,TotalEC AS tarjeta,TotalCC AS cuentaCorriente,TotalCH AS cheque,CONVERT(varchar(10),FechaPriVto,23) AS vencimiento FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND IDComprob IN (1,2,5,6,7,8,13,29,43)", receipt);
                     if (header.Count != 1) { Reply(context, 404, new { ok = false, error = "El comprobante no existe en SQL." }); return; }
                     Reply(context, 200, new { ok = true, comprobante = header[0],
-                        articulos = Rows(connection, "SELECT IDArt AS idart,ArtDesc AS descripcion,Cantidad AS cantidad,PrecioUni AS precio,Importe AS importe FROM dbo.FacturasATS WHERE IDRecibo=@p0 ORDER BY Orden", receipt),
+                        articulos = Rows(connection, "SELECT IDArt AS idart,ArtDesc AS descripcion,Cantidad AS cantidad,PrecioUni AS precio,Importe AS importe,PorcIVA*100 AS iva,PorcDto*100 AS descuento FROM dbo.FacturasATS WHERE IDRecibo=@p0 ORDER BY Orden", receipt),
                         valores = Rows(connection, "SELECT v.IDTipoPago AS idTipoPago,p.TipoPago AS tipo,v.Importe AS importe,v.ImpRec AS impRec,v.ImpEnt AS total,v.Cuotas AS cuotas,v.IDTarjeta AS idTarjeta,t.[Descripción] AS tarjeta,v.Coef AS coef,v.Concepto AS descripcion FROM dbo.FacturasTSVal v LEFT JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta WHERE v.IDRecibo=@p0 ORDER BY v.Orden", receipt) });
                     return;
                 }

@@ -194,7 +194,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.25"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.26"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -278,7 +278,32 @@ document.addEventListener('keydown',event=>{
   const editingText=target?.matches?.('input:not([readonly]),textarea,[contenteditable="true"]');
   if(editingText||window.getSelection()?.toString())event.stopImmediatePropagation();
 },true);
-function roundMoney(v){return Math.round((Number(v)+Number.EPSILON)*100)/100}
+function decimalParts(value){
+  const number=Number(value);if(!Number.isFinite(number))return null;
+  const match=String(number).match(/^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i);
+  if(!match)return null;
+  let units=BigInt(match[2]+(match[3]||''))*(match[1]?-1n:1n),scale=(match[3]||'').length-Number(match[4]||0);
+  if(scale<0){units*=10n**BigInt(-scale);scale=0}
+  return{units,scale};
+}
+function decimalUnits(units,scale,places){
+  if(scale<=places)return units*10n**BigInt(places-scale);
+  const divisor=10n**BigInt(scale-places),negative=units<0n,absolute=negative?-units:units;
+  const rounded=absolute/divisor+(absolute%divisor*2n>=divisor?1n:0n);
+  return negative?-rounded:rounded;
+}
+function roundDecimal(value,places){
+  const parts=decimalParts(value);
+  return parts?Number(decimalUnits(parts.units,parts.scale,places))/10**places:NaN;
+}
+function roundMoney(value){return roundDecimal(value,2)}
+function articleAmount(row){
+  const quantity=decimalParts(n(row.cantidad)),price=decimalParts(n(row.precio));
+  if(!quantity||!price)return 0;
+  // El mismo orden que SQL: precio a 4 decimales, producto a 2, mitades hacia afuera.
+  const priceUnits=decimalUnits(price.units,price.scale,4);
+  return Number(decimalUnits(quantity.units*priceUnits,quantity.scale+4,2))/100;
+}
 function articleMargin(row){const cost=n(row.costoFinal);return cost>0?roundMoney((n(row.precio)/cost-1)*100):0}
 function recalculateArticle(row,changed){
   const base=n(row.precioBase),cost=n(row.costoFinal);
@@ -318,7 +343,7 @@ function fiscalQrPayload(data,receipt,company,type){
   const encoded=btoa(JSON.stringify(payload));
   return 'https://www.arca.gob.ar/fe/qr/?p='+encodeURIComponent(encoded);
 }
-function ensureBlanks(){const valid=articles.filter(r=>String(r?.idart||'').trim()),pending=articles.find(r=>!String(r?.idart||'').trim()&&(String(r?.codProv||'').trim()||String(r?.descripcion||'').trim()||n(r?.precio)>0||n(r?.cantidad)!==1||n(r?.descuento)>0))||articles.find(r=>!String(r?.idart||'').trim())||blankArticle();articles=[...valid,pending];if(!payments.length)payments.push(blankPayment('Efectivo',true));if(payments.length===1&&!paymentStarted(payments[0])&&payments[0].tipo==='Efectivo')payments[0].autoDifference=true}function totals(){let net=0,iva21=0,iva105=0,other=0,base=0;articles.forEach(r=>{if(!String(r.idart||'').trim()||n(r.cantidad)<=0)return;const gross=roundMoney(n(r.cantidad)*n(r.precio)),rate=n(r.iva),tax=rate>0?roundMoney(gross-gross/(1+rate/100)):0;base+=gross;net+=gross-tax;if(Math.abs(rate-21)<.01)iva21+=tax;else if(Math.abs(rate-10.5)<.01)iva105+=tax;else other+=tax});const adjustment=roundMoney(payments.reduce((a,r)=>a+n(r.impRec),0)),paid=roundMoney(payments.reduce((a,r)=>a+n(r.importe)+n(r.impRec),0)),total=roundMoney(base+adjustment);return{net:roundMoney(net),iva21:roundMoney(iva21),iva105:roundMoney(iva105),other:roundMoney(other),base:roundMoney(base),adjustment,total,paid,difference:roundMoney(paid-total)}}
+function ensureBlanks(){const valid=articles.filter(r=>String(r?.idart||'').trim()),pending=articles.find(r=>!String(r?.idart||'').trim()&&(String(r?.codProv||'').trim()||String(r?.descripcion||'').trim()||n(r?.precio)>0||n(r?.cantidad)!==1||n(r?.descuento)>0))||articles.find(r=>!String(r?.idart||'').trim())||blankArticle();articles=[...valid,pending];if(!payments.length)payments.push(blankPayment('Efectivo',true));if(payments.length===1&&!paymentStarted(payments[0])&&payments[0].tipo==='Efectivo')payments[0].autoDifference=true}function totals(){let net=0,iva21=0,iva105=0,other=0,base=0;articles.forEach(r=>{if(!String(r.idart||'').trim()||n(r.cantidad)<=0)return;const gross=articleAmount(r),rate=n(r.iva),tax=rate>0?roundMoney(gross-gross/(1+rate/100)):0;base+=gross;net+=gross-tax;if(Math.abs(rate-21)<.01)iva21+=tax;else if(Math.abs(rate-10.5)<.01)iva105+=tax;else other+=tax});const adjustment=roundMoney(payments.reduce((a,r)=>a+n(r.impRec),0)),paid=roundMoney(payments.reduce((a,r)=>a+n(r.importe)+n(r.impRec),0)),total=roundMoney(base+adjustment);return{net:roundMoney(net),iva21:roundMoney(iva21),iva105:roundMoney(iva105),other:roundMoney(other),base:roundMoney(base),adjustment,total,paid,difference:roundMoney(paid-total)}}
 const articlePhotoCache=new Map();
 let focusedArticleIndex=-1,articlePhotoRequest=0;
 function closeArticlePhoto(){
@@ -385,7 +410,7 @@ function renderArticles(){
   const body=$('#articleBody');
   body.innerHTML='';
   articles.forEach((r,i)=>{
-    const sub=n(r.cantidad)*n(r.precio),tr=document.createElement('tr');
+    const sub=articleAmount(r),tr=document.createElement('tr');
     tr.dataset.row=i;
     tr.innerHTML=`<td class="row-selector" data-row-select="${i}">›</td><td><input data-a="idart" data-row="${i}" data-col="0" value="${esc(r.idart)}"></td><td><input data-a="codProv" data-row="${i}" data-col="1" value="${esc(r.codProv)}"></td><td class="description-cell"><input data-a="descripcion" data-row="${i}" data-col="2" autocomplete="off" placeholder="Buscar artículo…" value="${esc(r.descripcion)}"><button class="combo-toggle" data-open-description="${i}" type="button" tabindex="-1" aria-label="Desplegar artículos">▼</button></td><td><input class="money" data-number data-a="cantidad" data-row="${i}" data-col="3" inputmode="decimal" value="${num(r.cantidad)}"></td><td><input class="money" data-money data-a="precio" data-row="${i}" data-col="4" inputmode="decimal" value="${money(r.precio)}"></td><td><input class="money stock-field" data-number data-a="stock" data-row="${i}" data-col="5" tabindex="-1" value="${num(r.stock)}" readonly></td><td><input class="money" data-number data-percent data-a="margen" data-row="${i}" data-col="6" inputmode="decimal" value="${n(r.costoFinal)>0?num(articleMargin(r))+' %':'—'}" ${n(r.costoFinal)>0?'':'disabled title="Sin costo de compra"'}></td><td><input class="money" data-number data-percent data-a="descuento" data-row="${i}" data-col="7" inputmode="decimal" value="${num(r.descuento)} %"></td><td><input class="money" data-money data-a="importe" data-row="${i}" data-col="8" inputmode="decimal" value="${money(sub)}"></td><td><button class="remove" data-remove-a="${i}" type="button">×</button></td>`;
     body.appendChild(tr);
@@ -423,7 +448,7 @@ function bindArticleRows(){
       }
       if(['cantidad','precio','margen','descuento'].includes(key)){
         const amount=$(`#articleBody [data-row="${el.dataset.row}"][data-a="importe"]`);
-        if(amount)amount.value=money(n(r.cantidad)*n(r.precio));
+        if(amount)amount.value=money(articleAmount(r));
       }
       if(['idart','codProv','descripcion'].includes(key))showSuggestions(el);
       else renderTotals();
@@ -2194,6 +2219,15 @@ async function issue(){
   if(!recoveryPending&&!paymentRulesReady){
     const message='No se pudieron verificar las reglas de medios de pago. Revisá la conexión con Configuración antes de emitir.';
     setMsg(message,'error');alert(message);return;
+  }
+  if(!recoveryPending){
+    renderTotals();
+    const currentTotals=totals();
+    if(Math.abs(currentTotals.difference)>=.005){
+      const message=`Los valores recibidos (${money(currentTotals.paid)}) no coinciden con el total (${money(currentTotals.total)}). Diferencia: ${money(currentTotals.difference)}. Revisá los importes de Valores recibidos antes de confirmar.`;
+      setMsg(message,'error');alert(message);
+      $('#paymentBody [data-p="importe"]')?.focus();return;
+    }
   }
   const paymentProblem=recoveryPending?null:paymentRuleProblem();
   if(paymentProblem){
