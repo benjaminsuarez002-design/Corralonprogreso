@@ -4390,7 +4390,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.27"></script>
+<script src="corralon-system.js?v=1.0.28"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -11010,11 +11010,14 @@ function imprimirEtiquetasCarrito() {
       if (!window.jspdf?.jsPDF) throw new Error('No se pudo cargar el generador de PDF. Recargá la página e intentá nuevamente.');
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a5' });
-    doc.setProperties({ title: 'Etiquetas de precio', subject: 'A5 horizontal · etiquetas de 5 × 3 cm' });
+    doc.setProperties({ title: 'Etiquetas de precio', subject: 'A5 horizontal · etiquetas con margen de impresión' });
     const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    // A5 horizontal: 210 × 148 mm; 4 columnas y 4 filas de 50 × 30 mm.
-    const left = (doc.internal.pageSize.getWidth() - 200) / 2;
-    const top = (doc.internal.pageSize.getHeight() - 120) / 2;
+    // Cuatro columnas dentro del margen de impresión, con 3 cm de alto.
+    const gap = 3 * 25.4 / 96; // 3 px expresados en milímetros.
+    const left = 7.5;
+    const labelWidth = (doc.internal.pageSize.getWidth() - 2 * left - 3 * gap) / 4;
+    const contentWidth = labelWidth - 4;
+    const top = (doc.internal.pageSize.getHeight() - (120 + 3 * gap)) / 2;
     let index = 0;
     function fittedText(value, maxSize, minSize, width) {
       let size = maxSize;
@@ -11029,11 +11032,11 @@ function imprimirEtiquetasCarrito() {
       for (let copy = 0; copy < item.cantidad; copy++, index++) {
         if (index && index % 16 === 0) doc.addPage('a5', 'landscape');
         const cell = index % 16;
-        const x = left + (cell % 4) * 50;
-        const y = top + Math.floor(cell / 4) * 30;
+        const x = left + (cell % 4) * (labelWidth + gap);
+        const y = top + Math.floor(cell / 4) * (30 + gap);
         doc.setDrawColor(130);
         doc.setLineWidth(0.15);
-        doc.rect(x, y, 50, 30);
+        doc.rect(x, y, labelWidth, 30);
         doc.setTextColor(0);
         doc.setFont('helvetica', 'bold');
         const description = String(item.nombre).trim().replace(/\s+/g, ' ').toLocaleUpperCase('es-AR');
@@ -11041,20 +11044,20 @@ function imprimirEtiquetasCarrito() {
         let lines;
         do {
           doc.setFontSize(size);
-          lines = doc.splitTextToSize(description, 46);
+          lines = doc.splitTextToSize(description, contentWidth);
           if (lines.length * size * 0.3528 * 1.05 <= 17) break;
           size -= 0.25;
         } while (size > 4);
         doc.text(lines, x + 2, y + 2, { baseline: 'top', lineHeightFactor: 1.05 });
         const code = String(item.codigo);
-        fittedText(code, 9, 5, 46);
-        doc.text(code, x + 2, y + 26.5, { maxWidth: 46 });
-        const codeWidth = Math.min(46, doc.getTextWidth(code));
+        fittedText(code, 9, 5, contentWidth);
+        doc.text(code, x + 2, y + 26.5, { maxWidth: contentWidth });
+        const codeWidth = Math.min(contentWidth, doc.getTextWidth(code));
         const price = money.format(item.precio).replace(/\s/g, ' ');
         // El precio comparte el renglón inferior con el ID; se ajusta sin recortar cifras.
-        const priceWidth = Math.max(15, 44 - codeWidth);
+        const priceWidth = Math.max(15, contentWidth - 2 - codeWidth);
         fittedText(price, 17, 5, priceWidth);
-        doc.text(price, x + 48, y + 26.5, { align: 'right', maxWidth: priceWidth });
+        doc.text(price, x + labelWidth - 2, y + 26.5, { align: 'right', maxWidth: priceWidth });
       }
     }
       const pdfUrl = URL.createObjectURL(doc.output('blob'));
