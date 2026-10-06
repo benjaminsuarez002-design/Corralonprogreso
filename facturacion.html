@@ -194,7 +194,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.24"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.25"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -1090,7 +1090,43 @@ function updateTrialButton(){
 function renderVoucherTypes(preferred){if(!sqlConfig)return;const point=Number($('#pos').value),types=sqlConfig.comprobantes.filter(x=>Number(x.idPuntoVenta)===point);$('#voucherType').innerHTML=types.map(x=>`<option value="${x.id}">${esc(x.codigo)} · ${esc(x.nombre)}</option>`).join('');const chosen=types.find(x=>String(x.id)===String(preferred))||types.find(x=>Number(x.id)===13)||types[0];if(chosen)$('#voucherType').value=String(chosen.id);refreshPaymentTypeOptions();markPaymentRuleProblems();updateTrialButton()}
 function applyData(d){paymentUndoHistory.length=0;paymentEditState=null;const station=workstation();issuedReceipt=d?.emision||null;draftId=d?.id||'';$('#branch').value=d?.sucursal||station.branch||'';$('#date').value=d?.fecha||today();$('#cae').value=d?.emision?.cae||d?.cae||'';$('#invoiceReference').value=d?.facturaAsociada||'';$('#seller').value=String((sqlConfig?.vendedores||[]).find(x=>String(x.id)===String(d?.vendedor||station.seller)||norm(x.nombre)===norm(d?.vendedor))?.id||'');const listaAnterior={minorista:'3',intermedio:'2',mayorista:'1'};$('#priceList').value=listaAnterior[d?.listaPrecios]||d?.listaPrecios||'3';$('#docType').value=d?.cliente?.tipoDocumento||'DNI';$('#docNumber').value=d?.cliente?.numeroDocumento||'';$('#customerName').value=customerUpper(d?.cliente?.nombre||'CONSUMIDOR FINAL');$('#customerName').dataset.idCliente=d?.idCliente||(norm(d?.cliente?.nombre||'CONSUMIDOR FINAL')==='consumidor final'?'1':'1');$('#customerTax').value=d?.cliente?.condicionIva||'Consumidor final';$('#customerPhone').value=d?.cliente?.telefono||'';$('#customerAddress').value=d?.cliente?.direccion||'';$('#customerEmail').value=d?.cliente?.email||'';$('#note').value=d?.nota||'';articles=(d?.uiArticulos||d?.articulos||[]).map(x=>({...blankArticle(),...x}));payments=(d?.uiValores||d?.valores||[]).map(x=>({...blankPayment(),...x,idTarjeta:Number(x.idTarjeta)||Number((sqlConfig?.tarjetas||[]).find(t=>norm(t.nombre)===norm(x.tarjeta))?.id)||0,coef:n(x.coef),impRec:n(x.impRec)}));renderArticles();renderPayments();lastSaved=d?structuredClone(d):null;$('#pos').value=String(d?.idPuntoVenta||(sqlConfig?.puntosVenta||[]).find(x=>String(x.id)===String(d?.puntoVenta)||norm(x.nombre)===norm(d?.puntoVenta))?.id||station.pos||'');renderVoucherTypes(d?.idComprobante||(sqlConfig?.comprobantes||[]).find(x=>norm(x.nombre)===norm(d?.tipoComprobante))?.id||13);lockIssued();setMsg(issuedReceipt?'Comprobante emitido en SQL. Podés reimprimirlo.':d?'Borrador cargado.':'Nuevo comprobante.','ok')}
 const applyDataOriginal=applyData;
-applyData=function(d){
+const INTERRUPTED_SALES_KEY='corralon_facturacion_resguardo_v1';
+function interruptedSales(){try{return JSON.parse(localStorage.getItem(INTERRUPTED_SALES_KEY)||'{}')}catch{return {}}}
+function mergeInterruptedSales(list){
+  const merged=new Map(list.map(d=>[d.id,d]));
+  for(const backup of Object.values(interruptedSales())){
+    if(!backup?.id||!backup.interrupted||!Array.isArray(backup.articulos))continue;
+    const existing=merged.get(backup.id);
+    if(!existing||(!existing.emision&&Number(backup.updatedAt)>Number(existing.updatedAt)))merged.set(backup.id,backup);
+  }
+  return [...merged.values()].sort((a,b)=>b.updatedAt-a.updatedAt);
+}
+function preserveInterruptedSale(next,discard=false){
+  if(discard||saleSwitchBusy||issuedReceipt||recoveryPending||(draftId&&next?.id===draftId))return;
+  const hasContent=articles.some(row=>String(row.idart||row.codProv||row.descripcion||'').trim())||payments.some(paymentStarted)||String($('#note').value||'').trim()||(String($('#customerName').value||'').trim()&&norm($('#customerName').value)!=='consumidor final');
+  if(!hasContent)return;
+  const snapshot={...formData(),uiArticulos:structuredClone(articles),uiValores:structuredClone(payments),interrupted:true};
+  // Capturar antes de cambiar la pantalla conserva incluso las filas incompletas.
+  try{
+    const backups=interruptedSales();backups[snapshot.id]=snapshot;
+    localStorage.setItem(INTERRUPTED_SALES_KEY,JSON.stringify(backups));
+  }catch(error){
+    setMsg('No hay espacio para resguardar la venta. Se conserva en pantalla.','error');
+    throw new Error('No se reemplazó la venta porque no se pudo guardar su resguardo.');
+  }
+  putDraft(snapshot).then(async()=>{
+    const backups=interruptedSales();
+    if(backups[snapshot.id]?.updatedAt===snapshot.updatedAt){delete backups[snapshot.id];try{localStorage.setItem(INTERRUPTED_SALES_KEY,JSON.stringify(backups))}catch{}}
+    await refreshPendingButton();
+  }).catch(error=>{
+    console.error('No se pudo resguardar la venta interrumpida:',error);
+    refreshPendingButton().catch(console.warn);
+    setMsg('La venta quedó resguardada en Pendientes. No se pudo actualizar el archivo local de borradores.','error');
+  });
+}
+function pendingLocalSale(draft){return !draft.emision&&(draft.recoveryPending||(draft.interrupted&&draft.id!==draftId))}
+applyData=function(d,{discard=false}={}){
+  preserveInterruptedSale(d,discard);
   draftViewRevision++;
   clearTimeout(saveTimer);
   recoveryPending=Boolean(d?.recoveryPending);recoveryCanRetry=false;
@@ -1130,17 +1166,31 @@ function putDraft(data){
   draftWriteQueue=task.catch(()=>{});
   return task;
 }
-async function allDrafts(){const database=await openDB();return new Promise((resolve,reject)=>{const req=database.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>{database.close();resolve(req.result.sort((a,b)=>b.updatedAt-a.updatedAt))};req.onerror=()=>reject(req.error)})}async function deleteDraft(id){const database=await openDB();return new Promise((resolve,reject)=>{const tx=database.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>{database.close();resolve()};tx.onerror=()=>reject(tx.error)})}
+async function allDrafts(){const database=await openDB();return new Promise((resolve,reject)=>{const req=database.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>{database.close();resolve(mergeInterruptedSales(req.result))};req.onerror=()=>reject(req.error)})}async function deleteDraft(id){const database=await openDB();return new Promise((resolve,reject)=>{const tx=database.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>{database.close();resolve()};tx.onerror=()=>reject(tx.error)})}
 async function saveDraft(silent=false){const data={...formData(),uiArticulos:structuredClone(articles),uiValores:structuredClone(payments)};draftId=data.id;rememberActiveDraft(data.id);const stored=await putDraft(data);if(draftId!==data.id)return;
 if(stored?.emision&&!issuedReceipt){recoveryPending=true;lockIssued();setRecoveryAlert('Esta venta ya figura emitida en la copia local. Verificando SQL antes de habilitarla.');await verifyRecovery();return}
 lastSaved=structuredClone(stored||data);if(!silent)setMsg('Borrador guardado localmente.','ok')}function scheduleDraft(){if(issuedReceipt)return;draftViewRevision++;clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft(true).catch(console.warn),700)}async function showDrafts(){const list=await allDrafts(),box=$('#draftList');box.innerHTML=list.length?list.map(d=>`<div class="draft"><div><strong>${esc(d.emision?.numero||d.tipoComprobante)} · ${esc(customerUpper(d.cliente?.nombre||'Sin cliente'))}</strong><small>${d.emision?'EMITIDO · ':''}${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)}</small></div><button data-open-draft="${d.id}">Abrir</button><button data-delete-draft="${d.id}">${d.emision?'Quitar de esta PC':'Eliminar borrador'}</button></div>`).join(''):'<div class="empty">No hay borradores.</div>';$('#draftModal').classList.add('open');$$('[data-open-draft]').forEach(b=>b.addEventListener('click',async()=>{const d=list.find(x=>x.id===b.dataset.openDraft);applyData(d);closeDraftModal()}));$$('[data-delete-draft]').forEach(b=>b.addEventListener('click',async()=>{if(b.dataset.deleteDraft===draftId)applyData(null);await deleteDraft(b.dataset.deleteDraft);showDrafts()}))}
 showDrafts=async function(){
-  const drafts=(await allDrafts()).filter(d=>d.recoveryPending&&!d.emision);
-  $('#draftList').innerHTML=drafts.length?drafts.map(d=>`<div class="draft"><div><strong>${esc(d.tipoComprobante||'Comprobante')} · ${esc(customerUpper(d.cliente?.nombre||'Sin cliente'))}</strong><small>${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)} · Pendiente de verificar</small></div><button data-open-draft="${d.id}" type="button">Abrir</button></div>`).join(''):'<div class="empty">No hay emisiones pendientes.</div>';
+  const drafts=(await allDrafts()).filter(pendingLocalSale);
+  $('#draftList').innerHTML=drafts.length?drafts.map(d=>`<div class="draft"><div><strong>${esc(d.tipoComprobante||'Comprobante')} · ${esc(customerUpper(d.cliente?.nombre||'Sin cliente'))}</strong><small>${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)} · ${d.recoveryPending?'Pendiente de verificar':'Venta interrumpida · lista para retomar'}</small></div><button data-open-draft="${d.id}" type="button">Abrir</button></div>`).join(''):'<div class="empty">No hay ventas pendientes.</div>';
   $('#draftModal').classList.add('open');
-  $$('[data-open-draft]').forEach(button=>button.addEventListener('click',()=>{if(!sqlConfig){setMsg('La venta sigue guardada. Esperá a que vuelva SQL para abrirla.','error');return}const draft=drafts.find(d=>d.id===button.dataset.openDraft);if(draft){applyData(draft);closeDraftModal()}}));
+  $$('[data-open-draft]').forEach(button=>button.addEventListener('click',async()=>{
+    if(issueInProgress||printInProgress||saleSwitchBusy||creditCheckInProgress)return;
+    if(!sqlConfig){setMsg('La venta sigue guardada. Esperá a que vuelva SQL para abrirla.','error');return}
+    const draft=drafts.find(d=>d.id===button.dataset.openDraft);if(!draft)return;
+    const revision=draftViewRevision;
+    button.disabled=true;
+    try{
+      const selected=await prepareRestoredDraft(draft);
+      if(draftViewRevision!==revision||issueInProgress||printInProgress||saleSwitchBusy)return;
+      const openIndex=saleIds.indexOf(selected.id);
+      if(openIndex>=0&&openIndex!==saleIndex){await changeSale(openIndex);closeDraftModal();return}
+      applyData(selected);closeDraftModal();await saveDraft(true);
+    }catch(error){setMsg(`No se pudo retomar la venta: ${error.message}`,'error')}
+    finally{button.disabled=false}
+  }));
 };
-async function refreshPendingButton(){const count=(await allDrafts()).filter(d=>d.recoveryPending&&!d.emision).length;$('#openDrafts').hidden=count===0;$('#openDrafts').textContent=`Pendientes (${count})`}
+async function refreshPendingButton(){const count=(await allDrafts()).filter(pendingLocalSale).length;$('#openDrafts').hidden=count===0;$('#openDrafts').textContent=`Pendientes (${count})`}
 const saveDraftOriginal=saveDraft;
 saveDraft=async function(silent=false){await saveDraftOriginal(silent);await refreshPendingButton()};
 async function loadConfig(){
@@ -2443,7 +2493,7 @@ $('#addSale').addEventListener('click',()=>changeSale(0,true));
 $('#previousSale').addEventListener('click',()=>changeSale(saleIndex-1));
 $('#nextSale').addEventListener('click',()=>changeSale(saleIndex+1));
 updateSaleNavigation();
-$('#newInvoice').addEventListener('click',async()=>{if(saleSwitchBusy||issueInProgress||creditCheckInProgress||printInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true);Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()])});
+$('#newInvoice').addEventListener('click',async()=>{if(saleSwitchBusy||issueInProgress||creditCheckInProgress||printInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null,{discard:true});await saveDraft(true);Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()])});
 $('#continueNewInvoice').addEventListener('click',async()=>{if(issueInProgress||!sqlConfig||!localDraftStoreReady)return;applyData(null);await saveDraft(true);Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()])});
 $('#openDrafts').addEventListener('click',()=>showDrafts().catch(error=>setMsg(error.message,'error')));
 $('#closeDrafts').addEventListener('click',closeDraftModal);
