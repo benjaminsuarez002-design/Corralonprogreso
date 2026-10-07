@@ -7422,7 +7422,8 @@
         import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
         import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')
       ]).then(([appModule, firestoreModule]) => {
-        const app = appModule.getApps().length ? appModule.getApp() : appModule.initializeApp(FIREBASE_CONFIG);
+        const app = appModule.getApps().find(candidate => candidate.options?.projectId === FIREBASE_CONFIG.projectId)
+          || appModule.initializeApp(FIREBASE_CONFIG, 'corralon-shared');
         const firestore = firestoreModule.getFirestore(app);
         return { ...firestoreModule, ref: firestoreModule.doc(firestore, 'configuracion', 'listas_proveedores') };
       }).catch(error => { sdkPromise = null; throw error; });
@@ -7610,7 +7611,8 @@
         import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
         import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')
       ]);
-      const app = appModule.getApps().length ? appModule.getApp() : appModule.initializeApp(FIREBASE_CONFIG);
+      const app = appModule.getApps().find(candidate => candidate.options?.projectId === FIREBASE_CONFIG.projectId)
+          || appModule.initializeApp(FIREBASE_CONFIG, 'corralon-shared');
       const firestore = firestoreModule.getFirestore(app);
       return firestoreModule.onSnapshot(
         firestoreModule.doc(firestore, 'configuracion', 'version_web'),
