@@ -99,6 +99,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const uuid = () => globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,char=>{const random=Math.floor(Math.random()*16);return (char==='x'?random:random&3|8).toString(16);});
   let user, options, ready=false, busy=false, customer=0, invoices=[], invoiceChoices=[], values=[], selectedInvoice=-1, rowBindings=[], confirmed=null, pending=null, requestSequence=0;
   const headerCombos={};
+  const billingWorkstationKey='facturacion_puesto_v1';
+  let billingPoint=new URLSearchParams(location.search).get('puntoVenta');
+  function billingDefaultPoint(){
+    let station;try{station=JSON.parse(localStorage.getItem(billingWorkstationKey)||'{}');}catch(_){}
+    const id=String(billingPoint||station?.pos||'');
+    return options.puntosVenta.some(point=>String(point.id)===id)?id:String(options.puntosVenta[0]?.id||'');
+  }
+  window.addEventListener('storage',event=>{if(event.key===billingWorkstationKey){try{billingPoint=JSON.parse(event.newValue||'{}').pos||null;}catch(_){billingPoint=null;}}});
   const key = () => `corralon_recibos_cobro_v1:${user.id}`;
   function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
   async function api(params={},payload=null){
@@ -211,8 +219,9 @@ document.addEventListener('DOMContentLoaded', () => {
     try{
       options=await api({consulta:'opciones'});
       $('point').innerHTML=options.puntosVenta.map(item=>`<option value="${Number(item.id)}">${item.id} · ${esc(item.nombre)}</option>`).join('');
+      $('point').value=billingDefaultPoint();
       let saved;try{saved=JSON.parse(localStorage.getItem(key())||'null');}catch(_){}
-      if(saved&&options.puntosVenta.some(item=>String(item.id)===String(saved.point))){$('point').value=saved.point;customer=Number(saved.customer)||0;invoices=saved.invoices||[];values=saved.values?.length?saved.values:[blankValue()];$('date').value=saved.date||dateText(today());$('note').value=saved.note||'';pending=saved.pending||null;}
+      if(saved&&(saved.pending||saved.customer||saved.invoices?.length||saved.values?.some(row=>Number(row.importe))||saved.note)&&options.puntosVenta.some(item=>String(item.id)===String(saved.point))){$('point').value=saved.point;customer=Number(saved.customer)||0;invoices=saved.invoices||[];values=saved.values?.length?saved.values:[blankValue()];$('date').value=saved.date||dateText(today());$('note').value=saved.note||'';pending=saved.pending||null;}
       else{values=[blankValue()];$('date').value=dateText(today());}
       syncCustomer();
       for(const [field,property] of [['customer','nombre'],['customerId','id'],['document','documento']]){
@@ -240,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addValue').onclick=()=>{if(busy||pending||confirmed)return;values.push(blankValue());render();save();$('values').lastElementChild.querySelector('input').focus();};
   $('note').addEventListener('input',save);$('date').addEventListener('change',save);$('point').addEventListener('change',()=>{invoices=[];invoiceChoices=[];requestSequence++;selectedInvoice=-1;render();save();if(customer)refreshBalance().catch(()=>{});});
   $('loadInvoices').onclick=loadInvoices;$('confirm').onclick=confirmReceipt;$('consult').onclick=history;$('viewReceipts').onclick=history;$('account').onclick=account;$('billing').onclick=()=>window.open('facturacion.html','_blank');
-  $('cancel').onclick=()=>{if(busy||pending)return;if(!confirmed&&(invoices.length||values.some(row=>row.importe))&&!confirm('¿Descartar este recibo sin confirmar?'))return;confirmed=null;customer=0;invoices=[];invoiceChoices=[];requestSequence++;values=[blankValue()];selectedInvoice=-1;syncCustomer();$('number').value='';$('balance').value='';$('note').value='';$('date').value=dateText(today());localStorage.removeItem(key());render();save();status('Nuevo recibo listo.');};
+  $('cancel').onclick=()=>{if(busy||pending)return;if(!confirmed&&(invoices.length||values.some(row=>row.importe))&&!confirm('¿Descartar este recibo sin confirmar?'))return;confirmed=null;$('point').value=billingDefaultPoint();customer=0;invoices=[];invoiceChoices=[];requestSequence++;values=[blankValue()];selectedInvoice=-1;syncCustomer();$('number').value='';$('balance').value='';$('note').value='';$('date').value=dateText(today());localStorage.removeItem(key());render();save();status('Nuevo recibo listo.');};
   $('historyBody').addEventListener('click',event=>{const button=event.target.closest('[data-receipt]');if(button)showReceipt(Number(button.dataset.receipt)).catch(error=>status(error.message,true));});
   $('viewInvoice').onclick=async()=>{
     const row=invoices[selectedInvoice];
