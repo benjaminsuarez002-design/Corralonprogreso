@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.35"></script>
+<script src="corralon-system.js?v=1.0.36"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -4754,16 +4754,22 @@ async function confirmStockIngreso() {
     const data=pending?.status==='uncertain' ? JSON.parse(pending.fingerprint) : stockIngresoData(), fingerprint=JSON.stringify(data);
     if (!pending || pending.fingerprint !== fingerprint) pending={id:stockIngresoUuid(),fingerprint,status:'draft',presupuestosWeb:[...new Set(rowsData.filter(row=>!isBlankStockRow(row)).map(row=>row.presupuestoWeb).filter(Boolean))]};
     stockIngresoBusy=true; stockFreeze(true); stockIngresoMessage('Verificando y confirmando el movimiento en SQL…');
+    CorralonSystem.articleSync.set('syncing', 'Verificando el movimiento en SQL…');
     const request={...data,id:pending.id};
     const preview=await stockIngresoCall(request,'previsualizar');
     const hasDocument = Number(data.idFactura)>0 || [data.numeroFactura,data.numeroRemito].some(value=>String(value||'').replace(/[^a-z0-9]/gi,'').replace(/^0+$/,'').length>0);
     const documentWarning = hasDocument ? '' : 'Este movimiento no tiene factura ni remito vinculado.\nPodés continuar igualmente.\n\n';
-    if (!preview.yaCargado && !(await htmlNotice(`${documentWarning}¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${data.articulos.length} artículos · Total ${money(preview.total)}`))) return;
+    if (!preview.yaCargado && !(await htmlNotice(`${documentWarning}¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${data.articulos.length} artículos · Total ${money(preview.total)}`))) {
+      CorralonSystem.articleSync.set('success', 'Confirmación cancelada · Movimiento sin guardar');
+      return;
+    }
     pending.status='uncertain'; localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));
+    CorralonSystem.articleSync.set('syncing', 'Confirmando el movimiento y actualizando el stock…');
     const result=preview.yaCargado ? preview : await stockIngresoCall(request,'confirmar');
     pending.status='confirmed';pending.numeroMovimiento=result.numeroMovimiento;pending.idRecibo=result.idRecibo;pending.resultado=result.articulos;localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));
     stockConfirmed=true; stockField('stockNumero').value=String(result.numeroMovimiento);
     confirmedNumber=result.numeroMovimiento;
+    CorralonSystem.articleSync.set('syncing', `Movimiento Nº ${result.numeroMovimiento} guardado · Actualizando los datos…`);
     try { await stockResolveConfirmedBudgets(pending.presupuestosWeb || []); }
     catch (error) { console.warn('Movimiento confirmado; notificación pendiente de sincronización', error); budgetResolutionWarning = '\nNo se pudo marcar el presupuesto como resuelto en el menú. Se reintentará al abrir Importar presupuesto web.'; }
     result.articulos.forEach(line=> { const row=rowsData.find(r=>r.idart===line.idart); if(row){row.stock=Number(line.stockDespues); row.cantidad=rawNumber(line.cantidad);row.precio=precioUnitarioDesdeFinal(row,line.precioUnitario);} });
@@ -4771,9 +4777,11 @@ async function confirmStockIngreso() {
     stockIngresoMessage(`Movimiento Nº ${result.numeroMovimiento} confirmado en SQL.`, 'ok');
     saveRows(); await stockRefreshSql();
     stockIngresoMessage(`Movimiento Nº ${result.numeroMovimiento} confirmado en SQL.`, 'ok');
+    CorralonSystem.articleSync.set('success', `Movimiento Nº ${result.numeroMovimiento} confirmado`);
   } catch(error) {
     if(error.definitive){const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');if(pending && pending.status==='uncertain'){pending.status='draft';localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));}}
     stockIngresoMessage(error.message,'error');
+    CorralonSystem.articleSync.set('error', error.message || 'No se pudo confirmar el movimiento');
   }
   finally { stockIngresoBusy=false; stockFreeze(stockConfirmed); }
   if(confirmedNumber!==null){
@@ -4924,6 +4932,12 @@ function stockRenderConsult() {
     panel.querySelectorAll('[data-stock-view]').forEach(button=>button.onclick=()=>stockOpenMovementPopup(Number(button.dataset.stockView)));
     panel.querySelector('#stockConsultMore')?.addEventListener('click',()=>stockLoadConsult(true));
     const form=panel.querySelector('form');
+    const movementTypes=stockSqlMeta?.tiposMovimiento||[];
+    const checkedTypes=new Set(String(filters.tipos||'').split(','));
+    form.querySelector('button[type="submit"]').insertAdjacentHTML('beforebegin',
+      `<details style="position:relative;min-width:210px"><summary style="cursor:pointer;padding:8px;border:1px solid #bbb;border-radius:6px">Tipo de comprobante</summary><div style="position:absolute;top:100%;left:0;min-width:300px;max-height:260px;overflow:auto;background:white;border:1px solid #bbb;padding:10px;z-index:100;box-shadow:0 4px 12px #0003"><label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="stockConsultAllTypes" ${!filters.tipos?'checked':''}>Todos</label>${movementTypes.map(item=>`<label style="display:flex;gap:7px;align-items:center;margin-top:5px"><input type="checkbox" data-stock-consult-type value="${Number(item.id)}" ${!filters.tipos||checkedTypes.has(String(item.id))?'checked':''}>${escapeHtml(item.codigo||'')} · ${escapeHtml(item.nombre)}</label>`).join('')}</div></details><label>Nº factura o remito<input id="stockConsultNumber" type="text" autocomplete="off" placeholder="Número completo o parcial" value="${escapeHtml(filters.buscar||'')}"></label>`);
+    stockField('stockConsultAllTypes').addEventListener('change',event=>form.querySelectorAll('[data-stock-consult-type]').forEach(check=>{check.checked=event.target.checked;}));
+    form.querySelectorAll('[data-stock-consult-type]').forEach(check=>check.addEventListener('change',()=>{stockField('stockConsultAllTypes').checked=[...form.querySelectorAll('[data-stock-consult-type]')].every(item=>item.checked);}));
     form.addEventListener('submit',event=>{event.preventDefault();stockApplyConsultFilters();});
     form.querySelectorAll('input').forEach(field=>field.addEventListener('input',()=>field.setCustomValidity('')));
     FX.bindFieldRestore({root:form,capture:true});
@@ -4942,7 +4956,11 @@ function stockApplyConsultFilters(){
   if(dates[0]>dates[1]){const field=stockField('stockConsultTo');field.setCustomValidity('Hasta debe ser igual o posterior a Desde.');field.reportValidity();return;}
   const provider=stockConsultProviderCombo?.getValue();
   if(provider==null){const field=stockField('stockConsultProvider');field.setCustomValidity('Seleccioná un proveedor de la lista.');field.reportValidity();return;}
-  stockConsultFilters={desde:dates[0],hasta:dates[1],proveedor:provider};
+  const selectedTypes=[...stockField('stockConsultPanel').querySelectorAll('[data-stock-consult-type]:checked')].map(check=>check.value);
+  // La transferencia seleccionada comprende la salida (57) y su entrada (58).
+  if (selectedTypes.includes('57') && !selectedTypes.includes('58')) selectedTypes.push('58');
+  const tipos=stockField('stockConsultAllTypes').checked?'':selectedTypes.join(',')||'0';
+  stockConsultFilters={desde:dates[0],hasta:dates[1],proveedor:provider,tipos,buscar:stockField('stockConsultNumber').value.trim()};
   return stockStartConsult();
 }
 async function stockLoadConsult(append=false){

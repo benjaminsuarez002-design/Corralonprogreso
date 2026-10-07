@@ -1686,7 +1686,7 @@
     const input = options.input, items = options.items || [];
     const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
     const wrapper = document.createElement('span');
-    wrapper.style.cssText = 'position:relative;display:block;min-width:200px';
+    wrapper.style.cssText = `position:relative;display:block;min-width:${options.minWidth ?? 200}px`;
     input.before(wrapper); wrapper.append(input);
     input.style.width = '100%'; input.style.paddingRight = '30px';
     input.autocomplete = 'off'; input.setAttribute('role', 'combobox'); input.setAttribute('aria-expanded', 'false');
@@ -1696,18 +1696,25 @@
     const menu = document.createElement('div'); menu.hidden = true; menu.setAttribute('role', 'listbox');
     menu.style.cssText = 'position:absolute;top:100%;left:0;min-width:100%;max-height:240px;overflow:auto;z-index:100;background:white;border:1px solid #bbb;box-shadow:0 4px 12px #0003';
     wrapper.append(toggle, menu);
-    let matches = [], active = 0;
+    if(options.fixedMenu)document.body.append(menu);
+    let matches = [], active = 0, selectedItem = items.find(item=>String(item.value)===String(options.selectedValue)) || null;
     const hide = () => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); };
     function mark() {
-      Array.from(menu.children).forEach((row, index) => { row.style.background = index === active ? '#ef1015' : 'white'; row.style.color = index === active ? 'white' : '#222'; row.setAttribute('aria-selected', String(index === active)); });
-      menu.children[active]?.scrollIntoView({ block: 'nearest' });
+      const rows=Array.from(menu.querySelectorAll('[data-index]'));
+      rows.forEach((row, index) => { row.style.background = index === active ? '#ef1015' : 'white'; row.style.color = index === active ? 'white' : '#222'; row.setAttribute('aria-selected', String(index === active)); });
+      rows[active]?.scrollIntoView({ block: 'nearest', inline:'nearest' });
     }
     function show(_, reason) {
+      if(options.fixedMenu){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,options.menuWidth||0),Math.max(1,window.innerWidth-16));menu.style.position='fixed';menu.style.top=rect.bottom+'px';menu.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';menu.style.width=width+'px';menu.style.minWidth=width+'px';menu.style.maxHeight=Math.max(80,Math.min(240,window.innerHeight-rect.bottom-10))+'px';}
       const query = reason === 'typing' || reason === 'typing-key' ? normalize(input.value) : '';
-      matches = items.filter(item => !query || normalize(item.label).includes(query) || normalize(item.value) === query);
+      matches = items.filter(item => !query || normalize(item.searchText||item.label).includes(query) || normalize(item.value) === query);
       active = 0; menu.replaceChildren();
+      const columns=options.columns||[],grid=columns.map(column=>`${column.width||100}px`).join(' '),gridWidth=columns.reduce((sum,column)=>sum+(column.width||100),20);
+      function fillColumns(row,cells){row.style.cssText=`display:grid;grid-template-columns:${grid};min-width:${gridWidth}px;padding:6px 10px;white-space:nowrap;font-size:12px;cursor:pointer`;cells.forEach((value,index)=>{const cell=document.createElement('span');cell.textContent=String(value??'');cell.title=cell.textContent;cell.style.cssText=`overflow:hidden;text-overflow:ellipsis;padding:0 5px;text-align:${columns[index]?.align||'left'}`;row.append(cell);});}
+      if(columns.length){const heading=document.createElement('div');fillColumns(heading,columns.map(column=>column.label));heading.style.cssText+=';position:sticky;top:0;z-index:1;background:#171717;color:white;font-weight:700;cursor:default';menu.append(heading);}
       matches.forEach((item, index) => {
-        const row = document.createElement('div'); row.textContent = item.label; row.setAttribute('role', 'option'); row.dataset.index = index; row.style.cssText = 'padding:7px 10px;white-space:nowrap;cursor:pointer'; menu.append(row);
+        const row = document.createElement('div'); row.setAttribute('role', 'option'); row.dataset.index = index;
+        if(columns.length)fillColumns(row,item.cells||[item.label]);else{row.textContent=item.label;row.style.cssText='padding:7px 10px;white-space:nowrap;cursor:pointer';}menu.append(row);
       });
       if (!matches.length) { const empty = document.createElement('div'); empty.textContent = 'Sin coincidencias'; empty.style.padding = '7px 10px'; menu.append(empty); }
       menu.hidden = false; input.setAttribute('aria-expanded', 'true'); mark();
@@ -1715,6 +1722,7 @@
     function pick() {
       if (!input.value.trim()) { hide(); return false; }
       const item = matches[active]; if (!item) return false;
+      selectedItem = item;
       input.value = item.label; input.setCustomValidity(''); hide(); input.dispatchEvent(new Event('change', { bubbles: true })); return true;
     }
     const bindings = bindDropdownOnlyWhenTyping({ root: wrapper, inputSelector: 'input', buttonSelector: 'button', show, hide, isOpen: () => !menu.hidden, advanceOnEnter: true,
@@ -1726,11 +1734,12 @@
       const row = event.target.closest('[data-index]'); if (!row) return;
       event.preventDefault(); active = Number(row.dataset.index); input.value = matches[active].label; pick(); input.focus();
     });
-    const outside = event => { if (!wrapper.contains(event.target)) hide(); };
+    const outside = event => { if (!wrapper.contains(event.target) && !menu.contains(event.target)) hide(); };
     document.addEventListener('pointerdown', outside);
     return {
-      getValue() { const query = normalize(input.value); if (!query) return options.emptyValue ?? ''; return items.find(item => normalize(item.label) === query || normalize(item.value) === query)?.value ?? null; },
-      destroy() { bindings.destroy(); document.removeEventListener('pointerdown', outside); }
+      setValue(value) { selectedItem = items.find(item=>String(item.value)===String(value)) || null; input.value=selectedItem?.label || ''; },
+      getValue() { const query = normalize(input.value); if (!query) return options.emptyValue ?? ''; if(selectedItem && normalize(selectedItem.label)===query)return selectedItem.value; return items.find(item => normalize(item.label) === query || normalize(item.value) === query)?.value ?? null; },
+      destroy() { bindings.destroy(); document.removeEventListener('pointerdown', outside); if(options.fixedMenu)menu.remove(); }
     };
   }
 
