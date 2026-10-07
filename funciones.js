@@ -261,7 +261,7 @@
       }
 
       if (event.key === 'Enter' && isOpen && isOpen(input) && pickActive) {
-        event.preventDefault();
+        if (options.advanceOnEnter !== true) event.preventDefault();
         if (suppressEnterAfterDelete && deletedInputs.has(input)) {
           deletedInputs.delete(input);
           hideDropdown(input, 'delete-enter', event);
@@ -1475,7 +1475,7 @@
     const root=options.root||document;
     const selector=options.selector||'input[type="number"],input[inputmode="decimal"],input[inputmode="numeric"],input[data-number-format],input[data-currency],input[data-money]';
     const states=new WeakMap();
-    const field=event=>{const input=states.has(event.target)?event.target:event.target?.closest?.(selector);return input&&!input.readOnly&&!input.disabled&&!input.matches('[type="date"],[type="tel"]')?input:null;};
+    const field=event=>{const input=states.has(event.target)?event.target:event.target?.closest?.(selector);return input&&!input.readOnly&&!input.disabled&&!input.matches('[type="date"],[type="tel"],[data-date],[data-number-expression="off"]')?input:null;};
     const hasExpression=value=>/[+xX×*/]/.test(String(value))||/\d\s*-/.test(String(value))||/^\s*-.*%/.test(String(value));
     function remember(event){const input=field(event);if(input)states.set(input,{base:input.type==='number'?Number(input.value):parseLocaleNumber(input.value),value:input.value,type:input.type});}
     function commit(input){
@@ -1668,6 +1668,72 @@
     return { clearSelection() { selected.clear(); paint(); }, finish };
   }
 
+  function bindFlexibleDates(options = {}) {
+    const root = options.root || document, selector = options.selector || '[data-date]';
+    root.querySelectorAll(selector).forEach(field => { field.dataset.date = ''; });
+    function normalize(event) {
+      const field = event.target;
+      if (!field.matches?.(selector) || (event.type === 'keydown' && !['Enter', 'Tab'].includes(event.key))) return;
+      const parsed = parseFechaFlexible(field.value);
+      if (parsed) { field.value = parsed.text; field.setCustomValidity(''); }
+    }
+    root.addEventListener('blur', normalize, true);
+    root.addEventListener('keydown', normalize, true);
+    return { destroy() { root.removeEventListener('blur', normalize, true); root.removeEventListener('keydown', normalize, true); } };
+  }
+
+  function bindTextDropdown(options = {}) {
+    const input = options.input, items = options.items || [];
+    const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const wrapper = document.createElement('span');
+    wrapper.style.cssText = 'position:relative;display:block;min-width:200px';
+    input.before(wrapper); wrapper.append(input);
+    input.style.width = '100%'; input.style.paddingRight = '30px';
+    input.autocomplete = 'off'; input.setAttribute('role', 'combobox'); input.setAttribute('aria-expanded', 'false');
+    const toggle = document.createElement('button');
+    toggle.type = 'button'; toggle.tabIndex = -1; toggle.textContent = '▾'; toggle.setAttribute('aria-label', 'Desplegar opciones');
+    toggle.style.cssText = 'position:absolute;right:2px;top:2px;bottom:2px;padding:0 7px;visibility:hidden';
+    const menu = document.createElement('div'); menu.hidden = true; menu.setAttribute('role', 'listbox');
+    menu.style.cssText = 'position:absolute;top:100%;left:0;min-width:100%;max-height:240px;overflow:auto;z-index:100;background:white;border:1px solid #bbb;box-shadow:0 4px 12px #0003';
+    wrapper.append(toggle, menu);
+    let matches = [], active = 0;
+    const hide = () => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); };
+    function mark() {
+      Array.from(menu.children).forEach((row, index) => { row.style.background = index === active ? '#ef1015' : 'white'; row.style.color = index === active ? 'white' : '#222'; row.setAttribute('aria-selected', String(index === active)); });
+      menu.children[active]?.scrollIntoView({ block: 'nearest' });
+    }
+    function show(_, reason) {
+      const query = reason === 'typing' || reason === 'typing-key' ? normalize(input.value) : '';
+      matches = items.filter(item => !query || normalize(item.label).includes(query) || normalize(item.value) === query);
+      active = 0; menu.replaceChildren();
+      matches.forEach((item, index) => {
+        const row = document.createElement('div'); row.textContent = item.label; row.setAttribute('role', 'option'); row.dataset.index = index; row.style.cssText = 'padding:7px 10px;white-space:nowrap;cursor:pointer'; menu.append(row);
+      });
+      if (!matches.length) { const empty = document.createElement('div'); empty.textContent = 'Sin coincidencias'; empty.style.padding = '7px 10px'; menu.append(empty); }
+      menu.hidden = false; input.setAttribute('aria-expanded', 'true'); mark();
+    }
+    function pick() {
+      if (!input.value.trim()) { hide(); return false; }
+      const item = matches[active]; if (!item) return false;
+      input.value = item.label; input.setCustomValidity(''); hide(); input.dispatchEvent(new Event('change', { bubbles: true })); return true;
+    }
+    const bindings = bindDropdownOnlyWhenTyping({ root: wrapper, inputSelector: 'input', buttonSelector: 'button', show, hide, isOpen: () => !menu.hidden, advanceOnEnter: true,
+      pickActive: pick, enterPicksFirst: false, moveActive: (_, step) => { active = Math.max(0, Math.min(matches.length - 1, active + step)); mark(); } });
+    wrapper.onmouseenter = () => { toggle.style.visibility = 'visible'; };
+    wrapper.onmouseleave = () => { toggle.style.visibility = 'hidden'; };
+    wrapper.addEventListener('focusout', event => { if (!wrapper.contains(event.relatedTarget)) hide(); });
+    menu.addEventListener('mousedown', event => {
+      const row = event.target.closest('[data-index]'); if (!row) return;
+      event.preventDefault(); active = Number(row.dataset.index); input.value = matches[active].label; pick(); input.focus();
+    });
+    const outside = event => { if (!wrapper.contains(event.target)) hide(); };
+    document.addEventListener('pointerdown', outside);
+    return {
+      getValue() { const query = normalize(input.value); if (!query) return options.emptyValue ?? ''; return items.find(item => normalize(item.label) === query || normalize(item.value) === query)?.value ?? null; },
+      destroy() { bindings.destroy(); document.removeEventListener('pointerdown', outside); }
+    };
+  }
+
   function bindFieldRestore(options = {}) {
     const root=options.root||document, selector=options.selector||'input,textarea,select', originals=new WeakMap();
     function remember(event){const field=event.target;if(field.matches?.(selector))originals.set(field,{value:field.value,checked:field.checked});}
@@ -1678,8 +1744,8 @@
       event.preventDefault();field.value=previous.value;if(field.type==='checkbox')field.checked=previous.checked;
       field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));field.select?.();
     }
-    root.addEventListener('focusin',remember);root.addEventListener('keydown',restore);
-    return {destroy(){root.removeEventListener('focusin',remember);root.removeEventListener('keydown',restore);}};
+    root.addEventListener('focusin',remember);root.addEventListener('keydown',restore,options.capture === true);
+    return {destroy(){root.removeEventListener('focusin',remember);root.removeEventListener('keydown',restore,options.capture === true);}};
   }
   function formatComprobanteNumber(value) {
     const text=String(value ?? '').trim();
@@ -1753,6 +1819,8 @@
     bindTableSort,
     bindResizableColumns,
     bindLinearNavigation,
+    bindFlexibleDates,
+    bindTextDropdown,
     parseLocaleNumber,
     evaluateNumericExpression,
     formatLocaleNumber,

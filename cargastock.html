@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.34"></script>
+<script src="corralon-system.js?v=1.0.35"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1403,6 +1403,13 @@ function isGreen(row) {
 function stockCostOptionsActive() {
   return Boolean(document.getElementById('stockCostOptions')?.open);
 }
+function stockUpdateSelectedArticlePrice(row, price) {
+  if (stockCostOptionsActive() && moneyNumber(row.precio)) return;
+  row.precio = precioUnitarioDesdeFinal(row, moneyNumber(price));
+  row.precioOriginal = 0;
+  row.precioDivisor = '';
+  row.precioMultiplicador = '';
+}
 document.getElementById('stockCostOptions').addEventListener('toggle', () => {
   stockRebuildArticleOptions();
   render();
@@ -1660,14 +1667,9 @@ function pickArticleProviderOption(index = articleProviderActive) {
   if (!row) return false;
   row.idart = item.source === 'proveedores' ? '' : String(item.idart || ''); row.stock = item.stock ?? null;
   row.idartManual = Boolean(row.idart);
-  if (cell.dataset.field !== 'descripcion' || !String(row.codigo || '').trim()) row.codigo = String(item.codProv || '').trim();
+  if (!stockCostOptionsActive() || cell.dataset.field !== 'descripcion' || !String(row.codigo || '').trim()) row.codigo = String(item.codProv || '').trim();
   row.descripcion = String(item.descripcion || '').trim();
-  if (!moneyNumber(row.precio)) {
-    row.precio = precioUnitarioDesdeFinal(row, moneyNumber(item.precioFinal || item.precioCosto || 0));
-    row.precioOriginal = 0;
-    row.precioDivisor = '';
-    row.precioMultiplicador = '';
-  }
+  stockUpdateSelectedArticlePrice(row, item.precioFinal || item.precioCosto || 0);
   commitCellEditSnapshot(cell);
   saveRows();
   closeArticleProviderList();
@@ -1699,12 +1701,7 @@ function applyExactProviderCode(cell) {
   row.idart = item.source === 'proveedores' ? '' : String(item.idart || ''); row.stock = item.stock ?? null;
   row.codigo = String(item.codProv || '').trim();
   row.descripcion = String(item.descripcion || '').trim();
-  if (!moneyNumber(row.precio)) {
-    row.precio = precioUnitarioDesdeFinal(row, moneyNumber(item.precioFinal || item.precioCosto || 0));
-    row.precioOriginal = 0;
-    row.precioDivisor = '';
-    row.precioMultiplicador = '';
-  }
+  stockUpdateSelectedArticlePrice(row, item.precioFinal || item.precioCosto || 0);
   commitCellEditSnapshot(cell);
   saveRows();
   render();
@@ -4625,7 +4622,7 @@ function stockCompleteIdArt(cell, focusQuantity = true){
   row.idartManual = true;
   cell.textContent=row.idart;
   row.descripcion=String(article.descripcion||'');row.stock=Number(article.stock||0);
-  if(!moneyNumber(row.precio))row.precio=precioUnitarioDesdeFinal(row,Number(article.precioCosto)||0);
+  stockUpdateSelectedArticlePrice(row, Number(article.precioCosto) || 0);
   if(row.conteo!=null)row.cantidad=rawNumber(Number(row.conteo)-row.stock);
   commitCellEditSnapshot(cell);closeArticleProviderList();render();saveRows();
   if (focusQuantity) focusNavigationTarget(editableCellAt(Number(cell.dataset.row),2));
@@ -4912,25 +4909,27 @@ window.addEventListener('storage', event => {
   if (event.key === stockInvoiceKey) stockReceiveInvoice();
 });
 let stockConsultFilters=null;
+let stockConsultProviderCombo=null;
 let stockConsultRequest=0,stockConsultMore=false,stockConsultTotal=0,stockConsultLoading=false;
 function stockRenderConsult() {
     const panel=stockField('stockConsultPanel'); panel.hidden=false;
     const filters=stockConsultFilters||{desde:stockToday(),hasta:stockToday(),proveedor:'0'};
     const dateText=value=>value.split('-').reverse().join('/');
-    const providerOptions=providers.map(item=>`<option value="${Number(CorralonSystem.providerIdentity.externalId(item))}" ${String(CorralonSystem.providerIdentity.externalId(item))===String(filters.proveedor)?'selected':''}>${escapeHtml(providerLabel(item))}</option>`).join('');
-    panel.innerHTML='<div class="stock-consult-title" style="gap:12px;flex-wrap:wrap"><span>Movimientos confirmados</span><button type="button" id="stockCloseConsult">Cerrar</button></div><form class="stock-consult-filters"><label>Desde<input id="stockConsultFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.desde)+'"></label><label>Hasta<input id="stockConsultTo" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.hasta)+'"></label><label>Proveedor<select id="stockConsultProvider"><option value="0">Todos los proveedores</option>'+providerOptions+'</select></label><button type="submit">Consultar</button></form><div class="stock-consult-grid"><div class="stock-consult-columns"><span>Fecha</span><span>Sucursal</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||item.sucursal||'—')}</span><span>${escapeHtml(item.nombre||'Movimiento de stock')}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>'+`<div style="padding:10px;display:flex;gap:12px;align-items:center"><span>${stockMovements.length} de ${stockConsultTotal} movimientos de todas las sucursales</span>${stockConsultMore?'<button id="stockConsultMore" type="button">Cargar más movimientos</button>':''}</div>`;
+    stockConsultProviderCombo?.destroy();
+    const providerOptions=[{value:'0',label:'Todos los proveedores'},...providers.map(item=>({value:String(CorralonSystem.providerIdentity.externalId(item)),label:providerLabel(item)}))];
+    const providerText=providerOptions.find(item=>item.value===String(filters.proveedor))?.label||'';
+    panel.innerHTML='<div class="stock-consult-title" style="gap:12px;flex-wrap:wrap"><span>Movimientos confirmados</span><button type="button" id="stockCloseConsult">Cerrar</button></div><form class="stock-consult-filters"><label>Desde<input id="stockConsultFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.desde)+'"></label><label>Hasta<input id="stockConsultTo" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.hasta)+'"></label><label>Proveedor<input id="stockConsultProvider" type="text" autocomplete="off" placeholder="Todos los proveedores" value="'+escapeHtml(providerText)+'"></label><button type="submit">Consultar</button></form><div class="stock-consult-grid"><div class="stock-consult-columns"><span>Fecha</span><span>Sucursal</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||item.sucursal||'—')}</span><span>${escapeHtml(item.nombre||'Movimiento de stock')}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>'+`<div style="padding:10px;display:flex;gap:12px;align-items:center"><span>${stockMovements.length} de ${stockConsultTotal} movimientos de todas las sucursales</span>${stockConsultMore?'<button id="stockConsultMore" type="button">Cargar más movimientos</button>':''}</div>`;
     if(!stockMovements.length) panel.insertAdjacentHTML('beforeend','<p>No hay movimientos confirmados.</p>');
     stockField('stockCloseConsult').onclick=()=>{panel.hidden=true;stockConsultRequest++;stockConsultLoading=false;};
     panel.querySelectorAll('[data-stock-view]').forEach(button=>button.onclick=()=>stockOpenMovementPopup(Number(button.dataset.stockView)));
     panel.querySelector('#stockConsultMore')?.addEventListener('click',()=>stockLoadConsult(true));
     const form=panel.querySelector('form');
     form.addEventListener('submit',event=>{event.preventDefault();stockApplyConsultFilters();});
-    form.querySelector('select').addEventListener('change',()=>stockApplyConsultFilters());
-    form.querySelectorAll('input').forEach(field=>{
-      field.addEventListener('input',()=>field.setCustomValidity(''));
-      field.addEventListener('blur',()=>{const parsed=FX.parseFechaFlexible(field.value);if(parsed){field.value=parsed.text;field.setCustomValidity('');}});
-    });
-    FX.bindLinearNavigation({root:form,selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
+    form.querySelectorAll('input').forEach(field=>field.addEventListener('input',()=>field.setCustomValidity('')));
+    FX.bindFieldRestore({root:form,capture:true});
+    FX.bindFlexibleDates({root:form,selector:'#stockConsultFrom,#stockConsultTo'});
+    stockConsultProviderCombo=FX.bindTextDropdown({input:stockField('stockConsultProvider'),items:providerOptions,emptyValue:'0'});
+    FX.bindLinearNavigation({root:form,selector:'input,button[type="submit"]',selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
 }
 function stockApplyConsultFilters(){
   const dates=['stockConsultFrom','stockConsultTo'].map(id=>{
@@ -4941,7 +4940,9 @@ function stockApplyConsultFilters(){
   });
   if(dates.some(date=>!date))return;
   if(dates[0]>dates[1]){const field=stockField('stockConsultTo');field.setCustomValidity('Hasta debe ser igual o posterior a Desde.');field.reportValidity();return;}
-  stockConsultFilters={desde:dates[0],hasta:dates[1],proveedor:stockField('stockConsultProvider').value};
+  const provider=stockConsultProviderCombo?.getValue();
+  if(provider==null){const field=stockField('stockConsultProvider');field.setCustomValidity('Seleccioná un proveedor de la lista.');field.reportValidity();return;}
+  stockConsultFilters={desde:dates[0],hasta:dates[1],proveedor:provider};
   return stockStartConsult();
 }
 async function stockLoadConsult(append=false){
@@ -5494,6 +5495,11 @@ el.rows.addEventListener('change', event => {
   row.idart=article?String(article.idart):'';
   row.idartManual = Boolean(article);
   row.stock=article?Number(article.stock||0):null;
+  if (article && !stockCostOptionsActive()) {
+    row.codigo = String(article.codProv || '').trim();
+    row.descripcion = String(article.descripcion || '').trim();
+    stockUpdateSelectedArticlePrice(row, article.precioFinal || article.precioCosto || 0);
+  }
   if(article && row.conteo!=null)row.cantidad=rawNumber(Number(row.conteo)-row.stock);
   render();saveRows();
 });
