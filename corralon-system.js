@@ -5671,16 +5671,16 @@
     }
 
     const singleProviderSyncs = new Map();
-    function syncSingleProviderJson(provider = '', providerId = '') {
+    function syncSingleProviderJson(provider = '', providerId = '', suppliedEntry = null) {
       const id = cleanId(providerId);
       const name = String(provider || '').replace(/^\s*\d+\s*[-–]\s*/, '').trim();
-      const key = id || name;
-      if (!key) return Promise.resolve([]);
+      const key = (id || name) + (suppliedEntry ? ':' + suppliedEntry.version : '');
+      if (!id && !name) return Promise.resolve([]);
       if (singleProviderSyncs.has(key)) return singleProviderSyncs.get(key);
       const task = (async () => {
         // Consult only this supplier; never advance the global version or cursor.
         const filter = id ? 'or=(id_proveedor.eq.' + encodeURIComponent(id) + ',previous_provider_ids.cs.%7B' + encodeURIComponent(id) + '%7D)' : 'proveedor=eq.' + encodeURIComponent(name);
-        const entries = currentProviderCacheEntries(await fetchProviderJsonTableRows(filter));
+        const entries = suppliedEntry ? [suppliedEntry] : currentProviderCacheEntries(await fetchProviderJsonTableRows(filter));
         if (entries.length > 1) throw new Error('Hay varias listas con ese nombre. Seleccioná el proveedor exacto.');
         const entry = providerJsonManifestEntries(providerJsonManifestFromTableRows(entries))[0];
         if (!entry) return readProviderArticlesCacheByProvider(id, name);
@@ -5691,6 +5691,7 @@
           req.onerror = () => reject(req.error);
         });
         const cached = await readProviderArticlesCacheByProvider(entry.id_proveedor, entry.proveedor);
+        if (Number(localProviderJsonManifest(local)[String(entry.id_proveedor)]?.version || 0) > Number(entry.version)) return cached;
         const overwrittenByFallback = (local.last_provider_updates || []).some(item => String(item.id_proveedor) === String(entry.id_proveedor) && !Number(item.version));
         const counts = await providerCacheCounts(database, [entry]);
         if (counts.get(String(entry.id_proveedor)) === Number(entry.total_articulos) && !overwrittenByFallback && !needsProviderJsonSync(entry, localProviderJsonManifest(local)) &&
@@ -5703,11 +5704,12 @@
         await new Promise((resolve, reject) => {
           const tx = database.transaction(['articulos', 'meta'], 'readwrite');
           const store = tx.objectStore('articulos');
-          queueProviderCacheReplacement(store, entry.id_proveedor, rows, entry.previous_provider_ids);
           const metaStore = tx.objectStore('meta');
           const metaReq = metaStore.get('principal');
           metaReq.onsuccess = () => {
             const current = metaReq.result || { id: 'principal' };
+            if (Number(localProviderJsonManifest(current)[String(entry.id_proveedor)]?.version || 0) > Number(entry.version)) return;
+            queueProviderCacheReplacement(store, entry.id_proveedor, rows, entry.previous_provider_ids);
             metaStore.put({ ...current, last_provider_updates: [
               ...(current.last_provider_updates || []).filter(item => String(item.id_proveedor) !== String(entry.id_proveedor)),
               { id_proveedor: String(entry.id_proveedor), proveedor: entry.proveedor, version: entry.version, updated_at: entry.updated_at }
@@ -5719,11 +5721,39 @@
           tx.onerror = () => reject(tx.error);
           tx.onabort = () => reject(tx.error || new Error('No se pudo guardar la lista'));
         });
-        return rows.map(normalizeProviderArticle).filter(item => item.descripcion || item.idart);
+        return readProviderArticlesCacheByProvider(entry.id_proveedor, entry.proveedor);
       })();
       singleProviderSyncs.set(key, task);
       task.finally(() => singleProviderSyncs.delete(key)).catch(() => {});
       return task;
+    }
+
+    async function providerListVersions() {
+      const database = await openListDb();
+      return new Promise((resolve, reject) => {
+        const req = database.transaction('meta').objectStore('meta').get('principal');
+        req.onsuccess = () => resolve(localProviderJsonManifest(req.result || {}));
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function syncProviderNotice(notice) {
+      const id = cleanId(notice?.providerId);
+      if (!id || !Number(notice.version) || !notice.manifestUrl) return null;
+      const database = await openListDb();
+      const local = await new Promise((resolve, reject) => {
+        const req = database.transaction('meta').objectStore('meta').get('principal');
+        req.onsuccess = () => resolve(req.result || {});
+        req.onerror = () => reject(req.error);
+      });
+      if (Number(localProviderJsonManifest(local)[id]?.version || 0) >= Number(notice.version)) {
+        return { entry: localProviderJsonManifest(local)[id], rows: await readProviderArticlesCacheByProvider(id, '') };
+      }
+      const response = await fetch(notice.manifestUrl, { cache: 'no-store' });
+      if (!response.ok) throw new Error('No se pudo descargar el índice de la lista');
+      const entry = (await response.json())?.providers?.[id];
+      if (!entry || Number(entry.version) !== Number(notice.version)) throw new Error('La versión del aviso no coincide con el JSON');
+      return { entry, rows: await syncSingleProviderJson(entry.proveedor, id, entry) };
     }
 
     async function syncProviderArticleBlocks(meta) {
@@ -6023,6 +6053,8 @@
       loadProviderCatalogWithProgress,
       loadSingleProviderCached,
       syncSingleProviderJson,
+      syncProviderNotice,
+      providerListVersions,
       removeProviderCatalogCache,
       loadCatalog,
       syncCatalogInBackground,
@@ -7467,6 +7499,71 @@
     return { create, take, extend, prepare: sortedUnique, defaultKey, defaultDescription };
   })();
 
+  const PROVIDER_LIST_UPDATES = (() => {
+    const FIREBASE_CONFIG = {
+      apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
+      authDomain: 'corralon-progreso.firebaseapp.com',
+      projectId: 'corralon-progreso',
+      storageBucket: 'corralon-progreso.firebasestorage.app',
+      messagingSenderId: '466583614632',
+      appId: '1:466583614632:web:42cb839f83e97475fabe9d'
+    };
+    let sdkPromise;
+    function sdk() {
+      if (!sdkPromise) sdkPromise = Promise.all([
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')
+      ]).then(([appModule, firestoreModule]) => {
+        const app = appModule.getApps().length ? appModule.getApp() : appModule.initializeApp(FIREBASE_CONFIG);
+        const firestore = firestoreModule.getFirestore(app);
+        return { ...firestoreModule, ref: firestoreModule.doc(firestore, 'configuracion', 'listas_proveedores') };
+      }).catch(error => { sdkPromise = null; throw error; });
+      return sdkPromise;
+    }
+    async function publish(published) {
+      const entry = published?.entry;
+      if (!entry?.id_proveedor || !published.manifestUrl) throw new Error('No hay un JSON publicado para avisar');
+      const api = await sdk();
+      const id = String(entry.id_proveedor);
+      const notice = { providerId: id, version: Number(entry.version), manifestUrl: published.manifestUrl };
+      // Keep one compact pointer per supplier: missed updates survive a disconnected PC.
+      await api.runTransaction(api.ref.firestore, async transaction => {
+        const snapshot = await transaction.get(api.ref);
+        const current = snapshot.exists() ? snapshot.data() : {};
+        if (Number(current.providers?.[id]?.version || 0) >= notice.version) return;
+        transaction.set(api.ref, { providers: { [id]: notice } }, { merge: true });
+      });
+    }
+    function subscribe(onUpdate, onError = console.warn) {
+      let stopped = false, unsubscribe = null, pending = Promise.resolve(), latest = {};
+      const seen = new Map();
+      function receive(notices) {
+        latest = notices;
+        pending = pending.then(async () => {
+          for (const notice of Object.values(notices)) {
+            if (stopped || Number(seen.get(notice.providerId) || 0) >= Number(notice.version)) continue;
+            try {
+              const update = await FALTANTES.syncProviderNotice(notice);
+              if (update) await onUpdate(update);
+              seen.set(notice.providerId, Number(notice.version));
+            } catch (error) { onError(error); }
+          }
+        }).catch(onError);
+      }
+      const online = () => receive(latest);
+      window.addEventListener('online', online);
+      Promise.all([sdk(), FALTANTES.providerListVersions()]).then(([api, local]) => {
+        if (stopped) return;
+        Object.entries(local).forEach(([id, entry]) => seen.set(id, Number(entry.version || 0)));
+        unsubscribe = api.onSnapshot(api.ref, { includeMetadataChanges: true }, snapshot => {
+          if (snapshot.exists() && !snapshot.metadata.fromCache) receive(snapshot.data().providers || {});
+        }, onError);
+      }).catch(onError);
+      return () => { stopped = true; unsubscribe?.(); window.removeEventListener('online', online); };
+    }
+    return { publish, subscribe };
+  })();
+
   const WEB_VERSION_NOTIFIER = (() => {
     const RAW_MANIFEST_URL = 'https://raw.githubusercontent.com/benjaminsuarez002-design/Corralonprogreso/main/version-web.json';
     const MANIFEST_URL = /^(https?:)$/i.test(location.protocol)
@@ -7713,6 +7810,7 @@
     catalog: CATALOG,
     catalogRealtime: CATALOG_REALTIME,
     providerIdentity: { internalId: providerInternalId, externalId: providerExternalId, newId: newProviderId, resolveText: resolveProviderText, mergeImport: mergeProviderImport },
+    providerListUpdates: PROVIDER_LIST_UPDATES,
     providerCache: { currentEntries: currentProviderCacheEntries, keys: providerCacheKeys, replace: queueProviderCacheReplacement, counts: providerCacheCounts, jsonIsNewer: providerJsonIsNewer },
     faltantes: FALTANTES,
     versionNotifier: WEB_VERSION_NOTIFIER

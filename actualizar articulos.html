@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.12"></script>
+<script src="corralon-system.js?v=1.0.13"></script>
   <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -274,7 +274,7 @@ function notifyProviderListUpdated(updatedAt){
 }
 async function updateProviderDate(value=currentProviderTimestamp()){if(!provider)return;const updated=applyProviderTimestamp(value);await Promise.all([putStoreItem('providers',updated),CorralonSystem.updateProviderDateOnly(updated,value)])}
 async function syncProviderArticles(){
-  await CorralonSystem.replaceProviderArticles(provider.id_proveedor,articles,(done,total)=>{
+  return CorralonSystem.replaceProviderArticles(provider.id_proveedor,articles,(done,total)=>{
     const pct=total?done/total:1;
     setSyncProgress(45+pct*40);
     statusEl.textContent=`Sincronizando artículos ${done.toLocaleString('es-AR')} / ${total.toLocaleString('es-AR')}`;
@@ -316,10 +316,19 @@ async function exportAndUpdate(){
   statusEl.textContent=isLocalAccessMode()?'XLS generado. Actualizando Access y publicando lista...':'XLS generado. Publicando lista...';
   try{
     setSyncProgress(45);
-    await syncProviderArticles();
+    const published = await syncProviderArticles();
     setSyncProgress(88);
     await updateProviderDate(stamp);
     notifyProviderListUpdated(stamp);
+    try {
+      await CorralonSystem.providerListUpdates.publish(published);
+    } catch (error) {
+      console.error('No se pudo avisar a los otros equipos', error);
+      setSyncProgress(100);
+      hideSyncProgress();
+      statusEl.textContent='Lista publicada, pero no se pudo enviar el aviso a los otros equipos. '+error.message;
+      return;
+    }
     setSyncProgress(100);
   }catch(error){
     statusEl.textContent='XLS generado, pero fallo la sincronizacion.';

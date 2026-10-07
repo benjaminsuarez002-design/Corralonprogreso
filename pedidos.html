@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.35"></script>
+<script src="corralon-system.js?v=1.0.36"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -1327,7 +1327,22 @@ function resolveOrderDocId(snapshot,preferred=''){return String(preferred||snaps
 function normalizeOrderList(){const map=new Map();for(const order of orderList){const id=String(order.id||'').trim();const key=orderListKey(order);if(!id||!key||canceledOrderIds.has(id))continue;if(!order.confirmado&&!orderHasContent(order))continue;map.set(key,{...(map.get(key)||{}),...order,id})}orderList=[...map.values()].sort((a,b)=>Number(a.id)-Number(b.id))}
 function pendingOrders(){normalizeOrderList();const visible=new Map(orderList.filter(order=>!order.confirmado&&orderHasContent(order)&&orderBelongsToActiveUser(order)&&!canceledOrderIds.has(String(order.id))).map(order=>[orderListKey(order),order]));for(const data of localOrderDrafts.values()){const draft=localDraftToOrder(data);if(!draft.confirmado&&orderHasContent(draft)&&!canceledOrderIds.has(String(draft.id)))visible.set(orderListKey(draft),draft)}return[...visible.values()].sort((a,b)=>Number(a.id)-Number(b.id))}
 function confirmedOrders(){normalizeOrderList();return orderList.filter(order=>order.confirmado&&!canceledOrderIds.has(String(order.id))).sort((a,b)=>Number(a.id)-Number(b.id))}
-function counterOrders(){const visible=new Map();for(const order of pendingOrders())visible.set(orderListKey(order),order);for(const order of orderList.filter(order=>orderStatus(order)==='revision'&&orderRevisionOwnedByActiveUser(order)&&orderHasContent(order)))visible.set(orderListKey(order),order);for(const data of localOrderDrafts.values()){const draft=localDraftToOrder(data),key=orderListKey(draft);if(!draft.confirmado&&orderHasContent(draft))visible.set(key,draft);else if(editingConfirmedDraftDocId&&key===String(editingConfirmedDraftDocId)&&orderHasContent(draft))visible.set(key,draft)}if(editingConfirmedDraftDocId&&editingConfirmedDraft())visible.set(String(editingConfirmedDraftDocId),{...currentOrderSnapshot(),_docId:editingConfirmedDraftDocId,_localDraft:true});return[...visible.values()].sort((a,b)=>Number(a.id)-Number(b.id))}
+function counterOrders(){
+  const visible=new Map();
+  for(const order of pendingOrders())visible.set(orderListKey(order),order);
+  for(const order of orderList.filter(order=>orderStatus(order)==='revision'&&orderRevisionOwnedByActiveUser(order)&&orderHasContent(order)))visible.set(orderListKey(order),order);
+  // Las flechas recuperan la edición local; Historial conserva orderList sin modificar.
+  for(const data of localOrderDrafts.values()){
+    const draft=localDraftToOrder(data),key=orderListKey(draft);
+    if(!orderHasContent(draft))continue;
+    if(!draft.confirmado){visible.set(key,draft);continue;}
+    const original=orderList.find(order=>orderListKey(order)===key);
+    const ownRevision=Boolean(data.header?._editingConfirmedDraftDocId&&original&&orderStatus(original)==='revision'&&orderRevisionOwnedByActiveUser(original));
+    if(ownRevision||(editingConfirmedDraftDocId&&key===String(editingConfirmedDraftDocId)))visible.set(key,draft);
+  }
+  if(editingConfirmedDraftDocId&&editingConfirmedDraft())visible.set(String(editingConfirmedDraftDocId),{...currentOrderSnapshot(),_docId:editingConfirmedDraftDocId,_localDraft:true});
+  return[...visible.values()].sort((a,b)=>Number(a.id)-Number(b.id));
+}
 function updateOrderCounter(){const visibleOrders=counterOrders();const currentKey=currentOrderListKey();const index=visibleOrders.findIndex(order=>orderListKey(order)===currentKey);if(els.orderCounter)els.orderCounter.textContent=visibleOrders.length?`${index>=0?index+1:0}/${visibleOrders.length}`:'0/0'}
 function clearSelection(){selectedRows.clear();selectedCols.clear();tableSelected=false;lastSelectedRow=-1}
 function loadOrder(order,{focus=true}={}){setOrderNote(order.nota);manualBlankOrderMode=false;activeOrderDocId=String(order?._docId||orderFirebaseDocId(order)||'').trim();lastRemoteApplyAt=Number(order?.updatedAt||Date.now());lastLocalChangeAt=0;clearSelection();headerProviderId=cleanProviderId(order.idProveedor||order.id_proveedor||'');els.providerInput.value=order.proveedor||'';els.branchSelect.value=branchSelectValue(order.sucursalId||order.sucursal||'');els.orderNumber.value=orderDisplayNumber(order);els.confirmedCheck.checked=Boolean(order.confirmado);els.confirmedCheck.dataset.pedido=String(Boolean(order.pedido));els.dateInput.value=order.fecha||today();rows=Array.isArray(order.detalles)&&order.detalles.length?order.detalles.map(row=>({...blankRow(),...row})): [blankRow()];applyProviderListMode(orderUsesProviderList(order));ensureBlank();saveLocal();paint();refreshMonthlyLimit();if(focus)focusCell(0,3,false)}
@@ -1616,6 +1631,18 @@ function prepareProviderCatalogWorker(worker,providerKey){
 function rememberProviderCatalogSession(){if(!providerCatalogWorker||!providerCatalogProvider)return;const session=providerCatalogSessions.get(providerCatalogProvider);if(session?.worker===providerCatalogWorker)Object.assign(session,{ready:providerCatalogReady,loading:providerCatalogLoading,touched:Date.now()})}
 function trimProviderCatalogSessions(){while(providerCatalogSessions.size>PROVIDER_CATALOG_SESSION_LIMIT){const entry=[...providerCatalogSessions.entries()].find(([provider])=>provider!==providerCatalogProvider);if(!entry)return;entry[1].worker?.terminate();providerCatalogSessions.delete(entry[0])}}
 function resetProviderCatalog(clearCache=false){rememberProviderCatalogSession();if(clearCache){const workers=new Set([...providerCatalogSessions.values()].map(session=>session.worker));if(providerCatalogWorker)workers.add(providerCatalogWorker);workers.forEach(worker=>worker?.terminate());providerCatalogSessions.clear()}providerCatalogWorker=null;providerCatalogReady=false;providerCatalogLoading=false;providerCatalogProvider='';providerLastQuery=null;providerLastOptions=null;providerQuerySeq++;combo.options=[];combo.loading=false;combo.error=''}
+function startProviderListUpdates(){
+  CorralonSystem.providerListUpdates.subscribe(({entry,rows:updated})=>{
+    const id=String(entry.id_proveedor),provider=String(headerProviderId)===id?selectedProviderName():entry.proveedor;
+    providerSyncStates.delete(id);providerSyncStates.delete(provider);
+    const session=providerCatalogSessions.get(provider);
+    if(session){session.loading=true;session.worker.postMessage({type:'hydrate',provider,rows:updated});}
+    if(selectedProviderName()===provider||String(headerProviderId)===id){
+      providerLastQuery=null;providerLastOptions=null;
+      els.status.textContent='Lista de precios actualizada. Usá Recalcular para aplicarla al pedido.';
+    }
+  },error=>{console.warn('Aviso de lista de precios',error);els.status.textContent='No se pudo recibir o descargar la nueva lista; se conserva la copia local';});
+}
 function providerQueryKey(provider,text,rowIndex){const row=rows[rowIndex]||{};return JSON.stringify({provider,text:String(text||''),filter:String(row.filtro||''),cod:String(row.codProv||'')})}
 function syncActiveProviderList(){
   const provider=selectedProviderName(),id=headerProviderId;
@@ -1640,7 +1667,8 @@ async function recalculateProviderPrices(){
   hideRowContextMenu();
   const provider=selectedProviderName(),id=headerProviderId,orderId=activeOrderDocId,orderRows=rows;
   if(!provider)return;
-  if(activeProviderSync?.key===(id||provider)&&activeProviderSync.pending)await activeProviderSync.promise;
+  const providerSync=providerSyncStates.get(id||provider);
+  if(providerSync?.pending)await providerSync.promise;
   const list=await Catalog.loadSingleProviderCached(provider,id);
   if(rows!==orderRows||activeOrderDocId!==orderId||selectedProviderName()!==provider||headerProviderId!==id)return;
   const normalized=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f\u200B-\u200D\uFEFF]/g,'').trim().toLowerCase();
@@ -2373,6 +2401,7 @@ async function init(){
     }
   },650);
   startCatalogVersionPolling();
+  startProviderListUpdates();
 }
 init();
 </script>
