@@ -59,7 +59,8 @@ onconnect = event => {
     if (message.type === 'get-meta') {
       try {
         await ready;
-        const value = meta || await readMeta();
+        const value = metaLoading ? await metaLoading : meta;
+        if (!value) throw new Error('No se pudo obtener la versión en la conexión compartida');
         send(port, { type: 'reply', requestId: message.requestId, meta: value });
       } catch (error) { send(port, { type: 'reply', requestId: message.requestId, error: error.message }); }
     }

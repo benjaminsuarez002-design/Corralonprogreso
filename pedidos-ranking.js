@@ -184,14 +184,21 @@
     }
   }
 
+  let pendingRankingMeta = null;
   async function sync(suppliedMeta = null) {
+    if (suppliedMeta && Number(suppliedMeta.ranking_version || 0) > Number(pendingRankingMeta?.ranking_version || 0)) pendingRankingMeta = suppliedMeta;
     if (syncPromise) return syncPromise;
     syncPromise = navigator.locks.request('corralon-ranking-download-v2', async () => {
       const shared = await cacheDb.get(CACHE_KEY);
       if (shared && Array.isArray(shared.rows) && Number(shared.version || 0) >= Number(state.version || 0)) {
         state = shared; byId = new Map(shared.rows.map(row => [String(row.idart), row]));
       }
-      const meta = suppliedMeta || await fetchMeta();
+      let meta = pendingRankingMeta; pendingRankingMeta = null;
+      if (!meta) {
+        meta = await fetchMeta();
+        if (Number(pendingRankingMeta?.ranking_version || 0) > Number(meta?.ranking_version || 0)) meta = pendingRankingMeta;
+        pendingRankingMeta = null;
+      }
       const target = Number(meta?.ranking_version || 0);
       if (!target) { state.meta = meta; refreshVisible(); return; }
       const full = !state.version || !state.rows.length || state.version > target;
@@ -204,7 +211,11 @@
       state = next;
       byId = merged;
       refreshVisible();
-    }).finally(() => { syncPromise = null; });
+    }).finally(() => {
+      syncPromise = null;
+      const next = pendingRankingMeta; pendingRankingMeta = null;
+      if (Number(next?.ranking_version || 0) > Number(state.version || 0)) sync(next).catch(console.warn);
+    });
     return syncPromise;
   }
 

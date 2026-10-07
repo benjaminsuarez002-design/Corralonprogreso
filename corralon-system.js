@@ -4325,7 +4325,7 @@
         memoryCache = null;
         const shared = await readCache();
         const previous = context.cached;
-        context = { ...context, cached: shared };
+        context = { ...context, cached: cacheHasRubros(shared) ? shared : null };
         if (!options.force && shared?.rows?.length && cacheHasRubros(shared) && shared.source === 'supabase'
             && Number(shared.version || 0) >= Number(context.version || 0)
             && Number(shared.patchVersion || 0) >= Number(context.patchVersion || 0)) {
@@ -5028,8 +5028,9 @@
     function firebaseDatabase() {
       if (firebaseDb) return firebaseDb;
       if (!window.firebase?.firestore) return null;
-      if (!window.firebase.apps.length) window.firebase.initializeApp(FIREBASE_CONFIG);
-      firebaseDb = window.firebase.firestore();
+      const app = window.firebase.apps.find(candidate => candidate.options?.projectId === FIREBASE_CONFIG.projectId)
+        || window.firebase.initializeApp(FIREBASE_CONFIG, 'corralon-shared');
+      firebaseDb = app.firestore();
       return firebaseDb;
     }
 
@@ -5640,6 +5641,10 @@
     }
 
     async function syncProviderNotice(notice) {
+      if (!navigator.locks) throw new Error('Este navegador no admite la descarga compartida de listas');
+      return navigator.locks.request('corralon-provider-json-' + cleanId(notice?.providerId), () => syncProviderNoticeUnlocked(notice));
+    }
+    async function syncProviderNoticeUnlocked(notice) {
       const id = cleanId(notice?.providerId);
       if (!id || !Number(notice.version) || !notice.manifestUrl) return null;
       const database = await openListDb();
