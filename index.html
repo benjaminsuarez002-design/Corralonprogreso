@@ -4390,7 +4390,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.28"></script>
+<script src="corralon-system.js?v=1.0.29"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4601,7 +4601,6 @@ let publicListObserver = null;
 let listaCacheFingerprintActiva = '';
 let listaCacheUrlActiva = '';
 let listaCacheServerSignatureActiva = '';
-let unsubscribeListaActual = null;
 let catalogoCambioVersionEscuchada = null;
 let articulosPortadaPublica = [];
 let terminoBaseBusquedaPublica = '';
@@ -4955,11 +4954,11 @@ async function consultarVersionCatalogoPublico() {
   return Number(Array.isArray(rows) && rows[0] ? rows[0].version : 0);
 }
 
-async function comprobarVersionCatalogoPublico() {
+async function comprobarVersionCatalogoPublico(suppliedMeta = null) {
   if (INDEX_MENU_SESSION_ACTIVE || document.hidden || publicCatalogVersionChecking) return;
   publicCatalogVersionChecking = true;
   try {
-    const nextVersion = await consultarVersionCatalogoPublico();
+    const nextVersion = suppliedMeta ? Number(suppliedMeta.version || 0) : await window.CorralonSystem.catalogRealtime.getMeta().then(meta => Number(meta?.version || 0));
     if (publicCatalogVersion === null) {
       publicCatalogVersion = nextVersion;
       return;
@@ -4986,9 +4985,7 @@ function iniciarConsultaVersionCatalogoPublico() {
   publicCatalogRealtimeStarted = true;
   window.CorralonSystem?.catalogRealtime?.configure({refresh:comprobarVersionCatalogoPublico});
   window.CorralonSystem?.catalogRealtime?.start();
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) comprobarVersionCatalogoPublico();
-  });
+
 }
 
 function primeraPalabraBusquedaPublica(value) {
@@ -9881,33 +9878,7 @@ if (INDEX_MENU_SESSION_ACTIVE) {
 }
 
 function iniciarEscuchaListaArticulos() {
-  if (!INDEX_MENU_SESSION_ACTIVE || unsubscribeListaActual) return;
-  unsubscribeListaActual = onSnapshot(doc(db, 'config', 'catalogoArticulosCambios'), async snap => {
-    if (snap.metadata?.fromCache) return;
-    const data = snap.exists() ? (snap.data() || {}) : {};
-    const version = Number(data.version || 0);
-    const codigo = String(data.codigo || '').trim();
-    if (catalogoCambioVersionEscuchada === null) {
-      catalogoCambioVersionEscuchada = version;
-      return;
-    }
-    if (!codigo || !version || version === catalogoCambioVersionEscuchada) return;
-    catalogoCambioVersionEscuchada = version;
-    try {
-      const updated = await window.CorralonSystem?.catalog?.fetchArticle?.(codigo);
-      if (!updated) return;
-      todosArticulos = todosArticulos.map((article) =>
-        obtenerIdArticulo(article) === codigo ? prepararArticulosParaVista([{ ...article, ...updated }])[0] : article
-      );
-      actualizarVistaEtiqueta();
-      aplicarBusquedaActual();
-      if (document.getElementById('productDetailModal')?.classList.contains('visible') && productDetailAdminCode === codigo) {
-        abrirDetalleProducto(codigo);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  });
+  if (INDEX_MENU_SESSION_ACTIVE) window.CorralonSystem?.catalogRealtime?.start();
 }
 
 function aplicarDeltaCatalogoEnPantalla(event) {

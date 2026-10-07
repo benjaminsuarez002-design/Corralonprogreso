@@ -698,7 +698,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.30"></script>
+<script src="corralon-system.js?v=1.0.31"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -2194,27 +2194,33 @@
     }
 
     async function cleanupOrphanRemitoNotifications() {
-      const remitoNotifs = historialNotifications.filter((item) => item.tipo === 'remito' && !item.resuelta && item.id);
-      if (!remitoNotifs.length) return;
-      try {
-        const ids = [...new Set(remitoNotifs.map((item) => String(item.id)))];
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=id&id=in.(${ids.map(encodeURIComponent).join(',')})`, {
-          headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
-        });
-        if (!response.ok) return;
-        const existing = new Set((await response.json()).map((row) => String(row.id)));
-        const missing = remitoNotifs.filter((item) => !existing.has(String(item.id)));
-        if (!missing.length) return;
-        await Promise.all(missing.map((item) => setDoc(doc(db, 'historialNotificaciones', item.firestoreId || `remito_${item.id}`), {
-          resuelta: true,
-          resueltaAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }, { merge: true })));
-        historialNotifications = historialNotifications.filter((item) => !missing.some((bad) => String(bad.id) === String(item.id) && item.tipo === 'remito'));
-        renderReviewNotifications();
-      } catch (error) {
-        console.warn('No se pudieron limpiar notificaciones de remitos eliminados', error);
-      }
+      const cacheKey = 'corralon_remito_notification_checks_v2';
+      const signature = item => JSON.stringify([item.firestoreId || item.id, item.updatedAt || item.createdAt || null]);
+      if (!navigator.locks) return;
+      await navigator.locks.request(cacheKey, async () => {
+        let checked = {};
+        try { checked = JSON.parse(localStorage.getItem(cacheKey) || '{}'); } catch (_) {}
+        const remitoNotifs = historialNotifications.filter(item => item.tipo === 'remito' && !item.resuelta && item.id && checked[String(item.firestoreId || item.id)] !== signature(item));
+        if (!remitoNotifs.length) return;
+        try {
+          const ids = [...new Set(remitoNotifs.map(item => String(item.id)))];
+          const response = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=id&id=in.(${ids.map(encodeURIComponent).join(',')})`, {
+            headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY }
+          });
+          if (!response.ok) return;
+          const existing = new Set((await response.json()).map(row => String(row.id)));
+          const missing = remitoNotifs.filter(item => !existing.has(String(item.id)));
+          await Promise.all(missing.map(item => setDoc(doc(db, 'historialNotificaciones', item.firestoreId || `remito_${item.id}`), {
+            resuelta: true, resueltaAt: serverTimestamp(), updatedAt: serverTimestamp()
+          }, { merge: true })));
+          remitoNotifs.forEach(item => { checked[String(item.firestoreId || item.id)] = signature(item); });
+          localStorage.setItem(cacheKey, JSON.stringify(Object.fromEntries(Object.entries(checked).slice(-1000))));
+          if (missing.length) {
+            historialNotifications = historialNotifications.filter(item => !missing.some(bad => String(bad.id) === String(item.id) && item.tipo === 'remito'));
+            renderReviewNotifications();
+          }
+        } catch (error) { console.warn('No se pudieron limpiar notificaciones de remitos eliminados', error); }
+      });
     }
 
     function setupReviewNotifications(usuario) {

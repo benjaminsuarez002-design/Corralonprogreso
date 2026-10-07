@@ -4081,12 +4081,12 @@
       return { rows: mergeMetadata(baseRows, metadataRows), baseUrl, metaUrl };
     }
 
-    async function catalogContext(cachedValue) {
+    async function catalogContext(cachedValue, suppliedMeta = null) {
       const cached = cachedValue === undefined ? await readCache() : cachedValue;
       let metaRow = null;
       let metadataUrl = '';
       try {
-        metaRow = await fetchMetaRow();
+        metaRow = suppliedMeta || (globalThis.CORRALON_DISABLE_CATALOG_REALTIME || IS_AUTOMATED_CRAWLER ? await fetchMetaRow() : await CATALOG_REALTIME.getMeta());
       } catch (error) {
         console.warn('No se pudo consultar la version del catalogo', error);
       }
@@ -4319,7 +4319,27 @@
       return promise;
     }
 
-    function startCatalogLoad(context, options = {}) {
+    async function startCatalogLoad(context, options = {}) {
+      if (!navigator.locks) throw new Error('Este navegador no admite la descarga compartida del catálogo');
+      return navigator.locks.request('corralon-catalog-download-v2', async () => {
+        memoryCache = null;
+        const shared = await readCache();
+        const previous = context.cached;
+        context = { ...context, cached: shared };
+        if (!options.force && shared?.rows?.length && cacheHasRubros(shared) && shared.source === 'supabase'
+            && Number(shared.version || 0) >= Number(context.version || 0)
+            && Number(shared.patchVersion || 0) >= Number(context.patchVersion || 0)) {
+          if (Number(previous?.version || 0) !== Number(shared.version || 0) || Number(previous?.patchVersion || 0) !== Number(shared.patchVersion || 0)) window.dispatchEvent(new CustomEvent('corralon:catalog-ready', { detail: { rows: shared.rows, version: shared.version, source: 'local' } }));
+          return shared.rows;
+        }
+        const rows = await startCatalogLoadUnlocked(context, options);
+        const saved = await readCache();
+        if (saved?.rows?.length && Number(saved.version || 0) >= Number(context.version || 0) && Number(saved.patchVersion || 0) >= Number(context.patchVersion || 0)) CATALOG_REALTIME.cacheReady();
+        return rows;
+      });
+    }
+
+    function startCatalogLoadUnlocked(context, options = {}) {
       if (canApplyPatches(context)) return startPatchLoad(context, options);
       if (Array.isArray(context?.cached?.rows)
           && context.cached.rows.length
@@ -4454,10 +4474,11 @@
     async function refresh(options = {}) {
       const cached = await readCache();
       if (!Array.isArray(cached?.rows) || !cached.rows.length) {
+        if (options.onlyCached) return { changed: false, rows: [], mode: 'none' };
         const rows = await load(options);
         return { changed: true, mode: 'full', rows };
       }
-      const context = await catalogContext(cached);
+      const context = await catalogContext(cached, options.metaRow);
       if (!context.versionKnown || (
         cached.signature === context.signature
         && Number(cached.patchVersion || 0) === Number(context.patchVersion || 0)
@@ -4467,6 +4488,21 @@
       const mode = canApplyPatches(context) ? 'patch' : (canApplyDelta(context) ? 'delta' : 'full');
       const rows = await startCatalogLoad(context, options);
       return { changed: true, mode, rows, version: context.version };
+    }
+
+    async function acceptSharedCache() {
+      const rows = await cachedRows();
+      if (rows.length) window.dispatchEvent(new CustomEvent('corralon:catalog-ready', { detail: { rows, version: memoryCache?.version, source: 'local' } }));
+    }
+
+    async function cachedArticle(code) {
+      memoryCache = null;
+      const cached = await readCache();
+      return cached?.rows?.find(row => codeOf(row) === String(code || '').trim()) || null;
+    }
+    async function cachedRows() {
+      memoryCache = null;
+      return (await readCache())?.rows || [];
     }
 
     async function clearCache() {
@@ -4558,6 +4594,9 @@
       fetchSupabaseRows,
       fetchCodeIndexRows: fetchSupabaseCodeIndexRows,
       fetchArticle,
+      cachedArticle,
+      cachedRows,
+      acceptSharedCache,
       repairArticle: repairCachedArticle,
       saveArticleEdit,
       saveArticleEdits,
@@ -4567,186 +4606,49 @@
   })();
 
   const CATALOG_REALTIME = (() => {
-    const LEADER_KEY = 'corralon_catalog_realtime_leader_v1';
-    const MESSAGE_KEY = 'corralon_catalog_realtime_message_v1';
-    const CHANNEL_NAME = 'corralon_catalog_realtime_v1';
-    const LEASE_MS = 15000;
-    const RENEW_MS = 5000;
-    const tabId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-    let started = false;
-    let leader = false;
-    let leaseTimer = null;
-    let refreshTimer = null;
-    let broadcast = null;
-    let supabaseClient = null;
-    let realtimeChannel = null;
-    let realtimeLibraryPromise = null;
-    let refreshAdapter=null,connecting=false,nextReconnectAt=0,retryDelay=5000;
-
-    function readLeader() {
-      try {
-        const value = JSON.parse(localStorage.getItem(LEADER_KEY) || 'null');
-        return value && typeof value === 'object' ? value : null;
-      } catch (_) {
-        return null;
-      }
-    }
-
-    function writeLeader(expiresAt) {
-      try {
-        localStorage.setItem(LEADER_KEY, JSON.stringify({ tabId, expiresAt }));
-        return readLeader()?.tabId === tabId;
-      } catch (_) {
-        return true;
-      }
-    }
-
-    function announceCatalogChange() {
-      const message = { type: 'catalog-change', sender: tabId, at: Date.now() };
-      try { broadcast?.postMessage(message); } catch (_) {}
-      try { localStorage.setItem(MESSAGE_KEY, JSON.stringify(message)); } catch (_) {}
-    }
-
-    function scheduleRefresh() {
-      clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => {
-        Promise.resolve().then(()=>refreshAdapter ? refreshAdapter() : CATALOG.refresh({ fallback: false })).catch((error) => {
-          console.warn('No se pudo aplicar la actualizacion en tiempo real del catalogo', error);
-        });
-      }, 80);
-    }
-
-    function loadRealtimeLibrary() {
-      if (window.supabase?.createClient) return Promise.resolve(window.supabase);
-      if (realtimeLibraryPromise) return realtimeLibraryPromise;
-      realtimeLibraryPromise = new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = new URL('vendor/supabase.js?v=20260812-catalog-realtime1', document.baseURI).href;
-        script.async = true;
-        script.onload = () => window.supabase?.createClient
-          ? resolve(window.supabase)
-          : reject(new Error('No se encontro el cliente Realtime de Supabase'));
-        script.onerror = () => reject(new Error('No se pudo cargar el cliente Realtime de Supabase'));
-        document.head.appendChild(script);
-      });
-      return realtimeLibraryPromise;
-    }
-
-    async function disconnectRealtime() {
-      const channel=realtimeChannel,client=supabaseClient;
-      realtimeChannel = null;
-      supabaseClient = null;
-      if(channel&&client){try{await client.removeChannel(channel);}catch(_) {}}
-      try{client?.realtime?.disconnect();}catch(_){}
-    }
-
-    async function connectRealtime() {
-      if (realtimeChannel || !leader || connecting || Date.now()<nextReconnectAt) return;
-      connecting=true;
-      try {
-        const library = await loadRealtimeLibrary();
-        if (!leader || realtimeChannel) return;
-        supabaseClient = library.createClient(SUPABASE_URL, SUPABASE_KEY, {
-          auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-          global: { headers: { 'x-client-info': 'corralon-catalog-realtime' } }
-        });
-        const ownedClient=supabaseClient;
-        realtimeChannel = supabaseClient
-          .channel('catalogo-meta-principal-v1')
-          .on('postgres_changes', {
-            event: '*',
-            schema: 'public',
-            table: TABLES.catalogMeta,
-            filter: 'id=eq.principal'
-          }, (payload) => {
-            announceCatalogChange();
-            window.dispatchEvent(new CustomEvent('corralon:catalog-meta-changed', {
-              detail: { rankingVersion: Number(payload?.new?.ranking_version || 0) }
-            }));
-            scheduleRefresh();
-          })
-          .subscribe((status) => {
-            if(supabaseClient!==ownedClient)return;
-            if (status === 'SUBSCRIBED') {retryDelay=5000;nextReconnectAt=0;scheduleRefresh();}
-            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              nextReconnectAt=Date.now()+retryDelay;retryDelay=Math.min(retryDelay*2,60000);
-              disconnectRealtime();
-            }
-          });
-      } catch (error) {
-        console.warn('Realtime de catalogo no disponible; se reintentara', error);
-        nextReconnectAt=Date.now()+retryDelay;retryDelay=Math.min(retryDelay*2,60000);
-        await disconnectRealtime();
-      }finally{connecting=false;}
-    }
-
-    function evaluateLeadership() {
-      const now = Date.now();
-      const current = readLeader();
-      const canClaim = !current || current.tabId === tabId || Number(current.expiresAt || 0) <= now;
-      const shouldLead = canClaim && writeLeader(now + LEASE_MS);
-      document.documentElement.dataset.catalogRealtimeLeader = shouldLead ? 'true' : 'false';
-      if (shouldLead) {
-        leader = true;
-        connectRealtime();
-      } else if (leader) {
-        leader = false;
-        disconnectRealtime();
-      }
-    }
-
-    function onStorage(event) {
-      if (event.key === MESSAGE_KEY && event.newValue) {
-        try {
-          const message = JSON.parse(event.newValue);
-          if (message?.sender !== tabId && message?.type === 'catalog-change') {
-            window.dispatchEvent(new Event('corralon:catalog-meta-changed'));
-            scheduleRefresh();
-          }
-        } catch (_) {}
-      }
-      if (event.key === LEADER_KEY) evaluateLeadership();
-    }
-
+    let worker = null, port = null, latestMeta = null, refreshAdapter = null;
+    let refreshQueue = Promise.resolve(), requestId = 0;
+    const requests = new Map();
     function start() {
-      if (started) return;
-      if(window.self!==window.top)return;
-      if (IS_AUTOMATED_CRAWLER) {
-        document.documentElement.dataset.catalogRealtimeLeader = 'crawler-disabled';
+      if (port || IS_AUTOMATED_CRAWLER || (globalThis.CORRALON_DISABLE_CATALOG_REALTIME && !refreshAdapter)) return;
+      if (!('SharedWorker' in window)) {
+        console.warn('Este navegador no admite la conexión compartida del catálogo');
         return;
       }
-      started = true;
-      if ('BroadcastChannel' in window) {
-        broadcast = new BroadcastChannel(CHANNEL_NAME);
-        broadcast.onmessage = (event) => {
-          if (event.data?.sender !== tabId && event.data?.type === 'catalog-change') {
-            window.dispatchEvent(new Event('corralon:catalog-meta-changed'));
-            scheduleRefresh();
-          }
-        };
-      }
-      window.addEventListener('storage', onStorage);
-      window.addEventListener('focus', evaluateLeadership);
-      document.addEventListener('visibilitychange', evaluateLeadership);
-      window.addEventListener('pagehide', () => {
-        if (leader && readLeader()?.tabId === tabId) {
-          try { localStorage.removeItem(LEADER_KEY); } catch (_) {}
+      worker = new SharedWorker(new URL('catalogo-realtime-worker.js', document.baseURI), { name: 'corralon-catalogo-v2' });
+      port = worker.port;
+      port.onmessage = event => {
+        const message = event.data || {};
+        if (message.type === 'cache-ready') CATALOG.acceptSharedCache().catch(console.warn);
+        if (message.type === 'reply') {
+          const request = requests.get(message.requestId);
+          if (request) { requests.delete(message.requestId); clearTimeout(request.timer); message.error ? request.reject(new Error(message.error)) : request.resolve(message.meta); }
         }
-        leader=false;clearTimeout(refreshTimer);disconnectRealtime();
-        clearInterval(leaseTimer);leaseTimer=null;
-      });
-      window.addEventListener('pageshow',()=>{
-        evaluateLeadership();if(!leaseTimer)leaseTimer=setInterval(evaluateLeadership,RENEW_MS);
-      });
-      evaluateLeadership();
-      leaseTimer = setInterval(evaluateLeadership, RENEW_MS);
+        if (message.type === 'meta' && message.meta) {
+          latestMeta = message.meta;
+          window.dispatchEvent(new CustomEvent('corralon:catalog-meta-changed', { detail: { rankingVersion: Number(latestMeta.ranking_version || 0), meta: latestMeta } }));
+          refreshQueue = refreshQueue.catch(console.warn).then(() => refreshAdapter ? refreshAdapter(latestMeta) : CATALOG.refresh({ fallback: false, metaRow: latestMeta, onlyCached: true }));
+        }
+        if (message.type === 'error') console.warn(message.message);
+      };
+      port.start();
+      port.postMessage({ type: 'init', url: SUPABASE_URL, key: SUPABASE_KEY });
+      worker.onerror = error => console.warn('Conexión compartida del catálogo', error.message);
     }
-
-    return {
-      start,
-      configure(options={}) {refreshAdapter=typeof options.refresh==='function'?options.refresh:null;},
-      isLeader: () => leader
-    };
+    function getMeta() {
+      start();
+      if (latestMeta) return Promise.resolve(latestMeta);
+      if (!port) return Promise.reject(new Error('Conexión compartida del catálogo no disponible'));
+      const id = ++requestId;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { requests.delete(id); reject(new Error('No se recibió la versión del catálogo')); }, 20000);
+        requests.set(id, { resolve, reject, timer });
+        port.postMessage({ type: 'get-meta', requestId: id });
+      });
+    }
+    window.addEventListener('pagehide', () => { port?.postMessage({ type: 'release' }); port?.close(); port = null; latestMeta = null; });
+    window.addEventListener('pageshow', () => { if (!globalThis.CORRALON_DISABLE_CATALOG_REALTIME || refreshAdapter) start(); });
+    return { start, getMeta, cacheReady() { port?.postMessage({ type: 'cache-ready' }); }, configure(options = {}) { refreshAdapter = typeof options.refresh === 'function' ? options.refresh : null; }, isLeader: () => false };
   })();
 
   const FALTANTES = (() => {
@@ -5254,10 +5156,10 @@
       }
     }
 
-    async function enrichIndexProviders(rows) {
+    async function enrichIndexProviders(rows, localOnly = false) {
       try {
         let providers = await getProvidersCache();
-        if (!providers.length) {
+        if (!providers.length && !localOnly) {
           try {
             providers = await importProvidersCloud();
           } catch (error) {
@@ -5832,6 +5734,11 @@
       return rows.sort((a, b) => String(a.descripcion || '').localeCompare(String(b.descripcion || ''), 'es', { numeric: true, sensitivity: 'base' }));
     }
 
+    async function adoptIndexCatalog(rows, cache = {}) {
+      cache.index = sortCatalogByDescription(await enrichIndexProviders(rows.map(normalizeIndexItem).filter(item => item.descripcion || item.idart), true));
+      return cache.index;
+    }
+
     async function loadCorralonCatalog(cache = {}, force = false) {
       if (!cache.index || force) {
         const sharedRows = await CATALOG.load({ force, fallback: true });
@@ -6049,6 +5956,7 @@
       resetCatalogToggle,
       bindCatalogToggle,
       loadCorralonCatalog,
+      adoptIndexCatalog,
       loadProviderCatalog,
       loadProviderCatalogWithProgress,
       loadSingleProviderCached,
