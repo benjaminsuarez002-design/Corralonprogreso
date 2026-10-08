@@ -7749,3 +7749,35 @@
     console.error('No se pudo iniciar CorralonSystem', error);
   }
 })();
+
+// Un único resumen diario de objetivos para Menú y Facturación por navegador.
+(function(){
+  if(window.CorralonAliasObjectives)return;
+  const key='corralon_menu_objectives_cache_v1',listeners=new Set();
+  let source=null,started=false,controller=null,release=null,midnightTimer=null;
+  const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+  function cached(){try{const data=JSON.parse(localStorage.getItem(key)||'null');return data?.dateIso===today()?data:{dateIso:today(),cards:[]};}catch{return {dateIso:today(),cards:[]};}}
+  function notify(data){for(const listener of listeners)listener(data);}
+  function publish(raw){const data={dateIso:today(),cards:Array.isArray(raw?.cards)?raw.cards:[]};try{const text=JSON.stringify(data);if(localStorage.getItem(key)!==text)localStorage.setItem(key,text);}catch{}notify(data);}
+  async function lead(){
+    let unsubscribe=null,finished=false;
+    await new Promise(resolve=>{
+      release=()=>{finished=true;unsubscribe?.();resolve();};
+      Promise.resolve().then(()=>source(today(),publish)).then(stop=>{unsubscribe=stop;if(finished)unsubscribe?.();},error=>{console.warn('No se pudo escuchar el resumen de objetivos:',error);release?.();});
+    });
+    release=null;
+  }
+  function start(){
+    if(started||!source||!listeners.size)return;
+    started=true;controller=new AbortController();
+    const run=navigator.locks?navigator.locks.request('corralon-alias-objectives-listener',{signal:controller.signal},lead):lead();
+    run.catch(error=>{if(error.name!=='AbortError')console.warn('No se pudo compartir el resumen de objetivos:',error);});
+    const next=new Date();next.setHours(24,0,0,0);
+    midnightTimer=setTimeout(()=>{stop();notify(cached());start();},next.getTime()-Date.now()+100);
+  }
+  function stop(){clearTimeout(midnightTimer);controller?.abort();release?.();started=false;}
+  window.addEventListener('storage',event=>{if(event.key===key)notify(cached());});
+  window.addEventListener('pagehide',stop);
+  window.addEventListener('pageshow',()=>{notify(cached());start();});
+  window.CorralonAliasObjectives={subscribe(listener,subscribeSource){listeners.add(listener);source=subscribeSource||source;listener(cached());start();return()=>{listeners.delete(listener);if(!listeners.size)stop();};}};
+})();

@@ -698,7 +698,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.31"></script>
+<script src="corralon-system.js?v=1.0.32"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -915,7 +915,6 @@
     let sessionExpiryTimer = null;
     let objectiveSummaryUnsubscribe = null;
     let objectiveSummaryLoaded = false;
-    let objectivePreloadStarted = false;
 
     function formatDolarValue(value) {
       const number = Number(value || 0);
@@ -991,7 +990,6 @@
       window.addEventListener('focus', loadDolarCards);
       window.addEventListener('online', loadDolarCards);
     }
-    let objectivePreloadPromise = null;
     const MENU_OBJECTIVES_CACHE_KEY = 'corralon_menu_objectives_cache_v1';
     let menuDragItem = null;
     let menuDragTarget = null;
@@ -1708,35 +1706,14 @@
         localStorage.removeItem('corralon_menu_notifs_cache_v1');
       } catch (_) {}
       const objectiveCache = readLocalJson(MENU_OBJECTIVES_CACHE_KEY, null);
-      const cachedCards = normalizeObjectiveCards(objectiveCache);
+      const cachedCards = objectiveCache?.dateIso === todayIso() ? normalizeObjectiveCards(objectiveCache) : [];
       if (cachedCards.length) {
         renderAliasObjectiveCards(cachedCards);
       }
     }
 
     async function preloadAliasObjectives() {
-      if (objectivePreloadStarted) return objectivePreloadPromise;
-      objectivePreloadStarted = true;
-      objectivePreloadPromise = (async () => {
-        try {
-          const snap = await getDocFromServer(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()));
-          objectiveSummaryLoaded = true;
-          renderAliasObjectivesSummary(snap.exists() ? snap.data() : null);
-        } catch (error) {
-          console.warn('No se pudo precargar resumen de objetivos desde servidor', error);
-          try {
-            const snap = await getDoc(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()));
-            objectiveSummaryLoaded = true;
-            renderAliasObjectivesSummary(snap.exists() ? snap.data() : null);
-          } catch (fallbackError) {
-            console.warn('No se pudo precargar resumen de objetivos desde cache', fallbackError);
-            if (!aliasObjectives.innerHTML.trim()) {
-              renderAliasObjectiveCards([{ alias: 'Alias', missing: 0 }], { loading: true });
-            }
-          }
-        }
-      })();
-      return objectivePreloadPromise;
+      setupAliasObjectives();
     }
 
     async function preloadReviewNotifications(usuario) {
@@ -1901,10 +1878,12 @@
 
     function setupAliasObjectives() {
       if (!objectiveSummaryUnsubscribe) {
-        objectiveSummaryUnsubscribe = onSnapshot(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, todayIso()), (snap) => {
+        objectiveSummaryUnsubscribe = window.CorralonAliasObjectives.subscribe((data) => {
           objectiveSummaryLoaded = true;
-          renderAliasObjectivesSummary(snap.exists() ? snap.data() : null);
-        }, (error) => console.warn('No se pudo escuchar resumen de objetivos de alias', error));
+          renderAliasObjectivesSummary(data);
+        }, (date, publish) => onSnapshot(doc(db, ALIAS_OBJECTIVES_SUMMARY_COLLECTION, date),
+          (snap) => publish(snap.exists() ? snap.data() : null),
+          (error) => console.warn('No se pudo escuchar resumen de objetivos de alias', error)));
       }
     }
 
