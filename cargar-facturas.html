@@ -678,7 +678,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     $('date').value = dateText(today()); $('period').value = `${today().slice(5, 7)}/${today().slice(0, 4)}`;
     const due = new Date(`${today()}T12:00:00`); due.setDate(due.getDate() + 30);
     $('due').value = `${due.getDate()}/${due.getMonth() + 1}/${due.getFullYear()}`;
-    setComboValue('type', options.tipos[0]?.id || ''); setComboValue('payment', 1); $('goods').value = '2';
+    setComboValue('type', ''); setComboValue('payment', 1); $('goods').value = '2';
     $('discount').value = '0,00%'; $('calculatorRate').value = '1'; $('inStock').checked = true;
     $('providerCode').value = ''; $('providerName').value = ''; $('lastNumber').value = localStorage.getItem(lastKey()) || '';
     rows = []; rows.push(blankRow()); draft = { id: rowId() };
@@ -764,7 +764,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const credit = result.credito.length ? `<p>Crédito por descuento: ${esc(result.credito[0].NroFactura)} · ${money(result.credito[0].Total)} (registro ${result.credito[0].IDRecibo}).</p>` : '';
     $('openStock').hidden = !(p.EnMovStk && !p.IDMovStk && FX.menuUserHasAccess('carga_stock'));
     const canEdit = FX.menuUserHasAccess('cargar_facturas');
-    const field=(label,value,width)=>`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':'readonly'} style="--width:${width}px" value="${esc(value??'')}"></label>`;
+    const canChangePayment=canEdit&&Number(p.IDFormaPago)===3&&total>0&&!result.pagos.length;
+    const field=(label,value,width)=>label==='Forma de Pago'&&canChangePayment?`<label>${esc(label)}:<select id="editPurchasePayment" style="width:${width}px;height:23px;padding:2px 5px;border-radius:0;font-size:12px"><option value="3">${esc(p.pago||'Cta. Cte.')}</option><option value="1">Efectivo</option></select></label>`:`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':'readonly'} style="--width:${width}px" value="${esc(value??'')}"></label>`;
     const taxTotal=(rate,net)=>result.impuestos.filter(row=>Math.abs(Number(row.porcentaje)-rate)<.00001&&(net?Number(row.impuesto)===0:/\biva\b/i.test(row.nombre||row.descripcion||''))).reduce((sum,row)=>sum+Number(row.importe||0),0);
     const summary=[['ImpNeto21',.21],['ImpNeto105',.105],['ImpNeto27',.27]].map(([label,rate],index)=>`<label>${label}:<output>${money(taxTotal(rate,true))}</output></label><label>ImpIVA${index===0?'21':index===1?'105':'27'}:<output>${money(taxTotal(rate,false))}</output></label>${index===0?`<label class="purchase-total">Total:<output>${money(total)}</output></label>`:index===1?`<label>En Movs. de Stock:<input type="checkbox" disabled ${p.EnMovStk?'checked':''}></label>`:field('Nº Mov. Stock',p.stockNumero||p.IDMovStk||'',95)}`).join('');
     openDetail('Consultar Compras a Proveedores', `<div class="purchase-inspect">
@@ -781,19 +782,22 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const stockCheck=$('detailBody').querySelector('.purchase-inspect-summary input[type="checkbox"]');
     stockCheck.disabled=!canEdit||Number(p.CodCuentaCpra)===11;
     const numberInput=$('editPurchaseNumber');
+    const paymentInput=$('editPurchasePayment');
     if(numberInput)FX.bindComprobanteNumber(numberInput);
     $('detailDialog').querySelector('[data-save-purchase-header]')?.remove();
     if(canEdit){
       const save=document.createElement('button');save.type='button';save.dataset.savePurchaseHeader='1';save.textContent='Guardar cambios';save.disabled=true;
       $('deleteInvoice').before(save);
-      const track=()=>{save.disabled=numberInput.value.trim()===p.NroFactura&&stockCheck.checked===Boolean(p.EnMovStk);};
+      const track=()=>{save.disabled=numberInput.value.trim()===p.NroFactura&&stockCheck.checked===Boolean(p.EnMovStk)&&(!paymentInput||Number(paymentInput.value)===Number(p.IDFormaPago));};
       numberInput.addEventListener('input',track);numberInput.addEventListener('change',track);stockCheck.addEventListener('change',track);
+      paymentInput?.addEventListener('change',track);
       save.onclick=async()=>{
-        save.disabled=true;numberInput.disabled=true;stockCheck.disabled=true;
+        save.disabled=true;numberInput.disabled=true;stockCheck.disabled=true;if(paymentInput)paymentInput.disabled=true;
         try{
-          const updated=await api({}, {accion:'editar-cabecera',id:p.IDRecibo,numero:numberInput.value.trim(),enStock:stockCheck.checked,numeroAnterior:p.NroFactura,enStockAnterior:Boolean(p.EnMovStk)});
-          showInvoice(updated);if($('reportDialog').open)await loadReport();message('Número de boleta y opción de stock guardados en SQL.');
-        }catch(error){await htmlNotice(error.message,false);numberInput.disabled=false;stockCheck.disabled=Number(p.CodCuentaCpra)===11;track();}
+          const changedPayment=paymentInput&&Number(paymentInput.value)!==Number(p.IDFormaPago);
+          const updated=await api({}, {accion:'editar-cabecera',id:p.IDRecibo,numero:numberInput.value.trim(),enStock:stockCheck.checked,numeroAnterior:p.NroFactura,enStockAnterior:Boolean(p.EnMovStk),...(paymentInput?{pago:Number(paymentInput.value),pagoAnterior:Number(p.IDFormaPago)}:{})});
+          showInvoice(updated);if($('reportDialog').open)await loadReport();message(changedPayment?'Factura pasada a efectivo y orden de pago generada con la fecha de la factura.':'Número de boleta y opción de stock guardados en SQL.');
+        }catch(error){await htmlNotice(error.message,false);numberInput.disabled=false;stockCheck.disabled=Number(p.CodCuentaCpra)===11;if(paymentInput)paymentInput.disabled=false;track();}
       };
     }
   }
@@ -912,6 +916,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
           if (id === 'account' || saved.fields?.[id] === undefined) return;
           if (comboLists.has(id)) setComboValue(id, saved.fields[id]); else $(id).value = saved.fields[id];
         });
+        if (!saved.pending) setComboValue('type', '');
         refreshAccounts(); setComboValue('account', saved.fields?.account || ''); $('inStock').checked = saved.inStock;
         $('providerCode').value = selectedProvider()?.id || '';
         $('providerName').value = selectedProvider()?.nombre || '';

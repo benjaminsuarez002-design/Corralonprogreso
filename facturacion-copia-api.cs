@@ -1849,28 +1849,65 @@ internal static class FacturacionCopiaApi
             credito = RowsTx(c, tx, "SELECT c.IDRecibo,c.NroFactura,c.Total FROM dbo.ComprasTP p JOIN dbo.ComprasTP c ON c.IDRecibo=p.IDRecImp AND c.Confirmado=1 WHERE p.IDRecibo=@p0", id) };
     }
 
+    private static void PurchaseCashPayment(SqlConnection c, SqlTransaction tx, int id, int operatorId)
+    {
+        var records = RowsTx(c, tx, "SELECT IDFormaPago,IDProveedor,IDDepósito,IDEmp,Fecha,NroFactura,Total,ISNULL(IDRecImp,0) AS IDRecImp FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado=1", id);
+        if (records.Count != 1) throw new InvalidOperationException("La compra no existe.");
+        var p = records[0];
+        if (Convert.ToInt32(p["IDFormaPago"]) == 1) return; // Reintentar no crea otra orden.
+        if (Convert.ToInt32(p["IDFormaPago"]) != 3 || Number(p["Total"]) <= 0) throw new InvalidOperationException("Solo se pueden pasar a efectivo las facturas positivas cargadas en cuenta corriente.");
+        if (Number(Scalar(c,tx,"SELECT COUNT(*) FROM dbo.OrdPagosTSFac f WITH(UPDLOCK,HOLDLOCK) JOIN dbo.OrdPagosTP o WITH(UPDLOCK,HOLDLOCK) ON o.NroOrden=f.NroOrden WHERE (f.IDFactura=@p0 OR f.IDFactura=@p1) AND o.Confirmado=1 AND ISNULL(o.Anulado,0)=0",id,p["IDRecImp"])) > 0)
+            throw new InvalidOperationException("No se puede pasar a efectivo: la factura o su crédito interno ya tienen una orden de pago confirmada y no anulada aplicada.");
+        if (RowsTx(c,tx,"SELECT IDTipoPago FROM dbo.TiposPagos WHERE IDTipoPago=1 AND EnCpras=1").Count != 1) throw new InvalidOperationException("Efectivo no está habilitado para compras.");
+        decimal paid = Number(Scalar(c,tx,"SELECT ISNULL(SUM(f.Importe),0) FROM dbo.OrdPagosTSFac f WITH(UPDLOCK,HOLDLOCK) JOIN dbo.OrdPagosTP o WITH(UPDLOCK,HOLDLOCK) ON o.NroOrden=f.NroOrden WHERE f.IDFactura=@p0 AND o.Confirmado=1 AND ISNULL(o.Anulado,0)=0",id));
+        decimal invoicePending = PurchaseMoney(Number(p["Total"])-paid), creditPending = 0;
+        int creditId = Convert.ToInt32(p["IDRecImp"]);
+        if (creditId > 0)
+        {
+            var credits = RowsTx(c,tx,"SELECT Total FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND IDTipoComp=51 AND IDProveedor=@p1 AND IDEmp=@p2 AND Confirmado=1",creditId,p["IDProveedor"],p["IDEmp"]);
+            if (credits.Count != 1 || Number(credits[0]["Total"]) > 0) throw new InvalidOperationException("Revisá el crédito interno vinculado a la factura.");
+            decimal creditPaid = Number(Scalar(c,tx,"SELECT ISNULL(SUM(f.Importe),0) FROM dbo.OrdPagosTSFac f WITH(UPDLOCK,HOLDLOCK) JOIN dbo.OrdPagosTP o WITH(UPDLOCK,HOLDLOCK) ON o.NroOrden=f.NroOrden WHERE f.IDFactura=@p0 AND o.Confirmado=1 AND ISNULL(o.Anulado,0)=0",creditId));
+            creditPending = PurchaseMoney(Number(credits[0]["Total"])-creditPaid);
+            if (creditPending > 0) throw new InvalidOperationException("El crédito interno tiene aplicaciones inconsistentes. Revisá sus pagos.");
+        }
+        decimal cash = PurchaseMoney(invoicePending + creditPending);
+        if (invoicePending <= 0 || cash <= 0) throw new InvalidOperationException("La factura ya está pagada o no tiene saldo pendiente para generar un pago en efectivo.");
+        int opNumber = Convert.ToInt32(Scalar(c,tx,"SELECT ISNULL(MAX(NroOP),0)+1 FROM dbo.OrdPagosTP WITH(UPDLOCK,HOLDLOCK)"));
+        int order = Convert.ToInt32(Scalar(c,tx,"INSERT dbo.OrdPagosTP(NroOP,Fecha,IDProveedor,Confirmado,IDDepósito,TotalCpras,TotalPagos,IDOper,IDEmp,Nota) OUTPUT INSERTED.NroOrden VALUES(@p0,@p1,@p2,1,@p3,@p4,@p4,@p5,@p6,@p7)",opNumber,p["Fecha"],p["IDProveedor"],p["IDDepósito"],cash,operatorId,p["IDEmp"],"Pago de factura " + Text(p["NroFactura"])));
+        Execute(c,tx,"INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)",order,id,invoicePending);
+        if (creditPending != 0) Execute(c,tx,"INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)",order,creditId,creditPending);
+        Execute(c,tx,"INSERT dbo.OrdPagosTSPag(NroOrden,IDTipoPago,Importe,FechaVto,IDBanco,IDMovBco) VALUES(@p0,1,@p1,@p2,0,NULL)",order,cash,p["Fecha"]);
+        Execute(c,tx,"UPDATE dbo.ComprasTP SET IDFormaPago=1 WHERE IDRecibo=@p0",id);
+        if (creditId > 0) Execute(c,tx,"UPDATE dbo.ComprasTP SET IDFormaPago=1 WHERE IDRecibo=@p0",creditId);
+    }
+
     private static object PurchaseEditHeader(SqlConnection c, Dictionary<string, object> input)
     {
         int id = RequiredId(Value(input, "id"), "la compra");
         string number = Limited(Value(input, "numero"), 20, "Número de boleta").Trim();
         if (!System.Text.RegularExpressions.Regex.IsMatch(number, @"^\d{4}-\d{8}$")) throw new InvalidOperationException("Ingresá el número con formato 0000-00000000.");
         bool inStock = Convert.ToBoolean(Value(input, "enStock"));
+        int requestedPayment = Value(input,"pago") == null ? 0 : RequiredId(Value(input,"pago"),"la forma de pago");
+        int paymentOperator = requestedPayment == 1 ? UserOperator(c,Text(Value(input,"usuarioId"))) : 0;
         using (var tx = c.BeginTransaction(IsolationLevel.Serializable))
         {
             try
             {
-                var records = RowsTx(c, tx, "SELECT IDProveedor,IDTipoComp,NroFactura,EnMovStk,ISNULL(IDMovStk,0) AS IDMovStk,ISNULL(IDRecImp,0) AS IDRecImp,CodCuentaCpra FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado=1", id);
+                var records = RowsTx(c, tx, "SELECT IDProveedor,IDTipoComp,NroFactura,EnMovStk,ISNULL(IDMovStk,0) AS IDMovStk,ISNULL(IDRecImp,0) AS IDRecImp,CodCuentaCpra,IDFormaPago FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado=1", id);
                 if (records.Count != 1) throw new InvalidOperationException("La compra no existe.");
                 var p = records[0];
                 bool currentStock = p["EnMovStk"] != null && p["EnMovStk"] != DBNull.Value && Convert.ToBoolean(p["EnMovStk"]);
-                if (Text(p["NroFactura"]) == number && currentStock == inStock) { var existing = PurchaseResult(c, tx, id); tx.Commit(); return existing; }
-                if (Text(p["NroFactura"]) != Text(Value(input, "numeroAnterior")) || currentStock != Convert.ToBoolean(Value(input, "enStockAnterior"))) throw new InvalidOperationException("Otro usuario modificó la compra. Cerrá y volvé a consultarla.");
+                bool paymentChanged = requestedPayment > 0 && requestedPayment != Convert.ToInt32(p["IDFormaPago"]);
+                if (Text(p["NroFactura"]) == number && currentStock == inStock && !paymentChanged) { var existing = PurchaseResult(c, tx, id); tx.Commit(); return existing; }
+                if (Text(p["NroFactura"]) != Text(Value(input, "numeroAnterior")) || currentStock != Convert.ToBoolean(Value(input, "enStockAnterior")) || (paymentChanged && Convert.ToInt32(p["IDFormaPago"]) != RequiredId(Value(input,"pagoAnterior"),"la forma de pago anterior"))) throw new InvalidOperationException("Otro usuario modificó la compra. Cerrá y volvé a consultarla.");
+                if (paymentChanged && requestedPayment != 1) throw new InvalidOperationException("Solo está habilitado el cambio de cuenta corriente a efectivo.");
                 if (inStock && Text(p["CodCuentaCpra"]).Trim() == "11") throw new InvalidOperationException("Las compras de fletes no se incluyen en movimientos de stock.");
                 if (!inStock && (Number(p["IDMovStk"]) > 0 || Number(Scalar(c, tx, "SELECT COUNT(*) FROM dbo.RecibosTP WHERE IDFactura=@p0 AND IDTipoMov=23 AND Confirmado=1 AND Anulado=0", id)) > 0)) throw new InvalidOperationException("Anulá primero la carga de stock vinculada antes de desmarcar esta opción.");
                 if (Number(Scalar(c, tx, "SELECT COUNT(*) FROM dbo.ComprasTP WHERE IDProveedor=@p0 AND IDTipoComp=@p1 AND NroFactura=@p2 AND Confirmado=1 AND IDRecibo<>@p3", p["IDProveedor"], p["IDTipoComp"], number, id)) > 0) throw new InvalidOperationException("Ya existe otra compra con ese número de boleta.");
                 Execute(c, tx, "UPDATE dbo.ComprasTP SET NroFactura=@p0,EnMovStk=@p1 WHERE IDRecibo=@p2", number, inStock, id);
                 Execute(c, tx, "UPDATE dbo.RecibosTP SET NroFactura=@p0 WHERE IDFactura=@p1 AND IDTipoMov=23 AND Confirmado=1 AND Anulado=0", number, id);
                 if (Number(p["IDRecImp"]) > 0) Execute(c, tx, "UPDATE dbo.ComprasTP SET NroFactura=@p0 WHERE IDRecibo=@p1 AND IDTipoComp=51", number, p["IDRecImp"]);
+                if (paymentChanged) PurchaseCashPayment(c,tx,id,paymentOperator);
                 var result = PurchaseResult(c, tx, id); tx.Commit(); return result;
             }
             catch { try { tx.Rollback(); } catch { } throw; }
@@ -2120,11 +2157,12 @@ internal static class FacturacionCopiaApi
                     throw new InvalidOperationException("Otra PC vinculó ese movimiento. Recargá antes de confirmar.");
                 if (payment != 3 && sign == 1)
                 {
+                    decimal cashAmount = signed - PurchaseMoney(signed * discount);
                     int opNumber = Convert.ToInt32(Scalar(c, tx, "SELECT ISNULL(MAX(NroOP),0)+1 FROM dbo.OrdPagosTP WITH(UPDLOCK,HOLDLOCK)"));
-                    int order = Convert.ToInt32(Scalar(c, tx, "INSERT dbo.OrdPagosTP(NroOP,Fecha,IDProveedor,Confirmado,IDDepósito,TotalCpras,TotalPagos,IDOper,IDEmp,Nota) OUTPUT INSERTED.NroOrden VALUES(@p0,@p1,@p2,1,@p3,@p4,@p4,@p5,@p6,@p7)", opNumber, date, provider, point, signed, operatorId, company, "Pago de factura " + number));
-                    Execute(c, tx, "INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", order, receipt, signed);
+                    int order = Convert.ToInt32(Scalar(c, tx, "INSERT dbo.OrdPagosTP(NroOP,Fecha,IDProveedor,Confirmado,IDDepósito,TotalCpras,TotalPagos,IDOper,IDEmp,Nota) OUTPUT INSERTED.NroOrden VALUES(@p0,@p1,@p2,1,@p3,@p4,@p4,@p5,@p6,@p7)", opNumber, date, provider, point, cashAmount, operatorId, company, "Pago de factura " + number));
+                    Execute(c, tx, "INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", order, receipt, cashAmount);
                     // Access une los valores con Bancos incluso para efectivo: 0 es sin banco.
-                    Execute(c, tx, "INSERT dbo.OrdPagosTSPag(NroOrden,IDTipoPago,Importe,FechaVto,IDBanco,IDMovBco) VALUES(@p0,@p1,@p2,@p3,0,NULL)", order, payment, signed, DateTime.Today);
+                    Execute(c, tx, "INSERT dbo.OrdPagosTSPag(NroOrden,IDTipoPago,Importe,FechaVto,IDBanco,IDMovBco) VALUES(@p0,@p1,@p2,@p3,0,NULL)", order, payment, cashAmount, DateTime.Today);
                 }
                 if (discount > 0)
                 {
@@ -2132,6 +2170,11 @@ internal static class FacturacionCopiaApi
                     int credit = Convert.ToInt32(Scalar(c, tx, "INSERT dbo.ComprasTP(IDTipoComp,IDDepósito,Fecha,FechaIVA,IDProveedor,Proveedor,Concepto,CUIT,IDFormaPago,NroFactura,CodCuentaCpra,Nota,Confirmado,Total,FechaVto,IDSuc,IDOper,IDEmp,IDTipoBien) OUTPUT INSERTED.IDRecibo VALUES(51,@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,1,@p11,@p12,@p13,@p14,@p15,2)", point, date, new DateTime(period.Year, period.Month, 1), provider, providers[0]["nombre"], "Credito Factura N° " + number, cuit, payment, number, account, "Descuento de compra " + receipt, creditAmount, due, branch, operatorId, company));
                     Execute(c, tx, "INSERT dbo.ComprasTS(IDRecibo,IDImpuesto,[Descripción],Importe,PorcImp,NroNeto) VALUES(@p0,0,'Neto 1',@p1,0,1)", credit, Math.Abs(creditAmount));
                     Execute(c, tx, "UPDATE dbo.ComprasTP SET IDRecImp=@p0 WHERE IDRecibo=@p1", credit, receipt);
+                    var lastPayment = RowsTx(c, tx, "SELECT TOP 1 NroOrden FROM dbo.OrdPagosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDProveedor=@p0 AND IDEmp=@p1 AND Confirmado=1 AND ISNULL(Anulado,0)=0 ORDER BY NroOrden DESC", provider, company);
+                    if (lastPayment.Count == 0) throw new InvalidOperationException("El proveedor no tiene un pago confirmado y no anulado para aplicar el descuento.");
+                    int discountOrder = Convert.ToInt32(lastPayment[0]["NroOrden"]);
+                    Execute(c, tx, "INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", discountOrder, credit, creditAmount);
+                    Execute(c, tx, "UPDATE dbo.OrdPagosTSFac SET Importe=Importe+@p2 WHERE NroOrden=@p0 AND IDFactura=@p1; IF @@ROWCOUNT=0 INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", discountOrder, receipt, -creditAmount);
                 }
                 var result = PurchaseResult(c, tx, receipt);
                 if (dryRun) tx.Rollback(); else tx.Commit();
