@@ -7754,11 +7754,19 @@
 (function(){
   if(window.CorralonAliasObjectives)return;
   const key='corralon_menu_objectives_cache_v1',listeners=new Set();
+  const aliasesKey='corralon_comprobantes_aliases_cache_v1';
   let source=null,started=false,controller=null,release=null,midnightTimer=null;
   const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-  function cached(){try{const data=JSON.parse(localStorage.getItem(key)||'null');return data?.dateIso===today()?data:{dateIso:today(),cards:[]};}catch{return {dateIso:today(),cards:[]};}}
+  function withTransferAliases(data){
+    let aliases=[];try{const saved=JSON.parse(localStorage.getItem(aliasesKey)||'[]');if(Array.isArray(saved))aliases=saved;}catch{}
+    return {...data,cards:(data.cards||[]).map(card=>{
+      const alias=aliases.find(item=>String(item.id)===String(card.aliasId));
+      return {...card,aliasTransferencia:String(card.aliasTransferencia||alias?.alias||'')};
+    })};
+  }
+  function cached(){try{const data=JSON.parse(localStorage.getItem(key)||'null');return withTransferAliases(data?.dateIso===today()?data:{dateIso:today(),cards:[]});}catch{return {dateIso:today(),cards:[]};}}
   function notify(data){for(const listener of listeners)listener(data);}
-  function publish(raw){const data={dateIso:today(),cards:Array.isArray(raw?.cards)?raw.cards:[]};try{const text=JSON.stringify(data);if(localStorage.getItem(key)!==text)localStorage.setItem(key,text);}catch{}notify(data);}
+  function publish(raw){const data=withTransferAliases({dateIso:today(),cards:Array.isArray(raw?.cards)?raw.cards:[]});try{const text=JSON.stringify(data);if(localStorage.getItem(key)!==text)localStorage.setItem(key,text);}catch{}notify(data);}
   async function lead(){
     let unsubscribe=null,finished=false;
     await new Promise(resolve=>{
@@ -7776,7 +7784,7 @@
     midnightTimer=setTimeout(()=>{stop();notify(cached());start();},next.getTime()-Date.now()+100);
   }
   function stop(){clearTimeout(midnightTimer);controller?.abort();release?.();started=false;}
-  window.addEventListener('storage',event=>{if(event.key===key)notify(cached());});
+  window.addEventListener('storage',event=>{if(event.key===key||event.key===aliasesKey)notify(cached());});
   window.addEventListener('pagehide',stop);
   window.addEventListener('pageshow',()=>{notify(cached());start();});
   window.CorralonAliasObjectives={subscribe(listener,subscribeSource){listeners.add(listener);source=subscribeSource||source;listener(cached());start();return()=>{listeners.delete(listener);if(!listeners.size)stop();};}};
