@@ -30,5 +30,15 @@
   const allowsVoucher = (rules, paymentId, voucherId) => !(rule(rules, paymentId).comprobantesExcluidos || []).includes(Number(voucherId));
   const allowsCard = (rules, paymentId, cardId) => !(rule(rules, paymentId).tarjetasExcluidas || []).includes(Number(cardId));
   const usesCards = payment => [3, 5].includes(Number(payment?.clase));
-  root.CorralonMediosPago = { normalize, rule, allowsVoucher, allowsCard, usesCards };
+  function adjustValue(row, source, parse = Number, round = value => Math.round((value + Number.EPSILON) * 100) / 100) {
+    if (source === 'total') {
+      const target = round(parse(row.total));
+      if (!parse(row.importe)) { row.importe = target; row.impRec = 0; row.coef = 0; }
+      else { row.impRec = round(target - parse(row.importe)); row.coef = parse(row.impRec) / parse(row.importe); }
+    } else if (source === 'impRec') row.coef = parse(row.importe) ? parse(row.impRec) / parse(row.importe) : 0;
+    else row.impRec = round(parse(row.importe) * parse(row.coef));
+    row.total = round(parse(row.importe) + parse(row.impRec));
+    return row;
+  }
+  root.CorralonMediosPago = { normalize, rule, allowsVoucher, allowsCard, usesCards, adjustValue };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -906,7 +906,7 @@ internal sealed class ServerForm : Form
         string route = requestPath.Substring("api/facturacion/".Length).ToLowerInvariant();
         string method = context.Request.HttpMethod;
         bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "catalogo", "articulos-sql", "stock", "stock-ingreso", "clientes", "comprobante", "consultar-comprobantes", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras", "revision-venta" }, route) >= 0)
-            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso", "articulos-sql", "clientes", "revision-venta", "imprimir-revision" }, route) >= 0);
+            || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso", "articulos-sql", "clientes", "revision-venta", "imprimir-revision", "comprobante-valores" }, route) >= 0);
         allowed = allowed || ((method == "GET" || method == "POST") && route == "cargar-facturas");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "recibos-cobro");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "proveedores-sql");

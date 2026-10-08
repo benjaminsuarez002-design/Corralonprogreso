@@ -1,9 +1,10 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia: 05/10/2026
+Fecha de referencia: 08/10/2026
 El cuerpo historico corresponde al 25/08/2026; las secciones 21 a 23 registran
-actualizaciones posteriores, junto con la seccion 24. La seccion mas reciente prevalece sobre las anteriores.
+actualizaciones posteriores. Las secciones 24 a 27 registran cambios hasta el
+08/10/2026. La seccion mas reciente prevalece sobre las anteriores.
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -1963,3 +1964,187 @@ Caja: ultimos campos editables y resumen de pendientes
   abreviado, sin guion, ya formateado, vacio y alfanumerico. Todas pasaron.
   No se verifico en navegador. Para cargar el cambio, recargar con Ctrl + F5.
 - No se modificaron versiones de publicacion ni se publicaron cambios.
+
+25. CARGAR FACTURAS, STOCK, FECHAS Y PAGOS (08/10/2026)
+====================================================
+
+- cargar-facturas.html: el boton del campo Numero de movimiento de stock abre
+  stockPicker, un popup dentro del mismo HTML. Lista movimientos disponibles del
+  proveedor en la sucursal correspondiente al punto de venta seleccionado.
+  Muestra fecha, sucursal, numero, tipo y total. Pulsar una fila consulta sus
+  articulos; Vincular este movimiento aplica la seleccion. Ver el detalle no
+  modifica el campo ni vuelve a ingresar existencias.
+- PurchaseQuery en facturacion-copia-api.cs tiene consultas movimientos y
+  detalle-stock. Solo ofrece compras de mercaderia confirmadas, no anuladas y
+  sin factura vinculada. Se quito el limite anterior de 90 dias. La confirmacion
+  vuelve a validar proveedor, sucursal y disponibilidad con bloqueo transaccional
+  para impedir que dos compras utilicen la misma carga.
+- PurchaseRemovalPreview/PurchaseDelete permiten eliminar la compra conservando
+  sus movimientos de stock: se liberan IDFactura y NroFactura en RecibosTP,
+  sin cambiar articulos, cantidades, existencias ni estado de anulacion.
+  Los bloqueos por pagos, asientos y referencias inconsistentes siguen activos.
+  La eliminacion conserva control de version, transaccion y auditoria SQL.
+- La deteccion incluye cargas anuladas. Caso comprobado: compra 163500,
+  proveedor SIDERAGRO 5534, factura 0048-00000444, movimiento 6842,
+  RecibosTP.IDRecibo 148739. La carga ya estaba anulada y mantenia IDFactura;
+  omitirla producia un bloqueo falso. Se corrigio la consulta y se verifico la
+  previsualizacion en SQL; no se elimino esa factura durante las pruebas.
+  Una carga anulada NO vuelve a estar disponible ni se reactiva al eliminar
+  la factura. El usuario indico que reingresara el stock que anulo por error.
+- cargastock.html: solo el usuario con nivel administrador puede editar la fecha
+  de una nueva carga. Otros usuarios usan hoy; cargas confirmadas no se editan.
+  stockFecha ahora es texto con funciones TXT compartidas: bindFlexibleDates,
+  bindFieldRestore y navegacion lineal. Acepta 1-9-26 -> 01/09/2026.
+  stockDateText convierte fechas ISO de borradores; el payload envia fecha ISO.
+  Se conserva la fecha del administrador al confirmar; no se reemplaza por hoy.
+- StockIngreso valida fecha igual o anterior a hoy y comprueba el nivel real del
+  usuario en Firestore para fechas anteriores, reutilizando la validacion de
+  administrador existente. No confia en un nivel enviado por el navegador.
+  Ambas cabeceras de una transferencia usan la fecha elegida. FechaYHora conserva
+  la hora real de registro. No se aplica el limite fiscal de cinco dias al stock.
+- Pagos automaticos de compras: OrdPagosTSPag debe guardar IDBanco=0 (NINGUNO),
+  incluso para efectivo. Las consultas Access FOrdPagosFSPag y FOrdPagosFSPagCons
+  hacen INNER JOIN con Bancos; IDBanco NULL ocultaba valores ya guardados.
+  Se corrigio el INSERT de PurchaseConfirm y el dato de la orden de pago 12068,
+  NroOrden 161518, IDOrden de valor 157163: Efectivo, $528.326,28.
+  Solo se cambio IDBanco de NULL a 0. Se verifico visibilidad en la consulta
+  real de Access; no se modifico importe ni se creo otro pago. No generalizar
+  esa correccion a todas las ordenes anteriores sin diagnosticar cada caso.
+- Aplicar precios en Stock: pendiente separado, NO reparado. Se encontro indice
+  unico Articulo en TArtsXLS de C:\Update\Ariel2App.mdb. Los codigos 14232,
+  14233 y 14234 tienen la misma descripcion: Excel contenia los tres, pero la
+  tabla temporal admitia solo el primero. El actualizador informaba OK aun
+  descartando filas. No se modifico ese indice ni se volvieron a aplicar precios.
+- funciones.js: se retiro la llamada automatica global bindNumericExpressions().
+  Las cuentas (+3%, x 1.03, etc.) son EXCLUSIVAS de los campos de precio del
+  editor articulos-sql.js, con activacion explicita sobre su detalle.
+  Nunca reactivar la calculadora para todos los campos numeric/decimal: fechas
+  y comprobantes con guion disparaban Cuenta invalida. Esta decision del usuario
+  reemplaza la instruccion antigua mas amplia de aplica funciones.txt.
+- Verificaciones: compilacion C#, pruebas de popup y permisos/formato de fecha,
+  sintaxis y consultas SQL de solo lectura. La reparacion del IDBanco indicada
+  arriba fue la escritura puntual autorizada. No hubo prueba manual de todos
+  los formularios en navegador ni borrado real de compras durante las pruebas.
+
+26. SINCRONIZACION COMPARTIDA Y RECIBOS DE COBRO (07-08/10/2026)
+============================================================
+
+- catalogo-realtime-worker.js mantiene una conexion Supabase Realtime compartida
+  entre paginas del mismo perfil de navegador y origen. Cambiar de pestana no
+  debe crear otra conexion. Una conexion/reconexion real consulta metadata una
+  vez; los eventos usan la metadata recibida. Un fallo de lectura no habilita
+  que cada pestana repita la consulta. Distintos perfiles/origenes/PCs no comparten
+  esa conexion. Requiere SharedWorker; no agregar una conexion alternativa.
+- corralon-system.js coordina descargas de catalogo mediante Web Locks e IndexedDB:
+  una descarga por navegador, otras paginas leen la copia compartida. Ranking
+  usa su bloqueo propio y conserva una version nueva llegada durante una descarga.
+  No hay comprobacion de ranking al recuperar foco. No reintroducir polling ni
+  consultas remotas de respaldo que el usuario rechazo expresamente.
+- Las fotos de Facturacion consultan catalog.cachedArticle: solamente copia local,
+  sin buscar en Supabase si falta la URL. Los eventos de catalogo invalidan la
+  cache de fotos. No descargar todo el catalogo solo para mostrar una fotografia.
+  Index con usuario logueado busca localmente; la busqueda publica conserva su
+  recorrido remoto reducido. Se elimino la escucha adicional que duplicaba las
+  descargas de articulos. Volver a una pestana publica utiliza metadata conocida.
+- Actualizar articulos publica un aviso compacto de proveedor/version/manifestUrl
+  en configuracion/listas_proveedores de Firebase. Los consumidores descargan el
+  JSON solo para una version nueva; Web Locks evitan duplicarlo entre pestanas.
+  Los inicializadores reutilizan una app del mismo proyecto aunque tenga nombre:
+  no usar getApp() suponiendo que existe DEFAULT. Si falla el aviso, informar
+  lista publicada sin aviso; no volver a publicar la lista como respaldo.
+- Los avisos actualizan catalogos/opciones de Pedidos sin reemplazar precios,
+  fecha ni contenido de un pedido en edicion, ni alterar Historial. La eliminacion
+  de las comprobaciones remotas al seleccionar proveedor fue una propuesta;
+  no asumir que ya se quitaron todas esas consultas.
+- Menu comprueba existencia de remitos solo para notificaciones nuevas/cambiadas,
+  con memoria local y bloqueo entre paginas; otros avisos no repiten esa consulta.
+- Se verificaron pruebas automatizadas de conexion, descarga unica, fotos locales,
+  ranking y apps Firebase con nombre. Sigue pendiente validar una publicacion
+  real y recepcion de avisos entre todos los equipos; no afirmar que se hizo.
+- recibos-cobro.html contiene el formulario, estilos y logica de emision SQL.
+  Facturacion tiene boton Recibos junto a Nota y pasa su punto de venta; al nuevo
+  recibo se recupera el punto de venta de Facturacion. El usuario puede cambiarlo
+  para ese recibo. Ver factura reutiliza facturacion-consulta.js, compartido con
+  Consultar de Facturacion. Revisar codigo actual antes de ampliar estos flujos.
+- Caso historico de recibo: 0011-00000001, $350.000 efectivo, BENJA SUAREZ,
+  aplicado a 0007-00034059. El saldo de $31,86 fue intencional del usuario;
+  no corregirlo ni tratarlo como fallo de redondeo.
+
+27. INICIADOR UNICO Y LIMPIEZA DEL PROYECTO (08/10/2026)
+====================================================
+
+- Usar el acceso directo del escritorio Iniciar Sistema.lnk, cuyo destino es
+  iniciar sistema.bat de esta carpeta. Inicia/actualiza el servidor y abre Menu.
+  Se borro el BAT duplicado iniciar-facturacion-copia.bat. Cualquier instruccion
+  antigua que lo mencione debe entenderse reemplazada por Iniciar Sistema.
+- iniciar-facturacion-copia.ps1 sigue siendo necesario: es el script INTERNO
+  que llama iniciar sistema.bat. NO borrarlo por llevar copia en el nombre.
+  El servidor activo usa CorralonWebServer.exe en raiz y servidor/FacturacionCopiaApi.exe.
+  Conservar facturacion-operador.json, wsfe-*.bin y venta-revision-*.bin.
+  Compilar una prueba no activa el ejecutable de produccion automaticamente.
+- Limpieza solicitada: se enviaron a la Papelera 1.243 archivos, aproximadamente
+  551,3 MB. Incluye cache npm de staging, perfil Chrome de pruebas, cinco MDB de
+  inspeccion, ejecutables de prueba obsoletos, caches temporales y carpetas vacias.
+  El borrado permanente fue rechazado automaticamente; no se vacio la Papelera.
+  Las bases originales en C:\Update no se borraron ni se modificaron por limpiar.
+- Se conservaron .git, .codex/config.toml, docs, tools, vendor, supabase, onepace,
+  tests, adjuntos, exportaciones de referencia y datos de recuperacion financiera.
+  .codex-staging/importer-dom-test contiene dependencias de pruebas reutilizadas:
+  no eliminarlo pensando que toda carpeta oculta es basura. tmp contiene tambien
+  codigo utilizado por pruebas/publicadores; inspeccionar referencias antes de borrar.
+- tests/*.test.cjs son pruebas de desarrollo; no son pantallas ni se ejecutan al
+  iniciar el sistema. No borrar pruebas utiles para ocultar archivos al usuario.
+  Sus ejecutables y fuentes generadas pueden recrearse segun el script respectivo.
+- No usar las rutas de MDB de inspeccion eliminadas como si siguieran existiendo.
+  Las exportaciones Access conservadas son evidencia historica; el SQL y las
+  consultas de la base vigente prevalecen sobre esas copias.
+- Tras limpiar pasaron cinco pruebas de permisos/formato/alcance de cuentas,
+  y el bootstrap real respondio OK con SQL conectado. El sistema siguio activo.
+  No se publicaron versiones ni se subieron cambios a GitHub por esta limpieza.
+
+28. CONSULTAR BOLETAS: CORREGIR VALORES (08/10/2026)
+--------------------------------------------------
+- facturacion-consulta.js permite a administradores cambiar tipo de valor,
+  tarjeta/cuenta y cuotas del plan, con Guardar valores. Usa los medios y reglas
+  de Facturacion. Recibos carga tambien facturacion-medios-pago.js para el popup
+  compartido. Ampliado: permite dividir pagos, agregar/quitar filas y editar
+  importes, descripcion, porcentaje, descuento/recargo y total por valor.
+  Conserva el total emitido, articulos, impuestos y stock. Diferencia cero
+  obligatoria en pantalla y SQL antes de guardar. Solo administradores.
+- Los totales inferiores leen TotalEF/TotalEC/TotalCC/TotalCH. La edicion
+  redistribuye por IDClasePago: efectivo 1, tarjeta 5, cuenta corriente 6,
+  transferencia 3 y cheque 2 en TotalCH, conservando el signo del comprobante.
+- POST comprobante-valores valida administrador consultando el usuario en
+  Firestore; SQL usa transaccion Serializable, version de cabecera/valores y
+  Orden del renglon. Bloquea anuladas, comprobantes ajenos a Facturacion,
+  valores bancarios vinculados y retiro de CC con recibos de cobro vigentes.
+- GET comprobante lee cabecera, detalle, valores y version en una transaccion.
+  Guardar recarga el detalle de SQL. No se corrige una boleta automaticamente.
+- Diez pruebas DOM pasaron; API y servidor compilaron. SQL real verifico version,
+  consultas de recibos y rechazo de version vieja sin modificar la boleta.
+  No se reinicio el servidor ni se publico: activar con Iniciar Sistema.
+- Pegado simple en la tabla de Facturacion evita reconstruir las celdas: conserva
+  foco y lista de IDArt/codigo proveedor/descripcion. Pegado tabular sigue igual.
+
+- Ampliacion de valores: facturacion-medios-pago.js comparte adjustValue con
+  Facturacion y Consultar. Agregar renglon propone el importe faltante.
+  SQL conserva Orden de renglones existentes, inserta los nuevos y quita los
+  eliminados en una transaccion. Validaciones completas antes de escribir;
+  protege valores bancarios vinculados y cuenta corriente ya cobrada.
+  Veinte pruebas pasaron; SQL real rechazo diferencias y filas nuevas sin
+  escribir nada. La boleta de prueba no fue corregida ni se reinicio el sistema.
+- Facturacion mantiene distribucion de escritorio con base 1680x900 y zoom
+  proporcional al ancho/alto disponible. Sin redistribucion de campos en
+  pantallas chicas; scroll de articulos interno. Script inline fitInvoiceForm.
+29. CARGA STOCK: NUEVO Y CANCELAR (08/10/2026)
+--------------------------------------------
+- Nuevo usa stockNewWorkspace: conserva la carga actual, agrega una al final
+  y abre esa carga vacia (2/4 -> 5/5). Persiste la nueva antes de activarla.
+- Cancelar usa stockCancelWorkspace: descarta la carga actual, compacta las
+  posteriores y abre la anterior (5/5 -> 4/4; 2/4 -> 1/3). Si cancela la
+  primera, abre la siguiente renumerada como 1. Minimo una carga: Cancelar
+  en 1/1 solo la vacia y limpia seleccion/undo; no elimina movimientos SQL.
+- IndexedDB updateMany renumera y quita claves en una transaccion. Las lecturas
+  previas usan strict para que un error no convierta cargas en vacias.
+  No permite Nuevo/Cancelar durante confirmacion incierta u operacion activa.
+- Siete pruebas de cargas pasaron y tres de fechas; scripts validos.

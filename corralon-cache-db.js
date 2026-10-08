@@ -22,7 +22,7 @@
     return dbPromise;
   }
 
-  async function get(key){
+  async function get(key, options = {}){
     try{
       const db=await openDb();
       return await new Promise((resolve,reject)=>{
@@ -31,6 +31,7 @@
         request.onerror=()=>reject(request.error);
       });
     }catch(error){
+      if(options.strict)throw error;
       console.warn('Cache IndexedDB:',error);
       return memoryFallback.get(String(key))??null;
     }
@@ -72,5 +73,18 @@
     return value;
   }
 
-  window.CorralonCacheDB={get,set,remove,migrateLocalStorage};
+  async function updateMany(entries, removeKeys = []){
+    const db=await openDb();
+    return new Promise((resolve,reject)=>{
+      const transaction=db.transaction(STORE_NAME,'readwrite'),store=transaction.objectStore(STORE_NAME);
+      try{
+        entries.forEach(([key,value])=>store.put({key:String(key),value,updatedAt:Date.now()}));
+        removeKeys.forEach(key=>store.delete(String(key)));
+      }catch(error){transaction.abort();reject(error);return;}
+      transaction.oncomplete=()=>{entries.forEach(([key,value])=>memoryFallback.set(String(key),value));removeKeys.forEach(key=>memoryFallback.delete(String(key)));resolve();};
+      transaction.onerror=()=>reject(transaction.error||new Error('No se pudieron actualizar las cargas'));
+      transaction.onabort=()=>reject(transaction.error||new Error('Actualización de cargas abortada'));
+    });
+  }
+  window.CorralonCacheDB={get,set,remove,migrateLocalStorage,updateMany};
 })();
