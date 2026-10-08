@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.36"></script>
+<script src="corralon-system.js?v=1.0.37"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -335,7 +335,7 @@
     <label>Sucursal<select id="stockIngresoSucursal" data-stock-header><option value="">Conectando…</option></select></label>
     <label>Tipo movimiento<select id="stockTipoMovimiento" data-stock-header><option value="23">Compras de Mercadería</option></select></label>
     <label>Nº movimiento<input id="stockNumero" readonly tabindex="-1" placeholder="Automático"></label>
-    <label>Fecha<input id="stockFecha" type="date" readonly tabindex="-1"></label>
+    <label>Fecha<input id="stockFecha" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" data-date data-stock-header data-stock-flow readonly tabindex="-1"></label>
     <label>Operador<input id="stockOperador" readonly tabindex="-1"></label>
     <label>Sucursal destino<select id="stockDestino" data-stock-header disabled><option value="">—</option></select></label>
     <label>Comp. relacionado<select id="stockRelacionado" data-stock-header><option value="">—</option></select></label>
@@ -4266,6 +4266,18 @@ function stockIngresoUuid() {
 }
 function stockProviderId() { return Number(CorralonSystem.providerIdentity.externalId(selectedProvider()) || 0); }
 function stockToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function stockCanEditDate() { return String(FX.menuSessionUser()?.nivel || '').trim().toLowerCase() === 'administrador'; }
+function stockDateText(value) {
+  const text = /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value).split('-').reverse().join('/') : value;
+  return FX.parseFechaFlexible(text)?.text || text;
+}
+function stockDatePermission() {
+  const field = stockField('stockFecha');
+  const allowed = stockCanEditDate() && !stockConfirmed && !stockIngresoBusy && !stockWorkspaceSwitching;
+  field.readOnly = !allowed; field.tabIndex = allowed ? 0 : -1; field.max = stockToday();
+  if (!stockCanEditDate() && !stockConfirmed && !stockIngresoBusy) field.value = stockToday();
+  field.value = stockDateText(field.value);
+}
 function stockHeaderSave() {
   if (stockConfirmed) return;
   const header = {};
@@ -4724,7 +4736,10 @@ function stockIngresoData() {
     if (!Number.isFinite(cantidad) || (type !== 35 && cantidad <= 0) || !Number.isFinite(precioUnitario) || precioUnitario < 0) throw new Error(`Revisá cantidad y precio de la fila ${index+1}.`);
     return {idart:article.idart,codigo:String(row.codigo),cantidad,precioUnitario:Math.round(precioUnitario*10000)/10000,...(row.conteo == null ? {} : {conteo:Number(row.conteo)})};
   });
-  return {sucursal:branch,puntoVenta:Number(point.id),proveedor:stockProviderId(),tipoMovimiento:Number(stockField('stockTipoMovimiento').value),sucursalDestino:Number(stockField('stockDestino').value),idFactura:Number(stockField('stockCompra').value),idRelacionado:Number(stockField('stockRelacionado').value),numeroFactura:stockField('stockIngresoFactura').value.trim(),numeroRemito:stockField('stockRemito').value.trim(),nota:stockField('stockIngresoNota').value.trim(),articulos};
+  const parsedDate = FX.parseFechaFlexible(stockDateText(stockField('stockFecha').value));
+  const fecha = stockCanEditDate() ? parsedDate && `${parsedDate.year}-${String(parsedDate.month).padStart(2,'0')}-${String(parsedDate.day).padStart(2,'0')}` : stockToday();
+  if (!fecha || fecha > stockToday() || !stockField('stockFecha').checkValidity()) throw new Error('Ingresá una fecha válida, igual o anterior a hoy.');
+  return {fecha,sucursal:branch,puntoVenta:Number(point.id),proveedor:stockProviderId(),tipoMovimiento:Number(stockField('stockTipoMovimiento').value),sucursalDestino:Number(stockField('stockDestino').value),idFactura:Number(stockField('stockCompra').value),idRelacionado:Number(stockField('stockRelacionado').value),numeroFactura:stockField('stockIngresoFactura').value.trim(),numeroRemito:stockField('stockRemito').value.trim(),nota:stockField('stockIngresoNota').value.trim(),articulos};
 }
 async function stockIngresoCall(data, action) {
   const actor = FX.menuSessionUser();
@@ -4736,6 +4751,7 @@ async function stockIngresoCall(data, action) {
   return result;
 }
 function stockFreeze(value) {
+  stockDatePermission();
   el.rows.inert = value; document.querySelectorAll('.stock-entry,.stock-provider,.toolbar').forEach(section => section.inert=value);
   stockField('confirmStockIngresoBtn').disabled=value;
   stockField('confirmStockIngresoBtn').textContent=stockConfirmed?'Ingreso confirmado':stockIngresoBusy?'Confirmando…':'Confirmar';
@@ -4749,7 +4765,7 @@ async function confirmStockIngreso() {
   let budgetResolutionWarning = '';
   try {
     document.activeElement?.blur();
-    stockField('stockFecha').value=stockToday();
+    if (!stockCanEditDate()) stockField('stockFecha').value=stockDateText(stockToday());
     let pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
     const data=pending?.status==='uncertain' ? JSON.parse(pending.fingerprint) : stockIngresoData(), fingerprint=JSON.stringify(data);
     if (!pending || pending.fingerprint !== fingerprint) pending={id:stockIngresoUuid(),fingerprint,status:'draft',presupuestosWeb:[...new Set(rowsData.filter(row=>!isBlankStockRow(row)).map(row=>row.presupuestoWeb).filter(Boolean))]};
@@ -4851,6 +4867,7 @@ sessionStorage.setItem('corralon_stock_tab_id', stockInvoiceTabId);
 let stockInvoiceReady = false, stockInvoiceApplying = false;
 window.name = 'corralon-carga-stock';
 window.addEventListener('menu-user-validated', event => {
+  stockDatePermission();
   stockInvoiceUser = String(event.detail.user.id);
   stockInvoiceKey = `corralon_stock_factura_${stockInvoiceUser}`;
   window.name = 'corralon-carga-stock';
@@ -5106,7 +5123,10 @@ async function initStockSql() {
     document.querySelectorAll('[data-stock-header]').forEach(field=>{if(saved[field.id]!=null){if(field.type==='checkbox')field.checked=saved[field.id];else field.value=saved[field.id];}});
     const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
     stockConfirmed=pending?.status==='confirmed';
-    stockField('stockOperador').value=stockSqlMeta.operador[0]?.nombre||'';stockField('stockFecha').value=stockToday();
+    stockField('stockOperador').value=stockSqlMeta.operador[0]?.nombre||'';
+    stockField('stockFecha').value=(stockCanEditDate() ? saved.stockFecha : '')||stockToday();
+    if (stockConfirmed && pending?.fingerprint) { try { stockField('stockFecha').value=JSON.parse(pending.fingerprint).fecha||stockToday(); } catch (_) {} }
+    stockDatePermission();
     stockMovementFields();await stockRefreshSql();await stockRefreshRelations();
     if(stockConfirmed){
       stockField('stockNumero').value=pending.numeroMovimiento||'';
@@ -5284,6 +5304,8 @@ stockHeaderFlowFields().forEach(field=>{
     if(stockMoveHeaderFocus(field,direction)){event.preventDefault();event.stopPropagation();}
   });
 });
+FX.bindFlexibleDates({root:document.querySelector('.app'),selector:'#stockFecha'});
+FX.bindFieldRestore({root:document.querySelector('.app'),selector:'#stockFecha',capture:true});
 FX.bindLinearNavigation({root:document.querySelector('.app'),selector:'[data-stock-flow]',
   navigateLeftRight:true,smartCaret:true,selectOnAnyFocus:true,selectOnFirstPointerFocus:true});
 stockField('stockRelacionado').addEventListener('change',async()=>{if(!stockField('stockRelacionado').value)return;if(rowsData.some(row=>!isBlankStockRow(row))&&!(await htmlNotice('¿Reemplazar las filas por las cantidades pendientes del comprobante?'))){stockField('stockRelacionado').value='';return;}try{const result=await stockSqlGet('pendientes',{recibo:stockField('stockRelacionado').value});rowsData=(result.articulos||[]).map(line=>normalizeRow({idart:line.idart,codigo:line.codigo||'',descripcion:line.descripcion,cantidad:line.cantidad,precio:precioUnitarioDesdeFinal({},line.precioUnitario)}));render();saveRows();stockHeaderSave();}catch(error){stockIngresoMessage(error.message,'error');}});

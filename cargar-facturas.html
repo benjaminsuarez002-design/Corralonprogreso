@@ -235,6 +235,14 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
     <header class="dialogbar"><h2>Cargar proveedor</h2><button type="button" data-close="providerDialog">Cerrar ✕</button></header>
     <iframe id="providerFrame" title="Formulario de proveedor SQL" style="display:block;width:100%;height:min(690px,80vh);border:0"></iframe>
   </dialog>
+  <dialog id="stockPicker" style="width:min(1050px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:14px;background:#fff">
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2 style="margin:0">Vincular carga de stock</h2><button id="stockPickerClose" type="button">Cerrar</button></header>
+    <p id="stockPickerStatus" role="status"></p>
+    <div style="max-height:28vh;overflow:auto"><table style="width:100%"><thead><tr><th>Fecha</th><th>Sucursal</th><th>Nº movimiento</th><th>Tipo de carga</th><th>Total</th></tr></thead><tbody id="stockPickerRows"></tbody></table></div>
+    <h3 id="stockPickerTitle">Elegí un movimiento para ver sus artículos</h3>
+    <div style="max-height:34vh;overflow:auto"><table style="width:100%"><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th></tr></thead><tbody id="stockPickerArticles"></tbody></table></div>
+    <footer style="display:flex;justify-content:flex-end;margin-top:12px"><button id="stockPickerUse" type="button" disabled>Vincular este movimiento</button></footer>
+  </dialog>
   <script id="cargar-facturas-script">
 (() => {
   'use strict';
@@ -384,6 +392,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   }
   function showPurchaseCombo(input) {
     if (pickingPurchaseCombo || !input || input.matches(':disabled') || input.readOnly) return;
+    if (input.id === 'movement') { openStockPicker(); return; }
     if (purchaseCombo.input !== input) hidePurchaseCombo();
     const items = purchaseComboItems(input), query = normalizedChoice(input.value);
     let selected = items.findIndex(item => normalizedChoice(item.value) === query);
@@ -482,6 +491,50 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       if (purchaseCombo.input === $('movement')) hidePurchaseCombo();
     }
   }
+  let stockPickerSelection = null, stockPickerRequest = 0;
+  async function openStockPicker() {
+    if ($('stockPicker').open) return;
+    hidePurchaseCombo(); stockPickerSelection = null; $('stockPickerUse').disabled = true;
+    $('stockPickerRows').innerHTML = ''; $('stockPickerArticles').innerHTML = '';
+    $('stockPickerTitle').textContent = 'Elegí un movimiento para ver sus artículos';
+    $('stockPicker').showModal();
+    const request = ++stockPickerRequest, providerId = selectedProvider()?.id, point = $('point').value;
+    if (!providerId || !$('inStock').checked) { $('stockPickerStatus').textContent = 'Seleccioná un proveedor y activá En Movs. de Stock.'; return; }
+    $('stockPickerStatus').textContent = 'Consultando movimientos disponibles…';
+    try {
+      const result = await api({ consulta:'movimientos', proveedor:providerId, puntoVenta:point });
+      if (request !== stockPickerRequest || !$('stockPicker').open) return;
+      fillCombo('movement', result.movimientos, 'Sin movimiento asociado');
+      $('stockPickerStatus').textContent = `${selectedProvider().nombre} · ${result.movimientos.length} movimientos disponibles en la sucursal seleccionada`;
+      $('stockPickerRows').innerHTML = result.movimientos.map(item => `<tr data-pick-stock="${Number(item.id)}" style="cursor:pointer"><td>${esc(item.fecha)}</td><td>${esc(item.sucursalNombre || item.sucursal)}</td><td><button type="button">${esc(item.numero)}</button></td><td>${esc(item.tipo)}</td><td>${money(item.total)}</td></tr>`).join('') || '<tr><td colspan="5">No hay movimientos disponibles.</td></tr>';
+    } catch (error) { if (request === stockPickerRequest) $('stockPickerStatus').textContent = error.message; }
+  }
+  async function previewStockMovement(id) {
+    const item = (comboLists.get('movement') || []).find(row => Number(row.id) === Number(id));
+    if (!item) return;
+    const request = ++stockPickerRequest;
+    stockPickerSelection = null; $('stockPickerUse').disabled = true; $('stockPickerArticles').innerHTML = '';
+    $('stockPickerTitle').textContent = `Movimiento ${item.numero} · ${item.fecha} · ${item.sucursalNombre || item.sucursal} · ${item.tipo}`;
+    $('stockPickerStatus').textContent = 'Consultando artículos…';
+    try {
+      const result = await api({ consulta:'detalle-stock', id:item.id, proveedor:selectedProvider().id, puntoVenta:$('point').value });
+      if (request !== stockPickerRequest || !$('stockPicker').open) return;
+      $('stockPickerArticles').innerHTML = result.articulos.map(row => `<tr><td>${esc(row.idart)}</td><td>${esc(row.codigo)}</td><td>${esc(row.descripcion)}</td><td>${esc(row.cantidad)}</td><td>${money(row.precioUnitario)}</td><td>${money(row.importe)}</td></tr>`).join('') || '<tr><td colspan="6">Sin artículos.</td></tr>';
+      stockPickerSelection = item; $('stockPickerUse').disabled = false;
+      $('stockPickerStatus').textContent = 'Se vinculará la carga existente; no se volverá a ingresar stock.';
+    } catch (error) { if (request === stockPickerRequest) $('stockPickerStatus').textContent = error.message; }
+  }
+  $('stockPickerClose').addEventListener('click', () => $('stockPicker').close());
+  $('stockPicker').addEventListener('close', () => { stockPickerRequest++; stockPickerSelection = null; $('movement').focus(); });
+  $('stockPickerRows').addEventListener('click', event => {
+    const button = event.target.closest('[data-pick-stock]'); if (button) previewStockMovement(button.dataset.pickStock);
+  });
+  $('stockPickerUse').addEventListener('click', () => {
+    if (!stockPickerSelection) return;
+    setComboValue('movement', stockPickerSelection.id);
+    $('movement').dispatchEvent(new Event('change', {bubbles:true}));
+    $('stockPicker').close(); saveDraft();
+  });
   async function refreshStock() {
     updateStockEligibility();
     const sequence = ++stockSequence, previous = comboItem('movement')?.id ?? $('movement').value;
@@ -754,10 +807,10 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       removalPreview = { id: detailInvoiceId, version: state.version };
       const movements = state.facturas.map(row => `<li>Registro ${Number(row.IDRecibo)} · ${esc(row.NroFactura)} · ${esc(row.Proveedor)} · ${money(row.Total)}${Number(row.IDRecibo) !== detailInvoiceId ? ' · crédito de descuento vinculado' : ''}</li>`).join('');
       const payments = state.pagos.length ? `<h3>Pagos vinculados</h3><ul>${state.pagos.map(row => `<li>OP ${esc(row.NroOP || row.NroOrden)} · registro ${Number(row.IDFactura)} · ${money(row.Importe)}</li>`).join('')}</ul>` : '<p>Sin pagos vinculados.</p>';
-      const stock = state.stock.length ? `<h3>Cargas de stock vinculadas</h3><ul>${state.stock.map(row => `<li>Movimiento ${Number(row.NroMov)} · registro ${Number(row.IDRecibo)} · sucursal ${Number(row.IDSuc)}</li>`).join('')}</ul>` : '<p>Sin cargas de stock vinculadas.</p>';
+      const stock = state.stock.length ? `<h3>Cargas de stock que se conservarán</h3><p>Se quitará el vínculo con esta factura. Los artículos y las existencias no cambian. Las cargas activas quedarán disponibles para otra factura; las anuladas seguirán anuladas.</p><ul>${state.stock.map(row => `<li>Movimiento ${Number(row.NroMov)} · registro ${Number(row.IDRecibo)} · sucursal ${Number(row.IDSuc)} · ${row.Anulado ? 'Anulada' : 'Activa'}</li>`).join('')}</ul>` : '<p>Sin cargas de stock vinculadas.</p>';
       const parents = state.padres.length ? `<p>También se quitará el vínculo y el porcentaje de descuento de la compra ${state.padres.map(row => Number(row.IDRecibo)).join(', ')}.</p>` : '';
       $('deleteInvoiceBody').innerHTML = `<p>Se eliminarán estos registros de compra y sus renglones de impuestos:</p><ul>${movements}</ul>${payments}${stock}${parents}`;
-      $('deleteInvoiceStatus').textContent = state.bloqueado ? state.motivos.join(' ') : 'No tiene pagos ni carga de stock vinculados. Confirmá para eliminar definitivamente.';
+      $('deleteInvoiceStatus').textContent = state.bloqueado ? state.motivos.join(' ') : state.stock.length ? 'Confirmá para eliminar la factura y quitar sus vínculos de stock, conservando el estado de cada carga.' : 'No tiene pagos ni carga de stock vinculados. Confirmá para eliminar definitivamente.';
       $('confirmDeleteInvoice').disabled = state.bloqueado;
     } catch (error) { $('deleteInvoiceStatus').textContent = error.message; }
   }

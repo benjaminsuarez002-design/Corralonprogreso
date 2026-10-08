@@ -1845,5 +1845,5 @@
     presupuestoMediosPago,
     normalizePresupuestoDatos
   };
-  bindNumericExpressions();
+  // Las cuentas en campos se activan explícitamente en los precios de Artículos.
 })();
