@@ -2190,6 +2190,76 @@ internal static class FacturacionCopiaApi
         Execute(connection, tx, "UPDATE dbo.RecibosTP SET NroFactura=NULL,IDFactura=NULL WHERE IDRecibo=@p0", receipt);
     }
 
+    // Copy every stored field, including legacy Access fields, except generated columns.
+    private static string StockCopyColumns(SqlConnection connection, SqlTransaction tx, string table, string excluded)
+    {
+        var columns = RowsTx(connection, tx, "SELECT QUOTENAME(name) AS nombre FROM sys.columns WHERE object_id=OBJECT_ID(@p0) AND is_identity=0 AND is_computed=0 AND system_type_id<>189 AND name<>@p1 ORDER BY column_id", "dbo." + table, excluded);
+        if (columns.Count == 0) throw new InvalidOperationException("No se pudo verificar la estructura del movimiento.");
+        return String.Join(",", columns.ConvertAll(row => Text(row["nombre"])).ToArray());
+    }
+
+    private static object StockCambiarSucursal(SqlConnection connection, Dictionary<string, object> input)
+    {
+        AssertPurchasePermission(Text(Value(input, "usuarioId")), "carga_stock");
+        int receipt = RequiredId(Value(input, "recibo"), "el movimiento");
+        int branch = RequiredId(Value(input, "sucursal"), "la sucursal original");
+        int destination = RequiredId(Value(input, "destino"), "la nueva sucursal");
+        if (branch == destination) throw new InvalidOperationException("Elegí otra sucursal.");
+        string marker = "[WEBSTOCKMOVE:" + receipt + ":" + destination + "]";
+        using (var tx = connection.BeginTransaction(IsolationLevel.Serializable))
+        {
+            try
+            {
+                if (Convert.ToInt32(Scalar(connection, tx, "DECLARE @r int; EXEC @r=sp_getapplock @Resource=@p0,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=10000; SELECT @r", "CorralonWeb.StockMove." + receipt)) < 0)
+                    throw new InvalidOperationException("El movimiento está siendo corregido. Reintentá.");
+                var saved = RowsTx(connection, tx, "SELECT IDRecibo,NroMov FROM dbo.RecibosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDSuc=@p0 AND Confirmado=1 AND Anulado=0 AND CHARINDEX(@p1,CONVERT(nvarchar(max),Nota))>0", destination, marker);
+                if (saved.Count == 1) { tx.Commit(); return new { ok = true, idRecibo = saved[0]["IDRecibo"], numeroMovimiento = saved[0]["NroMov"], yaCambiado = true }; }
+                var records = RowsTx(connection, tx, "SELECT R.*,T.StkPor,T.IDTipoMovStock,T.GenNS,T.ConReceta FROM dbo.RecibosTP R WITH(UPDLOCK,HOLDLOCK) JOIN dbo.TipoComprobantes T ON T.IDComprob=R.IDTipoMov WHERE R.IDRecibo=@p0 AND R.IDSuc=@p1 AND R.Confirmado=1 AND R.Anulado=0", receipt, branch);
+                if (records.Count != 1) throw new InvalidOperationException("El movimiento cambió o ya no está disponible en la sucursal original. Volvé a consultarlo.");
+                var header = records[0]; int type = Convert.ToInt32(header["IDTipoMov"]);
+                if (type == 57 || type == 58 || type == 38 || (Text(header["IDRecDes"]).Length > 0 && Number(header["IDRecDes"]) != 0) || (Text(header["IDRemito"]).Length > 0 && Number(header["IDRemito"]) != 0) || (Text(header["GenNS"]).Length > 0 && Convert.ToBoolean(header["GenNS"])) || (Text(header["ConReceta"]).Length > 0 && Convert.ToBoolean(header["ConReceta"])) ||
+                    Convert.ToInt32(Scalar(connection, tx, "SELECT COUNT(*) FROM dbo.RecibosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecDes=@p0 OR IDRemito=@p0", receipt)) > 0)
+                    throw new InvalidOperationException("Este movimiento tiene transferencias, series o comprobantes relacionados. No se puede cambiar su sucursal desde aquí.");
+                var points = RowsTx(connection, tx, "SELECT TOP 1 D.IDDepósito FROM dbo.[Depósitos] D JOIN dbo.Sucursales S ON S.IDSuc=D.IDSucAsoc WHERE S.IDSuc=@p0 AND D.IDEmp=@p1 ORDER BY D.IDDepósito", destination, header["IDEmp"]);
+                if (points.Count != 1) throw new InvalidOperationException("La sucursal elegida necesita un punto de venta de la misma empresa.");
+                var lines = RowsTx(connection, tx, "SELECT IDArt,SUM(Cantidad) AS cantidad FROM dbo.RecibosTS WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 GROUP BY IDArt ORDER BY IDArt", receipt);
+                if (lines.Count == 0) throw new InvalidOperationException("El movimiento no tiene artículos.");
+                if (type == 23 && Text(header["IDFactura"]).Length > 0 && Number(header["IDFactura"]) > 0 &&
+                    RowsTx(connection, tx, "SELECT IDRecibo FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND IDMovStk=@p1", header["IDFactura"], header["NroMov"]).Count != 1)
+                    throw new InvalidOperationException("La vinculación con la factura cambió. Revisala antes de corregir la sucursal.");
+                decimal sign = Number(header["IDTipoMovStock"]) > 0 ? Number(header["StkPor"]) : 0;
+                if (sign != -1 && sign != 0 && sign != 1) throw new InvalidOperationException("Este tipo de movimiento tiene un comportamiento de stock especial.");
+                int number = Convert.ToInt32(Scalar(connection, tx, "SELECT ISNULL(MAX(NroMov),0)+1 FROM dbo.RecibosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDTipoMov=@p0 AND IDSuc=@p1", type, destination));
+                string headerColumns = StockCopyColumns(connection, tx, "RecibosTP", "IDRecibo");
+                string headerValues = headerColumns.Replace("[IDSuc]", "@p1").Replace("[IDDepósito]", "@p2").Replace("[NroMov]", "@p3").Replace("[Nota]", "CONVERT(nvarchar(max),ISNULL([Nota],''))+@p4");
+                // The unique (type, number, branch) key must already be new at INSERT time.
+                int replacement = Convert.ToInt32(Scalar(connection, tx, "INSERT dbo.RecibosTP(" + headerColumns + ") OUTPUT INSERTED.IDRecibo SELECT " + headerValues + " FROM dbo.RecibosTP WHERE IDRecibo=@p0", receipt, destination, points[0]["IDDepósito"], number, marker));
+                string detailColumns = StockCopyColumns(connection, tx, "RecibosTS", "IDRecibo");
+                Execute(connection, tx, "INSERT dbo.RecibosTS(IDRecibo," + detailColumns + ") SELECT @p0," + detailColumns + " FROM dbo.RecibosTS WHERE IDRecibo=@p1", replacement, receipt);
+                foreach (var line in lines)
+                {
+                    string id = Text(line["IDArt"]); decimal delta = Number(line["cantidad"]) * sign;
+                    if (sign == 0) continue;
+                    if (RowsTx(connection, tx, "SELECT IDArt FROM dbo.ArtsStock WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0 AND IDSuc=@p1", id, branch).Count != 1)
+                        throw new InvalidOperationException("Falta el stock original del artículo " + id + ". No se modificó el movimiento.");
+                    Execute(connection, tx, "IF NOT EXISTS(SELECT 1 FROM dbo.ArtsStock WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0 AND IDSuc=@p1) INSERT dbo.ArtsStock(IDArt,IDSuc,StockAct) VALUES(@p0,@p1,0)", id, destination);
+                    decimal before = StockNumber(Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0 AND IDSuc=@p1", id, destination));
+                    Execute(connection, tx, "UPDATE dbo.RecibosTS SET Stock=@p0 WHERE IDRecibo=@p1 AND IDArt=@p2", before, replacement, id);
+                    if (Execute(connection, tx, "UPDATE dbo.ArtsStock SET StockAct=ISNULL(StockAct,0)-@p0 WHERE IDArt=@p1 AND IDSuc=@p2", delta, id, branch) != 1 ||
+                        Execute(connection, tx, "UPDATE dbo.ArtsStock SET StockAct=ISNULL(StockAct,0)+@p0 WHERE IDArt=@p1 AND IDSuc=@p2", delta, id, destination) != 1)
+                        throw new InvalidOperationException("El stock del artículo " + id + " no es único.");
+                }
+                Execute(connection, tx, "UPDATE C SET IDMovStk=@p0 FROM dbo.ComprasTP C JOIN dbo.RecibosTP R ON R.IDFactura=C.IDRecibo WHERE R.IDRecibo=@p1 AND R.IDTipoMov=23 AND C.IDMovStk=R.NroMov", number, receipt);
+                Execute(connection, tx, "UPDATE dbo.TipoComprobantes SET UltNroComp=@p0 WHERE IDComprob=@p1", number, type);
+                Execute(connection, tx, "DELETE dbo.RecibosTS WHERE IDRecibo=@p0", receipt);
+                if (Execute(connection, tx, "DELETE dbo.RecibosTP WHERE IDRecibo=@p0 AND IDSuc=@p1", receipt, branch) != 1) throw new InvalidOperationException("No se pudo eliminar el movimiento original.");
+                tx.Commit();
+                return new { ok = true, idRecibo = replacement, numeroMovimiento = number, yaCambiado = false };
+            }
+            catch { try { tx.Rollback(); } catch { } throw; }
+        }
+    }
+
     private static object StockAnular(SqlConnection connection, Dictionary<string, object> input)
     {
         UserOperator(connection, Text(Value(input, "usuarioId")));
@@ -2647,6 +2717,7 @@ internal static class FacturacionCopiaApi
                     var data = Object(Json.DeserializeObject(body));
                     string action = Text(Value(data, "accion"));
                     if (action == "anular") { Reply(context, 200, StockAnular(connection, data)); return; }
+                    if (action == "cambiar-sucursal") { Reply(context, 200, StockCambiarSucursal(connection, data)); return; }
                     if (action == "actualizar-costo") { Reply(context, 200, StockActualizarCosto(connection, data)); return; }
                     if (action != "previsualizar" && action != "confirmar") throw new InvalidOperationException("Acción de stock inválida.");
                     Reply(context, 200, StockIngreso(connection, data, action == "confirmar"));
