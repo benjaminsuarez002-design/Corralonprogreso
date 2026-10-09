@@ -3540,7 +3540,7 @@
     function readStorage(storage, key) {
       try {
         const value = JSON.parse(storage.getItem(key) || 'null');
-        if (!value?.token || Number(value.expiresAt || 0) <= Date.now()) {
+        if (!value?.token) {
           storage.removeItem(key);
           return null;
         }
@@ -3560,7 +3560,7 @@
       /*
        * El menú y las páginas de trabajo viven en pestañas distintas.
        * sessionStorage no se comparte con pestañas que ya estaban abiertas.
-       * La duración real sigue limitada por expiresAt en el servidor.
+       * La sesión de edición no vence por tiempo; se elimina al cerrar sesión.
        */
       localStorage.setItem(LOCAL_KEY, JSON.stringify(payload));
       return payload;
@@ -3592,7 +3592,14 @@
     }
 
     async function logout() {
+      const active = current();
       clear();
+      if (active?.token) {
+        await fetch(`${SUPABASE_URL}/functions/v1/catalogo-editor-sesion`, {
+          method: 'POST', headers: headers({ Authorization: `Bearer ${active.token}` }),
+          body: JSON.stringify({ action: 'logout' }), keepalive: true
+        }).catch(() => {});
+      }
     }
 
     async function saveArticlesRequest(body) {

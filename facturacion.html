@@ -181,7 +181,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.33"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.34"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -1987,7 +1987,19 @@ function bindPaymentGridNavigation(){
 
 function bindFunctions(){
   const F=window.CorralonFunciones;
-  document.addEventListener('keydown',event=>{if(event.key!=='F1'||event.ctrlKey||event.altKey||event.metaKey)return;event.preventDefault();const input=$('#customerName');if(!input.disabled){input.focus();input.select()}},true);
+  document.addEventListener('keydown',event=>{
+    if(event.key!=='F1'||event.ctrlKey||event.altKey||event.metaKey)return;
+    const providerCode=event.target.closest?.('#articleBody [data-a="codProv"]');
+    event.preventDefault();
+    if(providerCode){
+      event.stopImmediatePropagation();
+      const code=String(providerCode.value||'').trim();
+      if(!code){setMsg('Ingresá un código de proveedor para buscar.','error');return;}
+      window.open(`listasproveedores.html?codigo=${encodeURIComponent(code)}&exacto=1`,'corralon-listasproveedores');
+      return;
+    }
+    const input=$('#customerName');if(!input.disabled){input.focus();input.select()}
+  },true);
   bindStrictFormatting();
   bindTableRules();
   bindArticleGridNavigation();

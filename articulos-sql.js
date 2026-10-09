@@ -337,6 +337,41 @@
   els.nextArticle.addEventListener('click',()=>moveArticle(1));
   els.closeArticle.addEventListener('click',closeArticle);
   els.articleDialog.addEventListener('cancel',event=>{event.preventDefault();closeArticle();});
+  let pastingProviderPrice=false;
+  async function pasteProviderPrice(){
+    if(pastingProviderPrice||saving||loadingDetail||!draft)return;
+    if(String(FX.menuSessionUser()?.nivel||'').trim().toLowerCase()!=='administrador'){
+      status('Solo los administradores pueden editar artículos.',true);return;
+    }
+    const currentDraft=draft,currentId=selected;
+    pastingProviderPrice=true;
+    try{
+      const text=await FX.requestClipboardText();
+      if(!text)return;
+      if(draft!==currentDraft||selected!==currentId||saving||loadingDetail||!els.articleDialog.open)return;
+      const lines=String(text).trim().split(/\r?\n/);
+      if(lines.shift()!=='CORRALON_PRECIO_ARTICULO_V1')throw new Error('Copiá una fila de Listas de proveedores con Ctrl + Shift + C.');
+      const values=Object.fromEntries(lines.map(line=>{const at=line.indexOf('=');return at<0?['','']:[line.slice(0,at),line.slice(at+1)];}));
+      const code=String(values.CODPROV||'').trim(),price=FX.parseLocaleNumber(values.PRECIO_FINAL||'');
+      const provider=(catalogs.proveedores||[]).find(item=>String(item.id)===String(values.IDPROVEEDOR||'').trim());
+      if(values.MODO!=='CODPROV'||!code||code.length>30||!Number.isFinite(price)||price<=0)throw new Error('El código o precio copiado no es válido.');
+      if(!provider)throw new Error('El proveedor copiado no existe en el listado de proveedores de SQL.');
+      const previous=draft.costoLista;
+      draft.codigoProveedor=code;draft.idProveedor=Number(provider.id);draft.costoLista=round(price);
+      recalculate(draft,'costoLista',previous);
+      for(const [key,value] of [['codigoProveedor',code],['idProveedor',provider.nombre]]){
+        const input=els.detail.querySelector(`[data-field="${key}"]`);input.value=value;input.setCustomValidity('');
+      }
+      closeCombo();syncNumbers();markDirty(true);
+      status('Código, costo de lista y proveedor pegados. Revisá y guardá los cambios.');
+    }catch(error){status(error.message||'No se pudo pegar el precio del proveedor.',true);}
+    finally{pastingProviderPrice=false;}
+  }
+  document.addEventListener('keydown',event=>{
+    if(!els.articleDialog.open||!(event.ctrlKey||event.metaKey)||!event.shiftKey||event.altKey||String(event.key||'').toLowerCase()!=='v')return;
+    event.preventDefault();event.stopImmediatePropagation();
+    if(!event.repeat)pasteProviderPrice();
+  },true);
   document.addEventListener('keydown',event=>{
     if(!els.articleDialog.open)return;
     if(event.key!=='PageDown'&&event.key!=='PageUp')return;
