@@ -4404,7 +4404,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.31"></script>
+<script src="corralon-system.js?v=1.0.32"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -5131,6 +5131,16 @@ function precioOferta(precioLista, ofertaPct) {
   return Math.round(base * ((100 - pct) / 100) * 100) / 100;
 }
 
+const PROVEEDORES_CERAMICOS_PREDETERMINADOS = new Set(['5703', '5759', '5473', '5706', '5753']);
+function ceramicoPredeterminado(raw = {}) {
+  if (toBool(raw.ceramico ?? raw.tagCeramico) || raw.edicionUpdatedAt || raw.edicion_updated_at) return null;
+  const proveedorId = String(raw.id_proveedor ?? raw.idProveedor ?? raw.IDProv ?? '').trim().replace(/^0+(?=\d)/, '');
+  if (!PROVEEDORES_CERAMICOS_PREDETERMINADOS.has(proveedorId)) return null;
+  const descripcion = String(raw.nombre ?? raw.descripcion ?? raw.Descripcion ?? '');
+  const metros = descripcion.match(/\(\s*(\d+(?:[.,]\d+)?)\s*(?:m[²2])?\s*\)/i);
+  return { m2: metros ? sanitizeM2(metros[1].replace(',', '.')) : 0 };
+}
+
 function normalizarArticulo(raw) {
   const precioLista = normalizarNumeroConsulta(raw?.precio ?? raw?.PrecioVta3 ?? raw?.preciovta3 ?? raw?.precioVta3 ?? 0) || 0;
   const precioCostoConImpuestos = normalizarNumeroConsulta(raw?.PrecioCpraCI ?? raw?.preciocpraci ?? raw?.precioCpraCI ?? raw?.precio_cpra_ci ?? 0) || 0;
@@ -5142,8 +5152,9 @@ function normalizarArticulo(raw) {
   const destacado = toBool(raw?.destacado ?? raw?.tagDestacado);
   const masVendido = toBool(raw?.masVendido ?? raw?.mas_vendido ?? raw?.tagMasVendido);
   const accesoRapido = toBool(raw?.accesoRapido ?? raw?.rapido ?? raw?.tagRapido ?? raw?.quickAccess);
-  const ceramico = toBool(raw?.ceramico ?? raw?.tagCeramico);
-  const ceramicoM2 = sanitizeM2(raw?.ceramicoM2 ?? raw?.m2Ceramico ?? raw?.m2 ?? raw?.metros2Ceramico ?? 0);
+  const ceramicoAutomatico = ceramicoPredeterminado(raw);
+  const ceramico = ceramicoAutomatico !== null || toBool(raw?.ceramico ?? raw?.tagCeramico);
+  const ceramicoM2 = ceramicoAutomatico !== null ? ceramicoAutomatico.m2 : sanitizeM2(raw?.ceramicoM2 ?? raw?.m2Ceramico ?? raw?.m2 ?? raw?.metros2Ceramico ?? 0);
   const ceramicoPlacas = sanitizePlacas(raw?.ceramicoPlacas ?? raw?.placasCeramico ?? raw?.placasPorCaja ?? raw?.placas ?? 0);
   const ofertaPct = clampPct(raw?.ofertaPct ?? raw?.oferta_pct ?? raw?.ofertaPorcentaje ?? raw?.descuentoOferta ?? 0);
   const ofertaHasta = sanitizeIsoDate(raw?.ofertaHasta ?? raw?.oferta_hasta ?? raw?.fechaOfertaHasta ?? '');
@@ -9968,6 +9979,9 @@ window.CorralonSystem?.articleEditor?.configure({
     return results;
   },
   save: (nextList, updated, previousCode, appliedTargets = []) => {
+    const editados = new Set([updated, ...appliedTargets].map(obtenerIdArticulo));
+    const fechaEdicion = new Date().toISOString();
+    nextList = nextList.map(article => editados.has(obtenerIdArticulo(article)) ? { ...article, edicionUpdatedAt: fechaEdicion } : article);
     todosArticulos = prepararArticulosParaVista(nextList);
     actualizarVistaEtiqueta();
     aplicarBusquedaActual();
