@@ -262,7 +262,7 @@
     .clear-price-btn:hover{background:#fff1f1}
     input[type="checkbox"]{accent-color:#ef1015}
   </style>
-<script src="corralon-system.js?v=1.0.11"></script>
+<script src="corralon-system.js?v=1.0.12"></script>
   <script src="funciones.js"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="calculadoras"></script>
@@ -688,8 +688,8 @@
       applyProvider(providerInput.value);
     }
 
-    function openProviderModal() {
-      const provider = selectedProvider();
+    function openProviderModal(providerOverride = null) {
+      const provider = providerOverride?.proveedor ? providerOverride : selectedProvider();
       if (!provider) {
         if (providerInput) providerInput.focus();
         return;
@@ -717,6 +717,9 @@
     function closeProviderModal() {
       $('providerModal').classList.remove('visible');
       setProviderModalEditing(false);
+      const onClosed = providerState.onClosed;
+      providerState.onClosed = null; providerState.onSaved = null;
+      onClosed?.();
     }
 
     function setProviderModalEditing(enabled) {
@@ -766,10 +769,13 @@
       else providerState.rows.push(localProvider);
       providerState.rows.sort((a, b) => String(a.proveedor || '').localeCompare(String(b.proveedor || ''), 'es'));
       await CorralonSystem.setProvidersCache(providerState.rows);
-      providerInput.value = providerDisplay(localProvider);
-      renderProviderDropdown(false);
-      applyProvider(providerInput.value);
+      if (!providerState.onSaved) {
+        providerInput.value = providerDisplay(localProvider);
+        renderProviderDropdown(false);
+        applyProvider(providerInput.value);
+      }
       setProviderModalEditing(false);
+      providerState.onSaved?.(localProvider);
     }
 
     function setupProviderModalFunctions() {

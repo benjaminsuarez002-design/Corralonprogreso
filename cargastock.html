@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.39"></script>
+<script src="corralon-system.js?v=1.0.40"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -404,7 +404,7 @@
   <section class="stock-footer">
     <div class="stock-inventory-tip">ⓘ Inventario: escribí '9 en Cantidad para indicar 9 unidades contadas.</div>
     <div class="stock-summary"><label>Nota (Observaciones del movimiento)<textarea id="stockIngresoNota" data-stock-header maxlength="300" rows="2"></textarea></label><label>Total unidades<output id="stockTotalUnits">0</output></label><label>Total<output id="stockTotalAmount">$ 0,00</output></label></div>
-    <div class="actions-bottom"><button id="compareStockBtn" type="button">Comparar</button><button id="copyBtn" type="button">Copiar</button><button id="stockConsultBtn" type="button">Consultar</button><button id="stockCancelBtn" type="button">Cancelar</button><button id="stockNewBtn" type="button">Nuevo</button><button id="stockPrevBtn" title="Movimiento anterior" type="button">‹</button><button id="stockNextBtn" title="Movimiento siguiente" type="button">›</button><button id="stockPrintBtn" type="button" hidden>Imprimir comprobante</button><button class="primary" id="confirmStockIngresoBtn" type="button">Confirmar</button><span class="stock-ingreso-message" id="stockIngresoMessage" role="status" aria-live="polite">Conectando con SQL…</span><div class="summary-pill" id="copySummary" hidden>0 listos para copiar</div></div>
+    <div class="actions-bottom"><button id="compareStockBtn" type="button">Cargar en Pedidos</button><button id="copyBtn" type="button">Copiar</button><button id="stockConsultBtn" type="button">Consultar</button><button id="stockCancelBtn" type="button">Cancelar</button><button id="stockNewBtn" type="button">Nuevo</button><button id="stockPrevBtn" title="Movimiento anterior" type="button">‹</button><button id="stockNextBtn" title="Movimiento siguiente" type="button">›</button><button id="stockPrintBtn" type="button" hidden>Imprimir comprobante</button><button class="primary" id="confirmStockIngresoBtn" type="button">Confirmar</button><span class="stock-ingreso-message" id="stockIngresoMessage" role="status" aria-live="polite">Conectando con SQL…</span><div class="summary-pill" id="copySummary" hidden>0 listos para copiar</div></div>
   </section>
   <section id="stockConsultPanel" class="stock-consult-panel" hidden></section>
   <section id="stockMovementPopup" class="stock-movement-popup" role="dialog" aria-modal="true" aria-label="Detalle del movimiento de stock" hidden></section>
@@ -584,7 +584,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDocFromServer, getDoc, collection, query, where, getDocsFromServer, updateDoc, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDocFromServer, getDoc, collection, query, where, getDocsFromServer, updateDoc, serverTimestamp, Timestamp, runTransaction, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
@@ -845,6 +845,8 @@ function show(message) {
 function visibleModalBackdrops() {
   return [...document.querySelectorAll([
     '.modal-backdrop.visible',
+    '.local-articles-backdrop',
+    'dialog[open]',
     '#corralonNewArticlesBackdrop.open',
     '.corralon-number-calc-backdrop.is-visible'
   ].join(','))];
@@ -880,7 +882,8 @@ let stockWorkspaceReady = false;
 let stockWorkspaceSwitching = false;
 let stockWorkspaceRestored = null;
 function stockWorkspaceSnapshot() {
-  const header = {};
+  const savedHeader=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
+  const header = savedHeader.stockPedidoOrigen ? {stockPedidoOrigen:savedHeader.stockPedidoOrigen} : {};
   document.querySelectorAll('[data-stock-header]').forEach(field => header[field.id] = field.type === 'checkbox' ? field.checked : field.value);
   return {
     rows: rowsData.map(row => ({ ...row })), header,
@@ -897,8 +900,8 @@ function stockWorkspaceIndicator() {
     stockField('stockNextBtn').before(indicator);
   }
   indicator.textContent = `Carga ${stockActiveWorkspace} de ${stockWorkspaceCount}`;
-  stockField('stockPrevBtn').disabled = stockIngresoBusy || stockWorkspaceSwitching || stockActiveWorkspace === 1;
-  stockField('stockNextBtn').disabled = stockIngresoBusy || stockWorkspaceSwitching || stockActiveWorkspace === stockWorkspaceCount;
+  stockField('stockPrevBtn').disabled = stockIngresoBusy || stockPedidoBusy || stockWorkspaceSwitching || stockActiveWorkspace === 1;
+  stockField('stockNextBtn').disabled = stockIngresoBusy || stockPedidoBusy || stockWorkspaceSwitching || stockActiveWorkspace === stockWorkspaceCount;
 }
 function flushRowsSave() {
   clearTimeout(rowsSaveTimer);
@@ -1876,7 +1879,7 @@ function selectedRedRowsForNewArticles() {
 function hasLocalArticleImportDraft() {
   const provider = selectedProvider();
   const id = provider && CorralonSystem.providerIdentity.externalId(provider);
-  if (!id || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return false;
+  if (!id) return false;
   try { const key=`corralon_local_article_import_draft_v1_${id}`; return Boolean(localStorage.getItem(key) || sessionStorage.getItem(key)); } catch { return false; }
 }
 function assignNewArticleIds() {
@@ -4281,7 +4284,8 @@ function stockDatePermission() {
 }
 function stockHeaderSave() {
   if (stockConfirmed) return;
-  const header = {};
+  const savedHeader=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
+  const header = savedHeader.stockPedidoOrigen ? {stockPedidoOrigen:savedHeader.stockPedidoOrigen} : {};
   document.querySelectorAll('[data-stock-header]').forEach(field => header[field.id] = field.type === 'checkbox' ? field.checked : field.value);
   localStorage.setItem(STOCK_HEADER_KEY, JSON.stringify(header));
   if (stockWorkspaceReady && !stockWorkspaceSwitching) saveRows();
@@ -4291,7 +4295,7 @@ function stockBlankWorkspace() {
     header: {stockIngresoSucursal: stockField('stockIngresoSucursal').value, stockTipoMovimiento: '23', stockFecha: stockToday(), stockArticleFilter: 'sql'}};
 }
 async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitching=false, fresh=false, nextSnapshot=null} = {}) {
-  if ((number === stockActiveWorkspace && !discardCurrent) || stockIngresoBusy || (stockWorkspaceSwitching && !alreadySwitching) || !stockWorkspaceReady) return;
+  if ((number === stockActiveWorkspace && !discardCurrent) || stockIngresoBusy || stockPedidoBusy || (stockWorkspaceSwitching && !alreadySwitching) || !stockWorkspaceReady) return;
   document.activeElement?.blur();
   await Promise.resolve();
   const pending = JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY) || 'null');
@@ -4787,13 +4791,14 @@ function stockFreeze(value) {
   stockDatePermission();
   el.rows.inert = value; document.querySelectorAll('.stock-entry,.stock-provider,.toolbar').forEach(section => section.inert=value);
   stockField('confirmStockIngresoBtn').disabled=value;
+  document.getElementById('compareStockBtn').disabled=stockIngresoBusy||stockPedidoBusy;
   stockField('confirmStockIngresoBtn').textContent=stockConfirmed?'Ingreso confirmado':stockIngresoBusy?'Confirmando…':'Confirmar';
   stockField('confirmStockIngresoBtn').classList.toggle('stock-confirmed',stockConfirmed);
-  ['stockNewBtn','stockCancelBtn','stockConsultBtn','stockPrevBtn','stockNextBtn'].forEach(id => stockField(id).disabled=stockIngresoBusy);
+  ['stockNewBtn','stockCancelBtn','stockConsultBtn','stockPrevBtn','stockNextBtn'].forEach(id => stockField(id).disabled=stockIngresoBusy||stockPedidoBusy);
   if (stockWorkspaceReady) stockWorkspaceIndicator();
 }
 async function confirmStockIngreso() {
-  if (stockIngresoBusy || stockConfirmed) return;
+  if (stockIngresoBusy || stockPedidoBusy || stockConfirmed) return;
   let confirmedNumber=null;
   let budgetResolutionWarning = '';
   try {
@@ -4817,6 +4822,13 @@ async function confirmStockIngreso() {
     const result=preview.yaCargado ? preview : await stockIngresoCall(request,'confirmar');
     pending.status='confirmed';pending.numeroMovimiento=result.numeroMovimiento;pending.idRecibo=result.idRecibo;pending.resultado=result.articulos;localStorage.setItem(STOCK_INGRESO_DRAFT_KEY,JSON.stringify(pending));
     stockConfirmed=true; stockField('stockNumero').value=String(result.numeroMovimiento);
+    const pedidoOrigin=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}').stockPedidoOrigen;
+    if(pedidoOrigin?.startsWith('draft_')){
+      try{
+        const originalRef=doc(db,'configuracion',`stockPedido_${pedidoOrigin}`),movementRef=doc(db,'configuracion',`stockPedido_mov_${data.sucursal}_${result.numeroMovimiento}`);
+        await runTransaction(db,async transaction=>{const original=await transaction.get(originalRef),linked=await transaction.get(movementRef);if(original.exists()&&!linked.exists())transaction.set(movementRef,{...original.data(),createdAt:serverTimestamp()});});
+      }catch(error){budgetResolutionWarning+='\nEl stock se guardó, pero no se pudo vincular su pedido previo. Reintentá Cargar en Pedidos desde esta carga antes de abrirla desde Consultar.';console.warn(error);}
+    }
     confirmedNumber=result.numeroMovimiento;
     CorralonSystem.articleSync.set('syncing', `Movimiento Nº ${result.numeroMovimiento} guardado · Actualizando los datos…`);
     try { await stockResolveConfirmedBudgets(pending.presupuestosWeb || []); }
@@ -4835,8 +4847,13 @@ async function confirmStockIngreso() {
   finally { stockIngresoBusy=false; stockFreeze(stockConfirmed); }
   if(confirmedNumber!==null){
     await htmlNotice(`Movimiento confirmado\nNº ${confirmedNumber}${budgetResolutionWarning}`, false);
-    await stockReset();
-    stockIngresoMessage('Nueva carga lista.','ok');
+    if (stockWorkspaceCount > 1) {
+      await stockCancelWorkspace();
+      stockIngresoMessage(`Movimiento Nº ${confirmedNumber} confirmado. Carga ${stockActiveWorkspace} de ${stockWorkspaceCount}.`, 'ok');
+    } else {
+      await stockReset();
+      stockIngresoMessage('Nueva carga lista.','ok');
+    }
     el.providerInput.focus();
   }
 }
@@ -4880,11 +4897,12 @@ async function stockRefreshRelations() {
   }catch(error){stockIngresoMessage(error.message,'error');}
 }
 async function stockReset() {
-  if(stockIngresoBusy) return false;
+  if(stockIngresoBusy || stockPedidoBusy) return false;
   const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
   if(pending?.status==='uncertain'){stockIngresoMessage('Reintentá Confirmar para recuperar el ingreso pendiente antes de limpiar la pantalla.','error');return false;}
   if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !(await htmlNotice('¿Descartar esta carga sin confirmar?'))) return false;
   pushUndoSnapshot(); rowsData=[]; stockConfirmed=false; localStorage.removeItem(STOCK_INGRESO_DRAFT_KEY);
+  const headerForNew=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');delete headerForNew.stockPedidoOrigen;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(headerForNew));
   ['stockNumero','stockIngresoFactura','stockRemito','stockIngresoNota','stockCompra','stockRelacionado','stockDestino'].forEach(id=>stockField(id).value='');
   stockField('stockTipoMovimiento').value='23'; stockField('stockFecha').value=stockToday(); stockField('stockPrintBtn').hidden=true;
   el.providerInput.value='';
@@ -4895,7 +4913,7 @@ async function stockReset() {
 }
 let stockInvoiceUser = String(FX.menuSessionUser()?.id || '');
 let stockInvoiceKey = `corralon_stock_factura_${stockInvoiceUser}`;
-const stockInvoiceTabId = sessionStorage.getItem('corralon_stock_tab_id') || crypto.randomUUID();
+const stockInvoiceTabId = sessionStorage.getItem('corralon_stock_tab_id') || FX.createUuid();
 sessionStorage.setItem('corralon_stock_tab_id', stockInvoiceTabId);
 let stockInvoiceReady = false, stockInvoiceApplying = false;
 window.name = 'corralon-carga-stock';
@@ -5124,7 +5142,7 @@ async function stockViewMovement(index) {
   if(pending?.status==='uncertain'){stockIngresoMessage('Primero recuperá la confirmación pendiente.','error');return;}
   if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !(await htmlNotice('¿Descartar el borrador y consultar este movimiento?')))return;
   try {
-    const item=stockMovements[index], result=await stockSqlGet('detalle',{recibo:item.id,sucursal:item.sucursal||Number(stockField('stockIngresoSucursal').value)}); stockField('stockIngresoSucursal').value=String(item.sucursal||Number(stockField('stockIngresoSucursal').value));stockMovementIndex=index;stockConfirmed=true;
+    const item=stockMovements[index], result=await stockSqlGet('detalle',{recibo:item.id,sucursal:item.sucursal||Number(stockField('stockIngresoSucursal').value)}); stockField('stockIngresoSucursal').value=String(item.sucursal||Number(stockField('stockIngresoSucursal').value));stockMovementIndex=index;stockConfirmed=true;const pedidoHeader=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');pedidoHeader.stockPedidoOrigen=`mov_${item.sucursal||Number(stockField('stockIngresoSucursal').value)}_${item.numero}`;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(pedidoHeader));
     const selected=providers.find(p=>Number(CorralonSystem.providerIdentity.externalId(p))===Number(item.proveedor));
     setProvider(selected||null,{skipUndo:true,skipProviderArticles:true});
     rowsData=(result.articulos||[]).map(line=>{const row=normalizeRow({codigo:line.codigo||'',idart:line.idart,descripcion:line.descripcion,cantidad:line.cantidad,stock:line.stock,descuento:providerDiscountValue()});row.precio=precioUnitarioDesdeFinal(row,line.precioUnitario);return row;});
@@ -5343,7 +5361,74 @@ FX.bindLinearNavigation({root:document.querySelector('.app'),selector:'[data-sto
   navigateLeftRight:true,smartCaret:true,selectOnAnyFocus:true,selectOnFirstPointerFocus:true});
 stockField('stockRelacionado').addEventListener('change',async()=>{if(!stockField('stockRelacionado').value)return;if(rowsData.some(row=>!isBlankStockRow(row))&&!(await htmlNotice('¿Reemplazar las filas por las cantidades pendientes del comprobante?'))){stockField('stockRelacionado').value='';return;}try{const result=await stockSqlGet('pendientes',{recibo:stockField('stockRelacionado').value});rowsData=(result.articulos||[]).map(line=>normalizeRow({idart:line.idart,codigo:line.codigo||'',descripcion:line.descripcion,cantidad:line.cantidad,precio:precioUnitarioDesdeFinal({},line.precioUnitario)}));render();saveRows();stockHeaderSave();}catch(error){stockIngresoMessage(error.message,'error');}});
 
-document.getElementById('compareStockBtn').addEventListener('click', openStockComparison);
+let stockPedidoBusy=false;
+async function cargarStockEnPedidos(){
+  if(stockPedidoBusy||stockIngresoBusy||stockWorkspaceSwitching)return;
+  const button=document.getElementById('compareStockBtn');
+  try{
+    const actor=FX.menuSessionUser();
+    if(String(actor?.nivel||'').trim().toLowerCase()!=='administrador')throw new Error('Solo los administradores pueden marcar un pedido como pedido confirmado.');
+    const current=selectedProvider();if(!current)throw new Error('Seleccioná el proveedor del movimiento.');
+    if(Number(stockField('stockTipoMovimiento').value)!==23)throw new Error('Esta opción es para compras de mercadería.');
+    const movement=stockIngresoData();
+    const list=rowsData.filter(row=>!isBlankStockRow(row));
+    const details=list.map((row,index)=>{
+      const article=stockArticleForRow(row),line=movement.articulos[index];
+      const iva=Number(article?.iva)||0,precioSiva=line.precioUnitario,precioCiva=Math.round(precioSiva*(1+iva)*10000)/10000;
+      return {localUid:stockIngresoUuid(),codProv:String(row.codigo||''),filtro:String(line.idart),articulo:String(row.descripcion||article?.descripcion||''),cantidad:String(line.cantidad),precioSiva,precioCiva,subtotal:Math.round(precioCiva*line.cantidad*100)/100,antes:0,proveedor:current.proveedor||'',idProveedor:String(current.id_proveedor||''),listaOrigen:'corralon'};
+    });
+    const total=Math.round(details.reduce((sum,row)=>sum+row.subtotal,0)*100)/100;
+    if(!(total>0))throw new Error('El movimiento necesita un importe mayor a cero.');
+    const popup=document.createElement('dialog');popup.style.cssText='width:min(480px,90vw);padding:18px;border:1px solid #bbb;border-radius:10px;font:14px Arial';
+    popup.innerHTML=`<h3 style="margin:0 0 12px">Cargar en Pedidos</h3><p>${escapeHtml(current.proveedor||'')} · ${details.length} artículos</p><p>Total con IVA: <b>${money(total)}</b></p><label>Sucursal <select style="margin:8px" data-branch><option value="">Seleccionar sucursal</option>${CorralonSystem.BRANCHES.map(branch=>`<option value="${branch.id}">${escapeHtml(branch.label)}</option>`).join('')}</select></label><p>Se guardará confirmado y marcado como Pedido, y contará en el consumo mensual.</p><div style="display:flex;justify-content:flex-end;gap:8px"><button type="button" data-cancel>Cancelar</button><button type="button" data-save>Cargar en Pedidos</button></div>`;
+    const sqlName=String(stockField('stockIngresoSucursal').selectedOptions[0]?.textContent||'').toLowerCase();
+    const branchField=popup.querySelector('[data-branch]');
+    branchField.value=/calle\s*5|espa[nñ]a/.test(sqlName)?'calle5_espana':/progreso|ruta/.test(sqlName)?'progreso_ruta':'';
+    document.body.append(popup);popup.showModal();
+    stockPedidoBusy=true;button.disabled=true;stockFreeze(true);
+    const branch=await new Promise(resolve=>{
+      popup.querySelector('[data-cancel]').onclick=()=>resolve('');
+      popup.addEventListener('cancel',event=>{event.preventDefault();resolve('');});
+      popup.querySelector('[data-save]').onclick=()=>{if(!branchField.value){branchField.focus();return;}resolve(branchField.value);};
+    });
+    popup.close();popup.remove();if(!branch)return;
+    CorralonSystem.articleSync.set('syncing','Cargando el movimiento en Pedidos…',{progress:5});
+    const header=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
+    if(!header.stockPedidoOrigen){header.stockPedidoOrigen=stockConfirmed?`mov_${movement.sucursal}_${stockField('stockNumero').value}`:`draft_${stockIngresoUuid()}`;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(header));await flushRowsSave();}
+    const source=header.stockPedidoOrigen;
+    const sourceRef=doc(db,'configuracion',`stockPedido_${source}`),counterRef=doc(db,'configuracion','pedidosNumeracion');
+    const counter=await getDocFromServer(counterRef);
+    let observedMax=0;
+    if(!counter.exists()||!(Number(counter.data().ultimoNumero)>0)){
+      const historical=await getDocsFromServer(collection(db,'pedidos'));
+      historical.forEach(snapshot=>{observedMax=Math.max(observedMax,Number(snapshot.data().id)||0);});
+    }
+    const branchInfo=CorralonSystem.BRANCHES.find(item=>item.id===branch),month=movement.fecha.slice(0,7);
+    const summaryRef=doc(db,'pedidosTotalesMensuales',month);
+    let savedNumber='',already=false;
+    CorralonSystem.articleSync.set('syncing','Guardando el pedido y actualizando el consumo mensual…',{progress:55});
+    await runTransaction(db,async transaction=>{
+      const sourceSnap=await transaction.get(sourceRef);
+      if(sourceSnap.exists()){savedNumber=String(sourceSnap.data().numero);already=true;return;}
+      const counterSnap=await transaction.get(counterRef),summarySnap=await transaction.get(summaryRef);
+      const next=Math.max(Number(counterSnap.exists()?counterSnap.data().ultimoNumero:0)||0,observedMax)+1;
+      const orderDocId=`${next}__${actor.id}`,orderRef=doc(db,'pedidos',orderDocId);
+      const existing=await transaction.get(orderRef);if(existing.exists())throw new Error('El número de pedido ya está usado. Volvé a intentar.');
+      const stamp=Date.now();
+      const payload={id:String(next),_docId:orderDocId,idProveedor:String(current.id_proveedor||''),proveedor:current.proveedor||'',sucursalId:branch,sucursal:branchInfo.label,fecha:movement.fecha,total,nota:movement.nota,detalles:details,confirmado:true,pedido:true,estadoPedido:'pedido',eliminado:false,revisionOwner:null,usarListaProveedor:false,listaOrigen:'corralon',usuarioId:String(actor.id),usuarioKey:String(actor.id),usuarioNombre:actor.nombre||actor.usuario||'',usuarioLogin:actor.usuario||'',usuarioNivel:actor.nivel||'',syncId:stamp*1000+Math.floor(Math.random()*1000),updatedAt:stamp,origen:'carga-stock',movimientoStock:stockConfirmed?Number(stockField('stockNumero').value)||null:null,origenStock:source};
+      transaction.set(orderRef,payload);
+      transaction.set(counterRef,{ultimoNumero:next,updatedAt:serverTimestamp()},{merge:true});
+      transaction.set(sourceRef,{numero:String(next),pedidoDocId:orderDocId,createdAt:serverTimestamp()});
+      if(summarySnap.exists()&&summarySnap.data().initialized===true)transaction.set(summaryRef,{[branch]:increment(total),updatedAt:serverTimestamp()},{merge:true});
+      savedNumber=String(next);already=false;
+    });
+    stockIngresoMessage(already?`Este movimiento ya está cargado en el pedido Nº ${savedNumber}.`:`Pedido Nº ${savedNumber} cargado y marcado como Pedido.`, 'ok');
+    show(already?`Ya está en Pedidos · Nº ${savedNumber}`:`Cargado en Pedidos · Nº ${savedNumber}`);
+    CorralonSystem.articleSync.set('success',already?`Ya está en Pedidos · Nº ${savedNumber}`:`Pedido Nº ${savedNumber} cargado`,{progress:100});
+  }catch(error){stockIngresoMessage(error.message,'error');show(error.message);if(stockPedidoBusy)CorralonSystem.articleSync.set('error',error.message);}
+  finally{stockPedidoBusy=false;button.disabled=false;stockFreeze(stockConfirmed);}
+}
+document.getElementById('compareStockBtn').addEventListener('click',cargarStockEnPedidos);
 el.applyPricesBtn.addEventListener('click', () => {
   applyPricesToAccess().catch((error) => {
     console.error(error);
@@ -6110,9 +6195,7 @@ initFuncionesJsBindings();
   await Promise.all([loadRows(), loadPriceComparisons()]);
   render();
   const stockReady = initStockSql();
-  if (['localhost','127.0.0.1','[::1]'].includes(location.hostname)) {
-    import('./local-article-sync.js').then(module=>module.resumeQueue()).catch(console.warn);
-  }
+  import('./local-article-sync.js').then(module=>module.resumeQueue()).catch(console.warn);
   await loadProviders();
   await stockReady;
   stockRebuildArticleOptions();

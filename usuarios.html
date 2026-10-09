@@ -181,15 +181,15 @@
     font-weight: 900;
     text-transform: uppercase;
   }
-  .checks { padding: 14px 16px; display: grid; gap: 9px; }
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--text);
-    font-weight: 800;
-  }
-  .check input { width: auto; }
+  #permissionsModal .modal-box { width: min(100%, 620px); max-height: calc(100dvh - 36px); display: flex; flex-direction: column; }
+  #permissionsModal .modal-head, #permissionsModal .modal-actions { flex-shrink: 0; }
+  .checks { padding: 14px 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; overflow-y: auto; min-height: 0; }
+  @media (max-width: 540px) { .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .permission-group-title { grid-column: 1 / -1; font-size: 13px; font-weight: 900; color: var(--text); padding: 4px 0 7px; border-bottom: 1px solid var(--line); }
+  .permission-group-title:not(:first-child) { margin-top: 8px; }
+  .permission-chip { border: 1px solid #d8d8d8; border-radius: 999px; padding: 9px 13px; background: #f5f5f5; color: #444; font: 700 12px Arial, sans-serif; cursor: pointer; text-transform: uppercase; }
+  #permissionChecks .permission-chip[aria-pressed="true"] { background: #e50000; border-color: #e50000; color: white; }
+  .permission-chip:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
   .mode-options { padding: 16px; display: grid; gap: 10px; }
   .mode-option { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; }
   .mode-option input { width: auto; margin-top: 2px; }
@@ -211,7 +211,7 @@
   }
 </style>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.12"></script>
+<script src="corralon-system.js?v=1.0.13"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="usuarios"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-17">
 </head>
@@ -519,6 +519,15 @@
     renderUsers();
   }
 
+  function renderPermissionChips(permisos) {
+    const sqlIds = new Set(['facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'carga_stock', 'articulos_sql']);
+    els.checks.innerHTML = ['Web', 'SQL'].map(group =>
+      `<div class="permission-group-title">${group}</div>` + MENU_ITEMS
+        .filter(item => sqlIds.has(item.id) === (group === 'SQL'))
+        .map(item => `<button class="permission-chip" type="button" data-permission="${item.id}" aria-pressed="${permisos.has(item.id)}">${item.label}</button>`).join('')
+    ).join('');
+  }
+
   function openPermissions(id) {
     const user = users.find((item) => item.id === id);
     if (!user) return;
@@ -526,24 +535,14 @@
     draftCajaModo = user.nivel === 'administrador' ? 'completo' : (['lector','restringido'].includes(user.cajaModo) ? 'restringido' : 'completo');
     draftCajaSucursalId = String(user.cajaSucursalId || '');
     const permisos = new Set(userPermissions(user));
-    els.checks.innerHTML = MENU_ITEMS.map((item) => `
-      <label class="check">
-        <input type="checkbox" value="${item.id}" ${permisos.has(item.id) ? 'checked' : ''}>
-        <span>${item.label}</span>
-      </label>
-    `).join('');
+    renderPermissionChips(permisos);
     els.modal.classList.add('show');
   }
 
   function openDraftPermissions() {
     permissionsEditingId = '__draft__';
     const permisos = new Set(draftPermisos);
-    els.checks.innerHTML = MENU_ITEMS.map((item) => `
-      <label class="check">
-        <input type="checkbox" value="${item.id}" ${permisos.has(item.id) ? 'checked' : ''}>
-        <span>${item.label}</span>
-      </label>
-    `).join('');
+    renderPermissionChips(permisos);
     els.modal.classList.add('show');
   }
 
@@ -564,13 +563,14 @@
   }
 
   async function savePermissions() {
-    const permisos = [...els.checks.querySelectorAll('input:checked')].map((input) => input.value);
+    const permisos = [...els.checks.querySelectorAll('[data-permission][aria-pressed="true"]')].map((button) => button.dataset.permission);
     if (permissionsEditingId === '__draft__') {
       draftPermisos = permisos;
       permissionsEditingId = '';
       els.modal.classList.remove('show');
       return;
     }
+    const previousUser = users.find(user => user.id === permissionsEditingId);
     let updatedUser = null;
     users = users.map((user) => {
       if (user.id !== permissionsEditingId) return user;
@@ -578,10 +578,18 @@
       updatedUser = { ...user, nivel: isAdmin ? 'administrador' : 'personalizado', permisos: isAdmin ? ALL_MENU_IDS : permisos, cajaModo: isAdmin ? 'completo' : draftCajaModo, cajaSucursalId: isAdmin ? '' : draftCajaSucursalId };
       return updatedUser;
     });
-    await saveUser(updatedUser);
     permissionsEditingId = '';
     els.modal.classList.remove('show');
     renderUsers();
+    if (!updatedUser) return;
+    try {
+      await saveUser(updatedUser);
+    } catch (error) {
+      users = users.map(user => user === updatedUser ? previousUser : user);
+      renderUsers();
+      console.error('No se pudieron sincronizar los permisos', error);
+      alert('No se pudieron guardar los permisos. Revisá la conexión y volvé a intentarlo.');
+    }
   }
 
   els.save.addEventListener('click', saveUserFromForm);
@@ -604,16 +612,11 @@
   els.cancelPermissions.addEventListener('click', () => els.modal.classList.remove('show'));
   els.savePermissions.addEventListener('click', savePermissions);
   els.checks.addEventListener('click', (event) => {
-    const label = event.target.closest('label.check');
-    const checkbox = label?.querySelector('input[type="checkbox"][value="caja"]');
-    if(checkbox?.checked && event.target !== checkbox) {
-      event.preventDefault();
-      openCajaMode();
-    }
-  });
-  els.checks.addEventListener('change', (event) => {
-    const checkbox = event.target.closest('input[type="checkbox"][value="caja"]');
-    if (checkbox?.checked) openCajaMode();
+    const chip = event.target.closest('button[data-permission]');
+    if (!chip) return;
+    const selected = chip.getAttribute('aria-pressed') !== 'true';
+    chip.setAttribute('aria-pressed', String(selected));
+    if (chip.dataset.permission === 'caja' && selected) openCajaMode();
   });
   els.saveCajaMode.addEventListener('click', () => {
     draftCajaModo = els.cajaModeModal.querySelector('input[name="cajaMode"]:checked')?.value === 'restringido' ? 'restringido' : 'completo';

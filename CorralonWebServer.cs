@@ -236,12 +236,14 @@ internal static class LocalArticleImport
     }
     internal static void Handle(HttpListenerContext ctx)
     {
-        string host = ctx.Request.Url.Host;
         string origin = ctx.Request.Headers["Origin"];
-        bool loopback = ctx.Request.RemoteEndPoint != null && IPAddress.IsLoopback(ctx.Request.RemoteEndPoint.Address);
-        bool localHost = host == "localhost" || host == "127.0.0.1" || host == "[::1]" || host == "::1";
-        if (!loopback || !localHost || (origin != null && origin != ctx.Request.Url.GetLeftPart(UriPartial.Authority)) || ctx.Request.Headers["Sec-Fetch-Site"] == "cross-site")
-        { Reply(ctx, 403, new { error = "Disponible solamente desde localhost." }); return; }
+        IPAddress address = ctx.Request.RemoteEndPoint == null ? null : ctx.Request.RemoteEndPoint.Address;
+        if (address != null && address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        byte[] ip = address != null && address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? address.GetAddressBytes() : null;
+        bool trustedNetwork = address != null && (IPAddress.IsLoopback(address)
+            || (ip != null && ip[0] == 100 && ip[1] >= 64 && ip[1] <= 127));
+        if (!trustedNetwork || (origin != null && !String.Equals(origin, ctx.Request.Url.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase)) || ctx.Request.Headers["Sec-Fetch-Site"] == "cross-site")
+        { Reply(ctx, 403, new { error = "Importador disponible desde localhost o Tailscale." }); return; }
         try
         {
             string path = ctx.Request.Url.AbsolutePath;

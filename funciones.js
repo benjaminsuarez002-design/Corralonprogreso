@@ -1,4 +1,14 @@
 (function () {
+  function createUuid() {
+    if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
+
   function deepClone(value) {
     return JSON.parse(JSON.stringify(value));
   }
@@ -825,6 +835,7 @@
       if (!control || !root.contains(control) || control.disabled) return;
       const belongsToLabel = control.closest?.(labelSelector) || control.labels?.length;
       if (!belongsToLabel || document.activeElement === control) return;
+      if (control.tagName === 'SELECT') return;
       event.preventDefault();
       control.focus?.({ preventScroll: true });
       if (typeof control.select === 'function' && control.type !== 'checkbox' && control.type !== 'radio') control.select();
@@ -1264,6 +1275,7 @@
     const descClass = options.descClass || 'sort-desc';
     let currentKey = options.initialKey || '';
     let currentDir = options.initialDir || 'asc';
+    const firstDirection = key => options.firstDirectionByKey?.[key] === 'desc' ? 'desc' : 'asc';
 
     function applyHeaderState() {
       root.querySelectorAll(headerSelector).forEach((header) => {
@@ -1281,9 +1293,9 @@
         currentDir = dir;
       } else if (currentKey !== key) {
         currentKey = key;
-        currentDir = 'asc';
-      } else if (currentDir === 'asc') {
-        currentDir = 'desc';
+        currentDir = firstDirection(key);
+      } else if (currentDir === firstDirection(key)) {
+        currentDir = currentDir === 'asc' ? 'desc' : 'asc';
       } else {
         currentKey = '';
         currentDir = '';
@@ -1307,6 +1319,11 @@
         root.removeEventListener('click', handleClick);
       },
       setSort,
+      reset() {
+        currentKey = ''; currentDir = '';
+        applyHeaderState();
+        if (sort) sort('', '');
+      },
       getState: () => ({ key: currentKey, dir: currentDir })
     };
   }
@@ -1811,6 +1828,7 @@
     evaluatePriceAdjustment,
     bindNumericExpressions,
     bindIncrementalRendering,
+    createUuid,
     deepClone,
     statesEqual,
     isUndoShortcut,

@@ -207,7 +207,7 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
     <form id="reportFilters" class="filters">
       <label>Desde<input id="reportFrom" data-date placeholder="dd/mm/aaaa"></label>
       <label>Hasta<input id="reportTo" data-date placeholder="dd/mm/aaaa"></label>
-      <label>Proveedor<select id="reportProvider"></select></label>
+      <label>Proveedor<input id="reportProvider" data-sql-list="reportProvider" autocomplete="off" placeholder="Todos · Buscar proveedor"></label>
       <label id="reportSearchLabel">Buscar<input id="reportSearch" maxlength="100"></label>
       <button type="submit">Consultar</button>
     </form>
@@ -311,7 +311,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   let purchaseCombo = { input: null, items: [], active: 0 }, pickingPurchaseCombo = false;
   const selectedType = () => comboItem('type');
   const selectedProvider = () => comboItem('provider');
-  const rowId = () => crypto.randomUUID();
+  const rowId = () => FX.createUuid();
   const blankRow = () => ({ key: rowId(), impuesto: 0, neto: 0, importe: 0, porcentaje: .21, descripcion: 'NETO', empty: true });
   function message(text, error = false) { $('status').textContent = text; $('status').classList.toggle('error', error); }
   function saveDraft() {
@@ -353,6 +353,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   const normalizedChoice = value => String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-AR');
   function comboLabel(id, item) {
     if (id === 'type') return item.codigo;
+    if (id === 'reportProvider') return Number(item.id) === 0 ? 'Todos' : `${String(item.nombre || '').toLocaleUpperCase('es-AR')} · ${item.id}`;
     if (id === 'provider') return `${String(item.nombre || '').toLocaleUpperCase('es-AR')} · ${item.id}`;
     if (id === 'account') return `${item.nombre} · ${item.id}`;
     if (id === 'movement') return `${item.numero} · ${item.fecha} · ${money(item.total)}${item.remito ? ` · ${item.remito}` : ''}`;
@@ -710,7 +711,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       message(`Factura ${invoice.NroFactura} confirmada. Ya podés cargar la siguiente.`);
       if (sendToStock && !invoice.IDMovStk) {
         const stockTab = await new Promise(resolve => {
-          const request = crypto.randomUUID();
+          const request = FX.createUuid();
           let timer;
           const receive = event => {
             if (event.key !== `${stockKey}_reply` || !event.newValue) return;
@@ -848,7 +849,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     $('reportTitle').textContent = ({ buscar: 'Consultar facturas', iva: 'IVA Compras', 'cuenta-corriente': 'Cuenta corriente del proveedor' })[mode];
     const from = new Date(`${today()}T12:00:00`); if (mode === 'iva') from.setDate(1); else from.setDate(from.getDate() - 90);
     $('reportFrom').value = `${from.getDate()}/${from.getMonth() + 1}/${from.getFullYear()}`; $('reportTo').value = dateText(today());
-    $('reportProvider').value = mode === 'cuenta-corriente' ? String(selectedProvider()?.id || '') : '';
+    setComboValue('reportProvider', mode === 'cuenta-corriente' ? selectedProvider()?.id || 0 : 0);
     $('reportSearch').value = search; $('reportSearchLabel').hidden = mode !== 'buscar';
     if (!$('reportDialog').open) $('reportDialog').showModal();
     await loadReport();
@@ -857,7 +858,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if (reportMode === 'buscar') $('reportSearch').value = FX.formatComprobanteNumber($('reportSearch').value);
     $('reportStatus').textContent = 'Consultando SQL…'; $('loadMore').hidden = true;
     try {
-      const params = { consulta: reportMode, desde: parseFieldDate('reportFrom'), hasta: parseFieldDate('reportTo'), proveedor: $('reportProvider').value || 0,
+      if ($('reportProvider').value.trim() && !comboItem('reportProvider')) throw new Error('Seleccioná un proveedor de la lista.');
+      const params = { consulta: reportMode, desde: parseFieldDate('reportFrom'), hasta: parseFieldDate('reportTo'), proveedor: comboId('reportProvider') || 0,
         buscar: $('reportSearch').value.trim(), antes: more ? reportRows.at(-1)?.id || 0 : 0 };
       const result = await api(params);
       const loaded = result.facturas || result.filas || result.movimientos || result.saldos;
@@ -906,7 +908,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       fillSelect('point', options.puntosVenta); fillSelect('goods', options.bienes); fillCombo('payment', options.pagos);
       fillCombo('tax', options.impuestos);
       fillSelect('calculatorRate', options.impuestos.filter(item => item.codigoIva).map(item => ({ ...item, nombre: `${decimal(item.porcentaje * 100)}%` })));
-      fillSelect('reportProvider', reportProviders, 'Todos');
+      fillCombo('reportProvider', [{id:0,nombre:'Todos'}, ...reportProviders], 'Todos · Buscar proveedor');
       fillCombo('provider', options.proveedores);
       let saved; try { saved = JSON.parse(localStorage.getItem(storageKey()) || 'null'); } catch {}
       resetDraft();
@@ -916,7 +918,6 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
           if (id === 'account' || saved.fields?.[id] === undefined) return;
           if (comboLists.has(id)) setComboValue(id, saved.fields[id]); else $(id).value = saved.fields[id];
         });
-        if (!saved.pending) setComboValue('type', '');
         refreshAccounts(); setComboValue('account', saved.fields?.account || ''); $('inStock').checked = saved.inStock;
         $('providerCode').value = selectedProvider()?.id || '';
         $('providerName').value = selectedProvider()?.nombre || '';
@@ -926,15 +927,15 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
         message(saved.pending ? 'Hay una confirmación pendiente de verificar. Reintentá con este mismo borrador.' : 'Borrador recuperado. Datos de proveedores e impuestos consultados en SQL.');
       } else message('Listo para cargar una factura. Datos consultados en SQL.');
       if (cachedReady) freshOptions.then(data => {
-        const selectValues = Object.fromEntries(['point','goods','calculatorRate','reportProvider'].map(id => [id, $(id).value]));
-        const accountText = $('account').value;
+        const selectValues = Object.fromEntries(['point','goods','calculatorRate'].map(id => [id, $(id).value]));
+        const accountText = $('account').value, reportProviderText = $('reportProvider').value;
         options = { ...data, proveedores: data.proveedores.filter(provider => !provider.suspendido) };
         fillCombo('type', options.tipos); fillCombo('payment', options.pagos); fillCombo('tax', options.impuestos); fillCombo('provider', options.proveedores);
         fillSelect('point', options.puntosVenta); fillSelect('goods', options.bienes);
         fillSelect('calculatorRate', options.impuestos.filter(item => item.codigoIva).map(item => ({ ...item, nombre: `${decimal(item.porcentaje * 100)}%` })));
-        fillSelect('reportProvider', data.proveedores, 'Todos');
+        fillCombo('reportProvider', [{id:0,nombre:'Todos'}, ...data.proveedores], 'Todos · Buscar proveedor');
         Object.entries(selectValues).forEach(([id, value]) => { if ([...$(id).options].some(item => item.value === value)) $(id).value = value; });
-        refreshAccounts(); setComboValue('account', accountText);
+        refreshAccounts(); setComboValue('account', accountText); setComboValue('reportProvider', reportProviderText);
       }).catch(error => message(`Listas en caché disponibles. No se pudieron actualizar desde SQL: ${error.message}`, true));
     } catch (error) { options = null; message(error.message, true); initialized = false; setBusy(false); }
   }
@@ -1188,14 +1189,14 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   $('loadMore').addEventListener('click', () => loadReport(true));
   $('reportBody').addEventListener('click', async event => {
     const providerButton = event.target.closest('[data-provider]');
-    if (providerButton) { $('reportProvider').value = providerButton.dataset.provider; await loadReport(); return; }
+    if (providerButton) { setComboValue('reportProvider', providerButton.dataset.provider); await loadReport(); return; }
     const button = event.target.closest('[data-invoice]'); if (!button) return;
     try { showInvoice(await api({ consulta: 'detalle', id: button.dataset.invoice })); } catch (error) { $('reportStatus').textContent = error.message; }
   });
   document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
   $('detailDialog').addEventListener('close', () => detailReturnFocus?.focus());
   $('printDetail').addEventListener('click', () => printBody($('detailTitle').textContent, $('detailBody').innerHTML));
-  $('printReport').addEventListener('click', () => printBody($('reportTitle').textContent, `<p>${esc($('reportFrom').value)} al ${esc($('reportTo').value)} · ${esc($('reportProvider').selectedOptions[0]?.textContent)}</p>${$('reportBody').innerHTML}<p>${esc($('reportTotals').textContent)}</p>`));
+  $('printReport').addEventListener('click', () => printBody($('reportTitle').textContent, `<p>${esc($('reportFrom').value)} al ${esc($('reportTo').value)} · ${esc($('reportProvider').value || 'Todos')}</p>${$('reportBody').innerHTML}<p>${esc($('reportTotals').textContent)}</p>`));
   document.addEventListener('keydown', event => {
     if (!options || document.querySelector('dialog[open]')) return;
     if (event.key === 'F1') { event.preventDefault(); openReport('buscar', $('lastNumber').value); }

@@ -6908,7 +6908,7 @@
     }
 
     async function open(options = {}) {
-      if (options.localSql && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+      if (options.localSql) {
         const importer = await import('./local-article-importer.js');
         return importer.open(options);
       }

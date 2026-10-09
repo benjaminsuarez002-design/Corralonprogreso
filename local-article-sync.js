@@ -44,10 +44,21 @@ function showResult() {
 async function cancelFailed() {
   const canceled=jobs.filter(job=>job.state==='error');
   const saved=canceled.some(job=>job.rows.some(row=>row.sqlSaved));
+  // Cancelar detiene el envío, pero conserva las filas para corregir y reabrir.
+  for (const job of canceled) {
+    const draftKey=`corralon_local_article_import_draft_v1_${job.provider}`;
+    const existing=await cache().read(draftKey);
+    if (!existing?.rows?.length) {
+      await cache().write(draftKey,structuredClone({operation:job.operation,rows:job.rows}));
+      try { window.localStorage.setItem(draftKey,JSON.stringify({indexedDb:true})); } catch {}
+    } else {
+      await cache().write(`${draftKey}_canceled_${job.id}`,structuredClone({operation:job.operation,rows:job.rows}));
+    }
+  }
   jobs=jobs.filter(job=>job.state!=='error');
   canceled.forEach(job=>callbacks.delete(job.id));
   await persist();
-  window.CorralonSystem.articleSync.set('success',saved ? 'Carga pendiente cancelada. Lo ya guardado en SQL se conserva.' : 'Carga pendiente cancelada.');
+  window.CorralonSystem.articleSync.set('success',saved ? 'Carga cancelada. Borrador conservado; lo guardado en SQL también.' : 'Carga cancelada. Volvé a abrir el importador para corregir el borrador.');
 }
 async function process(job) {
   job.state='running';await persist();

@@ -3929,6 +3929,20 @@ body[data-catalog-view="mosaico"] .producto-card .card-cta .agregar-btn{grid-are
 
 @media(max-width:640px){body[data-catalog-view="mosaico"] .productos-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}}
 .filter-label-mobile{display:none}
+body.index-sin-stock .stock-pill,
+body.index-sin-stock .stock-branch-stack,
+body.index-sin-stock #productDetailStock{display:none!important}
+body.index-sin-stock[data-catalog-view="detalle"] .producto-card .producto-inner{
+  grid-template-rows:auto auto auto auto;
+  grid-template-areas:"foto nombre cta" "foto detalle cta" "foto tags cta" "foto codigo cta";
+  min-height:0;
+}
+body.index-sin-stock[data-catalog-view="mosaico"] .producto-card .producto-inner{
+  min-height:0;
+  align-content:start;
+}
+body.index-sin-stock .card-meta,
+body.index-sin-stock .home-card-meta{gap:0}
 @media(max-width:700px){
  #chipsPanel{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;width:calc(100% - 16px);margin:4px 8px 8px;padding:9px;background:#fff;border:1px solid #dedede;border-radius:9px;overflow:visible;flex-shrink:0}
  #chipsPanel .chips-grupo-izq{grid-column:1;grid-row:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;padding:0;overflow:visible}
@@ -4390,7 +4404,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.30"></script>
+<script src="corralon-system.js?v=1.0.31"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -5443,6 +5457,7 @@ function obtenerStockInfo(articulo) {
 }
 
 function renderStockMetaHtml(articulo, codigo) {
+  if (!window.CorralonFunciones?.isMenuSessionActive?.()) return `Código: ${escaparHtml(codigo)}`;
   const { hasBranchStock, sucursalStockLines, stockText } = obtenerStockInfo(articulo);
   if (!hasBranchStock) return `Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}`;
   return `<div class="stock-meta-block">
@@ -5452,6 +5467,7 @@ function renderStockMetaHtml(articulo, codigo) {
 }
 
 function renderStockPillsHtml(articulo, { withDisponibles = false } = {}) {
+  if (!window.CorralonFunciones?.isMenuSessionActive?.()) return '';
   const { hasBranchStock, sucursalStockLines, stockClass, stockText, stockLista } = obtenerStockInfo(articulo);
   if (!hasBranchStock) {
     return `<div class="stock-pill ${stockClass}">Stock: ${escaparHtml(withDisponibles ? stockText : stockLista)}</div>`;
@@ -5460,6 +5476,7 @@ function renderStockPillsHtml(articulo, { withDisponibles = false } = {}) {
 }
 
 function renderProductDetailStockHtml(articulo) {
+  if (!window.CorralonFunciones?.isMenuSessionActive?.()) return '';
   const { hasBranchStock, sucursalStockLines, stockLista } = obtenerStockInfo(articulo);
   if (!hasBranchStock) return `<div class="product-detail-stock-line">Stock: <strong>${escaparHtml(stockLista)}</strong></div>`;
   return sucursalStockLines.map((line) => `<div class="product-detail-stock-line ${line.class}">${escaparHtml(line.label)}: <strong>${escaparHtml(line.short)}</strong></div>`).join('');
@@ -7511,6 +7528,7 @@ function abrirDetalleProducto(codigo) {
   document.getElementById('productDetailProviderCode').textContent = codigoProveedor || '-';
   codigoProveedorWrap.classList.toggle('hidden', !sesionMenuActiva || !codigoProveedor);
   document.getElementById('productDetailStock').innerHTML = renderProductDetailStockHtml(articulo);
+  document.getElementById('productDetailStock').classList.toggle('hidden', !sesionMenuActiva);
   const detailPriceBase = document.getElementById('productDetailPriceBase');
   detailPriceBase.textContent = precioVisual.esCeramico && !articulo.ofertaVigente ? '' : (precioVisual.esCeramico ? precioVisual.precioBaseHtml : (articulo.ofertaVigente ? `Precio lista ${fmtPrecio(precioLista)}` : ''));
   detailPriceBase.classList.toggle('precio-caja', precioVisual.esCeramico);
@@ -11161,6 +11179,10 @@ document.getElementById('buyButton').addEventListener('click', crearPresupuesto)
 document.getElementById('printLabelsButton').addEventListener('click', imprimirEtiquetasCarrito);
 function actualizarBotonEtiquetas() {
   document.getElementById('printLabelsButton').hidden = !usuarioMenuPresupuestoActual().id;
+  const sinStock = !window.CorralonFunciones?.isMenuSessionActive?.();
+  const cambioSesion = document.body.classList.contains('index-sin-stock') !== sinStock;
+  document.body.classList.toggle('index-sin-stock', sinStock);
+  if (cambioSesion) renderContenidoActual();
 }
 actualizarBotonEtiquetas();
 window.addEventListener('menu-user-validated', actualizarBotonEtiquetas);

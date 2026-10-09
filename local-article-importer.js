@@ -1,6 +1,6 @@
 import {enqueue, resumeQueue} from './local-article-sync.js';
 export {resumeQueue};
-// Loaded only by the importer on localhost. No database credentials reach the browser.
+// Loaded by the SQL importer on localhost or Tailscale. No database credentials reach the browser.
 const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 const normalizeIndexFilter = value => String(value ?? '')
   .normalize('NFD')
@@ -58,11 +58,23 @@ export async function open(options) {
     <div data-status role="status"><span data-status-text>Leyendo artículos de la base local…</span><button type="button" data-reconnect hidden>Restablecer conexión</button></div><footer><span data-summary></span><button type="button" data-cancel>Cancelar</button><button type="button" class="primary" data-apply disabled>Aplicar todos</button></footer>
   </section>`;
   document.body.append(backdrop);
+  const backgroundElements = [...document.body.children].filter(element => element !== backdrop);
+  const backgroundInert = backgroundElements.map(element => [element, element.inert]);
+  backgroundElements.forEach(element => { element.inert = true; });
+  const focusInside = () => backdrop.querySelector('input:not([disabled]),select:not([disabled]),button:not([disabled])')?.focus({preventScroll:true});
+  const guardFocus = event => {
+    if (!backdrop.isConnected || backdrop.inert || backdrop.contains(event.target) || menu?.contains(event.target)) return;
+    event.stopImmediatePropagation(); focusInside();
+  };
+  const guardKeyup = event => { if (backdrop.isConnected && !backdrop.inert) event.stopImmediatePropagation(); };
+  window.addEventListener('focusin', guardFocus, true);
+  window.addEventListener('keyup', guardKeyup, true);
+  backdrop.querySelector('[data-close]').focus({preventScroll:true});
   const status = backdrop.querySelector('[data-status]'), statusText = backdrop.querySelector('[data-status-text]');
   const originalDescription = backdrop.querySelector('[data-original-description]');
   const reconnect = backdrop.querySelector('[data-reconnect]'), apply = backdrop.querySelector('[data-apply]');
   const providerId = Number(options.provider.id_proveedor || options.provider.idProveedor);
-  let busy = false, rows = [], catalog = [], catalogSorted = [], rubros = [], token = '', operation = crypto.randomUUID();
+  let busy = false, rows = [], catalog = [], catalogSorted = [], rubros = [], token = '', operation = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
   let catalogReady = false, draftSaveTimer = 0;
   const draftCache=window.CorralonSystem.localCache;
   let draftWrite=Promise.resolve();
@@ -114,10 +126,13 @@ export async function open(options) {
     if (discard) clearDraft(); else saveDraft();
     window.removeEventListener('pagehide', flushOnPageHide);
     hideMenu(); window.removeEventListener('keydown', handleDialogKeydown, true);
+    window.removeEventListener('focusin', guardFocus, true);
+    window.removeEventListener('keyup', guardKeyup, true);
+    backgroundInert.forEach(([element, inert]) => { element.inert = inert; });
     backdrop.remove(); active = false; returnFocus?.focus?.({ preventScroll:true });
   }
   function changed() {
-    operation = crypto.randomUUID();
+    operation = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
     clearTimeout(draftSaveTimer);
     draftSaveTimer = setTimeout(() => { draftSaveTimer = 0; saveDraft(); }, 500);
   }
@@ -214,7 +229,7 @@ export async function open(options) {
   async function pick(row, id) {
     const sourceInput = menuInput;
     hideMenu(); row.loading = true; row.mode = 'update'; row.id = ''; row.newConfirmed = true; summary();
-    const requestId = row.lookup = crypto.randomUUID();
+    const requestId = row.lookup = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
     setStatus('Leyendo los datos actuales del artículo…');
     try {
       const article = await api(`article?id=${encodeURIComponent(id)}`);
@@ -369,7 +384,7 @@ export async function open(options) {
     document.body.append(menu);
   }
   backdrop.addEventListener('click', e => {
-    if (e.target.closest('[data-cancel]')) { close(true); return; }
+    if (e.target.closest('[data-cancel]')) { close(); return; }
     if (e.target.closest('[data-close]')) { close(); return; }
     const articleToggle=e.target.closest('[data-article-toggle]');
     const rubroToggle=e.target.closest('[data-rubro-toggle]');
@@ -507,8 +522,10 @@ export async function open(options) {
     if (backdrop.inert) return;
     if (!backdrop.isConnected) return;
     const inDialog = backdrop.contains(e.target) || menu?.contains(e.target);
-    if (!inDialog && e.key !== 'Escape') return;
-    e.stopPropagation();
+    const undo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
+    e.stopImmediatePropagation();
+    if (!inDialog) { e.preventDefault(); if (!undo) { focusInside(); return; } }
+    if (undo) e.preventDefault();
     const input = e.target.closest?.('[data-field]');
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -521,9 +538,16 @@ export async function open(options) {
       }
       hideMenu(); return;
     }
-    if (busy || !inDialog) return;
+    if (busy || (!inDialog && !undo)) return;
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
       e.preventDefault(); if (!undoField(input)) setStatus('No hay movimientos para deshacer.'); return;
+    }
+    if (e.key === 'Tab' && !input) {
+      e.preventDefault();
+      const fields = [...backdrop.querySelectorAll('input:not([disabled]),select:not([disabled]),button:not([disabled])')].filter(element => !element.hidden && !element.closest('[hidden]'));
+      const index = fields.indexOf(document.activeElement);
+      fields[(index + (e.shiftKey ? -1 : 1) + fields.length) % fields.length]?.focus({preventScroll:true});
+      return;
     }
     if (!input) return;
     if (e.key === 'F2' && input.tagName === 'INPUT') {
@@ -579,6 +603,17 @@ export async function open(options) {
     for (const row of sqlRows) if (!confirmNew(row, true)) return;
     const invalid = rows.find(r => (r.mode==='update'&&!r.id) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
     if(invalid) { setStatus('Completá artículo, rubro, costo y margen en todas las filas.',true); return; }
+    const descriptions = new Set();
+    for (const row of sqlRows.filter(row => row.mode !== 'update')) {
+      const description = normalize(row.descripcion);
+      const reason = !description ? 'La descripción está vacía' : description.length > 100 ? 'La descripción supera los 100 caracteres' : descriptions.has(description) ? 'La descripción está repetida en el lote' : '';
+      if (reason) {
+        setStatus(`${reason}: fila ${rows.indexOf(row)+1}, código ${row.codigo || 'sin código'}. Corregila antes de aplicar.`,true);
+        backdrop.querySelector(`tr[data-row="${rows.indexOf(row)}"] [data-field="descripcion"]`)?.focus();
+        await flushDraft(); return;
+      }
+      descriptions.add(description);
+    }
     try { await flushDraft(true); } catch(error) { setStatus(error.message,true); return; }
     busy=true; apply.disabled=true;
     try {
@@ -611,8 +646,8 @@ export async function open(options) {
         const importedCode = source => String(source?.codigo || source?.cod_proveedor || source?.codProveedor || '').trim();
         rows=draft ? draft.rows.map(row=>({ ...row,
             importedDescription:row.importedDescription || importedText(row.codigo && importedRows.find(source=>importedCode(source)===row.codigo)) || row.descripcion,
-            uid:row.uid || crypto.randomUUID(), loading:false, lookup:null }))
-          : importedRows.map(source=>({uid:crypto.randomUUID(),mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
+            uid:row.uid || (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()), loading:false, lookup:null }))
+          : importedRows.map(source=>({uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
         if (draft?.operation) operation = draft.operation;
         catalogReady=true;
         await saveDraft();
