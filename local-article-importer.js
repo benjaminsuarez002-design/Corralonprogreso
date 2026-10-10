@@ -210,13 +210,13 @@ export async function open(options) {
   function render() {
     hideMenu();
     backdrop.querySelector('tbody').innerHTML = rows.map((r, i) => `<tr data-row="${i}" class="local-import-row${selectedRowUid === r.uid ? ' local-selected' : ''}">
-      <td><input readonly value="${escape(r.mode === 'new' ? 'Automático' : r.id || 'Elegir →')}"></td>
-      <td><input readonly value="${escape(r.codigo)}"></td>
+      <td><input ${options.editableSource?'data-field="id" maxlength="6" placeholder="Automático"':'readonly'} value="${escape(options.editableSource?r.id||'':r.mode === 'new' ? 'Automático' : r.id || 'Elegir →')}"></td>
+      <td><input ${options.editableSource?'data-field="codigo" maxlength="30"':'readonly'} value="${escape(r.codigo)}"></td>
       <td><div class="local-articles-combo"><input data-field="descripcion" autocomplete="off" maxlength="100" value="${escape(r.descripcion)}" placeholder="Buscar por código o descripción…"${r.original ? ` title="Costo anterior: ${escape(money(r.original.costo))}"` : ''}><button type="button" data-article-toggle tabindex="-1" title="Buscar artículo">▼</button></div></td>
       <td><div class="local-articles-combo"><input data-field="rubro" autocomplete="off" value="${escape(rubros.find(item => Number(item.id) === Number(r.rubro))?.nombre || '')}" placeholder="Elegir rubro"><button type="button" data-rubro-toggle tabindex="-1" title="Buscar rubro">▼</button></div></td>
       <td><select data-field="iva"><option value="0.21">21 %</option><option value="0.105">10,5 %</option>${![.21,.105].some(v => Math.abs(v-r.iva)<.00001) ? `<option value="${Number(r.iva)}">${Number(r.iva)*100} %</option>` : ''}</select></td>
       <td><input data-field="margen" inputmode="decimal" value="${displayMargin(r.margen)}"></td>
-      <td class="num">${money(r.costo)}</td><td class="num">${r.original ? money(r.original.costo) : '—'}</td><td class="num" data-difference>${costDifference(r)}</td>
+      <td class="num"><input data-field="costo" inputmode="text" value="${escape(r.costoExpression??money(r.costo))}"></td><td class="num">${r.original ? money(r.original.costo) : '—'}</td><td class="num" data-difference>${costDifference(r)}</td>
       <td><label class="local-load-web"><input type="checkbox" data-load-web ${r.loadWeb ? 'checked' : ''}>Cargar web</label><button type="button" data-remove title="Quitar">×</button></td>
     </tr>`).join('');
     backdrop.querySelectorAll('tr[data-row]').forEach(tr => {
@@ -455,6 +455,7 @@ export async function open(options) {
       row.margen = parseMargin(e.target.value);
       if (Number.isFinite(row.margen)) e.target.value = displayMargin(row.margen);
     }
+    if(row && e.target.dataset.field==='costo')finishCost(e.target,row);
     finishFieldEdit(e.target);
   });
   backdrop.addEventListener('input', e => {
@@ -465,7 +466,7 @@ export async function open(options) {
       row.mode = 'new'; row.id = ''; row.original = null; row.version = ''; row.lookup = null;
       row.needsNewConfirmation = true; row.newConfirmed = false; row.declinedDescription = '';
       search(input,row); summary();
-      tr.querySelector('td:first-child input').value = 'Automático';
+      tr.querySelector('td:first-child input').value = options.editableSource?'':'Automático';
     }
     if (field === 'rubro') {
       const selected = rubros.find(item => normalize(item.nombre) === normalize(input.value));
@@ -473,6 +474,15 @@ export async function open(options) {
       searchRubro(input,row);
     }
     if (field === 'margen') row.margen = parseMargin(input.value);
+    if(field==='codigo')row.codigo=input.value.trim();
+    if(field==='id'){
+      row.id=input.value.trim();row.mode='new';row.original=null;row.version='';row.lookup=null;
+    }
+    if(field==='costo'){
+      row.costoExpression=input.value;
+      try{row.costo=window.CorralonFunciones.evaluateBasicArithmetic(input.value);input.setCustomValidity('');}catch{}
+      tr.querySelector('[data-difference]').textContent=costDifference(row);
+    }
     changed();
   });
   backdrop.addEventListener('change', e => {
@@ -488,8 +498,13 @@ export async function open(options) {
     if (field === 'iva') {
       row[field]=Number(input.value); changed();
     }
+    if(field==='id' && row.id && catalog.some(article=>String(article.id)===row.id))pick(row,row.id);
   });
-  const editableFields = ['descripcion','rubro','iva','margen'];
+  function finishCost(input,row){
+    try{const cost=window.CorralonFunciones.evaluateBasicArithmetic(input.value);if(cost<=0)throw new Error('El costo debe ser mayor que cero.');row.costo=cost;delete row.costoExpression;input.value=money(cost);input.setCustomValidity('');changed();return true;}
+    catch(error){input.setCustomValidity(error.message);setStatus(error.message,true);return false;}
+  }
+  const editableFields = options.editableSource?['id','codigo','descripcion','rubro','iva','margen','costo']:['descripcion','rubro','iva','margen','costo'];
   function focusGrid(rowIndex, fieldIndex) {
     if (!rows.length) return;
     if (rowIndex >= rows.length) { apply.focus(); return; }
@@ -586,6 +601,7 @@ export async function open(options) {
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
+      if(input.dataset.field==='costo' && !finishCost(input,rowAt(input)))return;
       if (input.dataset.field === 'descripcion' && !confirmNew(rowAt(input), true)) return;
       moveGrid(input,e.shiftKey ? 'left' : 'right'); return;
     }
@@ -599,6 +615,9 @@ export async function open(options) {
   window.addEventListener('keydown', handleDialogKeydown, true);
   apply.addEventListener('click', async () => {
     if (busy) return;
+    for(const input of backdrop.querySelectorAll('[data-field="costo"]')){
+      const row=rowAt(input);if(!row.sqlSaved && !finishCost(input,row)){input.focus();return;}
+    }
     const sqlRows=rows.filter(r=>!r.sqlSaved);
     for (const row of sqlRows) if (!confirmNew(row, true)) return;
     const invalid = rows.find(r => (r.mode==='update'&&!r.id) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
@@ -647,7 +666,7 @@ export async function open(options) {
         rows=draft ? draft.rows.map(row=>({ ...row,
             importedDescription:row.importedDescription || importedText(row.codigo && importedRows.find(source=>importedCode(source)===row.codigo)) || row.descripcion,
             uid:row.uid || (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()), loading:false, lookup:null }))
-          : importedRows.map(source=>({uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
+          : importedRows.map(source=>({uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),sourceRowId:source.sourceRowId||'',mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
         if (draft?.operation) operation = draft.operation;
         catalogReady=true;
         await saveDraft();

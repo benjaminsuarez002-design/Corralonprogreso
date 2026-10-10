@@ -191,7 +191,7 @@ internal static class LocalArticleImport
                     bool update = row.mode == "update";
                     if (!update && row.mode != "new") throw new InvalidOperationException("Elegi Nuevo o Actualizar en cada fila.");
                     string code = Str(row.codigo), description = Str(row.descripcion), id = Str(row.id);
-                    if (code.Length == 0 || code.Length > 30 || !codes.Add(code)) throw new InvalidOperationException("Codigo de proveedor vacio, demasiado largo o repetido: " + code);
+                    if (code.Length > 30 || (code.Length > 0 && !codes.Add(code))) throw new InvalidOperationException("Codigo de proveedor demasiado largo o repetido: " + code);
                     if (row.costo <= 0 || row.costo > 1000000000m || row.rubro <= 0 || (row.margen.HasValue && (row.margen.Value < 0 || row.margen.Value > 10000))) throw new InvalidOperationException("Revisa costo, rubro y margen de " + code);
                     using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.Rubros WHERE IDRubro=@p0", row.rubro))
                         if (Convert.ToInt32(cmd.ExecuteScalar()) != 1) throw new InvalidOperationException("El rubro de " + code + " no existe.");
@@ -211,11 +211,21 @@ internal static class LocalArticleImport
                         if (description.Length == 0 || description.Length > 100 || !descriptions.Add(description)) throw new InvalidOperationException("Descripcion vacia, demasiado larga o repetida: " + code);
                         using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE [Descripción]=@p0 AND ISNULL(Suspendido,0)=0", description))
                             if (Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("Ya existe la descripcion de " + code + ". Elegi Actualizar y selecciona el articulo.");
-                        if (++max > 999999) throw new InvalidOperationException("Se agoto la numeracion de seis digitos.");
-                        id = max.ToString("D6"); ids.Add(id);
+                        if (id.Length > 0)
+                        {
+                            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[0-9]{6}$") || id == "000000" || !ids.Add(id)) throw new InvalidOperationException("IDArt invalido o repetido: " + id);
+                            using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0", id))
+                                if (Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("El IDArt " + id + " ya existe. Selecciona el articulo para actualizarlo.");
+                            max = Math.Max(max, Int32.Parse(id));
+                        }
+                        else
+                        {
+                            if (++max > 999999) throw new InvalidOperationException("Se agoto la numeracion de seis digitos.");
+                            id = max.ToString("D6"); ids.Add(id);
+                        }
                     }
                     using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.[Artículos] WHERE IDProveedor=@p0 AND IDArtProv=@p1 AND IDArt<>@p2 AND ISNULL(Suspendido,0)=0", batch.provider, code, id))
-                        if (Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("El codigo " + code + " ya pertenece a otro articulo de este proveedor.");
+                        if (code.Length > 0 && Convert.ToInt32(cmd.ExecuteScalar()) > 0) throw new InvalidOperationException("El codigo " + code + " ya pertenece a otro articulo de este proveedor.");
                     decimal cost = Decimal.Round(row.costo, 2, MidpointRounding.AwayFromZero);
                     decimal ci = Decimal.Round(cost * (1 + iva), 4, MidpointRounding.AwayFromZero);
                     object[] args = { id, code, description, batch.provider, row.rubro, iva, cost, ci,

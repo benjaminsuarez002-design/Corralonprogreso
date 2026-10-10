@@ -17,6 +17,7 @@ h2{font:700 22px 'Barlow Condensed',Arial;margin:0}
 #todayLabel{position:absolute;left:234px;top:13px;width:190px;height:18px;border:1px solid var(--corralon-line-strong);background:var(--corralon-soft);font-size:10px;line-height:16px;text-align:center;white-space:nowrap}
 button,a.back{padding:4px 8px;border:1px solid var(--corralon-line-strong);border-radius:0;background:var(--corralon-white);font:700 13px Arial,sans-serif;cursor:pointer;text-decoration:none;color:inherit}
 button:disabled{opacity:.5;cursor:default}.primary{background:var(--corralon-red);color:var(--corralon-white);border-color:var(--corralon-red)}
+#deleteInvoiceDialog .removal-chips{display:flex;gap:6px;align-items:center;margin:0;white-space:nowrap}#deleteInvoiceDialog .removal-chips button{border-radius:999px;padding:6px 12px}#deleteInvoiceDialog .removal-chips button[aria-pressed="true"]{background:var(--corralon-red);border-color:var(--corralon-red);color:#fff}#deleteInvoiceBody td{padding:6px}#deleteInvoiceBody .removal-reason{display:block;max-width:320px;white-space:normal;font-size:12px;margin-top:4px;color:#555}
 .topbar button,.topbar .back{position:absolute;top:6px;height:28px;text-align:center}
 #accountButton{left:453px;width:100px}#ivaButton{left:574px;width:100px}.topbar .back{left:700px;width:40px;font-size:11px;line-height:18px;padding:4px 0}
 .panel{position:relative;width:810px;margin:6px 0 0 22px;padding:0;border:0;border-radius:0;background:transparent}
@@ -205,9 +206,9 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
   <dialog id="reportDialog" aria-labelledby="reportTitle">
     <header class="dialogbar"><h2 id="reportTitle">Consultar</h2><button id="printReport" type="button">Imprimir</button><button type="button" data-close="reportDialog">Cerrar ✕</button></header>
     <form id="reportFilters" class="filters">
+      <label>Proveedor<input id="reportProvider" data-sql-list="reportProvider" autocomplete="off" placeholder="Todos · Buscar proveedor"></label>
       <label>Desde<input id="reportFrom" data-date placeholder="dd/mm/aaaa"></label>
       <label>Hasta<input id="reportTo" data-date placeholder="dd/mm/aaaa"></label>
-      <label>Proveedor<input id="reportProvider" data-sql-list="reportProvider" autocomplete="off" placeholder="Todos · Buscar proveedor"></label>
       <label id="reportSearchLabel">Buscar<input id="reportSearch" maxlength="100"></label>
       <button type="submit">Consultar</button>
     </form>
@@ -223,7 +224,11 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
     <header class="dialogbar"><h2 id="deleteInvoiceTitle">Eliminar movimiento</h2><button type="button" data-close="deleteInvoiceDialog">Cerrar ✕</button></header>
     <div class="detail-body" id="deleteInvoiceBody"></div>
     <p id="deleteInvoiceStatus" class="status" role="status"></p>
-    <footer class="actions"><button id="confirmDeleteInvoice" type="button" class="primary" disabled>Eliminar definitivamente</button><button type="button" data-close="deleteInvoiceDialog">Cancelar</button></footer>
+    <footer class="actions"><button id="confirmDeleteInvoice" type="button" class="primary" disabled>Confirmar eliminación</button><button type="button" data-close="deleteInvoiceDialog">Cancelar</button></footer>
+  </dialog>
+  <dialog id="removalLinkDetail" style="width:min(1050px,calc(100vw - 32px))">
+    <header class="dialogbar"><h2 id="removalLinkDetailTitle">Detalle</h2><button type="button" data-close="removalLinkDetail">Cerrar ✕</button></header>
+    <div id="removalLinkDetailBody" style="padding:12px;max-height:70vh;overflow:auto"></div>
   </dialog>
   <div id="purchaseComboMenu" class="combo-menu purchase-combo-menu" role="listbox" aria-label="Opciones disponibles"></div>
   <div id="providerWebMenu" hidden style="position:fixed;z-index:10000;padding:4px;background:var(--corralon-panel,#fff);border:1px solid #ccc;box-shadow:0 4px 15px #0003"><button id="openProviderWeb" type="button">Ver en Proveedores web</button></div>
@@ -242,6 +247,14 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
     <h3 id="stockPickerTitle">Elegí un movimiento para ver sus artículos</h3>
     <div style="max-height:34vh;overflow:auto"><table style="width:100%"><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th></tr></thead><tbody id="stockPickerArticles"></tbody></table></div>
     <footer style="display:flex;justify-content:flex-end;margin-top:12px"><button id="stockPickerUse" type="button" disabled>Vincular este movimiento</button></footer>
+  </dialog>
+  <dialog id="detailStockPicker" style="width:min(1050px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:14px;background:#fff">
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2 style="margin:0">Vincular carga de stock</h2><button id="detailStockPickerClose" type="button">Cerrar</button></header>
+    <p id="detailStockPickerStatus" role="status"></p>
+    <div style="max-height:28vh;overflow:auto"><table style="width:100%"><thead><tr><th>Fecha</th><th>Sucursal</th><th>Nº movimiento</th><th>Tipo de carga</th><th>Total</th></tr></thead><tbody id="detailStockPickerRows"></tbody></table></div>
+    <h3 id="detailStockPickerTitle">Elegí un movimiento para ver sus artículos</h3>
+    <div style="max-height:34vh;overflow:auto"><table style="width:100%"><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th></tr></thead><tbody id="detailStockPickerArticles"></tbody></table></div>
+    <footer style="display:flex;justify-content:flex-end;margin-top:12px"><button id="detailStockPickerUse" type="button" disabled>Vincular este movimiento</button></footer>
   </dialog>
   <script id="cargar-facturas-script">
 (() => {
@@ -506,7 +519,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       const result = await api({ consulta:'movimientos', proveedor:providerId, puntoVenta:point });
       if (request !== stockPickerRequest || !$('stockPicker').open) return;
       fillCombo('movement', result.movimientos, 'Sin movimiento asociado');
-      $('stockPickerStatus').textContent = `${selectedProvider().nombre} · ${result.movimientos.length} movimientos disponibles en la sucursal seleccionada`;
+      $('stockPickerStatus').textContent = `${selectedProvider().nombre} · ${result.movimientos.length} movimientos disponibles de los últimos 90 días`;
       $('stockPickerRows').innerHTML = result.movimientos.map(item => `<tr data-pick-stock="${Number(item.id)}" style="cursor:pointer"><td>${esc(item.fecha)}</td><td>${esc(item.sucursalNombre || item.sucursal)}</td><td><button type="button">${esc(item.numero)}</button></td><td>${esc(item.tipo)}</td><td>${money(item.total)}</td></tr>`).join('') || '<tr><td colspan="5">No hay movimientos disponibles.</td></tr>';
     } catch (error) { if (request === stockPickerRequest) $('stockPickerStatus').textContent = error.message; }
   }
@@ -751,6 +764,65 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     $('detailTitle').textContent = title; $('detailBody').innerHTML = content;
     if (!$('detailDialog').open) $('detailDialog').showModal();
   }
+  let detailStockRequest=0,detailStockBusy=false;
+  function bindDetailStockMovement(invoice){
+    const input=$('editPurchaseMovement');if(!input)return;
+    const picker=$('detailStockPicker'),original=String(invoice.stockNumero||invoice.IDMovStk||'');
+    let movements=[],selection=null;
+    $('detailStockMenu')?.remove();
+    const menu=document.createElement('div');menu.id='detailStockMenu';menu.hidden=true;
+    menu.style.cssText='position:fixed;z-index:2000;background:#fff;border:1px solid #aaa;padding:4px;box-shadow:0 3px 12px #0003';
+    menu.innerHTML='<button type="button">Desvincular</button>';$('detailDialog').appendChild(menu);
+    const update=async movement=>{
+      if(detailStockBusy)return;detailStockBusy=true;
+      $('detailStockPickerUse').disabled=true;input.disabled=true;menu.hidden=true;
+      $('detailStockPickerStatus').textContent='Guardando vínculo en SQL…';
+      try{
+        const result=await api({}, {accion:'editar-stock',id:invoice.IDRecibo,movimiento:movement,movimientoAnterior:Number(invoice.IDMovStk||0)});
+        if(picker.open)picker.close();
+        showInvoice(result);if($('reportDialog').open)await loadReport();
+        message(movement?'Carga de stock vinculada.':'Movimiento desvinculado de la factura y factura desvinculada de la carga de stock.');
+      }catch(error){input.disabled=false;$('detailStockPickerUse').disabled=!selection;input.value=original;if(picker.open)$('detailStockPickerStatus').textContent=error.message;else await htmlNotice(error.message,false);}
+      finally{detailStockBusy=false;}
+    };
+    const preview=async item=>{
+      const request=++detailStockRequest;selection=null;$('detailStockPickerUse').disabled=true;
+      $('detailStockPickerArticles').innerHTML='';$('detailStockPickerTitle').textContent=`Movimiento ${item.numero} · ${item.fecha} · ${item.sucursalNombre||item.sucursal} · ${item.tipo}`;
+      $('detailStockPickerStatus').textContent='Consultando artículos…';
+      try{
+        const result=await api({consulta:'detalle-stock',id:item.id,proveedor:invoice.IDProveedor,puntoVenta:invoice.IDDepósito});
+        if(request!==detailStockRequest||!picker.open)return;
+        $('detailStockPickerArticles').innerHTML=result.articulos.map(row=>`<tr><td>${esc(row.idart)}</td><td>${esc(row.codigo)}</td><td>${esc(row.descripcion)}</td><td>${esc(row.cantidad)}</td><td>${money(row.precioUnitario)}</td><td>${money(row.importe)}</td></tr>`).join('')||'<tr><td colspan="6">Sin artículos.</td></tr>';
+        selection=item;$('detailStockPickerUse').disabled=false;$('detailStockPickerStatus').textContent='Se vinculará la carga existente; no se volverá a ingresar stock.';
+      }catch(error){if(request===detailStockRequest)$('detailStockPickerStatus').textContent=error.message;}
+    };
+    const open=async()=>{
+      if(picker.open||detailStockBusy)return;
+      menu.hidden=true;selection=null;const typed=input.value.trim();
+      $('detailStockPickerUse').disabled=true;$('detailStockPickerRows').innerHTML='';$('detailStockPickerArticles').innerHTML='';$('detailStockPickerTitle').textContent='Elegí un movimiento para ver sus artículos';picker.showModal();
+      if(!invoice.EnMovStk){$('detailStockPickerStatus').textContent='Activá En Movs. de Stock y guardá los cambios antes de vincular una carga.';return;}
+      const request=++detailStockRequest;$('detailStockPickerStatus').textContent='Consultando movimientos disponibles…';
+      try{
+        const result=await api({consulta:'movimientos',proveedor:invoice.IDProveedor,puntoVenta:invoice.IDDepósito});
+        if(request!==detailStockRequest||!picker.open)return;
+        movements=result.movimientos;
+        $('detailStockPickerRows').innerHTML=movements.map(item=>`<tr data-detail-pick-stock="${Number(item.id)}" style="cursor:pointer"><td>${esc(item.fecha)}</td><td>${esc(item.sucursalNombre||item.sucursal)}</td><td><button type="button">${esc(item.numero)}</button></td><td>${esc(item.tipo)}</td><td>${money(item.total)}</td></tr>`).join('')||'<tr><td colspan="5">No hay movimientos disponibles.</td></tr>';
+        $('detailStockPickerStatus').textContent=`${invoice.Proveedor} · ${movements.length} movimientos disponibles de los últimos 90 días`;
+        const match=typed&&typed!==original?movements.find(item=>String(item.numero)===typed):null;
+        if(match)await preview(match);else if(typed&&typed!==original)$('detailStockPickerStatus').textContent=`El movimiento ${typed} no está disponible. Elegí una carga de la lista.`;
+      }catch(error){if(request===detailStockRequest)$('detailStockPickerStatus').textContent=error.message;}
+    };
+    input.oncontextmenu=event=>{event.preventDefault();if(detailStockBusy)return;input.focus();menu.hidden=false;menu.querySelector('button').disabled=!invoice.IDMovStk&&!invoice.stockId;menu.style.left=Math.min(event.clientX,window.innerWidth-140)+'px';menu.style.top=Math.min(event.clientY,window.innerHeight-45)+'px';};
+    input.onblur=()=>setTimeout(()=>{menu.hidden=true;},150);menu.onmousedown=event=>event.preventDefault();
+    menu.querySelector('button').onclick=()=>update(0);
+    input.onkeydown=event=>{if(['Enter','F4','ArrowDown'].includes(event.key)){event.preventDefault();event.stopPropagation();open();}};
+    input.ondblclick=open;input.onchange=()=>{if(input.value.trim()!==original)open();};
+    $('detailStockPickerRows').onclick=event=>{const row=event.target.closest('[data-detail-pick-stock]');if(row){const item=movements.find(item=>Number(item.id)===Number(row.dataset.detailPickStock));if(item)preview(item);}};
+    $('detailStockPickerUse').onclick=()=>{if(selection)update(Number(selection.id));};
+    $('detailStockPickerClose').onclick=()=>{if(!detailStockBusy)picker.close();};
+    picker.oncancel=event=>{if(detailStockBusy)event.preventDefault();};
+    picker.onclose=()=>{detailStockRequest++;selection=null;input.value=original;if(input.isConnected)input.focus();};
+  }
   function detailField(label, value) { return `<div><dt>${esc(label)}</dt><dd>${esc(value || '—')}</dd></div>`; }
   function showInvoice(result) {
     const p = result.factura[0];
@@ -766,7 +838,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     $('openStock').hidden = !(p.EnMovStk && !p.IDMovStk && FX.menuUserHasAccess('carga_stock'));
     const canEdit = FX.menuUserHasAccess('cargar_facturas');
     const canChangePayment=canEdit&&Number(p.IDFormaPago)===3&&total>0&&!result.pagos.length;
-    const field=(label,value,width)=>label==='Forma de Pago'&&canChangePayment?`<label>${esc(label)}:<select id="editPurchasePayment" style="width:${width}px;height:23px;padding:2px 5px;border-radius:0;font-size:12px"><option value="3">${esc(p.pago||'Cta. Cte.')}</option><option value="1">Efectivo</option></select></label>`:`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':'readonly'} style="--width:${width}px" value="${esc(value??'')}"></label>`;
+    const field=(label,value,width)=>label==='Forma de Pago'&&canChangePayment?`<label>${esc(label)}:<select id="editPurchasePayment" style="width:${width}px;height:23px;padding:2px 5px;border-radius:0;font-size:12px"><option value="3">${esc(p.pago||'Cta. Cte.')}</option><option value="1">Efectivo</option></select></label>`:`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':label==='Nº Mov. Stock'&&canEdit?'id="editPurchaseMovement" autocomplete="off"':'readonly'} style="--width:${width}px" value="${esc(value??'')}"></label>`;
     const taxTotal=(rate,net)=>result.impuestos.filter(row=>Math.abs(Number(row.porcentaje)-rate)<.00001&&(net?Number(row.impuesto)===0:/\biva\b/i.test(row.nombre||row.descripcion||''))).reduce((sum,row)=>sum+Number(row.importe||0),0);
     const summary=[['ImpNeto21',.21],['ImpNeto105',.105],['ImpNeto27',.27]].map(([label,rate],index)=>`<label>${label}:<output>${money(taxTotal(rate,true))}</output></label><label>ImpIVA${index===0?'21':index===1?'105':'27'}:<output>${money(taxTotal(rate,false))}</output></label>${index===0?`<label class="purchase-total">Total:<output>${money(total)}</output></label>`:index===1?`<label>En Movs. de Stock:<input type="checkbox" disabled ${p.EnMovStk?'checked':''}></label>`:field('Nº Mov. Stock',p.stockNumero||p.IDMovStk||'',95)}`).join('');
     openDetail('Consultar Compras a Proveedores', `<div class="purchase-inspect">
@@ -779,6 +851,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       <div class="purchase-inspect-discount">${field('Imp. Dto.',`${decimal(Number(p.ImpDto||0)*100)}%`,105)}<label>Total c/Dto.:<output>${money(totalAfterDiscount)}</output></label></div>
       </div>${payments}${credit}`);
     detailInvoiceId = Number(p.IDRecibo); $('deleteInvoice').hidden = false;
+    bindDetailStockMovement(p);
     $('detailBody').querySelector('.purchase-inspect-actions').append($('detailDialog').querySelector('.actions'));
     const stockCheck=$('detailBody').querySelector('.purchase-inspect-summary input[type="checkbox"]');
     stockCheck.disabled=!canEdit||Number(p.CodCuentaCpra)===11;
@@ -809,19 +882,42 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     $('deleteInvoiceDialog').showModal();
     try {
       const state = await api({ consulta: 'previsualizar-eliminacion', id: detailInvoiceId });
-      removalPreview = { id: detailInvoiceId, version: state.version };
+      removalPreview = { id: detailInvoiceId, version: state.version, stockAcciones:Object.fromEntries(state.stock.map(row=>[row.IDRecibo,'desvincular'])),pagoAcciones:Object.fromEntries(state.ordenes.map(row=>[row.NroOrden,'desvincular'])) };
       const movements = state.facturas.map(row => `<li>Registro ${Number(row.IDRecibo)} · ${esc(row.NroFactura)} · ${esc(row.Proveedor)} · ${money(row.Total)}${Number(row.IDRecibo) !== detailInvoiceId ? ' · crédito de descuento vinculado' : ''}</li>`).join('');
-      const payments = state.pagos.length ? `<h3>Pagos vinculados</h3><ul>${state.pagos.map(row => `<li>OP ${esc(row.NroOP || row.NroOrden)} · registro ${Number(row.IDFactura)} · ${money(row.Importe)}</li>`).join('')}</ul>` : '<p>Sin pagos vinculados.</p>';
-      const stock = state.stock.length ? `<h3>Cargas de stock que se conservarán</h3><p>Se quitará el vínculo con esta factura. Los artículos y las existencias no cambian. Las cargas activas quedarán disponibles para otra factura; las anuladas seguirán anuladas.</p><ul>${state.stock.map(row => `<li>Movimiento ${Number(row.NroMov)} · registro ${Number(row.IDRecibo)} · sucursal ${Number(row.IDSuc)} · ${row.Anulado ? 'Anulada' : 'Activa'}</li>`).join('')}</ul>` : '<p>Sin cargas de stock vinculadas.</p>';
+      const chips=(group,id,row)=>`<div class="removal-chips" data-removal-group="${group}" data-removal-id="${Number(id)}"><button type="button" data-removal-choice="desvincular" aria-pressed="true" ${state.bloqueado?'disabled':''}>Desvincular</button><button type="button" data-removal-choice="eliminar" aria-pressed="false" ${state.bloqueado||row.bloqueadoEliminar?'disabled':''}>Eliminar</button><button type="button" data-removal-view>Ver</button></div>${row.motivoEliminar?`<span class="removal-reason">${esc(row.motivoEliminar)}</span>`:''}`;
+      const payments = state.ordenes.length ? `<h3>Órdenes de pago vinculadas</h3><table><thead><tr><th>Nº OP</th><th>Estado</th><th>Total pagado</th><th>Acción</th></tr></thead><tbody>${state.ordenes.map(row=>`<tr><td>${esc(row.NroOP||row.NroOrden)}</td><td>${row.Anulado?'Anulada':row.Confirmado?'Confirmada':'Sin confirmar'}</td><td class="numeric">${money(row.TotalPagos||0)}</td><td>${chips('pagoAcciones',row.NroOrden,row)}</td></tr>`).join('')}</tbody></table>` : '<p>Sin órdenes de pago vinculadas.</p>';
+      const stock = state.stock.length ? `<h3>Cargas de stock vinculadas</h3><table><thead><tr><th>Nº movimiento</th><th>Sucursal</th><th>Estado</th><th>Importe</th><th>Acción</th></tr></thead><tbody>${state.stock.map(row=>`<tr><td>${Number(row.NroMov)}</td><td>${Number(row.IDSuc)}</td><td>${row.Anulado?'Anulada':'Activa'}</td><td class="numeric">${money(state.articulosStock.filter(line=>Number(line.IDRecibo)===Number(row.IDRecibo)).reduce((sum,line)=>sum+Number(line.Importe||0),0))}</td><td>${chips('stockAcciones',row.IDRecibo,row)}</td></tr>`).join('')}</tbody></table>` : '<p>Sin cargas de stock vinculadas.</p>';
       const parents = state.padres.length ? `<p>También se quitará el vínculo y el porcentaje de descuento de la compra ${state.padres.map(row => Number(row.IDRecibo)).join(', ')}.</p>` : '';
       $('deleteInvoiceBody').innerHTML = `<p>Se eliminarán estos registros de compra y sus renglones de impuestos:</p><ul>${movements}</ul>${payments}${stock}${parents}`;
-      $('deleteInvoiceStatus').textContent = state.bloqueado ? state.motivos.join(' ') : state.stock.length ? 'Confirmá para eliminar la factura y quitar sus vínculos de stock, conservando el estado de cada carga.' : 'No tiene pagos ni carga de stock vinculados. Confirmá para eliminar definitivamente.';
-      $('confirmDeleteInvoice').disabled = state.bloqueado;
+      $('deleteInvoiceStatus').textContent=state.bloqueado?state.motivos.join(' '):'Elegí qué hacer con cada fila. Desvincular conserva esa carga u orden; Eliminar la borra. Al confirmar se eliminarán la factura y su crédito vinculado; las cargas de stock elegidas para eliminar se revertirán.';
+      $('confirmDeleteInvoice').disabled=state.bloqueado;
+      $('deleteInvoiceBody').onclick=event=>{
+        const button=event.target.closest('button'),row=button?.closest('[data-removal-group]');if(!row)return;
+        const group=row.dataset.removalGroup,id=Number(row.dataset.removalId);
+        if(button.hasAttribute('data-removal-choice')){
+          if(removingInvoice||button.disabled)return;
+          removalPreview[group][id]=button.dataset.removalChoice;
+          row.querySelectorAll('[data-removal-choice]').forEach(chip=>chip.setAttribute('aria-pressed',String(chip===button)));
+        }else if(button.hasAttribute('data-removal-view')){
+          let content,title;
+          if(group==='stockAcciones'){
+            const movement=state.stock.find(item=>Number(item.IDRecibo)===id),lines=state.articulosStock.filter(item=>Number(item.IDRecibo)===id);
+            title=`Carga de stock Nº ${movement.NroMov}`;
+            content='<table><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th></tr></thead><tbody>'+lines.map(line=>`<tr><td>${esc(line.IDArt)}</td><td>${esc(line.codigo||'')}</td><td>${esc(line.descripcion||'')}</td><td>${esc(line.Cantidad)}</td><td>${money(line.PrecioUni||0)}</td><td>${money(line.Importe||0)}</td></tr>`).join('')+'</tbody></table>';
+          }else{
+            const order=state.ordenes.find(item=>Number(item.NroOrden)===id),values=state.valoresPago.filter(item=>Number(item.NroOrden)===id),invoices=state.facturasPago.filter(item=>Number(item.NroOrden)===id);
+            title=`Orden de pago Nº ${order.NroOP||order.NroOrden}`;
+            content='<h3>Valores pagados</h3><table><thead><tr><th>Tipo de pago</th><th>Nº valor / documento</th><th>Banco</th><th>Vencimiento</th><th>Importe</th></tr></thead><tbody>'+values.map(value=>`<tr><td>${esc(value.TipoPago||value.IDTipoPago||'—')}</td><td>${esc(value.NroCompPago||'—')}</td><td>${esc(value.IDBanco||'—')}</td><td>${value.FechaVto?esc(dateText(sqlDate(value.FechaVto))):'—'}</td><td>${money(value.Importe||0)}</td></tr>`).join('')+'</tbody></table><h3>Facturas imputadas</h3><table><thead><tr><th>Nº factura</th><th>Proveedor</th><th>Importe imputado</th></tr></thead><tbody>'+invoices.map(item=>`<tr><td>${esc(item.numeroFactura||item.IDFactura)}</td><td>${esc(item.proveedor||'—')}</td><td>${money(item.Importe||0)}</td></tr>`).join('')+`</tbody></table><p>Total pagado: ${money(order.TotalPagos||0)}</p>`;
+          }
+          $('removalLinkDetailTitle').textContent=title;$('removalLinkDetailBody').innerHTML=content;$('removalLinkDetail').showModal();
+        }
+      };
     } catch (error) { $('deleteInvoiceStatus').textContent = error.message; }
   }
   async function removeInvoice() {
     if (!removalPreview || removingInvoice || $('confirmDeleteInvoice').disabled) return;
     removingInvoice = true; $('confirmDeleteInvoice').disabled = true;
+    $('deleteInvoiceBody').querySelectorAll('[data-removal-choice]').forEach(button=>button.disabled=true);
     $('deleteInvoiceStatus').textContent = 'Verificando vinculaciones y eliminando en SQL…';
     try {
       const removedId = removalPreview.id;
@@ -847,7 +943,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   async function openReport(mode, search = '') {
     reportMode = mode; reportRows = [];
     $('reportTitle').textContent = ({ buscar: 'Consultar facturas', iva: 'IVA Compras', 'cuenta-corriente': 'Cuenta corriente del proveedor' })[mode];
-    const from = new Date(`${today()}T12:00:00`); if (mode === 'iva') from.setDate(1); else from.setDate(from.getDate() - 90);
+    const from = new Date(`${today()}T12:00:00`); if (mode === 'iva') from.setDate(1); else if(mode!=='buscar') from.setDate(from.getDate() - 90);
     $('reportFrom').value = `${from.getDate()}/${from.getMonth() + 1}/${from.getFullYear()}`; $('reportTo').value = dateText(today());
     setComboValue('reportProvider', mode === 'cuenta-corriente' ? selectedProvider()?.id || 0 : 0);
     $('reportSearch').value = search; $('reportSearchLabel').hidden = mode !== 'buscar';
@@ -1003,6 +1099,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if (target?.tagName === 'INPUT') target.select();
   }, true);
   FX.bindLinearNavigation({ root: $('purchaseForm'), selector: '[data-flow]', selectOnAnyFocus: true, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
+  FX.bindLinearNavigation({ root: $('reportFilters'), selector: 'input,button[type="submit"]', selectOnAnyFocus: true, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
+  FX.bindFieldRestore({ root: $('reportFilters') });
   FX.bindLiveCurrency({ root: $('purchaseForm') });
   FX.bindLiveLocaleNumber({ root: $('purchaseForm'), selector: '#discount', decimals: 2, suffix: '%', fixedOnInput: true, selectOnFocus: false });
   FX.bindLiveLocaleNumber({ root: $('taxTable'), selector: '[data-field="neto"]', decimals: 0, selectOnFocus: false, preserveEmpty: true });
@@ -1186,6 +1284,16 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   $('accountButton').addEventListener('click', () => openReport('cuenta-corriente'));
   $('ivaButton').addEventListener('click', () => openReport('iva'));
   $('reportFilters').addEventListener('submit', event => { event.preventDefault(); loadReport(); });
+  $('reportProvider').addEventListener('change',()=>{
+    if(reportMode!=='buscar'||!$('reportDialog').open)return;
+    const provider=comboItem('reportProvider');
+    if($('reportProvider').value.trim()&&!provider)return;
+    const from=new Date(`${today()}T12:00:00`);
+    if(Number(provider?.id||0)>0)from.setDate(from.getDate()-29);
+    $('reportFrom').value=dateText(`${from.getFullYear()}-${String(from.getMonth()+1).padStart(2,'0')}-${String(from.getDate()).padStart(2,'0')}`);
+    $('reportTo').value=dateText(today());
+    loadReport();
+  });
   $('loadMore').addEventListener('click', () => loadReport(true));
   $('reportBody').addEventListener('click', async event => {
     const providerButton = event.target.closest('[data-provider]');

@@ -1610,7 +1610,7 @@ internal static class FacturacionCopiaApi
         try
         {
             string url = "https://firestore.googleapis.com/v1/projects/corralon-progreso/databases/(default)/documents/menuUsuarios/" + Uri.EscapeDataString(userId)
-                + "?mask.fieldPaths=nivel&mask.fieldPaths=permisos&key=AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0";
+                + "?mask.fieldPaths=nivel&mask.fieldPaths=permisos&mask.fieldPaths=permisosEdicion&key=AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0";
             var request = (HttpWebRequest)WebRequest.Create(url); request.Timeout = 8000;
             using (var response = request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
                 fields = Object(Value(Object(Json.DeserializeObject(reader.ReadToEnd())), "fields"));
@@ -1618,7 +1618,11 @@ internal static class FacturacionCopiaApi
         catch { throw new InvalidOperationException("No se pudo verificar tu permiso de " + permissionName + ". Reintentá al recuperar la conexión."); }
         string level = Text(Value(Object(Value(fields, "nivel")), "stringValue")).ToLowerInvariant();
         if (level == "administrador") return;
-        if (administratorOnly) throw new InvalidOperationException("Solo los administradores pueden modificar los valores de una boleta.");
+        if (administratorOnly)
+        {
+            if (UserHasModuleEditPermission(fields, permission)) return;
+            throw new InvalidOperationException("Tu usuario no tiene permiso de edición para modificar los valores de una boleta.");
+        }
         if (level != "vendedor")
         {
             object values = Value(Object(Value(Object(Value(fields, "permisos")), "arrayValue")), "values");
@@ -1626,6 +1630,16 @@ internal static class FacturacionCopiaApi
                 if (Text(Value(Object(item), "stringValue")) == permission) return;
         }
         throw new InvalidOperationException("Tu usuario no tiene permiso para " + permissionName + ".");
+    }
+
+    private static bool UserHasModuleEditPermission(Dictionary<string, object> fields, string permission)
+    {
+        bool access = false, edit = false;
+        foreach (var item in PurchaseArray(Value(Object(Value(Object(Value(fields, "permisos")), "arrayValue")), "values")))
+            if (Text(Value(Object(item), "stringValue")) == permission) access = true;
+        foreach (var item in PurchaseArray(Value(Object(Value(Object(Value(fields, "permisosEdicion")), "arrayValue")), "values")))
+            if (Text(Value(Object(item), "stringValue")) == permission) edit = true;
+        return access && edit;
     }
 
     private static string InvoiceValuesVersion(SqlConnection c, SqlTransaction tx, int receipt)
@@ -1914,11 +1928,52 @@ internal static class FacturacionCopiaApi
         }
     }
 
+    private static List<Dictionary<string,object>> PurchaseAvailableStock(SqlConnection c,SqlTransaction tx,int provider,int company,int receipt)
+    {
+        string hints=tx==null?"":" WITH(UPDLOCK,HOLDLOCK)";
+        return RowsTx(c,tx,"SELECT r.IDRecibo AS id,r.NroMov AS numero,CONVERT(varchar(10),r.Fecha,103) AS fecha,r.Total AS total,r.NroRemito AS remito,r.IDSuc AS sucursal,s.Sucursal AS sucursalNombre,t.Descripcion AS tipo,r.NroMov,r.IDFactura,r.NroFactura,r.IDSuc,r.IDRecibo FROM dbo.RecibosTP r"+hints+" JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Sucursales s ON s.IDSuc=r.IDSuc WHERE r.IDProveedor=@p0 AND r.IDEmp=@p1 AND (@p2=0 OR r.IDRecibo=@p2) AND r.Fecha>=DATEADD(day,-90,CONVERT(date,GETDATE())) AND r.IDTipoMov=23 AND r.Confirmado=1 AND r.Anulado=0 AND t.EnStk=1 AND t.IDTipoMovStock=1 AND r.IDFactura IS NULL AND r.NroFactura IS NULL AND NOT EXISTS(SELECT 1 FROM dbo.ComprasTP p"+hints+" LEFT JOIN dbo.[Depósitos] d ON d.IDDepósito=p.IDDepósito WHERE p.IDMovStk=r.NroMov AND p.IDProveedor=r.IDProveedor AND ISNULL(d.IDSucAsoc,p.IDSuc)=r.IDSuc) ORDER BY r.Fecha DESC,r.NroMov DESC",provider,company,receipt);
+    }
+    private static object PurchaseEditStock(SqlConnection c,Dictionary<string,object> input)
+    {
+        int id=RequiredId(Value(input,"id"),"la compra");
+        int movement=Convert.ToInt32(Number(Value(input,"movimiento")??0));
+        int previous=Convert.ToInt32(Number(Value(input,"movimientoAnterior")??0));
+        if(movement<0)throw new InvalidOperationException("Movimiento inválido.");
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable))
+        {
+            try
+            {
+                var invoices=RowsTx(c,tx,"SELECT p.*,ISNULL(d.IDSucAsoc,p.IDSuc) AS sucursalReal FROM dbo.ComprasTP p WITH(UPDLOCK,HOLDLOCK) LEFT JOIN dbo.[Depósitos] d ON d.IDDepósito=p.IDDepósito WHERE p.IDRecibo=@p0 AND p.Confirmado=1",id);
+                if(invoices.Count!=1)throw new InvalidOperationException("La compra no existe.");
+                var invoice=invoices[0];
+                var old=RowsTx(c,tx,"SELECT IDRecibo,NroMov,IDFactura FROM dbo.RecibosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDTipoMov=23 AND Confirmado=1 AND (IDFactura=@p0 OR (IDFactura IS NULL AND NroMov=@p1 AND IDProveedor=@p2 AND IDSuc=@p3 AND NroFactura=@p4))",id,invoice["IDMovStk"]??0,invoice["IDProveedor"],invoice["sucursalReal"],invoice["NroFactura"]);
+                if(old.Count>1)throw new InvalidOperationException("La factura tiene más de una carga vinculada. Revisá la vinculación.");
+                if((movement==0 && old.Count==0 && Number(invoice["IDMovStk"]??0)==0)||(old.Count==1 && Number(old[0]["IDRecibo"])==movement))
+                {var existing=PurchaseResult(c,tx,id);tx.Commit();return existing;}
+                if(Number(invoice["IDMovStk"]??0)!=previous)throw new InvalidOperationException("Otro usuario cambió el movimiento. Cerrá y volvé a consultar la factura.");
+                if(previous>0 && old.Count==0)throw new InvalidOperationException("No se encontró la carga de stock vinculada. Revisá la sucursal y el movimiento.");
+                Dictionary<string,object> next=null;
+                if(movement>0)
+                {
+                    if(!Convert.ToBoolean(invoice["EnMovStk"]) || Text(invoice["CodCuentaCpra"]).Trim()=="11")throw new InvalidOperationException("La factura no está habilitada para movimientos de stock.");
+                    var available=PurchaseAvailableStock(c,tx,Convert.ToInt32(invoice["IDProveedor"]),Convert.ToInt32(invoice["IDEmp"]),movement);
+                    if(available.Count!=1)throw new InvalidOperationException("El movimiento ya no está disponible para este proveedor y sucursal.");
+                    next=available[0];
+                }
+                foreach(var row in old)Execute(c,tx,"UPDATE dbo.RecibosTP SET IDFactura=NULL,NroFactura=NULL WHERE IDRecibo=@p0",row["IDRecibo"]);
+                if(next!=null)Execute(c,tx,"UPDATE dbo.RecibosTP SET IDFactura=@p0,NroFactura=@p1 WHERE IDRecibo=@p2",id,invoice["NroFactura"],movement);
+                Execute(c,tx,"UPDATE dbo.ComprasTP SET IDMovStk=@p0 WHERE IDRecibo=@p1",next==null?(object)DBNull.Value:next["NroMov"],id);
+                var result=PurchaseResult(c,tx,id);tx.Commit();return result;
+            }
+            catch{try{tx.Rollback();}catch{}throw;}
+        }
+    }
     private sealed class PurchaseRemovalState
     {
-        public List<Dictionary<string, object>> facturas, impuestos, pagos, stock, padres;
+        public List<Dictionary<string, object>> facturas, impuestos, pagos, stock, padres, ordenes, valoresPago, facturasPago, articulosStock;
         public List<string> motivos = new List<string>();
-        public bool ok = true, bloqueado;
+        public List<string> motivosEliminar = new List<string>();
+        public bool ok = true, bloqueado, bloqueadoEliminar;
         public string version = "";
     }
     private static PurchaseRemovalState PurchaseRemovalPreview(SqlConnection c, SqlTransaction tx, int id)
@@ -1934,11 +1989,28 @@ internal static class FacturacionCopiaApi
             pagos = RowsTx(c, tx, "SELECT f.IDFactura,f.NroOrden,o.NroOP,f.Importe,o.Confirmado,o.Anulado FROM dbo.OrdPagosTSFac f" + hints + " LEFT JOIN dbo.OrdPagosTP o ON o.NroOrden=f.NroOrden WHERE f.IDFactura IN(" + ids + ") ORDER BY f.IDFactura,f.NroOrden"),
             stock = RowsTx(c, tx, "SELECT r.IDRecibo,r.NroMov,r.IDFactura,r.IDSuc,r.Confirmado,r.Anulado FROM dbo.RecibosTP r" + hints + " WHERE r.IDTipoMov=23 AND r.Confirmado=1 AND EXISTS(SELECT 1 FROM dbo.ComprasTP p LEFT JOIN dbo.[Depósitos] d ON d.IDDepósito=p.IDDepósito WHERE p.IDRecibo IN(" + ids + ") AND (r.IDFactura=p.IDRecibo OR (r.IDFactura IS NULL AND p.IDMovStk=r.NroMov AND r.IDProveedor=p.IDProveedor AND r.NroFactura=p.NroFactura AND r.IDSuc=ISNULL(d.IDSucAsoc,p.IDSuc)))) ORDER BY r.IDRecibo"),
             padres = RowsTx(c, tx, "SELECT IDRecibo,NroFactura,IDRecImp,ImpDto FROM dbo.ComprasTP" + hints + " WHERE IDRecImp IN(" + ids + ") AND IDRecibo NOT IN(" + ids + ") ORDER BY IDRecibo") };
-        if (state.pagos.Count > 0) state.motivos.Add("Tiene pagos vinculados. Debés resolver esos pagos antes de eliminar la compra.");
+        string orderFilter=" WHERE NroOrden IN(SELECT NroOrden FROM dbo.OrdPagosTSFac WHERE IDFactura IN("+ids+"))";
+        state.ordenes=RowsTx(c,tx,"SELECT * FROM dbo.OrdPagosTP"+hints+orderFilter+" ORDER BY NroOrden");
+        state.valoresPago=RowsTx(c,tx,"SELECT v.*,t.TipoPago FROM dbo.OrdPagosTSPag v"+hints+" LEFT JOIN dbo.TiposPagos t ON t.IDTipoPago=v.IDTipoPago"+orderFilter+" ORDER BY NroOrden,IDOrden");
+        state.facturasPago=RowsTx(c,tx,"SELECT f.*,p.NroFactura AS numeroFactura,p.Proveedor AS proveedor FROM dbo.OrdPagosTSFac f"+hints+" LEFT JOIN dbo.ComprasTP p ON p.IDRecibo=f.IDFactura"+orderFilter+" ORDER BY NroOrden,IDFactura");
+        state.articulosStock=new List<Dictionary<string,object>>();
+        foreach(var movement in state.stock)state.articulosStock.AddRange(RowsTx(c,tx,"SELECT d.*,a.IDArtProv AS codigo,a.[Descripción] AS descripcion FROM dbo.RecibosTS d"+hints+" LEFT JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=@p0 ORDER BY d.IDOrden",movement["IDRecibo"]));
+        foreach(var order in state.ordenes)
+        {
+            var reasons=new List<string>();
+            if(state.facturasPago.Exists(row=>Number(row["NroOrden"])==Number(order["NroOrden"]) && !state.facturas.Exists(header=>Number(header["IDRecibo"])==Number(row["IDFactura"]))))reasons.Add("Tiene otra factura asociada. No se puede eliminar esta orden de pago.");
+            if(Number(order["IDAsiento"]??0)>0 || Number(order["IDRecImp"]??0)>0)reasons.Add("Tiene un asiento o comprobante vinculado.");
+            if(state.valoresPago.Exists(row=>Number(row["NroOrden"])==Number(order["NroOrden"]) && Number(row["IDMovBco"]??0)>0))reasons.Add("Tiene un movimiento bancario vinculado.");
+            order["bloqueadoEliminar"]=reasons.Count>0;order["motivoEliminar"]=String.Join(" ",reasons.ToArray());
+            state.motivosEliminar.AddRange(reasons);
+        }
         foreach (var movement in state.stock)
         {
             if (movement["IDFactura"] != null && !state.facturas.Exists(header => Number(header["IDRecibo"]) == Number(movement["IDFactura"]))) state.motivos.Add("El movimiento de stock está vinculado a otra compra. Revisá esa vinculación.");
             if (Number(Scalar(c, tx, "SELECT COUNT(*) FROM dbo.ComprasTP" + hints + " WHERE IDRecibo NOT IN(" + ids + ") AND IDMovStk=@p0 AND IDProveedor=@p1 AND NroFactura=@p2 AND IDDepósito IN(SELECT IDDepósito FROM dbo.[Depósitos] WHERE IDSucAsoc=@p3)", movement["NroMov"], main[0]["IDProveedor"], main[0]["NroFactura"], movement["IDSuc"])) > 0) state.motivos.Add("Otra compra referencia esta carga de stock. Revisá esa vinculación.");
+            bool linked=Number(Scalar(c,tx,"SELECT COUNT(*) FROM dbo.RecibosTP R"+hints+" WHERE (R.IDRecibo=@p0 AND (ISNULL(R.IDRecDes,0)<>0 OR ISNULL(R.IDRemito,0)<>0 OR EXISTS(SELECT 1 FROM dbo.TipoComprobantes T WHERE T.IDComprob=R.IDTipoMov AND (ISNULL(T.GenNS,0)<>0 OR ISNULL(T.ConReceta,0)<>0)))) OR R.IDRecDes=@p0 OR R.IDRemito=@p0",movement["IDRecibo"]))>0;
+            movement["bloqueadoEliminar"]=linked;movement["motivoEliminar"]=linked?"La carga tiene otros movimientos vinculados.":"";
+            if(linked)state.motivosEliminar.Add(Text(movement["motivoEliminar"]));
         }
         foreach (var header in state.facturas)
         {
@@ -1948,8 +2020,15 @@ internal static class FacturacionCopiaApi
         }
         if (credit > 0 && state.padres.Count > 0) state.motivos.Add("El crédito está vinculado a otra compra. Revisá la vinculación antes de eliminar.");
         state.bloqueado = state.motivos.Count > 0;
+        state.bloqueadoEliminar=state.bloqueado || state.motivosEliminar.Count>0;
         using (var sha = SHA256.Create()) state.version = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(state)))).Replace("-", "");
         return state;
+    }
+    private static string PurchaseRemovalChoice(Dictionary<string,object> input,string group,object id)
+    {
+        string choice=Value(input,group)==null?Text(Value(input,"vinculaciones")):Text(Value(Object(Value(input,group)),Text(id)));
+        if(choice!="desvincular" && choice!="eliminar")throw new InvalidOperationException("Elegí una acción para cada carga y orden de pago.");
+        return choice;
     }
     private static object PurchaseDelete(SqlConnection c, Dictionary<string, object> input)
     {
@@ -1971,10 +2050,39 @@ internal static class FacturacionCopiaApi
                 var state = PurchaseRemovalPreview(c, tx, id);
                 if (state.bloqueado) throw new InvalidOperationException(String.Join(" ", state.motivos.ToArray()));
                 if (version != state.version) throw new InvalidOperationException("La compra o sus vinculaciones cambiaron. Volvé a consultar antes de eliminar.");
+                foreach(var movement in state.stock)if(PurchaseRemovalChoice(input,"stockAcciones",movement["IDRecibo"])=="eliminar" && Convert.ToBoolean(movement["bloqueadoEliminar"]))throw new InvalidOperationException(Text(movement["motivoEliminar"]));
+                foreach(var order in state.ordenes)if(PurchaseRemovalChoice(input,"pagoAcciones",order["NroOrden"])=="eliminar" && Convert.ToBoolean(order["bloqueadoEliminar"]))throw new InvalidOperationException(Text(order["motivoEliminar"]));
                 string archived = Json.Serialize(state);
-                // Conservar cabecera, artículos y existencias: liberar solamente la factura.
                 foreach (var movement in state.stock)
-                    if (Execute(c, tx, "UPDATE dbo.RecibosTP SET IDFactura=NULL,NroFactura=NULL WHERE IDRecibo=@p0 AND IDTipoMov=23 AND Confirmado=1", movement["IDRecibo"]) != 1) throw new InvalidOperationException("No se pudo liberar la carga de stock vinculada.");
+                {
+                    string mode=PurchaseRemovalChoice(input,"stockAcciones",movement["IDRecibo"]);
+                    if(mode=="desvincular")
+                    {
+                        if (Execute(c, tx, "UPDATE dbo.RecibosTP SET IDFactura=NULL,NroFactura=NULL WHERE IDRecibo=@p0 AND IDTipoMov=23 AND Confirmado=1", movement["IDRecibo"]) != 1) throw new InvalidOperationException("No se pudo liberar la carga de stock vinculada.");
+                    }
+                    else
+                    {
+                        if(!Convert.ToBoolean(movement["Anulado"]))
+                            Execute(c,tx,"UPDATE A SET A.StockAct=ISNULL(A.StockAct,0)-D.Cantidad*T.StkPor FROM dbo.ArtsStock A JOIN (SELECT IDArt,SUM(Cantidad) AS Cantidad FROM dbo.RecibosTS WHERE IDRecibo=@p0 GROUP BY IDArt) D ON D.IDArt=A.IDArt JOIN dbo.RecibosTP R ON R.IDRecibo=@p0 AND R.IDSuc=A.IDSuc JOIN dbo.TipoComprobantes T ON T.IDComprob=R.IDTipoMov WHERE T.IDTipoMovStock>0",movement["IDRecibo"]);
+                        Execute(c,tx,"DELETE dbo.RecibosTS WHERE IDRecibo=@p0",movement["IDRecibo"]);
+                        if(Execute(c,tx,"DELETE dbo.RecibosTP WHERE IDRecibo=@p0",movement["IDRecibo"])!=1)throw new InvalidOperationException("No se pudo eliminar la carga de stock.");
+                    }
+                }
+                foreach(var order in state.ordenes)
+                {
+                    string mode=PurchaseRemovalChoice(input,"pagoAcciones",order["NroOrden"]);
+                    if(mode=="eliminar")
+                    {
+                        Execute(c,tx,"DELETE dbo.OrdPagosTSFac WHERE NroOrden=@p0",order["NroOrden"]);
+                        Execute(c,tx,"DELETE dbo.OrdPagosTSPag WHERE NroOrden=@p0",order["NroOrden"]);
+                        Execute(c,tx,"DELETE dbo.OrdPagosTP WHERE NroOrden=@p0",order["NroOrden"]);
+                    }
+                    else
+                    {
+                        foreach(var invoice in state.facturas)Execute(c,tx,"DELETE dbo.OrdPagosTSFac WHERE NroOrden=@p0 AND IDFactura=@p1",order["NroOrden"],invoice["IDRecibo"]);
+                        Execute(c,tx,"UPDATE dbo.OrdPagosTP SET TotalCpras=ISNULL((SELECT SUM(Importe) FROM dbo.OrdPagosTSFac WHERE NroOrden=@p0),0) WHERE NroOrden=@p0",order["NroOrden"]);
+                    }
+                }
                 foreach (var parent in state.padres) Execute(c, tx, "UPDATE dbo.ComprasTP SET IDRecImp=NULL,ImpDto=0 WHERE IDRecibo=@p0 AND IDRecImp=@p1", parent["IDRecibo"], parent["IDRecImp"]);
                 foreach (var header in state.facturas)
                 {
@@ -2005,10 +2113,10 @@ internal static class FacturacionCopiaApi
             impuestos = Rows(c, "SELECT IDImpuesto AS id,Impuesto AS nombre,CONVERT(decimal(10,4),PorcImp) AS porcentaje,CodIVAAFIP AS codigoIva FROM dbo.Impuestos ORDER BY Impuesto"),
             puntosVenta = Rows(c, "SELECT IDDepósito AS id,[Descripción] AS nombre,IDSucAsoc AS sucursal,IDEmp AS empresa FROM dbo.[Depósitos] WHERE IDDepósito>1 ORDER BY IDDepósito") };
         if (query == "proveedor") return new { ok = true, proveedor = Rows(c, "SELECT p.IDProveedor,p.[RazónSocial] AS nombre,p.CUIT,p.[Dirección] AS direccion,p.Localidad,p.[Teléfono] AS telefono,p.Email,p.Web,p.Nota,p.SaldoIni,t.Descripcion AS condicionIva FROM dbo.Proveedores p LEFT JOIN dbo.TiposIVA t ON t.IDTipoIVA=p.IDTipoIVA WHERE p.IDProveedor=@p0", provider) };
-        if (query == "movimientos") return new { ok = true, movimientos = Rows(c, "SELECT r.IDRecibo AS id,r.NroMov AS numero,CONVERT(varchar(10),r.Fecha,103) AS fecha,r.Total AS total,r.NroRemito AS remito,r.IDSuc AS sucursal,p.[Descripción] AS sucursalNombre,t.Descripcion AS tipo FROM dbo.RecibosTP r JOIN dbo.[Depósitos] p ON p.IDDepósito=@p1 AND p.IDSucAsoc=r.IDSuc LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov WHERE r.IDProveedor=@p0 AND r.IDTipoMov=23 AND r.Confirmado=1 AND r.Anulado=0 AND r.IDFactura IS NULL AND ISNULL(r.NroFactura,'')='' AND NOT EXISTS(SELECT 1 FROM dbo.ComprasTP cp WHERE cp.IDMovStk=r.NroMov AND cp.IDProveedor=r.IDProveedor AND cp.IDDepósito IN(SELECT IDDepósito FROM dbo.[Depósitos] WHERE IDSucAsoc=r.IDSuc)) ORDER BY r.Fecha DESC,r.NroMov DESC", provider, point) };
+        if (query == "movimientos") return new { ok = true, movimientos = PurchaseAvailableStock(c,null,provider,RequiredId(Scalar(c,null,"SELECT IDEmp FROM dbo.[Depósitos] WHERE IDDepósito=@p0",point),"la empresa"),0) };
         if (query == "detalle-stock")
         {
-            var movements = Rows(c, "SELECT r.IDRecibo FROM dbo.RecibosTP r JOIN dbo.[Depósitos] p ON p.IDDepósito=@p2 AND p.IDSucAsoc=r.IDSuc WHERE r.IDRecibo=@p0 AND r.IDProveedor=@p1 AND r.IDTipoMov=23 AND r.Confirmado=1 AND r.Anulado=0 AND r.IDFactura IS NULL AND ISNULL(r.NroFactura,'')=''", RequiredId(id,"el movimiento"), provider, point);
+            var movements = PurchaseAvailableStock(c,null,provider,RequiredId(Scalar(c,null,"SELECT IDEmp FROM dbo.[Depósitos] WHERE IDDepósito=@p0",point),"la empresa"),RequiredId(id,"el movimiento"));
             if (movements.Count != 1) throw new InvalidOperationException("El movimiento ya no está disponible para este proveedor y sucursal.");
             return new { ok = true, articulos = Rows(c,"SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,d.Cantidad AS cantidad,d.PrecioUni AS precioUnitario,d.Importe AS importe FROM dbo.RecibosTS d LEFT JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=@p0 ORDER BY d.IDOrden",id) };
         }
@@ -2141,9 +2249,8 @@ internal static class FacturacionCopiaApi
                 Dictionary<string, object> stock = null;
                 if (movementId > 0)
                 {
-                    var movements = RowsTx(c, tx, "SELECT IDRecibo,NroMov,IDFactura,NroFactura FROM dbo.RecibosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND IDProveedor=@p1 AND IDSuc=@p2 AND IDTipoMov=23 AND Confirmado=1 AND Anulado=0", movementId, provider, branch);
+                    var movements = PurchaseAvailableStock(c,tx,provider,company,movementId);
                     if (movements.Count != 1 || movements[0]["IDFactura"] != null || Text(movements[0]["NroFactura"]).Length > 0) throw new InvalidOperationException("El movimiento ya está vinculado o no corresponde al proveedor/sucursal.");
-                    if (Number(Scalar(c, tx,"SELECT COUNT(*) FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDMovStk=@p0 AND IDProveedor=@p1 AND IDDepósito IN(SELECT IDDepósito FROM dbo.[Depósitos] WHERE IDSucAsoc=@p2)",movements[0]["NroMov"],provider,branch)) > 0) throw new InvalidOperationException("Otra compra ya referencia ese movimiento de stock.");
                     stock = movements[0];
                 }
                 decimal signed = total * sign;
@@ -2257,6 +2364,31 @@ internal static class FacturacionCopiaApi
                 return new { ok = true, idRecibo = replacement, numeroMovimiento = number, yaCambiado = false };
             }
             catch { try { tx.Rollback(); } catch { } throw; }
+        }
+    }
+
+    private static object StockVincularCompra(SqlConnection connection, Dictionary<string, object> input)
+    {
+        AssertPurchasePermission(Text(Value(input,"usuarioId")),"carga_stock");
+        int receipt=RequiredId(Value(input,"recibo"),"el movimiento"),branch=RequiredId(Value(input,"sucursal"),"la sucursal"),purchase=RequiredId(Value(input,"compra"),"la factura");
+        using(var tx=connection.BeginTransaction(IsolationLevel.Serializable))
+        {
+            try
+            {
+                var movements=RowsTx(connection,tx,"SELECT IDFactura,IDProveedor,IDEmp,NroMov FROM dbo.RecibosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND IDSuc=@p1 AND IDTipoMov=23 AND Confirmado=1 AND Anulado=0",receipt,branch);
+                if(movements.Count!=1)throw new InvalidOperationException("La carga de stock ya no está disponible.");
+                var movement=movements[0];
+                var purchases=RowsTx(connection,tx,"SELECT C.IDMovStk,C.NroFactura FROM dbo.ComprasTP C WITH(UPDLOCK,HOLDLOCK) JOIN dbo.TipoComprobantes T ON T.IDComprob=C.IDTipoComp WHERE C.IDRecibo=@p0 AND C.IDProveedor=@p1 AND C.IDEmp=@p2 AND C.Confirmado=1 AND T.ImpPor>0",purchase,movement["IDProveedor"],movement["IDEmp"]);
+                if(purchases.Count!=1)throw new InvalidOperationException("La factura no corresponde al proveedor y empresa de esta carga.");
+                var invoice=purchases[0];
+                if(Text(movement["IDFactura"]).Length>0 && Number(movement["IDFactura"])>0 && Number(movement["IDFactura"])!=purchase)throw new InvalidOperationException("El movimiento ya tiene otra factura vinculada. Volvé a consultarlo.");
+                if(Text(invoice["IDMovStk"]).Length>0 && Number(invoice["IDMovStk"])>0 && (Text(movement["IDFactura"]).Length==0 || Number(movement["IDFactura"])!=purchase || Number(invoice["IDMovStk"])!=Number(movement["NroMov"])))throw new InvalidOperationException("La factura ya tiene otra carga de stock vinculada.");
+                if(Convert.ToInt32(Scalar(connection,tx,"SELECT COUNT(*) FROM dbo.RecibosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDFactura=@p0 AND IDRecibo<>@p1 AND Confirmado=1 AND Anulado=0",purchase,receipt))>0)throw new InvalidOperationException("La factura fue vinculada desde otro equipo.");
+                Execute(connection,tx,"UPDATE dbo.ComprasTP SET IDMovStk=@p0,EnMovStk=1 WHERE IDRecibo=@p1",movement["NroMov"],purchase);
+                Execute(connection,tx,"UPDATE dbo.RecibosTP SET IDFactura=@p0,NroFactura=@p1 WHERE IDRecibo=@p2",purchase,invoice["NroFactura"],receipt);
+                tx.Commit();return new {ok=true,numeroFactura=invoice["NroFactura"],numeroMovimiento=movement["NroMov"]};
+            }
+            catch{try{tx.Rollback();}catch{}throw;}
         }
     }
 
@@ -2436,6 +2568,11 @@ internal static class FacturacionCopiaApi
         string query = request.QueryString["consulta"] ?? "";
         if (query == "proveedores") return new { ok = true, proveedores = Rows(connection, "SELECT IDProveedor AS id,[RazónSocial] AS nombre FROM dbo.Proveedores WHERE ISNULL(Suspendido,0)=0 ORDER BY [RazónSocial]") };
         if (query == "articulos") return new { ok = true, articulos = Rows(connection, "SELECT a.IDArt AS idart,a.IDArtProv AS codProv,a.[Descripción] AS descripcion,a.IDProveedor AS proveedor,p.[RazónSocial] AS proveedorNombre,a.IDRubro AS idRubro,r.[Descripción] AS rubroNombre,a.PorcIVA1 AS iva,a.PorcGanMin AS margen,ISNULL(s.StockAct,0) AS stock,a.PrecioCpraSI AS precioCosto,a.PrecioCpraCI * CASE WHEN a.IDMoneda=1 THEN CONVERT(decimal(18,4),1) ELSE m.ImpCotiz END AS costoFinal FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s ON s.IDArt=a.IDArt AND s.IDSuc=@p0 LEFT JOIN dbo.Monedas m ON m.IDMoneda=a.IDMoneda LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor LEFT JOIN dbo.Rubros r ON r.IDRubro=a.IDRubro WHERE a.Suspendido=0 ORDER BY a.[Descripción]", branch) };
+        if(query=="compras-sin-stock")
+        {
+            AssertPurchasePermission(request.QueryString["usuarioId"],"carga_stock");
+            return new {ok=true,compras=Rows(connection,"SELECT C.IDRecibo AS id,C.NroFactura AS numero,CONVERT(varchar(10),C.Fecha,103) AS fecha,C.Total AS total FROM dbo.ComprasTP C JOIN dbo.TipoComprobantes T ON T.IDComprob=C.IDTipoComp JOIN dbo.RecibosTP R ON R.IDProveedor=C.IDProveedor AND R.IDEmp=C.IDEmp WHERE R.IDRecibo=@p0 AND R.IDSuc=@p1 AND R.IDTipoMov=23 AND R.Confirmado=1 AND R.Anulado=0 AND C.Fecha>=DATEADD(day,-90,GETDATE()) AND C.Confirmado=1 AND C.EnMovStk=1 AND C.IDMovStk IS NULL AND T.ImpPor>0 AND NOT EXISTS(SELECT 1 FROM dbo.RecibosTP S WHERE S.IDFactura=C.IDRecibo AND S.Confirmado=1 AND S.Anulado=0) ORDER BY C.Fecha DESC,C.IDRecibo DESC",receipt,branch)};
+        }
         if (query == "compras") return new { ok = true, compras = Rows(connection, "SELECT IDRecibo AS id,NroFactura AS numero,CONVERT(varchar(10),Fecha,103) AS fecha,Total AS total FROM dbo.ComprasTP WHERE IDProveedor=@p0 AND Fecha>=DATEADD(day,-90,GETDATE()) AND Confirmado=1 AND EnMovStk=1 AND IDMovStk IS NULL ORDER BY Fecha DESC", provider) };
         if (query == "movimientos")
         {
@@ -2686,6 +2823,7 @@ internal static class FacturacionCopiaApi
                     var data = Object(Json.DeserializeObject(body));
                     AssertPurchasePermission(Text(Value(data, "usuarioId")));
                     if (Text(Value(data, "accion")) == "editar-cabecera") { Reply(context, 200, PurchaseEditHeader(connection, data)); return; }
+                    if (Text(Value(data, "accion")) == "editar-stock") { Reply(context, 200, PurchaseEditStock(connection, data)); return; }
                     if (Text(Value(data, "accion")) == "eliminar") { Reply(context, 200, PurchaseDelete(connection, data)); return; }
                     if (Text(Value(data,"accion")) != "confirmar") throw new InvalidOperationException("Acción de compra inválida.");
                     Reply(context, 200, PurchaseConfirm(connection, data, false)); return;
@@ -2718,6 +2856,7 @@ internal static class FacturacionCopiaApi
                     string action = Text(Value(data, "accion"));
                     if (action == "anular") { Reply(context, 200, StockAnular(connection, data)); return; }
                     if (action == "cambiar-sucursal") { Reply(context, 200, StockCambiarSucursal(connection, data)); return; }
+                    if (action == "vincular-compra") { Reply(context, 200, StockVincularCompra(connection, data)); return; }
                     if (action == "actualizar-costo") { Reply(context, 200, StockActualizarCosto(connection, data)); return; }
                     if (action != "previsualizar" && action != "confirmar") throw new InvalidOperationException("Acción de stock inválida.");
                     Reply(context, 200, StockIngreso(connection, data, action == "confirmar"));

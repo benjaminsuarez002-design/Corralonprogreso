@@ -189,6 +189,7 @@
   .permission-group-title:not(:first-child) { margin-top: 8px; }
   .permission-chip { border: 1px solid #d8d8d8; border-radius: 999px; padding: 9px 13px; background: #f5f5f5; color: #444; font: 700 12px Arial, sans-serif; cursor: pointer; text-transform: uppercase; }
   #permissionChecks .permission-chip[aria-pressed="true"] { background: #e50000; border-color: #e50000; color: white; }
+  #permissionChecks .permission-chip[data-edit="true"] { background: #087a43; border-color: #087a43; color: white; }
   .permission-chip:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
   .mode-options { padding: 16px; display: grid; gap: 10px; }
   .mode-option { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; }
@@ -211,7 +212,7 @@
   }
 </style>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.13"></script>
+<script src="corralon-system.js?v=1.0.14"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="usuarios"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-17">
 </head>
@@ -261,6 +262,7 @@
 <div id="permissionsModal" class="modal">
   <div class="modal-box">
     <div class="modal-head">Botones visibles</div>
+    <div style="padding:8px 16px 0;font:12px Arial,sans-serif;color:#555">Clic izquierdo: rojo, acceso normal. Clic derecho: verde, acceso con edición. Repetí el mismo clic para quitarlo.</div>
     <div id="permissionChecks" class="checks"></div>
     <div class="modal-actions">
       <button class="btn light" id="cancelPermissions" type="button">Cancelar</button>
@@ -356,6 +358,7 @@
   let editingId = '';
   let permissionsEditingId = '';
   let draftPermisos = DEFAULT_SELLER_IDS.slice();
+  let draftPermisosEdicion = [];
   let draftCajaModo = 'completo';
   let draftCajaSucursalId = '';
 
@@ -414,6 +417,7 @@
   function resetForm() {
     editingId = '';
     draftPermisos = DEFAULT_SELLER_IDS.slice();
+    draftPermisosEdicion = [];
     draftCajaModo = 'completo';
     draftCajaSucursalId = '';
     els.name.value = '';
@@ -490,6 +494,7 @@
         idOperador,
         nivel,
         permisos: nivel === 'personalizado' ? draftPermisos.slice() : currentDefaultPermissions(nivel),
+        permisosEdicion: nivel === 'personalizado' ? draftPermisosEdicion.slice() : [],
         cajaModo: nivel === 'administrador' ? 'completo' : draftCajaModo,
         cajaSucursalId: nivel === 'administrador' ? '' : draftCajaSucursalId
       };
@@ -519,12 +524,12 @@
     renderUsers();
   }
 
-  function renderPermissionChips(permisos) {
+  function renderPermissionChips(permisos, edicion = []) {
     const sqlIds = new Set(['facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'carga_stock', 'articulos_sql']);
     els.checks.innerHTML = ['Web', 'SQL'].map(group =>
       `<div class="permission-group-title">${group}</div>` + MENU_ITEMS
         .filter(item => sqlIds.has(item.id) === (group === 'SQL'))
-        .map(item => `<button class="permission-chip" type="button" data-permission="${item.id}" aria-pressed="${permisos.has(item.id)}">${item.label}</button>`).join('')
+        .map(item => `<button class="permission-chip" type="button" data-permission="${item.id}" data-edit="${permisos.has(item.id) && edicion.includes(item.id)}" aria-pressed="${permisos.has(item.id)}" title="Clic izquierdo: acceso normal. Clic derecho: acceso con edición. Repetir el mismo clic: quitar acceso.">${item.label}</button>`).join('')
     ).join('');
   }
 
@@ -535,14 +540,14 @@
     draftCajaModo = user.nivel === 'administrador' ? 'completo' : (['lector','restringido'].includes(user.cajaModo) ? 'restringido' : 'completo');
     draftCajaSucursalId = String(user.cajaSucursalId || '');
     const permisos = new Set(userPermissions(user));
-    renderPermissionChips(permisos);
+    renderPermissionChips(permisos, user.permisosEdicion || []);
     els.modal.classList.add('show');
   }
 
   function openDraftPermissions() {
     permissionsEditingId = '__draft__';
     const permisos = new Set(draftPermisos);
-    renderPermissionChips(permisos);
+    renderPermissionChips(permisos, draftPermisosEdicion);
     els.modal.classList.add('show');
   }
 
@@ -564,8 +569,10 @@
 
   async function savePermissions() {
     const permisos = [...els.checks.querySelectorAll('[data-permission][aria-pressed="true"]')].map((button) => button.dataset.permission);
+    const permisosEdicion = [...els.checks.querySelectorAll('[data-permission][aria-pressed="true"][data-edit="true"]')].map(button => button.dataset.permission);
     if (permissionsEditingId === '__draft__') {
       draftPermisos = permisos;
+      draftPermisosEdicion = permisosEdicion;
       permissionsEditingId = '';
       els.modal.classList.remove('show');
       return;
@@ -575,7 +582,7 @@
     users = users.map((user) => {
       if (user.id !== permissionsEditingId) return user;
       const isAdmin = user.nivel === 'administrador';
-      updatedUser = { ...user, nivel: isAdmin ? 'administrador' : 'personalizado', permisos: isAdmin ? ALL_MENU_IDS : permisos, cajaModo: isAdmin ? 'completo' : draftCajaModo, cajaSucursalId: isAdmin ? '' : draftCajaSucursalId };
+      updatedUser = { ...user, nivel: isAdmin ? 'administrador' : 'personalizado', permisos: isAdmin ? ALL_MENU_IDS : permisos, permisosEdicion, cajaModo: isAdmin ? 'completo' : draftCajaModo, cajaSucursalId: isAdmin ? '' : draftCajaSucursalId };
       return updatedUser;
     });
     permissionsEditingId = '';
@@ -611,13 +618,17 @@
   });
   els.cancelPermissions.addEventListener('click', () => els.modal.classList.remove('show'));
   els.savePermissions.addEventListener('click', savePermissions);
-  els.checks.addEventListener('click', (event) => {
+  function togglePermissionChip(event, edit) {
     const chip = event.target.closest('button[data-permission]');
     if (!chip) return;
-    const selected = chip.getAttribute('aria-pressed') !== 'true';
+    event.preventDefault();
+    const selected = !(chip.getAttribute('aria-pressed') === 'true' && (chip.dataset.edit === 'true') === edit);
     chip.setAttribute('aria-pressed', String(selected));
+    chip.dataset.edit = String(selected && edit);
     if (chip.dataset.permission === 'caja' && selected) openCajaMode();
-  });
+  }
+  els.checks.addEventListener('click', event => togglePermissionChip(event, false));
+  els.checks.addEventListener('contextmenu', event => togglePermissionChip(event, true));
   els.saveCajaMode.addEventListener('click', () => {
     draftCajaModo = els.cajaModeModal.querySelector('input[name="cajaMode"]:checked')?.value === 'restringido' ? 'restringido' : 'completo';
     draftCajaSucursalId = draftCajaModo === 'restringido' ? String(els.cajaRestrictedBranch.value || '') : '';

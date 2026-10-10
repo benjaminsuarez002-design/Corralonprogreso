@@ -56,7 +56,7 @@
       const field=[...detail.querySelectorAll('.receipt-field')].find(el=>el.firstChild.textContent===label)?.querySelector('span');if(field)field.textContent=money(value);
     }
   }
-  function canEditValues(){return String(valuesUser().nivel||'').toLowerCase()==='administrador'&&Number(detailData?.comprobante?.confirmado)!==0&&!Number(detailData?.comprobante?.anulada)&&Boolean(detailData?.versionValores)}
+  function canEditValues(){const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return allowed&&Number(detailData?.comprobante?.confirmado)!==0&&!Number(detailData?.comprobante?.anulada)&&Boolean(detailData?.versionValores)}
   function valueRules(){try{return window.CorralonMediosPago?.normalize(JSON.parse(localStorage.getItem('corralon_facturacion_medios_pago_v1')||'null'),historyConfig)}catch{return window.CorralonMediosPago?.normalize(null,historyConfig)}}
   function valueTypes(){const rules=valueRules();return(historyConfig?.tiposPago||[]).filter(p=>[1,3,5,6].includes(Number(p.clase))&&Number(p.id)!==14&&(!window.CorralonMediosPago||window.CorralonMediosPago.allowsVoucher(rules,p.id,detailData.comprobante.idComprobante)))}
   function valueCards(value){const rules=valueRules();return(historyConfig?.tarjetas||[]).filter(c=>!window.CorralonMediosPago||window.CorralonMediosPago.allowsCard(rules,value.idTipoPago,c.id))}

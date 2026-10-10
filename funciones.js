@@ -667,6 +667,25 @@
     return Number.isFinite(result) ? result : 0;
   }
 
+  function evaluateBasicArithmetic(value) {
+    const text=String(value??'').replace(/\$/g,'').replace(/\s+/g,'').replace(/[−–—]/g,'-');
+    if(!text)return 0;
+    let at=0;
+    const invalid=()=>{throw new Error('Cuenta inválida. Usá números y +, -, * o /.');};
+    function factor(){
+      if(text[at]==='+'){at++;return factor();}
+      if(text[at]==='-'){at++;return -factor();}
+      if(text[at]==='('){at++;const result=sum();if(text[at++]!==')')invalid();return result;}
+      const match=text.slice(at).match(/^(?:\d[\d.,]*|[.,]\d+)/);
+      if(!match || /[.,]$/.test(match[0]))invalid();
+      at+=match[0].length;
+      const result=parseLocaleNumber(match[0]);if(!Number.isFinite(result))invalid();return result;
+    }
+    function product(){let result=factor();while(text[at]==='*'||text[at]==='/'){const op=text[at++],right=factor();if(op==='/'&&right===0)throw new Error('No se puede dividir por cero.');result=op==='*'?result*right:result/right;}return result;}
+    function sum(){let result=product();while(text[at]==='+'||text[at]==='-'){const op=text[at++],right=product();result=op==='+'?result+right:result-right;}return result;}
+    const result=sum();if(at!==text.length||!Number.isFinite(result))invalid();return result;
+  }
+
   function formatLocaleNumber(value, options = {}) {
     const decimals = Math.max(0, Number(options.decimals ?? 2));
     const suffix = String(options.suffix || '');
@@ -1850,6 +1869,7 @@
     bindTextDropdown,
     parseLocaleNumber,
     evaluateNumericExpression,
+    evaluateBasicArithmetic,
     formatLocaleNumber,
     bindLiveLocaleNumber,
     rawCurrencyText,
