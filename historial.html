@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.18"></script>
+<script src="corralon-system.js?v=1.0.19"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -2009,7 +2009,7 @@ function setAccionesDetalleModo(modo) {
   const btnSql = document.getElementById('btnDetalleSql');
   if(btnSql) {
     btnSql.style.display = esRemito && cargaSqlDisponible() ? '' : 'none';
-    btnSql.disabled = esRemito && Boolean(_remitoDetalleActual?.sql_resultado);
+    btnSql.disabled = esRemito && Boolean(_remitoDetalleActual?.sql_resultado?.compraId);
     btnSql.textContent = btnSql.disabled ? 'Cargado en SQL' : 'Cargar en SQL';
   }
   if (btnDel) {
@@ -2097,12 +2097,15 @@ async function abrirCargaRemitoSql() {
     if(field.selectedIndex < 0) field.selectedIndex = placeholder ? 0 : -1;
   };
   fill(select,options.pagos,base.pago);
-  fill(account,accounts,provider?.cuenta,'Sin cuenta válida en el proveedor SQL');
+  fill(account,accounts,pending?.payload?.cuenta ?? provider?.cuenta,'Seleccionar cuenta');
   fill(goods,options.bienes,provider?.tipoBien,'Sin tipo de bien válido en el proveedor SQL');
-  account.disabled = goods.disabled = true;
+  account.disabled = Boolean(pending?.result);
+  goods.disabled = true;
   const concept = document.createElement('p');
   concept.style.cssText = 'font-size:13px;margin:0 0 8px';
-  concept.textContent = `Concepto: ${accounts.find(item => String(item.id) === account.value)?.nombre || 'Sin cuenta válida'}`;
+  const updateConcept = () => { concept.textContent = `Concepto: ${accounts.find(item => String(item.id) === account.value)?.nombre || 'Sin cuenta válida'}`; };
+  updateConcept();
+  account.addEventListener('change',updateConcept);
   goods.closest('label').after(concept);
   const attemptDetails = document.createElement('details');
   attemptDetails.dataset.sqlAttempt = '';
@@ -2122,12 +2125,12 @@ async function abrirCargaRemitoSql() {
     lines.style.cssText = 'max-height:80px;overflow:auto;margin:6px 0;white-space:pre-wrap;font-size:11px';
     lines.textContent = 'IDArt · Cantidad · Precio unitario\n' + (payload.articulos || []).map(item => `${item.idart} · ${item.cantidad} · ${fmt(item.precio)}`).join('\n');
     const help = document.createElement('p');
-    help.textContent = 'Para reintentar, elegí el pago arriba y pulsá Cargar en SQL. La cuenta, el tipo de bien y el concepto se toman del proveedor SQL.';
+    help.textContent = 'Para reintentar, elegí el pago y la cuenta arriba y pulsá Cargar en SQL. El concepto corresponde a la cuenta elegida; el tipo de bien se toma del proveedor SQL.';
     attemptDetails.replaceChildren(summary,info,lines,help); attemptDetails.open = opened;
   };
   showAttemptDetails();
   if(pending) status.textContent = pending.result ? 'La carga ya existe en SQL. Falta sincronizar el vínculo web.' : 'Hay un intento anterior guardado para reintentar. No se ejecuta automáticamente.';
-  if(!account.value || !goods.value) status.textContent = 'Revisá la cuenta y el tipo de bien predeterminados en Proveedores SQL.';
+  if(!account.value || !goods.value) status.textContent = 'Seleccioná una cuenta válida y revisá el tipo de bien predeterminado en Proveedores SQL.';
   if(pending?.result) select.disabled = true;
   let busy = false;
   close.onclick = () => dialog.close();
@@ -2137,13 +2140,13 @@ async function abrirCargaRemitoSql() {
     if(busy) return;
     busy = true; save.disabled = close.disabled = select.disabled = account.disabled = goods.disabled = true;
     try {
-      if(!pending?.result && (!select.value || !account.value || !goods.value)) throw new Error('Seleccioná el pago y revisá la cuenta y el tipo de bien en Proveedores SQL.');
+      if(!pending?.result && (!select.value || !account.value || !goods.value)) throw new Error('Seleccioná el pago y la cuenta y revisá el tipo de bien en Proveedores SQL.');
       if(!pending) {
         pending = { payload:remitoSqlPayload(remito,select.value) };
       }
       if(!pending.result) {
-        pending.payload = {...pending.payload,pago:Number(select.value)};
-        delete pending.payload.cuenta; delete pending.payload.tipoBien;
+        pending.payload = {...pending.payload,pago:Number(select.value),cuenta:account.value};
+        delete pending.payload.tipoBien;
         pending.attemptedAt = new Date().toISOString();
         localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending));
       }
@@ -2161,13 +2164,13 @@ async function abrirCargaRemitoSql() {
         pending.result = { compraId:purchase.IDRecibo, numero:purchase.NroFactura, stockId:purchase.stockId, stockNumero:purchase.stockNumero, pago:Number(pending.payload.pago) };
         localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending));
       }
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${encodeURIComponent(remito.id)}`,{ method:'PATCH',headers:CorralonSystem.headers({Prefer:'return=representation'}),body:JSON.stringify({sql_resultado:pending.result}) });
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${encodeURIComponent(remito.id)}`,{ method:'PATCH',headers:CorralonSystem.headers({Prefer:'return=representation'}),body:JSON.stringify({sql_resultado:{...remito.sql_resultado,...pending.result}}) });
       if(!response.ok) throw new Error('SQL ya quedó cargado. Falta sincronizar el vínculo web; reintentá para completar.');
       const rows = await response.json();
       if(!rows.length) throw new Error('SQL ya quedó cargado, pero el remito no se encontró al actualizar su vínculo web.');
-      remito.sql_resultado = pending.result;
+      remito.sql_resultado = {...remito.sql_resultado,...pending.result};
       const cached = _remitosCache.find(item => String(item.id) === String(remito.id));
-      if(cached) cached.sql_resultado = pending.result;
+      if(cached) cached.sql_resultado = remito.sql_resultado;
       resolverRemitoCargadoSql(remito);
       localStorage.removeItem(remitoSqlPendingKey(remito.id));
       if(_remitoDetalleActual?.id === remito.id) setAccionesDetalleModo('remito');
@@ -2182,7 +2185,7 @@ async function abrirCargaRemitoSql() {
         showAttemptDetails();
       }
     }
-    finally { busy = false; close.disabled = false; save.disabled = false; select.disabled = Boolean(pending?.result); account.disabled = goods.disabled = true; }
+    finally { busy = false; close.disabled = false; save.disabled = false; select.disabled = Boolean(pending?.result); account.disabled = Boolean(pending?.result); goods.disabled = true; }
   };
   dialog.showModal();
 }

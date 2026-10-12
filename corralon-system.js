@@ -273,11 +273,93 @@
     };
   }
 
+  function aridosCacheDb() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('corralon_aridos_config_v1', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('config');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  let aridosCacheWrites = Promise.resolve();
+  function persistAridosConfig(key, value) {
+    aridosCacheWrites = aridosCacheWrites.catch(() => {}).then(async () => {
+      const db = await aridosCacheDb();
+      try { await new Promise((resolve, reject) => {
+        const tx = db.transaction('config', 'readwrite');
+        tx.objectStore('config').put(value, key);
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+      }); } finally { db.close(); }
+    }).catch(error => console.warn('No se pudo guardar la configuración local de áridos', error));
+  }
+  async function loadCachedAridosConfig() {
+    await aridosCacheWrites;
+    const db = await aridosCacheDb();
+    try {
+      const read = key => new Promise((resolve, reject) => {
+        const req = db.transaction('config').objectStore('config').get(key);
+        req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+      });
+      const [configs, freight] = await Promise.all([read('articles'), read('freight')]);
+      if (configs) setAridosConfigMap(configs, false);
+      if (freight) setAridosFreightConfig(freight, false);
+      return { available: Boolean(configs), freightAvailable: Boolean(freight) };
+    } finally { db.close(); }
+  }
+  let aridosRemoteSync = null;
+  async function refreshAridosConfig() {
+    if (aridosRemoteSync) return aridosRemoteSync;
+    aridosRemoteSync = (async () => {
+      await loadCachedAridosConfig();
+      const db = await aridosCacheDb();
+      let state;
+      try { state = await new Promise((resolve,reject) => {
+        const request = db.transaction('config').objectStore('config').get('sync');
+        request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+      }); } finally { db.close(); }
+      const base='https://firestore.googleapis.com/v1/projects/corralon-progreso/databases/(default)/documents';
+      const decode = field => {
+        if (!field) return null;
+        if ('stringValue' in field) return field.stringValue;
+        if ('booleanValue' in field) return field.booleanValue;
+        if ('integerValue' in field) return Number(field.integerValue);
+        if ('doubleValue' in field) return field.doubleValue;
+        if ('timestampValue' in field) return field.timestampValue;
+        if (field.mapValue) return Object.fromEntries(Object.entries(field.mapValue.fields||{}).map(([key,value])=>[key,decode(value)]));
+        return null;
+      };
+      const query = {from:[{collectionId:'configAridosArticulos'}]};
+      if(state?.cursor)query.where={fieldFilter:{field:{fieldPath:'updatedAt'},op:'GREATER_THAN_OR_EQUAL',value:{timestampValue:state.cursor}}};
+      const response=await fetch(base+':runQuery',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({structuredQuery:query})});
+      const results=await response.json();
+      if(!response.ok)throw new Error(results?.error?.message||'No se pudo actualizar la configuración de áridos.');
+      const next=state?.cursor?new Map(aridosConfigMap):new Map();
+      const readTimes=results.map(entry=>entry.readTime).filter(Boolean).sort();
+      let cursor=readTimes[0]||state?.cursor||'';
+      for(const entry of results){
+        const doc=entry.document;
+        if(!doc)continue;
+        const data=Object.fromEntries(Object.entries(doc.fields||{}).map(([key,value])=>[key,decode(value)]));
+        const code=String(data.codigo||doc.name.split('/').pop());
+        next.set(aridCodeKey(code),normalizeAridConfig(data,code));
+        if(data.updatedAt && data.updatedAt>cursor)cursor=data.updatedAt;
+      }
+      const freightResponse=await fetch(base+'/config/aridosFletes');
+      if(!freightResponse.ok)throw new Error('No se pudo actualizar el flete de áridos.');
+      const freightDoc=await freightResponse.json();
+      const freight=Object.fromEntries(Object.entries(freightDoc.fields||{}).map(([key,value])=>[key,decode(value)]));
+      setAridosConfigMap(next);setAridosFreightConfig(freight);
+      if(cursor)persistAridosConfig('sync',{cursor});
+      await aridosCacheWrites;
+      return {changed:results.some(entry=>entry.document),available:true};
+    })();
+    try { return await aridosRemoteSync; } finally { aridosRemoteSync=null; }
+  }
   function configureAridos(options = {}) {
     aridosAdapter = { ...aridosAdapter, ...options };
   }
 
-  function setAridosConfigMap(source) {
+  function setAridosConfigMap(source, persist = true) {
     const next = new Map();
     const add = (key, value) => {
       const normalized = normalizeAridConfig(value, key);
@@ -288,12 +370,14 @@
     else if (Array.isArray(source)) source.forEach((value) => add(value?.codigo, value));
     else if (source && typeof source === 'object') Object.entries(source).forEach(([key, value]) => add(key, value));
     aridosConfigMap = next;
+    if (persist) persistAridosConfig('articles', Object.fromEntries(next));
     window.dispatchEvent(new CustomEvent('corralon:aridos-config-loaded', { detail: { configs: next } }));
     return next;
   }
 
-  function setAridosFreightConfig(value) {
+  function setAridosFreightConfig(value, persist = true) {
     aridosFreightConfig = normalizeAridFreightConfig(value);
+    if (persist) persistAridosConfig('freight', aridosFreightConfig);
     window.dispatchEvent(new CustomEvent('corralon:aridos-freight-loaded', { detail: { ...aridosFreightConfig } }));
     return { ...aridosFreightConfig };
   }
@@ -1607,6 +1691,7 @@
   }
 
   function aridArticleMargin(article = {}) {
+    article = article || {};
     let margin = Number(article.margenGanancia ?? article.PorcGanMin ?? article.porcGanMin ?? 0);
     if (Math.abs(margin) > 1) margin /= 100;
     const cost = Number(article.precioCostoConImpuestos ?? article.PrecioCpraCI ?? article.precioCpraCI ?? 0);
@@ -1806,8 +1891,8 @@
         renderAridosBudgetRows(Math.max(0, index - 1));
         return;
       }
-      if (event.target.closest('[data-arid-cart]')) addAridosBudgetToCart();
-      if (event.target.closest('[data-arid-export]')) exportAridosBudgetXls();
+      if (event.target.closest('[data-arid-cart]')) addAridosBudgetToCart().catch(error => alert(error.message));
+      if (event.target.closest('[data-arid-export]')) exportAridosBudgetXls().catch(error => alert(error.message));
     });
     window.CorralonFunciones?.bindLinearNavigation?.({
       root: aridosBudgetHost,
@@ -2010,7 +2095,12 @@
     aridosBudgetFreightMode = 'rawson';
     aridosBudgetCustomRate = 0;
     const exportButton = host.querySelector('[data-arid-export]');
-    if (exportButton) exportButton.hidden = !isLocalAridExportAvailable();
+    if (exportButton) {
+      exportButton.hidden = Boolean(aridosAdapter.hideExport) || (typeof aridosAdapter.importSql === 'function' ? false : !isLocalAridExportAvailable());
+      exportButton.textContent = typeof aridosAdapter.importSql === 'function' ? 'Importar en SQL' : 'Generar XLS y actualizar';
+    }
+    const cartButton = host.querySelector('[data-arid-cart]');
+    if (cartButton) cartButton.textContent = aridosAdapter.cartLabel || 'Agregar al carrito';
     host.classList.add('is-open');
     host.setAttribute('aria-hidden', 'false');
     renderAridosBudgetRows(0);
@@ -2099,6 +2189,10 @@
     const payload = aridosBudgetPayload();
     const error = validateAridosBudget(payload);
     if (error) return alert(error);
+    if (typeof aridosAdapter.importSql === 'function') {
+      await aridosAdapter.importSql(payload);
+      return;
+    }
     const rows = payload.materials.map((item) => aridXlsRow(
       item.article,
       aridUnifiedName(item, !!payload.freight),
@@ -4088,14 +4182,19 @@
       return { rows: mergeMetadata(baseRows, metadataRows), baseUrl, metaUrl };
     }
 
-    async function catalogContext(cachedValue, suppliedMeta = null) {
+    async function catalogContext(cachedValue, suppliedMeta = null, options = {}) {
       const cached = cachedValue === undefined ? await readCache() : cachedValue;
       let metaRow = null;
       let metadataUrl = '';
+      const sharedLookup = !options.checkRemote && !globalThis.CORRALON_DISABLE_CATALOG_REALTIME && !IS_AUTOMATED_CRAWLER;
       try {
-        metaRow = suppliedMeta || (globalThis.CORRALON_DISABLE_CATALOG_REALTIME || IS_AUTOMATED_CRAWLER ? await fetchMetaRow() : await CATALOG_REALTIME.getMeta());
+        metaRow = suppliedMeta || (sharedLookup ? await CATALOG_REALTIME.getMeta() : await fetchMetaRow());
       } catch (error) {
         console.warn('No se pudo consultar la version del catalogo', error);
+        if(sharedLookup && !suppliedMeta){
+          try { metaRow = await fetchMetaRow(); }
+          catch(fallbackError){console.warn('No se pudo verificar la versión por HTTP; se conserva la caché',fallbackError);}
+        }
       }
       const version = Number(metaRow?.version || 0);
       const patchVersion = Number(metaRow?.patch_version || 0);
@@ -4326,9 +4425,9 @@
       return promise;
     }
 
+    let catalogLoadQueue = Promise.resolve();
     async function startCatalogLoad(context, options = {}) {
-      if (!navigator.locks) throw new Error('Este navegador no admite la descarga compartida del catálogo');
-      return navigator.locks.request('corralon-catalog-download-v2', async () => {
+      const work = async () => {
         memoryCache = null;
         const shared = await readCache();
         const previous = context.cached;
@@ -4343,7 +4442,12 @@
         const saved = await readCache();
         if (saved?.rows?.length && Number(saved.version || 0) >= Number(context.version || 0) && Number(saved.patchVersion || 0) >= Number(context.patchVersion || 0)) CATALOG_REALTIME.cacheReady();
         return rows;
-      });
+      };
+      if (navigator.locks?.request) return navigator.locks.request('corralon-catalog-download-v2', work);
+      // En HTTP por IP no hay Web Locks; releer la caché antes de cada trabajo.
+      const pending = catalogLoadQueue.catch(() => {}).then(work);
+      catalogLoadQueue = pending;
+      return pending;
     }
 
     function startCatalogLoadUnlocked(context, options = {}) {
@@ -4485,7 +4589,7 @@
         const rows = await load(options);
         return { changed: true, mode: 'full', rows };
       }
-      const context = await catalogContext(cached, options.metaRow);
+      const context = await catalogContext(cached, options.metaRow, options);
       if (!context.versionKnown || (
         cached.signature === context.signature
         && Number(cached.patchVersion || 0) === Number(context.patchVersion || 0)
@@ -4504,12 +4608,15 @@
 
     async function cachedArticle(code) {
       memoryCache = null;
+      await loadCachedAridosConfig();
       const cached = await readCache();
-      return cached?.rows?.find(row => codeOf(row) === String(code || '').trim()) || null;
+      const article = cached?.rows?.find(row => codeOf(row) === String(code || '').trim());
+      return article ? decorateAridArticle(article) : null;
     }
     async function cachedRows() {
       memoryCache = null;
-      return (await readCache())?.rows || [];
+      await loadCachedAridosConfig();
+      return ((await readCache())?.rows || []).map(decorateAridArticle);
     }
 
     async function clearCache() {
@@ -5647,9 +5754,15 @@
       });
     }
 
+    const providerNoticeQueues = new Map();
     async function syncProviderNotice(notice) {
-      if (!navigator.locks) throw new Error('Este navegador no admite la descarga compartida de listas');
-      return navigator.locks.request('corralon-provider-json-' + cleanId(notice?.providerId), () => syncProviderNoticeUnlocked(notice));
+      const key = 'corralon-provider-json-' + cleanId(notice?.providerId);
+      const work = () => syncProviderNoticeUnlocked(notice);
+      if (navigator.locks?.request) return navigator.locks.request(key, work);
+      const pending = (providerNoticeQueues.get(key) || Promise.resolve()).catch(() => {}).then(work);
+      providerNoticeQueues.set(key, pending);
+      try { return await pending; }
+      finally { if (providerNoticeQueues.get(key) === pending) providerNoticeQueues.delete(key); }
     }
     async function syncProviderNoticeUnlocked(notice) {
       const id = cleanId(notice?.providerId);
@@ -7726,6 +7839,8 @@
     },
     aridos: {
       configure: configureAridos,
+      loadCachedConfig: loadCachedAridosConfig,
+      refresh: refreshAridosConfig,
       setConfigMap: setAridosConfigMap,
       setFreightConfig: setAridosFreightConfig,
       decorateArticle: decorateAridArticle,

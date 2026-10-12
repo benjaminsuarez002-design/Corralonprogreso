@@ -599,11 +599,12 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   async function onTypeChange() {
     const type = selectedType();
     if (currencyNumber($('quickTotal').value) > 0) loadQuickTotal();
-    $('number').readOnly = Boolean(type?.automatico);
-    if (type?.automatico) {
+    const automatic = Boolean(type?.automatico) && String(type?.codigo || '').toUpperCase() !== 'CRINP';
+    $('number').readOnly = automatic;
+    if (automatic) {
       try {
         const result = await api({ consulta: 'numero', tipo: type.id });
-        if (selectedType()?.id === type.id) { $('number').value = result.numero; saveDraft(); }
+        if (selectedType()?.id === type.id && $('number').readOnly) { $('number').value = result.numero; saveDraft(); }
       } catch (error) { message(error.message, true); }
     }
     saveDraft();
@@ -705,7 +706,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       return { ...row, importe: Math.round(row.importe * 100) / 100 };
     });
     if (!taxes.length) throw new Error('Cargá los importes de la factura.');
-    const number = FX.formatComprobanteNumber($('number').value);
+    const number = FX.formatComprobanteNumber($('number').value, {defaultPoint:'0001'});
     $('number').value = number;
     return { id: draft.id, tipo: Number(comboId('type', true)), numero: number, fecha: parseFieldDate('date'), periodo: parsePeriod(),
       vencimiento: parseFieldDate('due'), proveedor: provider.id, puntoVenta: Number($('point').value), cuit: $('cuit').value.trim(),
@@ -885,7 +886,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     stockCheck.disabled=!canEdit||Number(p.CodCuentaCpra)===11;
     const numberInput=$('editPurchaseNumber');
     const paymentInput=$('editPurchasePayment');
-    if(numberInput)FX.bindComprobanteNumber(numberInput);
+    if(numberInput)FX.bindComprobanteNumber(numberInput, {defaultPoint:'0001'});
     $('detailDialog').querySelector('[data-save-purchase-header]')?.remove();
     if(canEdit){
       const save=document.createElement('button');save.type='button';save.dataset.savePurchaseHeader='1';save.textContent='Guardar cambios';save.disabled=true;
@@ -1150,7 +1151,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     rows.sort((a, b) => (key === 'impuesto' ? (options.impuestos.find(item => item.id === a.impuesto)?.nombre || '').localeCompare(options.impuestos.find(item => item.id === b.impuesto)?.nombre || '', 'es', { numeric: true }) : a[key] - b[key]) * (direction === 'desc' ? -1 : 1));
     taxSelection.clearSelection(); renderRows(); saveDraft();
   } });
-  ['number', 'remito', 'reportSearch', 'searchNumber'].forEach(id => FX.bindComprobanteNumber($(id)));
+  ['number', 'remito', 'reportSearch', 'searchNumber'].forEach(id => FX.bindComprobanteNumber($(id), id === 'number' ? {defaultPoint:'0001'} : {}));
   FX.bindFieldRestore({ root: $('purchaseForm') });
   FX.bindDropdownOnlyWhenTyping({ root: document, inputSelector: '[data-purchase-combo]', buttonSelector: '.purchase-combo-drop',
     show: (input, reason) => {

@@ -11,7 +11,7 @@
 <script src="funciones.js?v=20260610-menu-session"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.13"></script>
+<script src="corralon-system.js?v=1.0.14"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -518,16 +518,34 @@ async function loadRemitoWebSuggestions() {
     (async () => {
       remitoWebArticles = await CorralonSystem.catalog.cachedRows(); refresh();
       if(remitoWebArticles.length) {
-        const sync = await CorralonSystem.catalog.refresh({ fallback:false, onlyCached:true });
+        const sync = await CorralonSystem.catalog.refresh({ fallback:false, onlyCached:true, checkRemote:true });
         remitoWebArticles = sync.rows;
       } else {
         remitoWebArticles = await CorralonSystem.catalog.load({ fallback:true });
       }
       refresh();
+      remitoCatalogLastCheck = Date.now();
       CorralonSystem.catalogRealtime.start();
     })().catch(error => { console.warn('No se pudo cargar el catálogo web', error); toast('No se pudo cargar el catálogo. Podés seguir escribiendo manualmente.'); })
   ]);
 }
+let remitoCatalogSync=null,remitoCatalogLastCheck=0;
+function refreshRemitoCatalog(){
+  if(document.visibilityState==='hidden'||!remitoWebArticles.length)return;
+  if(remitoCatalogSync)return remitoCatalogSync;
+  if(Date.now()-remitoCatalogLastCheck<30000)return;
+  remitoCatalogLastCheck=Date.now();
+  remitoCatalogSync=(async()=>{
+    const result=await CorralonSystem.catalog.refresh({fallback:false,onlyCached:true,checkRemote:true});
+    remitoWebArticles=result.rows;
+    if(remitoSuggestionKind(document.activeElement))showRemitoSuggestions(document.activeElement);
+  })().catch(error=>console.warn('No se pudo actualizar el catálogo de Remitos; se conserva la copia local',error))
+    .finally(()=>{remitoCatalogSync=null;});
+  return remitoCatalogSync;
+}
+window.addEventListener('pageshow',refreshRemitoCatalog);
+document.addEventListener('visibilitychange',refreshRemitoCatalog);
+document.addEventListener('focusin',event=>{if(remitoSuggestionKind(event.target)==='article')refreshRemitoCatalog();});
 window.addEventListener('corralon:catalog-delta', event => {
   const delta = event.detail || {};
   const code = article => String(article.codigo || article.idart || article.idArt || '').trim();
@@ -1236,18 +1254,19 @@ function remitoFull(value) {
   return '0001-' + remitoShort(value);
 }
 async function contarRemitosGuardados() {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=nro&numero_manual=eq.false`, {
-    headers: {
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'apikey': SUPABASE_KEY
-    }
-  });
-  if(!res.ok) throw new Error(await res.text());
-  const data = await res.json();
-  return (Array.isArray(data) ? data : []).reduce((max, row) => {
-    const n = parseInt(String(row.nro || '').split('-').pop().replace(/\D/g, ''), 10) || 0;
-    return n > 0 ? Math.max(max, n) : max;
-  }, 0);
+    // Igual que Historial; conservar el remito con salto, ya vinculado a SQL.
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=nro&nro=neq.0001-00748370&order=fecha_iso.desc.nullslast,id.desc&limit=1`, {
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey': SUPABASE_KEY
+      }
+    });
+    if(!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if(!Array.isArray(data)) throw new Error('No se pudo consultar el último número de remito.');
+    const previous = data.length ? Number(String(data[0].nro || '').split('-').pop()) : 0;
+    if(!Number.isSafeInteger(previous) || previous < 0 || previous >= 99999999) throw new Error('El último número de remito no es válido.');
+    return previous;
 }
 
 // ── NÚMERO DE REMITO DESDE SUPABASE ─────────────────────────────

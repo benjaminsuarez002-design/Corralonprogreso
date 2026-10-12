@@ -9,6 +9,19 @@
   <script src="facturacion-medios-pago.js"></script>
   <style>
     *{box-sizing:border-box}
+    .aridos-delivery-dialog{background:#fff;color:#20242a;box-shadow:0 18px 55px #0003;font-family:Barlow,Arial,sans-serif}
+    .aridos-delivery-dialog::backdrop{background:rgba(20,27,38,.38)}
+    .aridos-delivery-dialog h3{font-size:20px;font-weight:800;line-height:1.25}
+    .aridos-delivery-dialog>label{font-size:12px;font-weight:700;color:#59616c}
+    .aridos-delivery-dialog input{font:500 14px Barlow,Arial,sans-serif;color:#20242a;background:#fff}
+    .aridos-delivery-dialog [data-delivery-combo]:focus-within{border-color:#8799ad!important;box-shadow:0 0 0 3px #eaf0f6}
+    .aridos-delivery-dialog .delivery-note{margin:14px 0 18px;padding:11px 12px;border:1px solid #e5e9ee;border-radius:8px;background:#f7f9fb;color:#5b6470;font-size:13px;line-height:1.45}
+    .aridos-delivery-dialog .delivery-actions{padding-top:14px;border-top:1px solid #edf0f3}
+    .aridos-delivery-dialog .delivery-actions button{min-height:37px;padding:0 16px;border:1px solid #d4d9df;border-radius:8px;background:#fff;color:#404956;font:700 14px Barlow,Arial,sans-serif;cursor:pointer;transition:background .15s,box-shadow .15s}
+    .aridos-delivery-dialog .delivery-actions button:hover{background:#f2f5f8}
+    .aridos-delivery-dialog .delivery-actions [data-delivery-confirm]{border-color:#0b7b3b;background:#0b7b3b;color:white;box-shadow:0 3px 9px #0b7b3b26}
+    .aridos-delivery-dialog .delivery-actions [data-delivery-confirm]:hover{background:#096b33}
+    .aridos-delivery-dialog button:focus-visible{outline:2px solid #7c99b5;outline-offset:2px}
     body{margin:0;min-height:100vh;font-family:Barlow,Arial,sans-serif;background:#eceef2}
     .app{display:flex;flex-direction:column;width:calc(100% - 10px);max-width:1680px;height:calc(100vh - 10px);height:calc(100dvh - 10px);min-height:0;margin:5px auto}
     .topbar{display:flex;align-items:end;gap:7px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.08)}
@@ -90,6 +103,7 @@
     .suggestion-context button{display:block;width:100%;padding:8px 10px;border:0;border-radius:4px;background:#fff;text-align:left;font:700 13px Barlow,Arial;cursor:pointer}
     .suggestion-context button:hover,.suggestion-context button:focus{background:#ef1015;color:#fff}
     .suggestion-context button:disabled{opacity:.55;cursor:wait}
+    .suggestion-context button[hidden]{display:none!important}
     #voucherType{appearance:none;padding-right:28px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23222' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;background-size:12px 8px}
     .client-field{position:relative}.client-field input{padding-right:28px}.client-drop,.payment-drop{position:absolute;right:2px;top:2px;width:23px;height:23px;border:1px solid #aaa;border-radius:5px;background:#fff;cursor:pointer}.client-drop{top:20px;display:block;border:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23222' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 8px no-repeat;font-size:0}.client-options{position:fixed;z-index:60;display:none;max-height:220px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;background:#fff;box-shadow:0 8px 24px #0003}.client-options.open{display:block}.client-option{padding:5px 8px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;cursor:pointer}.client-option:hover{background:#e8e8e5}.client-option.active,.client-option.active:hover{background:#b7192b;color:#fff}.client-option small{display:block;color:#666}.client-option.active small{color:#fff}
     .payment-combo{position:relative}.payment-combo input{padding-right:27px}.payment-combo:hover .payment-drop,.payment-combo:focus-within .payment-drop{display:block}.payment-drop{display:none;z-index:3}.payment-options{position:fixed;z-index:45;display:none;max-height:240px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;background:#fff;box-shadow:0 8px 24px #0003}.payment-options.open{display:block}.payment-option{padding:6px 9px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;cursor:pointer}.payment-option:hover{background:#e8e8e5}.payment-option.active,.payment-option.active:hover{background:#b7192b;color:#fff}.payment-combo input.payment-rule-invalid{outline:2px solid #d00008;outline-offset:-2px}
@@ -173,7 +187,7 @@
 </main>
 <div class="article-photo-lightbox" id="articlePhotoLightbox" role="dialog" aria-modal="true" aria-label="Imagen ampliada del artículo" hidden><button class="article-photo-close" id="articlePhotoClose" type="button" aria-label="Cerrar imagen">×</button><img id="articlePhotoLarge" alt=""></div>
 <div class="suggestions" id="suggestions"></div>
-<div class="suggestion-context" id="suggestionContextMenu" role="menu"><button id="importWebCart" type="button" role="menuitem">Importar carrito web</button><button id="sendSuggestionToMissing" type="button" role="menuitem">Enviar a Faltantes</button><button id="editSuggestionWeb" type="button" role="menuitem">Editar p. web</button><button id="editSuggestionSql" type="button" role="menuitem" hidden>Editar artículo SQL</button></div>
+<div class="suggestion-context" id="suggestionContextMenu" role="menu"><button id="refreshArticlePrices" type="button" role="menuitem">Actualizar precios</button><button id="budgetSuggestionAridos" type="button" role="menuitem" hidden>Presupuestar áridos</button><button id="importWebCart" type="button" role="menuitem">Importar carrito web</button><button id="sendSuggestionToMissing" type="button" role="menuitem">Enviar a Faltantes</button><button id="editSuggestionWeb" type="button" role="menuitem">Editar p. web</button><button id="editSuggestionSql" type="button" role="menuitem" hidden>Editar artículo SQL</button></div>
 <div class="customer-context" id="customerContextMenu" role="menu"><button id="viewCustomer" type="button" role="menuitem">Ver cliente</button><button id="newCustomer" type="button" role="menuitem">Agregar cliente</button></div>
 <div class="modal-wrap" id="customerModal" role="dialog" aria-modal="true" aria-label="Ficha del cliente"><section class="modal customer-modal"><header class="modal-head"><h2 id="customerModalTitle">Cliente</h2><button id="closeCustomer" type="button">Cerrar</button></header><form id="customerForm" class="customer-form"><input id="editCustomerId" type="hidden"><div class="field wide"><label for="editCustomerName">Razón social *</label><input id="editCustomerName" maxlength="100" required></div><div class="field"><label for="editCustomerContact">Contacto</label><input id="editCustomerContact" maxlength="35"></div><div class="field"><label for="editCustomerList">Lista de precios</label><select id="editCustomerList"></select></div><div class="field wide"><label for="editCustomerAddress">Dirección</label><input id="editCustomerAddress" maxlength="100"></div><div class="field"><label for="editCustomerLocality">Localidad</label><input id="editCustomerLocality" maxlength="50"></div><div class="field"><label for="editCustomerZip">Código postal</label><input id="editCustomerZip" maxlength="20"></div><div class="field"><label for="editCustomerPhone">Teléfono</label><input id="editCustomerPhone" maxlength="50"></div><div class="field"><label for="editCustomerMobile">Celular</label><input id="editCustomerMobile" maxlength="50"></div><div class="field"><label for="editCustomerTax">Tipo de IVA *</label><select id="editCustomerTax"></select></div><div class="field"><label for="editCustomerDocType">Tipo de documento *</label><select id="editCustomerDocType"></select></div><div class="field"><label for="editCustomerDocument">Número de documento</label><input id="editCustomerDocument" maxlength="13"></div><div class="field"><label for="editCustomerSeller">Vendedor *</label><select id="editCustomerSeller"></select></div><div class="field"><label for="editCustomerPayment">Tipo de pago *</label><select id="editCustomerPayment"></select></div><div class="field"><label for="editCustomerDiscount">Descuento %</label><input id="editCustomerDiscount" type="number" min="0" max="100" step="0.01" value="0"></div><div class="field"><label for="editCustomerCredit">Límite de crédito $</label><input id="editCustomerCredit" type="number" min="0" step="0.01" value="0"></div><div class="field"><label for="editCustomerSaldo">Saldo cta. cte. $</label><input id="editCustomerSaldo" class="readonly" readonly></div><div class="field"><label for="editCustomerAvailable">Cupo disponible $</label><input id="editCustomerAvailable" inputmode="decimal"></div><div class="field wide"><label for="editCustomerEmail">Email</label><input id="editCustomerEmail" type="email" maxlength="150"></div><div class="field wide"><label for="editCustomerWeb">Web</label><input id="editCustomerWeb" maxlength="150"></div><div class="field wide"><label for="editCustomerCbu">CBU</label><input id="editCustomerCbu" maxlength="22"></div><div class="field wide"><label for="editCustomerAlias">Alias CBU</label><input id="editCustomerAlias" maxlength="100"></div><div class="field full"><label for="editCustomerNote">Nota</label><textarea id="editCustomerNote" maxlength="4000"></textarea></div></form><div class="customer-form-error" id="customerFormError" role="alert"></div><footer class="customer-form-actions"><button id="cancelCustomer" type="button">Cancelar</button><button id="saveCustomer" class="primary" type="submit" form="customerForm">Guardar cliente</button></footer></section></div>
 <div class="modal-wrap" id="draftModal" role="dialog" aria-modal="true" aria-label="Emisiones pendientes"><section class="modal"><header class="modal-head"><h2>Emisiones pendientes</h2><button id="closeDrafts" type="button">Cerrar</button></header><div class="draft-list" id="draftList"></div></section></div>
@@ -181,7 +195,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.35"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.36"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -902,10 +916,11 @@ function renderSuggestionItems(){
     `<button type="button" class="suggestion-filter" data-filter-suggestions aria-pressed="${suggestionsMatchesOnly}" ${!norm(normalizedLookupValue(activeSuggestionInput||{value:'',dataset:{}}))?'disabled':''}>${suggestionsMatchesOnly?'▾ Mostrar lista':'▴ Filtrar'}</button>`;
   box.querySelectorAll('[data-suggestion]').forEach(el=>el.addEventListener('mousedown',event=>{if(event.button!==0)return;event.preventDefault();pickSuggestion(+el.dataset.suggestion)}));
 }
-let contextSuggestionItem=null,faltantesFirebaseLoading=null,webEditorArticles=[];
+let contextSuggestionItem=null,contextSuggestionRow=null,faltantesFirebaseLoading=null,webEditorArticles=[];
 function closeSuggestionContextMenu(){
   $('#suggestionContextMenu').classList.remove('open');
   contextSuggestionItem=null;
+  contextSuggestionRow=null;
 }
 function webCartProgress(value,label){
   let box=$('#webCartProgress');
@@ -1002,12 +1017,109 @@ function loadPaymentRules(){
   })();
   return paymentRulesLoading;
 }
-function openArticleContextMenu(article,event){
+let cachedBillingAridos = [];
+let billingAridosLoad = null;
+async function loadBillingAridosCache() {
+  if (billingAridosLoad) return billingAridosLoad;
+  billingAridosLoad = (async () => {
+    const rows = await CorralonSystem.catalog.cachedRows();
+    cachedBillingAridos = rows.map(row => ({...row, codigo:String(row.codigo||row.idart||'')}));
+    CorralonSystem.aridos.configure({getArticles:()=>cachedBillingAridos, importSql:null, hideExport:true,
+      cartLabel:'Agregar a facturación', addToCart:addBillingAridos});
+    return cachedBillingAridos;
+  })();
+  try { return await billingAridosLoad; } finally { billingAridosLoad = null; }
+}
+async function refreshBillingPrices() {
+  const button=$('#refreshArticlePrices');
+  if(button.disabled)return;
+  closeSuggestionContextMenu();hideSuggestions();button.disabled=true;button.textContent='Actualizando…';
+  try {
+    await Promise.all([CorralonSystem.catalog.refresh({fallback:false}),CorralonSystem.aridos.refresh(),loadSqlCatalog({throwOnError:true})]);
+    await loadBillingAridosCache();
+    setMsg('Precios y copia local de Index actualizados.','ok');
+  } catch(error){setMsg(error.message,'error');} finally {button.disabled=false;button.textContent='Actualizar precios';}
+}
+$('#refreshArticlePrices').addEventListener('click',refreshBillingPrices);
+$('#budgetSuggestionAridos').addEventListener('click',async()=>{
+  const item=contextSuggestionItem;
+  const target={row:contextSuggestionRow,draftId};
+  closeSuggestionContextMenu();
+  if(!item||!target.row)return;
+  try {
+    await loadBillingAridosCache();
+    if(target.draftId!==draftId||!articles.includes(target.row))return;
+    hideSuggestions();
+    billingAridosTarget=target;
+    if(!CorralonSystem.aridos.openBudget(String(item.idart),{returnFocus:activeSuggestionInput||document.activeElement})){
+      billingAridosTarget=null;
+      setMsg('No se encontró la configuración de este árido en la copia local. Pulsá Actualizar precios para sincronizarla.','error');
+    }
+  }catch(error){setMsg(error.message,'error');}
+});
+async function importBillingAridos(payload) {
+  const ids=payload.materials.map(item=>String(item.code));
+  if(new Set(ids).size!==ids.length)throw new Error('Elegí cada árido una sola vez para actualizar su precio.');
+  const lines=[];
+  for(const item of payload.materials){
+    const response=await fetch(`${SQL_PREPARACION}/articulos-sql?id=${encodeURIComponent(item.code)}`,{cache:'no-store'});
+    const result=await response.json();
+    if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar el artículo SQL.');
+    lines.push({idart:item.code,version:result.articulo.version,costoConIva:item.costUnit});
+  }
+  const response=await fetch(`${SQL_PREPARACION}/articulos-sql`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({accion:'presupuestar-aridos',usuarioId:uid().id,articulos:lines})});
+  const result=await response.json();
+  if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo importar en SQL.');
+  const refreshed=await loadSqlCatalog({throwOnError:true});
+  if(!refreshed)throw new Error('Los precios se guardaron en SQL. Elegí el punto de venta y pulsá Actualizar precios.');
+}
+let billingAridosBusy=false,billingAridosTarget=null;
+async function addBillingAridos(payload) {
+  if(billingAridosBusy)return;
+  if(issuedReceipt||issueInProgress)throw new Error('Abrí un comprobante nuevo para agregar artículos.');
+  const target=billingAridosTarget;
+  const targetIndex=()=>target?.draftId===draftId?articles.indexOf(target.row):-1;
+  if(targetIndex()<0)throw new Error('La fila original ya no está disponible. Volvé a presupuestar el árido desde su fila.');
+  for(const item of payload.materials){
+    if(!catalog.some(row=>String(row.idart)===String(item.code)))throw new Error(`El árido ${item.code} no está disponible en SQL.`);
+  }
+  const button=document.querySelector('[data-arid-cart]');
+  billingAridosBusy=true;
+  if(button){button.disabled=true;button.textContent='Actualizando SQL…';}
+  try {
+    await importBillingAridos(payload);
+    const selected=payload.materials.map(item=>({idart:String(item.code),cantidad:item.meters}));
+    const loaded=selected.map(item=>{
+      const found=catalog.find(row=>String(row.idart)===item.idart);
+      if(!found)throw new Error(`El árido ${item.idart} no está disponible en el catálogo SQL actualizado.`);
+      return {...blankArticle(),idart:item.idart,codProv:found.codProv||'',descripcion:found.descripcion,
+        cantidad:item.cantidad,precio:roundMoney(n(found.precioFinal)),precioBase:roundMoney(n(found.precioFinal)),costoFinal:n(found.costoFinal),
+        idMoneda:Number(found.idMoneda)||1,cotizacion:n(found.cotizacion),stock:n(found.stock),iva:n(found.iva)};
+    });
+    const index=targetIndex();
+    if(index<0||issuedReceipt||issueInProgress)throw new Error('Los precios se actualizaron en SQL, pero la fila original ya no está disponible. Volvé a abrir el presupuesto.');
+    articles.splice(index,1,...loaded);
+    billingAridosTarget=null;
+    renderArticles();scheduleDraft();
+    setMsg('Fila reemplazada con los áridos y sus precios recalculados en SQL.','ok');
+  }catch(error){setMsg(error.message,'error');throw error;}
+  finally {billingAridosBusy=false;if(button){button.disabled=false;button.textContent='Agregar a facturación';}}
+}
+function openArticleContextMenu(article,event,rowIndex=null){
   event.preventDefault();
   contextSuggestionItem=article?{...article}:null;
+  contextSuggestionRow=Number.isInteger(rowIndex)?articles[rowIndex]||null:null;
   $('#sendSuggestionToMissing').hidden=!article;
   $('#editSuggestionWeb').hidden=!article;
   $('#editSuggestionSql').hidden=!article||!canEditSqlArticle();
+  const aridButton=$('#budgetSuggestionAridos');
+  aridButton.hidden=true;
+  if(article)loadBillingAridosCache().then(()=>{
+    if(String(contextSuggestionItem?.idart)!==String(article.idart))return;
+    const cached=cachedBillingAridos.find(row=>row.codigo===String(article.idart));
+    aridButton.hidden=!cached||!CorralonSystem.aridos.getConfig(cached).activo;
+  }).catch(console.warn);
   const menu=$('#suggestionContextMenu');
   menu.classList.add('open');
   menu.style.left=`${Math.max(4,Math.min(event.clientX,innerWidth-menu.offsetWidth-4))}px`;
@@ -1018,7 +1130,7 @@ $('#suggestions').addEventListener('contextmenu',event=>{
   if(!row)return;
   const article=suggestionItems[Number(row.dataset.suggestion)];
   if(!article)return;
-  openArticleContextMenu(article,event);
+  openArticleContextMenu(article,event,activeSuggestionInput?Number(activeSuggestionInput.dataset.row):null);
 });
 $('#articleBody').addEventListener('contextmenu',event=>{
   const row=event.target.closest('tr[data-row]');
@@ -1029,7 +1141,7 @@ $('#articleBody').addEventListener('contextmenu',event=>{
   openArticleContextMenu({...catalogArticle,...article,
     idProveedor:catalogArticle?.idProveedor||article.idProveedor||'',
     proveedor:catalogArticle?.proveedor||article.proveedor||'',
-    precioFinal:n(article.precioBase)||n(article.precio)},event);
+    precioFinal:n(article.precioBase)||n(article.precio)},event,Number(row.dataset.row));
 });
 $('#suggestionContextMenu').addEventListener('mousedown',event=>event.stopPropagation());
 document.addEventListener('keydown',event=>{if(event.key==='Escape')closeSuggestionContextMenu()});
@@ -1169,7 +1281,7 @@ function pickSuggestion(i){
   refreshSelectedStock().catch(console.warn);
   setTimeout(()=>$('#articleBody [data-row="'+row+'"][data-a="cantidad"]')?.focus(),0);
 }
-function formData(){const t=totals(),u=uid();return{id:draftId||newDraftId(),updatedAt:Date.now(),createdAt:lastSaved?.createdAt||Date.now(),usuarioId:String(u.id||''),idOperador:Number(u.idOperador)||null,usuario:String(u.nombre||u.usuario||''),sucursal:$('#branch').value,idPuntoVenta:Number($('#pos').value)||0,idCliente:Number($('#customerName').dataset.idCliente??'1'),puntoVenta:$('#pos').selectedOptions[0]?.textContent||'',idComprobante:Number($('#voucherType').value)||0,tipoComprobante:$('#voucherType').selectedOptions[0]?.textContent||'',fecha:$('#date').value,cae:$('#cae').value,facturaAsociada:[5,6,7,8,29].includes(Number($('#voucherType').value))?$('#invoiceReference').value.trim():'',vendedor:$('#seller').value,listaPrecios:$('#priceList').value,cliente:{tipoDocumento:$('#docType').value,numeroDocumento:$('#docNumber').value,nombre:customerUpper($('#customerName').value),condicionIva:$('#customerTax').value,telefono:$('#customerPhone').value,direccion:$('#customerAddress').value,email:$('#customerEmail').value},articulos:structuredClone(articles.filter(r=>String(r.idart||'').trim()&&n(r.cantidad)>0)),valores:payments.filter(r=>n(r.importe)>0).map(r=>({...r,idTipoPago:Number(r.idTipoPago)||Number((sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(r.tipo))?.id)||0})),nota:$('#note').value,totales:t,estado:issuedReceipt?'emitido':'borrador',emision:issuedReceipt,recoveryPending}}
+function formData(){const t=totals(),u=uid();return{id:draftId||newDraftId(),updatedAt:Date.now(),createdAt:lastSaved?.createdAt||Date.now(),usuarioId:String(u.id||''),idOperador:Number(u.idOperador)||null,usuario:String(u.nombre||u.usuario||''),sucursal:$('#branch').value,idPuntoVenta:Number($('#pos').value)||0,idCliente:Number($('#customerName').dataset.idCliente??'1'),puntoVenta:$('#pos').selectedOptions[0]?.textContent||'',idComprobante:Number($('#voucherType').value)||0,tipoComprobante:$('#voucherType').selectedOptions[0]?.textContent||'',fecha:$('#date').value,cae:$('#cae').value,facturaAsociada:[5,6,7,8,29].includes(Number($('#voucherType').value))?$('#invoiceReference').value.trim():'',vendedor:$('#seller').value,listaPrecios:$('#priceList').value,cliente:{tipoDocumento:$('#docType').value,numeroDocumento:$('#docNumber').value,nombre:customerUpper($('#customerName').value),condicionIva:$('#customerTax').value,telefono:$('#customerPhone').value,direccion:$('#customerAddress').value,email:$('#customerEmail').value},articulos:structuredClone(articles.filter(r=>String(r.idart||'').trim()&&n(r.cantidad)>0)),valores:payments.filter(r=>n(r.importe)>0).map(r=>({...r,idTipoPago:Number(r.idTipoPago)||Number((sqlConfig?.tiposPago||[]).find(x=>norm(x.nombre)===norm(r.tipo))?.id)||0})),nota:$('#note').value,totales:t,estado:issuedReceipt?'emitido':'borrador',emision:issuedReceipt,recoveryPending,aridosEntrega:aridosEntrega?structuredClone(aridosEntrega):null}}
 let associatedReceiptId=0;
 const formDataWithoutAssociation=formData;
 formData=function(){const data=formDataWithoutAssociation(),associate=[5,6,7,8,29].includes(Number(data.idComprobante));return{...data,boletaOrigen:$('#invoiceReference').value.trim(),idBoletaOrigen:associatedReceiptId,idFacturaAsociada:associate?associatedReceiptId:0}};
@@ -1194,7 +1306,7 @@ function updateTrialButton(){
   $('#issueInvoice').disabled=Boolean(issuedReceipt||recoveryPending||issueInProgress||saleSwitchBusy)||!enabled||!localDraftStoreReady||!$('#pos').value||!$('#seller').value;
 }
 function renderVoucherTypes(preferred){if(!sqlConfig)return;const point=Number($('#pos').value),types=sqlConfig.comprobantes.filter(x=>Number(x.idPuntoVenta)===point);$('#voucherType').innerHTML=types.map(x=>`<option value="${x.id}">${esc(x.codigo)} · ${esc(x.nombre)}</option>`).join('');const chosen=types.find(x=>String(x.id)===String(preferred))||types.find(x=>Number(x.id)===13)||types[0];if(chosen)$('#voucherType').value=String(chosen.id);refreshPaymentTypeOptions();markPaymentRuleProblems();updateTrialButton()}
-function applyData(d){paymentUndoHistory.length=0;paymentEditState=null;const station=workstation();issuedReceipt=d?.emision||null;draftId=d?.id||'';$('#branch').value=d?.sucursal||station.branch||'';$('#date').value=d?.fecha||today();$('#cae').value=d?.emision?.cae||d?.cae||'';$('#invoiceReference').value=d?.facturaAsociada||'';$('#seller').value=String((sqlConfig?.vendedores||[]).find(x=>String(x.id)===String(d?.vendedor||station.seller)||norm(x.nombre)===norm(d?.vendedor))?.id||'');const listaAnterior={minorista:'3',intermedio:'2',mayorista:'1'};$('#priceList').value=listaAnterior[d?.listaPrecios]||d?.listaPrecios||'3';$('#docType').value=d?.cliente?.tipoDocumento||'DNI';$('#docNumber').value=d?.cliente?.numeroDocumento||'';$('#customerName').value=customerUpper(d?.cliente?.nombre||'CONSUMIDOR FINAL');$('#customerName').dataset.idCliente=d?.idCliente||(norm(d?.cliente?.nombre||'CONSUMIDOR FINAL')==='consumidor final'?'1':'1');$('#customerTax').value=d?.cliente?.condicionIva||'Consumidor final';$('#customerPhone').value=d?.cliente?.telefono||'';$('#customerAddress').value=d?.cliente?.direccion||'';$('#customerEmail').value=d?.cliente?.email||'';$('#note').value=d?.nota||'';articles=(d?.uiArticulos||d?.articulos||[]).map(x=>({...blankArticle(),...x}));payments=(d?.uiValores||d?.valores||[]).map(x=>({...blankPayment(),...x,idTarjeta:Number(x.idTarjeta)||Number((sqlConfig?.tarjetas||[]).find(t=>norm(t.nombre)===norm(x.tarjeta))?.id)||0,coef:n(x.coef),impRec:n(x.impRec)}));renderArticles();renderPayments();lastSaved=d?structuredClone(d):null;$('#pos').value=String(d?.idPuntoVenta||(sqlConfig?.puntosVenta||[]).find(x=>String(x.id)===String(d?.puntoVenta)||norm(x.nombre)===norm(d?.puntoVenta))?.id||station.pos||'');renderVoucherTypes(d?.idComprobante||(sqlConfig?.comprobantes||[]).find(x=>norm(x.nombre)===norm(d?.tipoComprobante))?.id||13);lockIssued();setMsg(issuedReceipt?'Comprobante emitido en SQL. Podés reimprimirlo.':d?'Borrador cargado.':'Nuevo comprobante.','ok')}
+function applyData(d){aridosEntrega=d?.aridosEntrega?structuredClone(d.aridosEntrega):null;paymentUndoHistory.length=0;paymentEditState=null;const station=workstation();issuedReceipt=d?.emision||null;draftId=d?.id||'';$('#branch').value=d?.sucursal||station.branch||'';$('#date').value=d?.fecha||today();$('#cae').value=d?.emision?.cae||d?.cae||'';$('#invoiceReference').value=d?.facturaAsociada||'';$('#seller').value=String((sqlConfig?.vendedores||[]).find(x=>String(x.id)===String(d?.vendedor||station.seller)||norm(x.nombre)===norm(d?.vendedor))?.id||'');const listaAnterior={minorista:'3',intermedio:'2',mayorista:'1'};$('#priceList').value=listaAnterior[d?.listaPrecios]||d?.listaPrecios||'3';$('#docType').value=d?.cliente?.tipoDocumento||'DNI';$('#docNumber').value=d?.cliente?.numeroDocumento||'';$('#customerName').value=customerUpper(d?.cliente?.nombre||'CONSUMIDOR FINAL');$('#customerName').dataset.idCliente=d?.idCliente||(norm(d?.cliente?.nombre||'CONSUMIDOR FINAL')==='consumidor final'?'1':'1');$('#customerTax').value=d?.cliente?.condicionIva||'Consumidor final';$('#customerPhone').value=d?.cliente?.telefono||'';$('#customerAddress').value=d?.cliente?.direccion||'';$('#customerEmail').value=d?.cliente?.email||'';$('#note').value=d?.nota||'';articles=(d?.uiArticulos||d?.articulos||[]).map(x=>({...blankArticle(),...x}));payments=(d?.uiValores||d?.valores||[]).map(x=>({...blankPayment(),...x,idTarjeta:Number(x.idTarjeta)||Number((sqlConfig?.tarjetas||[]).find(t=>norm(t.nombre)===norm(x.tarjeta))?.id)||0,coef:n(x.coef),impRec:n(x.impRec)}));renderArticles();renderPayments();lastSaved=d?structuredClone(d):null;$('#pos').value=String(d?.idPuntoVenta||(sqlConfig?.puntosVenta||[]).find(x=>String(x.id)===String(d?.puntoVenta)||norm(x.nombre)===norm(d?.puntoVenta))?.id||station.pos||'');renderVoucherTypes(d?.idComprobante||(sqlConfig?.comprobantes||[]).find(x=>norm(x.nombre)===norm(d?.tipoComprobante))?.id||13);lockIssued();setMsg(issuedReceipt?'Comprobante emitido en SQL. Podés reimprimirlo.':d?'Borrador cargado.':'Nuevo comprobante.','ok')}
 const applyDataOriginal=applyData;
 const INTERRUPTED_SALES_KEY='corralon_facturacion_resguardo_v1';
 function interruptedSales(){try{return JSON.parse(localStorage.getItem(INTERRUPTED_SALES_KEY)||'{}')}catch{return {}}}
@@ -1296,7 +1408,7 @@ showDrafts=async function(){
     finally{button.disabled=false}
   }));
 };
-async function refreshPendingButton(){const count=(await allDrafts()).filter(pendingLocalSale).length;$('#openDrafts').hidden=count===0;$('#openDrafts').textContent=`Pendientes (${count})`}
+async function refreshPendingButton(){const drafts=await allDrafts(),count=drafts.filter(pendingLocalSale).length;$('#openDrafts').hidden=count===0;$('#openDrafts').textContent=`Pendientes (${count})`;aridosRetryButton.hidden=!drafts.some(data=>data.emision?.idRecibo&&data.aridosEntrega&&!data.aridosEntrega.complete)}
 const saveDraftOriginal=saveDraft;
 saveDraft=async function(silent=false){await saveDraftOriginal(silent);await refreshPendingButton()};
 async function loadConfig(){
@@ -1341,10 +1453,20 @@ async function sqlConnectionAvailable(){
   }catch{return false}
 }
 let printerOptionsInitialized=false;
-async function loadTicketPrinters(){
+let localPrinterProbe=null,localPrinterRetryAt=0;
+function loadLocalTicketPrinters(force=false){
+  if(localPrinterProbe)return localPrinterProbe;
+  if(!force&&Date.now()<localPrinterRetryAt)return Promise.resolve([]);
+  localPrinterProbe=fetch(`${LOCAL_PRINTER_API}/impresoras`,{cache:'no-store',signal:AbortSignal.timeout(1200)})
+    .then(async response=>{const data=await response.json();if(!response.ok||!data.ok)throw new Error('Conector local no disponible.');localPrinterRetryAt=0;return data.impresoras||[]})
+    .catch(()=>{localPrinterRetryAt=Date.now()+60000;return []})
+    .finally(()=>{localPrinterProbe=null});
+  return localPrinterProbe;
+}
+async function loadTicketPrinters(settings={}){
   const [central,local]=await Promise.allSettled([
     fetch(`${SQL_PREPARACION}/impresoras`,{cache:'no-store'}).then(async response=>{const data=await response.json();if(!response.ok||!data.ok)throw new Error('No se pudieron consultar las impresoras del servidor.');return data.impresoras||[]}),
-    fetch(`${LOCAL_PRINTER_API}/impresoras`,{cache:'no-store',signal:AbortSignal.timeout(1200)}).then(async response=>{const data=await response.json();if(!response.ok||!data.ok)throw new Error('Conector local no disponible.');return data.impresoras||[]})
+    loadLocalTicketPrinters(settings.forceLocal===true)
   ]);
   const printers=[BROWSER_PRINTER,...(local.status==='fulfilled'?local.value:[]).map(name=>`local:${name}`),...(central.status==='fulfilled'?central.value:[]).map(name=>`server:${name}`)];
   let saved='';try{saved=localStorage.getItem(TICKET_PRINTER_KEY)||''}catch{}
@@ -1358,7 +1480,7 @@ async function loadTicketPrinters(){
   $('#doPrintTrial').disabled=Boolean((previewDraft?.emision||issuedReceipt)&&!selected&&$('#trialModal').classList.contains('open'));
   return printers;
 }
-async function loadSqlCatalog(){
+async function loadSqlCatalog(options={}){
   if(!sqlConfig)return;
   const point=$('#pos').value,list=$('#priceList').value;
   if(!point){catalog=[];catalogOrdered=[];$('#catalogStatus').textContent='Elegí sucursal y punto de venta';return}
@@ -1374,9 +1496,11 @@ async function loadSqlCatalog(){
     stockStatusError=false;
     $('#catalogStatus').textContent=`${catalog.length.toLocaleString('es-AR')} artículos de SQL Server`;
     refreshSelectedStock().catch(console.warn);
+    return true;
   }catch(e){
     if(point!==$('#pos').value||list!==$('#priceList').value)return;
     console.warn(e);catalog=[];catalogOrdered=[];$('#catalogStatus').textContent='Catálogo SQL no disponible';setMsg(e.message,'error');
+    if(options.throwOnError)throw e;
   }
 }
 async function refreshSelectedStock(){
@@ -2290,6 +2414,154 @@ async function openBudgetPreview(data,receipt,popup=null){
   setTimeout(()=>URL.revokeObjectURL(pdfUrl),60000);
   return opened;
 }
+let aridosEntrega=null;
+function saleNeedsAridosDelivery(data){return ![5,6,29,43].includes(Number(data.idComprobante));}
+async function chooseAridosDelivery(data){
+  if(!saleNeedsAridosDelivery(data))return null;
+  const cache=await CorralonSystem.aridos.loadCachedConfig();
+  if(!cache.available)await CorralonSystem.aridos.refresh();
+  const lines=data.articulos.filter(row=>CorralonSystem.aridos.getConfig(row.idart).activo).map(row=>({idart:String(row.idart),cant:n(row.cantidad),desc:row.descripcion,precio:n(row.costoFinal)}));
+  if(!lines.length)return null;
+  if(lines.some(row=>row.cant<=0||row.precio<=0))throw new Error('Falta el costo SQL de un árido. Actualizá los precios antes de confirmar.');
+  let providers=await CorralonSystem.getProvidersCache();
+  if(!providers.length)providers=await CorralonSystem.syncProvidersCache();
+  const valid=providers.filter(provider=>/^\d+$/.test(CorralonSystem.providerIdentity.externalId(provider)));
+  if(!valid.length)throw new Error('No hay proveedores web con ID SQL para elegir.');
+  const dialog=document.createElement('dialog');
+  dialog.className='aridos-delivery-dialog';
+  dialog.style.cssText='width:min(460px,92vw);box-sizing:border-box;padding:20px;border:1px solid #ccc;border-radius:12px;overflow:visible';
+  dialog.innerHTML=`<h3 style="margin:0 0 14px">¿Qué proveedor entrega el árido?</h3><label for="aridosDeliveryProvider">Proveedor</label><div style="position:relative;margin:6px 0 12px"><div data-delivery-combo style="display:flex;border:1px solid #ccc;border-radius:7px;overflow:hidden"><input id="aridosDeliveryProvider" data-delivery-provider role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="aridosDeliveryProviders" autocomplete="off" placeholder="Buscar por nombre o ID…" style="flex:1;min-width:0;padding:9px;border:0;outline:none"><button type="button" data-delivery-toggle aria-label="Mostrar proveedores" style="border:0;border-left:1px solid #ddd;padding:0 10px;background:#f5f5f5">▾</button></div><div id="aridosDeliveryProviders" data-delivery-list role="listbox" hidden style="position:absolute;top:100%;left:0;right:0;z-index:1;max-height:180px;overflow:auto;background:white;border:1px solid #ccc;border-radius:7px;box-shadow:0 4px 12px #0002"></div></div><p class="delivery-note">Se generará un remito web con las cantidades vendidas y el precio de costo con IVA.</p><div class="delivery-actions" style="display:flex;gap:8px;justify-content:flex-end"><button data-delivery-cancel>Cancelar</button><button data-delivery-confirm>Confirmar venta</button></div>`;
+  document.body.appendChild(dialog);
+  const field=dialog.querySelector('[data-delivery-provider]');
+  const list=dialog.querySelector('[data-delivery-list]');
+  const label=provider=>`${provider.proveedor} · ${CorralonSystem.providerIdentity.externalId(provider)}`;
+  const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+  const previous=valid.find(provider=>String(provider.id_proveedor)===String(aridosEntrega?.provider?.id_proveedor));
+  let selected=previous||null,matches=[],active=0,searchStarted=false;
+  if(previous)field.value=label(previous);
+  const closeList=()=>{list.hidden=true;field.setAttribute('aria-expanded','false');field.removeAttribute('aria-activedescendant');};
+  const renderList=()=>{
+    const query=normalize(field.value);
+    if(!searchStarted||!query){matches=[];closeList();return;}
+    matches=valid.filter(provider=>normalize(label(provider)).includes(query));
+    active=Math.min(Math.max(active,0),Math.max(matches.length-1,0));
+    list.innerHTML=matches.length?matches.map((provider,index)=>`<button type="button" id="aridosDeliveryOption${index}" role="option" aria-selected="${index===active}" data-delivery-option="${index}" title="${esc(label(provider))}" style="display:block;box-sizing:border-box;width:100%;margin:0;border-radius:0;text-align:left;border:0;border-bottom:1px solid #eee;padding:8px 10px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:${index===active?'#edf4ff':'white'};cursor:pointer">${esc(label(provider))}</button>`).join(''):'<div style="padding:9px;color:#777">Sin coincidencias</div>';
+    list.hidden=false;field.setAttribute('aria-expanded','true');
+    if(matches.length)field.setAttribute('aria-activedescendant',`aridosDeliveryOption${active}`);else field.removeAttribute('aria-activedescendant');
+  };
+  const pick=index=>{if(!matches[index])return;selected=matches[index];searchStarted=false;field.value=label(selected);field.setCustomValidity('');closeList();field.focus();};
+  field.addEventListener('input',()=>{selected=null;searchStarted=true;active=0;field.setCustomValidity('');renderList();});
+  field.addEventListener('focus',()=>{active=0;renderList();});
+  field.addEventListener('blur',()=>{if(!dialog.contains(document.activeElement)||!list.contains(document.activeElement))closeList();});
+  dialog.querySelector('[data-delivery-toggle]').addEventListener('mousedown',event=>event.preventDefault());
+  dialog.querySelector('[data-delivery-toggle]').addEventListener('click',()=>{const open=list.hidden;field.focus();if(open){active=0;renderList();}else closeList();});
+  list.addEventListener('mousedown',event=>event.preventDefault());
+  list.addEventListener('click',event=>{const option=event.target.closest('[data-delivery-option]');if(option)pick(Number(option.dataset.deliveryOption));});
+  field.addEventListener('keydown',event=>{
+    if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+      event.preventDefault();if(list.hidden){active=0;renderList();}else{active=Math.min(Math.max(active+(event.key==='ArrowDown'?1:-1),0),Math.max(matches.length-1,0));renderList();}
+      const option=list.querySelector('[aria-selected="true"]');
+      if(option){if(option.offsetTop<list.scrollTop)list.scrollTop=option.offsetTop;else if(option.offsetTop+option.offsetHeight>list.scrollTop+list.clientHeight)list.scrollTop=option.offsetTop+option.offsetHeight-list.clientHeight;}
+    }else if(event.key==='Enter'&&!list.hidden){event.preventDefault();pick(active);}
+    else if(event.key==='Escape'&&!list.hidden){event.preventDefault();event.stopPropagation();closeList();}
+  });
+  return new Promise(resolve=>{
+    const finish=value=>{dialog.remove();resolve(value);};
+    dialog.querySelector('[data-delivery-cancel]').onclick=()=>finish(false);
+    dialog.addEventListener('cancel',event=>{event.preventDefault();finish(false);});
+    dialog.querySelector('[data-delivery-confirm]').onclick=()=>{
+      const exact=valid.filter(provider=>normalize(label(provider))===normalize(field.value)||normalize(provider.proveedor)===normalize(field.value)||CorralonSystem.providerIdentity.externalId(provider)===field.value.trim());
+      const provider=selected||(exact.length===1?exact[0]:null);
+      if(!provider){field.setCustomValidity('Seleccioná un proveedor de la lista.');field.reportValidity();field.focus();return;}
+      finish({provider:{id_proveedor:provider.id_proveedor,nombre:provider.proveedor,sqlId:Number(CorralonSystem.providerIdentity.externalId(provider))},items:lines,complete:false});
+    };
+    dialog.showModal();field.focus();
+  });
+}
+async function saveAridosDeliveryState(data){
+  const database=await openDB();
+  try {await new Promise((resolve,reject)=>{
+    const tx=database.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),request=store.get(data.id);
+    request.onsuccess=()=>{
+      const current=request.result;
+      if(!current?.emision||Number(current.emision.idRecibo)!==Number(data.emision?.idRecibo)){tx.abort();return;}
+      store.put({...current,aridosEntrega:structuredClone(data.aridosEntrega),updatedAt:Date.now()});
+    };
+    tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('No se pudo guardar el estado del remito en esta PC.'));
+  });}finally{database.close();}
+}
+const aridosDeliverySyncs=new Map();
+async function syncAridosDelivery(data){
+  if(aridosDeliverySyncs.has(data.id))return aridosDeliverySyncs.get(data.id);
+  const work=()=>performAridosDeliverySync(data);
+  const promise=globalThis.navigator?.locks?.request
+    ?navigator.locks.request('aridos-remito-venta-'+data.id,work):work();
+  aridosDeliverySyncs.set(data.id,promise);
+  try{return await promise;}finally{aridosDeliverySyncs.delete(data.id);}
+}
+async function performAridosDeliverySync(data){
+  const delivery=data.aridosEntrega;
+  if(!delivery||delivery.complete||!data.emision?.idRecibo||!saleNeedsAridosDelivery(data))return;
+  const root=CorralonSystem.SUPABASE_URL+'/rest/v1/';
+  const request=async(path,method='GET',body)=>{
+    const response=await fetch(root+path,{method,headers:CorralonSystem.headers({'Content-Type':'application/json',Prefer:'return=representation'}),...(body===undefined?{}:{body:JSON.stringify(body)})});
+    const result=await response.json().catch(()=>null);
+    if(!response.ok)throw new Error(result?.message||'No se pudo guardar el remito web.');return result;
+  };
+  const saleId=String(data.emision.idRecibo);
+  let found=await request('remitos?sql_resultado->>venta_aridos_id=eq.'+encodeURIComponent(saleId)+'&select=*&limit=2');
+  if(found.length>1)throw new Error('Hay más de un remito vinculado a esta venta. Revisalo en Historial.');
+  let header=found[0];
+  if(!header){
+    // Seguir el orden de Historial. El salto ya vinculado a SQL se conserva,
+    // pero no se usa como base de la secuencia web.
+    const last=await request('remitos?select=nro&nro=neq.0001-00748370&order=fecha_iso.desc.nullslast,id.desc&limit=1');
+    if(!Array.isArray(last))throw new Error('No se pudo consultar el último número de remito.');
+    const previous=last.length?Number(String(last[0].nro||'').split('-').pop()):0;
+    if(!Number.isSafeInteger(previous)||previous<0)throw new Error('El último número de remito no es válido.');
+    const next=previous+1;
+    if(next>99999999)throw new Error('Se agotó la numeración de remitos.');
+    const branch=CorralonSystem.BRANCHES.find(row=>row.id===data.sucursal)?.label||data.sucursal;
+    const date=data.fecha.split('-').reverse().join('/');
+    const total=roundMoney(delivery.items.reduce((sum,row)=>sum+row.cant*row.precio,0));
+    const result=await request('remitos','POST',{nro:'0001-'+String(next).padStart(8,'0'),numero_manual:false,cliente:delivery.provider.nombre,
+      proveedor_web_id:delivery.provider.id_proveedor,proveedor_sql_id:delivery.provider.sqlId,fecha:date,fecha_iso:data.fecha,total,sucursal:branch,
+      usuario_id:data.usuarioId,usuario_nombre:data.usuario,sql_resultado:{venta_aridos_id:saleId,venta_numero:data.emision.numero}});
+    header=result?.[0];if(!header?.id)throw new Error('No se recibió el remito web guardado.');
+  }
+  delivery.remitoId=header.id;delivery.numero=header.nro;
+  await saveAridosDeliveryState({...data,aridosEntrega:delivery});
+  const existing=await request('items_remito?remito_id=eq.'+encodeURIComponent(header.id)+'&select=idart,cant,precio,descripcion');
+  if(!existing.length){
+    await request('items_remito','POST',delivery.items.map(row=>({remito_id:header.id,idart:row.idart,cant:row.cant,precio:row.precio,descripcion:row.desc})));
+  }else{
+    const expected=delivery.items.map(row=>[row.idart,n(row.cant),n(row.precio),row.desc].join('|')).sort();
+    const actual=existing.map(row=>[row.idart,n(row.cant),n(row.precio),row.descripcion].join('|')).sort();
+    if(JSON.stringify(expected)!==JSON.stringify(actual))throw new Error('Los artículos del remito web no coinciden. Revisalo en Historial.');
+  }
+  await ensureFaltantesFirebase();
+  if(!firebase.apps.length)firebase.initializeApp({apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',authDomain:'corralon-progreso.firebaseapp.com',projectId:'corralon-progreso'});
+  const notification=firebase.firestore().collection('historialNotificaciones').doc('remito_'+header.id);
+  const snapshot=await notification.get();
+  if(!snapshot.exists)await notification.set({tipo:'remito',id:String(header.id),titulo:'Remito',detalle:header.cliente,cliente:header.cliente,fecha:header.fecha,
+    sucursal:header.sucursal,usuario_id:data.usuarioId,usuario_nombre:data.usuario,total:header.total,resuelta:false,
+    createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+  delivery.complete=true;delete delivery.error;
+  await saveAridosDeliveryState({...data,aridosEntrega:delivery});
+  if(draftId===data.id)aridosEntrega=delivery;
+  await refreshPendingButton();
+}
+const aridosRetryButton=document.createElement('button');
+aridosRetryButton.type='button';aridosRetryButton.hidden=true;aridosRetryButton.textContent='Reintentar remitos de áridos';
+$('#openDrafts').after(aridosRetryButton);
+aridosRetryButton.addEventListener('click',async()=>{
+  if(aridosRetryButton.disabled)return;aridosRetryButton.disabled=true;
+  try{
+    const pending=(await allDrafts()).filter(data=>data.emision?.idRecibo&&data.aridosEntrega&&!data.aridosEntrega.complete);
+    for(const data of pending)await syncAridosDelivery(data);
+    setMsg(pending.length?'Remitos de áridos sincronizados.':'No hay remitos de áridos pendientes.','ok');
+  }catch(error){setMsg(error.message,'error');}finally{aridosRetryButton.disabled=false;await refreshPendingButton();}
+});
 async function issue(){
   if(issuedReceipt||issueInProgress||creditCheckInProgress||saleSwitchBusy)return;
   const checkingDraftId=draftId;
@@ -2351,11 +2623,19 @@ async function issue(){
   try{data=formData()}catch(error){const message=`No se pudo preparar el comprobante: ${error.message}`;issueInProgress=false;lockIssued();setMsg(message,'error');alert(message);return}
   if(!(sqlConfig?.comprobantesEmitibles||[]).some(id=>Number(id)===Number(data.idComprobante))){setMsg('Este comprobante necesita autorización fiscal antes de emitir.','error');issueInProgress=false;lockIssued();return}
   if(!data.articulos.length){setMsg('Agregá al menos un artículo.','error');issueInProgress=false;lockIssued();return}
+  try {
+    if(!wasRecoveryAttempt){
+      const delivery=await chooseAridosDelivery(data);
+      if(delivery===false){issueInProgress=false;lockIssued();return;}
+      aridosEntrega=delivery;data.aridosEntrega=delivery;
+    }
+  }catch(error){issueInProgress=false;lockIssued();setMsg(error.message,'error');alert(error.message);return;}
+  CorralonSystem.articleSync.set('syncing','Verificando la conexión con SQL…');
   const budgetPopup=Number(data.idComprobante)===43?reserveBudgetPreview():null;
   if(!await sqlConnectionAvailable()){
     budgetPopup?.close();
     await saveDraft(true).catch(console.warn);
-    issueInProgress=false;lockIssued();setMsg(SQL_CONNECTION_MESSAGE,'error');alert(SQL_CONNECTION_MESSAGE);return;
+    issueInProgress=false;lockIssued();CorralonSystem.articleSync.set('error',SQL_CONNECTION_MESSAGE);setMsg(SQL_CONNECTION_MESSAGE,'error');alert(SQL_CONNECTION_MESSAGE);return;
   }
   try{
     recoveryPending=true;
@@ -2366,9 +2646,11 @@ async function issue(){
     await refreshPendingButton();
     lastSaved=structuredClone(data);
     requestStarted=true;
+    CorralonSystem.articleSync.set('syncing','Confirmando el comprobante y actualizando el stock…');
     const response=await fetch(`${SQL_PREPARACION}/emitir`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comprobante:data,recuperarSolo:wasRecoveryAttempt})});
     const payload=await response.json().catch(()=>({}));
     if(!response.ok||!payload.ok){const e=new Error(payload.error||`HTTP ${response.status}`);e.safeToRetry=Boolean(payload.safeToRetry)||(response.status===409&&!payload.recoveryRequired);e.fiscalRejected=Boolean(payload.fiscalRejected);e.saleReview=Boolean(payload.revisionRequired);e.arcaUnavailable=Boolean(payload.arcaUnavailable);e.sqlUnavailable=response.status===503&&!e.arcaUnavailable;throw e}
+    CorralonSystem.articleSync.set('syncing',`Comprobante ${payload.numero} guardado · Verificando los datos…`);
     const checkResponse=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(payload.idRecibo)}`,{cache:'no-store'});
     const check=await checkResponse.json().catch(()=>({}));
     if(!checkResponse.ok||!check.ok)throw new Error('No se pudo verificar la venta en SQL. No vuelvas a emitirla.');
@@ -2382,7 +2664,16 @@ async function issue(){
     issuedReceipt.caeExpiry=String(check.comprobante.caeExpiry||'');
     $('#cae').value=issuedReceipt.cae;
     await saveDraft(true);
+    if(aridosEntrega&&!aridosEntrega.complete){
+      CorralonSystem.articleSync.set('syncing','Venta confirmada · Guardando el remito de áridos…');
+      try {await syncAridosDelivery({...data,emision:issuedReceipt,aridosEntrega});}
+      catch(error){
+        aridosEntrega.error=error.message;await saveAridosDeliveryState({...data,emision:issuedReceipt,aridosEntrega}).catch(console.warn);await refreshPendingButton();
+        alert(`La venta ${issuedReceipt.numero} quedó confirmada. El remito de áridos quedó pendiente: ${error.message}. Usá Reintentar remitos de áridos; no vuelvas a emitir la venta.`);
+      }
+    }
     setMsg(`${data.tipoComprobante} ${payload.numero} confirmado en SQL. Artículos y valores guardados.`,'ok');
+    CorralonSystem.articleSync.set('success',`Comprobante ${payload.numero} confirmado`);
     const issuedNumber=issuedReceipt.numero;
     if(Number(data.idComprobante)===43){
       await openBudgetPreview(data,issuedReceipt,budgetPopup);
@@ -2415,6 +2706,7 @@ async function issue(){
     setMsg(`${data.tipoComprobante} ${issuedNumber} confirmado en SQL. ${printer?`Ticket enviado a ${printer}.`:'Sin impresión.'} Nueva venta lista.`,'ok');
     loadSqlCatalog().catch(console.warn);
   }catch(error){
+    CorralonSystem.articleSync.set('error',error.message||'No se pudo completar la confirmación.');
     console.warn(error);
     if((error.saleReview||(requestStarted&&!error.safeToRetry&&!issuedReceipt))&&await window.CorralonSaleReviews.handle(data,error))return;
     if(budgetPopup&&!budgetPopup.closed&&Number(data.idComprobante)===43)budgetPopup.close();
@@ -2666,7 +2958,7 @@ $('#reprintReceipt').addEventListener('click',async()=>{
   }catch(error){if(error.saleReview)await window.CorralonSaleReviews.handle(formData(),error);else setMsg(`No se pudo reimprimir: ${error.message}`,'error')}
 });
 $('#previewPrinter').addEventListener('change',()=>{$('#doPrintTrial').disabled=!$('#previewPrinter').value;$('#previewPrinterError').textContent=''});
-$('#refreshPrinters').addEventListener('click',async()=>{try{const printers=await loadTicketPrinters();$('#previewPrinterError').textContent=printers.length?'':'No hay ticketeras configuradas en el servidor.'}catch(error){$('#previewPrinterError').textContent=error.message}});
+$('#refreshPrinters').addEventListener('click',async()=>{try{const printers=await loadTicketPrinters({forceLocal:true});$('#previewPrinterError').textContent=printers.length?'':'No hay ticketeras configuradas en el servidor.'}catch(error){$('#previewPrinterError').textContent=error.message}});
 $('#doPrintTrial').addEventListener('click',async()=>{
   const source=previewDraft,receipt=source?.emision||issuedReceipt;
   if(!receipt){window.print();return}
@@ -2823,6 +3115,7 @@ function historyReceiptSource(result){
     emision:{idRecibo:Number(h.idRecibo),numero:h.numero,total:Number(h.totalAbsoluto),idComprobante:Number(h.idComprobante),cae:h.cae||'',caeExpiry:h.caeExpiry||''}};
 }
 window.CorralonInvoiceHistoryActions={
+  refreshAfterAnnul:()=>Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()]),
   preview:async receipt=>{
     if(issueInProgress||printInProgress||!sqlConfig)throw new Error('Esperá a que termine la operación actual.');
     const response=await fetch(`${SQL_PREPARACION}/comprobante?id=${encodeURIComponent(receipt)}`,{cache:'no-store'}),result=await response.json();
@@ -2903,10 +3196,10 @@ $('#pos').addEventListener('change',()=>{const suc=Number($('#pos').selectedOpti
 $('#seller').addEventListener('change',()=>{saveWorkstation();updateTrialButton();scheduleDraft()});
 $('#priceList').addEventListener('change',()=>{loadSqlCatalog();scheduleDraft()});
 $('#ticketPrinter').addEventListener('change',()=>{try{localStorage.setItem(TICKET_PRINTER_KEY,$('#ticketPrinter').value)}catch{}});
-async function updatePrinterSetup(){
+async function updatePrinterSetup(forceLocal=false){
   $('#printerSetupError').textContent='';
   try{
-    const printers=await loadTicketPrinters();
+    const printers=await loadTicketPrinters({forceLocal});
     if(!printers.some(name=>name.startsWith('local:')))$('#printerSetupError').textContent='Para imprimir directo en esta PC, instalá el conector local. El selector del navegador funciona sin instalarlo.';
   }catch(error){
     $('#printerSetupChoice').innerHTML='<option value="">No se pudieron consultar las impresoras</option>';
@@ -2914,7 +3207,7 @@ async function updatePrinterSetup(){
   }
 }
 $('#chooseTicketPrinter').addEventListener('click',()=>{$('#printerSetupModal').classList.add('open');updatePrinterSetup().then(()=>$('#printerSetupChoice').focus())});
-$('#reloadPrinterSetup').addEventListener('click',updatePrinterSetup);
+$('#reloadPrinterSetup').addEventListener('click',()=>updatePrinterSetup(true));
 $('#closePrinterSetup').addEventListener('click',()=>$('#printerSetupModal').classList.remove('open'));
 $('#printerSetupModal').addEventListener('mousedown',event=>{if(event.target===$('#printerSetupModal'))$('#printerSetupModal').classList.remove('open')});
 $('#savePrinterSetup').addEventListener('click',async()=>{
