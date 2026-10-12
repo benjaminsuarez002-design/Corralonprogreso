@@ -9,6 +9,16 @@
   let records = new Map(), cursor = null, chain = Promise.resolve(), ready, unsubscribe, db, pending = null, saving = false, connected = false;
   let choosingProvider = false, editingMovement = null, historyRows = [];
   let sortKey = 'date', sortDirection = 'desc';
+  const embedded = parent !== window && new URLSearchParams(location.search).get('embed') === 'flete';
+  let invoiceSelection = null, freightSelection = null;
+  const notifyLock = locked => { if(embedded) parent.postMessage({type:'corralon:freight-lock',locked},location.origin); };
+  window.addEventListener('message',event=>{
+    if(!embedded || event.origin!==location.origin || event.source!==parent || event.data?.type!=='corralon:freight-seed' || saveDialog.open || saving || choosingProvider)return;
+    invoiceSelection=event.data.invoice;freightSelection=event.data.freight;
+    el('totalFactura').value=fmtMoney(Number(invoiceSelection?.total)||0);
+    el('totalFlete').value=fmtMoney(Number(freightSelection?.total)||0);
+    calcFlete();
+  });
   const combo = (id,label) => `<label for="${id}">${label}</label><span class="freight-combo"><input id="${id}" autocomplete="off" data-freight-combo role="combobox" aria-autocomplete="list" aria-expanded="false"><button type="button" data-freight-drop tabindex="-1" aria-label="Desplegar ${label}">▾</button><span class="freight-options" role="listbox" hidden></span></span>`;
   const host = document.createElement('div');
   host.innerHTML = `<dialog id="freightSaveDialog" class="freight-dialog"><form id="freightSaveForm"><header><strong>Guardar flete</strong><button type="button" data-freight-close>Cerrar ×</button></header><div class="freight-body"><div class="freight-fields">${combo('freightProvider','Proveedor')}${combo('freightCarrier','Proveedor de transporte')}</div><p id="freightSaveAmounts"></p><div id="freightSaveAverage"></div><p id="freightSaveStatus" role="status"></p></div><footer><button type="button" id="freightSaveConsult">Consultar</button><button type="submit" id="freightConfirm">Guardar</button></footer></form></dialog>
@@ -40,13 +50,18 @@
       return sortDirection==='desc' ? -comparison : comparison;
     });
     historyRows=rows;
-    el('freightTable').querySelector('tbody').innerHTML = rows.map((r,i)=>`<tr>${[r.date.split('-').reverse().join('/'),r.providerName,r.carrierName,fmtMoney(r.invoice),fmtMoney(r.freight),fmtPct(r.percent)].map((v,j)=>`<td tabindex="0" data-row="${i}" data-col="${j}">${j===1||j===2?`<button type="button" data-edit-freight="${i}" data-edit-field="${j}" title="Cambiar proveedor" style="font:inherit;color:inherit;background:transparent;border:0;padding:0;text-align:left;cursor:pointer">${esc(v)} ✎</button>`:esc(v)}</td>`).join('')}</tr>`).join('');
+    el('freightTable').querySelector('tbody').innerHTML = rows.map((r,i)=>`<tr>${[r.date.split('-').reverse().join('/'),r.providerName,r.carrierName,fmtMoney(r.invoice),fmtMoney(r.freight),fmtPct(r.percent)].map((v,j)=>`<td tabindex="0" data-row="${i}" data-col="${j}">${j===1||j===2?`<button type="button" data-edit-freight="${i}" data-edit-field="${j}" title="Cambiar proveedor" style="font:inherit;color:inherit;background:transparent;border:0;padding:0;text-align:left;cursor:pointer">${esc(v)} ✎</button>`:esc(v)+((j===3?r.purchaseInvoiceNumber:j===4?r.freightInvoiceNumber:null)?`<small style="display:block">${esc(j===3?r.purchaseInvoiceNumber:r.freightInvoiceNumber)}</small>`: '')}</td>`).join('')}</tr>`).join('');
     const grouped = new Map();
     rows.forEach(r=>{ const list=grouped.get(r.carrierId)||[]; list.push(r); grouped.set(r.carrierId,list); });
     el('freightCompanyTotals').innerHTML = `<strong>${rows.length} movimientos · Promedio mensual: ${esc(fmtPct(average(rows)))}</strong><table><thead><tr><th>Proveedor de transporte</th><th>Movimientos</th><th>Total facturas</th><th>Total flete</th><th>% flete</th></tr></thead><tbody>${[...grouped.values()].map(list=>`<tr><td>${esc(list[0].carrierName)}</td><td>${list.length}</td><td>${esc(fmtMoney(list.reduce((s,r)=>s+r.invoice,0)))}</td><td>${esc(fmtMoney(list.reduce((s,r)=>s+r.freight,0)))}</td><td>${esc(fmtPct(average(list)))}</td></tr>`).join('')}</tbody></table><small>Porcentaje ponderado: total de flete ÷ total de facturas × 100.</small>`;
     el('freightHistoryStatus').textContent = connected ? 'Actualizado desde Firebase' : 'Copia local · esperando conexión a Firebase';
   }
-  function resolveProvider(value) { return CorralonSystem.providerIdentity.resolveText(providerState.rows,value); }
+  function resolveProvider(value) {
+    const provider=CorralonSystem.providerIdentity.resolveText(providerState.rows,value);
+    if(provider)return provider;
+    const selected=embedded && [invoiceSelection,freightSelection].find(row=>row && norm(row.proveedor)===norm(value));
+    return selected?{id_proveedor:'sql:'+selected.idProveedor,proveedor:selected.proveedor}:null;
+  }
   function mergeSnapshot(snapshot) {
     // Only committed server data may advance the cursor or enter the remote cache.
     if (snapshot.metadata.fromCache) return;
@@ -108,12 +123,16 @@
     document.getElementById('modalProviderId').focus();
   }
   el('saveFreightBtn').onclick=()=>{
+    if(embedded && (!invoiceSelection?.id || !freightSelection?.id)) {alert('Elegí una boleta para la factura y otra para el flete.');return;}
     editingMovement=null;saveDialog.querySelector('header strong').textContent='Guardar flete';
     const invoice=n('totalFactura'), freight=n('totalFlete');
     if(invoice<=0 || freight<0 || !Number.isFinite(invoice+freight)) {alert('Ingresá un total de factura mayor a cero y un flete válido.'); return;}
-    if(!pending) pending={id:[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join(''),invoice,freight,date:today()};
+    if(!pending) pending={id:[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join(''),invoice,freight,date:today(),...(embedded?{purchaseInvoiceId:invoiceSelection.id,purchaseInvoiceNumber:invoiceSelection.numero,freightInvoiceId:freightSelection.id,freightInvoiceNumber:freightSelection.numero}: {})};
     el('freightSaveAmounts').textContent=`Factura: ${fmtMoney(pending.invoice)} · Flete: ${fmtMoney(pending.freight)} · ${fmtPct(pending.freight/pending.invoice)}`;
-    el('freightProvider').value=providerInput.value;
+    el('freightProvider').value=embedded?invoiceSelection.proveedor:providerInput.value;
+    if(embedded)el('freightCarrier').value=freightSelection.proveedor;
+    el('freightProvider').readOnly=el('freightCarrier').readOnly=embedded;
+    notifyLock(true);
     el('freightSaveStatus').textContent=''; summary(); saveDialog.showModal(); el('freightProvider').focus();
   };
   el('freightSaveForm').onsubmit=async event=>{
@@ -133,6 +152,7 @@
       // Stable operation ID makes uncertain connection retries idempotent. Existing data is never replaced.
       const carrierId=await companyId(name), ref=db.collection(collection).doc('movement_'+pending.id), carrierRef=db.collection(collection).doc(carrierId);
       const payload={kind:'movement',date:pending.date,invoice:pending.invoice,freight:pending.freight,percent:pending.freight/pending.invoice,providerId:String(provider.id_proveedor),providerName:provider.proveedor,carrierId,carrierName:name};
+      if(pending.purchaseInvoiceId)Object.assign(payload,{purchaseInvoiceId:pending.purchaseInvoiceId,purchaseInvoiceNumber:pending.purchaseInvoiceNumber,freightInvoiceId:pending.freightInvoiceId,freightInvoiceNumber:pending.freightInvoiceNumber});
       await db.runTransaction(async tx=>{
         const [existing,company]=await Promise.all([tx.get(ref),tx.get(carrierRef)]);
         if(existing.exists) return;
@@ -153,6 +173,7 @@
     const carrier=resolveProvider(row.carrierName);
     el('freightProvider').value=provider?providerDisplay(provider):row.providerName;
     el('freightCarrier').value=carrier?providerDisplay(carrier):row.carrierName;
+    el('freightProvider').readOnly=el('freightCarrier').readOnly=false;
     saveDialog.querySelector('header strong').textContent='Editar proveedores del flete';
     el('freightSaveAmounts').textContent=`Factura: ${fmtMoney(row.invoice)} · Flete: ${fmtMoney(row.freight)} · ${fmtPct(row.percent)}`;
     el('freightSaveStatus').textContent='';
@@ -166,13 +187,16 @@
   saveDialog.addEventListener('cancel',event=>{if(saving)event.preventDefault();});
   saveDialog.addEventListener('close',()=>{
     if(choosingProvider)return;
+    notifyLock(false);
     pending=null;
     if(editingMovement){editingMovement=null;summary();if(!historyDialog.open)historyDialog.showModal();}
     else el('saveFreightBtn').focus();
   });
   let activeCombo=null, options=[], activeIndex=0;
+  if(embedded)parent.postMessage({type:'corralon:freight-ready'},location.origin);
   function hide(input) {input.parentElement.querySelector('.freight-options').hidden=true; input.setAttribute('aria-expanded','false'); if(activeCombo===input)activeCombo=null;}
   function show(input,reason) {
+    if(input.readOnly)return;
     activeCombo=input; activeIndex=0;
     const all=reason==='button'||reason==='toggle', query=norm(all?'':input.value);
     options=providerState.rows.map(p=>({name:providerDisplay(p),search:`${p.proveedor} ${CorralonSystem.providerIdentity.externalId(p)}`})).filter(r=>norm(r.search).includes(query)).slice(0,80);

@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.17"></script>
+<script src="corralon-system.js?v=1.0.18"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -347,6 +347,10 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .btn-confirm-ok { flex: 2; padding: 12px; border: none; border-radius: 10px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; color: #fff; }
 
 /* ── TOAST / LOADING ── */
+.history-state-chip{transition:background .18s,opacity .18s;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.history-state-chip[aria-busy="true"]{cursor:wait!important;opacity:.8}
+.history-state-chip[aria-busy="true"]::before{content:"";width:9px;height:9px;border:2px solid #ffffff70;border-top-color:white;border-radius:50%;animation:history-state-spin .65s linear infinite}
+@keyframes history-state-spin{to{transform:rotate(360deg)}}
 .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--texto-dark); color: #fff; padding: 10px 20px; border-radius: 20px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; z-index: 999; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .3s; }
 .toast.show { opacity: 1; }
 .loading-overlay { position: fixed; inset: 0; background: rgba(240,236,232,0.9); display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 600; }
@@ -432,6 +436,7 @@ input[type="checkbox"]{accent-color:#ef1015}
     <div class="detalle-head">
       <div class="detalle-nro-wrap">
         <span class="detalle-nro" id="detalleNro">—</span>
+        <span id="detalleEstado" style="display:inline-flex;align-items:center"></span>
         <button class="btn-copy-boleta" id="btnCopyBoleta" type="button" title="Copiar número de boleta" aria-label="Copiar número de boleta" onclick="copiarNumeroBoleta()"></button>
       </div>
       <button onclick="cerrarDetalle()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;">✕</button>
@@ -441,6 +446,7 @@ input[type="checkbox"]{accent-color:#ef1015}
       <button id="btnDetallePdf" class="btn-det pdf" onclick="verPDFDetalle()">📄 PDF</button>
       <button id="btnDetalleCopy" class="btn-det edit" onclick="copiarContenidoDetalle()">Copiar contenido</button>
       <button id="btnDetalleEdit" class="btn-det edit" onclick="abrirEditar()">✏️ Editar</button>
+      <button id="btnDetalleSql" class="btn-det edit" style="display:none" onclick="abrirCargaRemitoSql()">Cargar en SQL</button>
       <button id="btnDetalleDel" class="btn-det del" onclick="confirmarEliminar()">🗑 Eliminar</button>
     </div>
   </div>
@@ -664,6 +670,140 @@ function ocultarPresupuestoLocal(presupuesto) {
 
 function historialNotifId(tipo, id) {
   return `${tipo}_${String(id || '').replace(/[^\w-]/g, '_')}`;
+}
+
+const historialEstados = new Map(), historialEstadosGuardando = new Set();
+let historialEstadosCache, historialEstadosInicio, historialEstadosReady = false;
+async function iniciarCacheEstadosHistorial() {
+  if(historialEstadosInicio) return historialEstadosInicio;
+  historialEstadosInicio = (async () => {
+    const {createNotificationCache} = await import('./menu-notifications-cache.js');
+    const api = {
+      db:histDb, Timestamp:firebase.firestore.Timestamp,
+      collection:(db, name) => db.collection(name),
+      doc:(db, name, id) => db.collection(name).doc(id),
+      where:(field, operator, value) => ({field, operator, value}),
+      query:(reference, filter) => reference.where(filter.field, filter.operator, filter.value),
+      getDocsFromServer:reference => reference.get({source:'server'}),
+      getDocFromServer:async reference => {
+        const snapshot = await reference.get({source:'server'});
+        return {id:snapshot.id, metadata:snapshot.metadata, data:() => snapshot.data(), exists:() => snapshot.exists};
+      },
+      onSnapshot:(reference, options, next, error) => reference.onSnapshot(options, next, error)
+    };
+    historialEstadosCache = createNotificationCache({collectionName:HISTORIAL_NOTIFS_COLLECTION, versionField:'updatedAt', timestamp:true, api,
+      onError:error => console.warn('No se pudieron sincronizar los estados; se conserva la caché', error),
+      onChange:rows => {
+        historialEstadosReady = historialEstadosCache.isInitialized();
+        const incoming = new Map(rows.map(row => [row.firestoreId, row.resuelta !== false]));
+        for(const key of historialEstados.keys()) if(!historialEstadosGuardando.has(key)) historialEstados.set(key, incoming.has(key) ? incoming.get(key) : true);
+        for(const [key, state] of incoming) if(!historialEstadosGuardando.has(key)) historialEstados.set(key, state);
+        if(historialEstadosReady) document.querySelectorAll('[data-history-state]').forEach(button => {
+          if(!historialEstados.has(button.dataset.historyState)) historialEstados.set(button.dataset.historyState, true);
+        });
+        pintarEstadosHistorial();
+      }
+    });
+    await historialEstadosCache.start();
+    historialEstadosReady = historialEstadosCache.isInitialized();
+  })().catch(error => { historialEstadosInicio = null; console.warn('No se pudo abrir la caché de estados', error); });
+  return historialEstadosInicio;
+}
+window.addEventListener('pagehide', () => historialEstadosCache?.stop());
+window.addEventListener('pageshow', event => { if(event.persisted) historialEstadosCache?.start(); });
+function cargaSqlDisponible() {
+  const host = location.hostname.toLowerCase().replace(/\.$/, '');
+  return host !== 'corralonprogreso.com' && !host.endsWith('.corralonprogreso.com');
+}
+function puedeVerEstadosHistorial() {
+  const user = window.CorralonFunciones?.menuSessionUser?.();
+  return String(user?.nivel || '').trim().toLowerCase() === 'administrador';
+}
+function chipEstadoHistorial(tipo, registro) {
+  if(!puedeVerEstadosHistorial()) return '';
+  const id = String(tipo === 'remito' ? registro.id : registro.numero || registro.id || '');
+  const key = historialNotifId(tipo, id);
+  const known = historialEstados.has(key), resolved = historialEstados.get(key) !== false;
+  return `<button type="button" class="history-state-chip" data-history-state="${esc(key)}" data-history-type="${esc(tipo)}" data-history-id="${esc(id)}" style="border:0;border-radius:20px;padding:4px 10px;font-size:12px;font-weight:700;color:white;background:${known ? resolved ? '#118545' : '#df1228' : '#777'};cursor:pointer;flex-shrink:0" ${!known || historialEstadosGuardando.has(key) ? 'disabled' : ''} title="${resolved ? 'Marcar como no resuelto' : 'Marcar como resuelto'}">${known ? resolved ? 'Resuelto' : 'No resuelto' : 'Cargando estado…'}</button>`;
+}
+function pintarEstadosHistorial() {
+  document.querySelectorAll('[data-history-state]').forEach(button => {
+    button.hidden = !puedeVerEstadosHistorial();
+    const key = button.dataset.historyState;
+    if(!historialEstados.has(key)) return;
+    const resolved = historialEstados.get(key) !== false;
+    button.textContent = resolved ? 'Resuelto' : 'No resuelto';
+    button.style.background = resolved ? '#118545' : '#df1228';
+    button.title = resolved ? 'Marcar como no resuelto' : 'Marcar como resuelto';
+    button.disabled = historialEstadosGuardando.has(key);
+    button.setAttribute('aria-busy', String(button.disabled));
+  });
+}
+function mostrarEstadoDetalle(tipo, registro) {
+  const target = document.getElementById('detalleEstado');
+  if(!target) return;
+  target.innerHTML = chipEstadoHistorial(tipo, registro);
+  const chip = target.querySelector('button');
+  if(!chip) return;
+  chip.style.setProperty('width', 'auto', 'important');
+  chip.style.setProperty('min-width', '0', 'important');
+  chip.style.setProperty('min-height', '0', 'important');
+  chip.style.setProperty('padding', '3px 8px', 'important');
+  chip.style.setProperty('font-size', '11px', 'important');
+}
+async function cargarEstadosHistorial(tipo, registros) {
+  if(!puedeVerEstadosHistorial()) return;
+  await iniciarCacheEstadosHistorial();
+  if(!historialEstadosReady) return;
+  registros.forEach(registro => {
+    const id = String(tipo === 'remito' ? registro.id : registro.numero || registro.id || '');
+    const key = historialNotifId(tipo, id);
+    if(!historialEstados.has(key)) historialEstados.set(key, true);
+  });
+  pintarEstadosHistorial();
+}
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-history-state]');
+  if(!button) return;
+  event.stopPropagation();
+  if(!puedeVerEstadosHistorial()) return;
+  const {historyState:key, historyType:tipo, historyId:id} = button.dataset;
+  if(!historialEstados.has(key) || historialEstadosGuardando.has(key)) return;
+  const previous = historialEstados.get(key), resolved = previous === false;
+  historialEstados.set(key, resolved);
+  historialEstadosGuardando.add(key); pintarEstadosHistorial();
+  try {
+    const reference = histDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(key);
+    await histDb.runTransaction(async transaction => {
+      const snapshot = await transaction.get(reference);
+      const next = resolved;
+      const state = {resuelta:next, resueltaAt:next ? firebase.firestore.FieldValue.serverTimestamp() : null, updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
+      if(snapshot.exists) transaction.update(reference, state);
+      else transaction.set(reference, {tipo, id, titulo:tipo === 'remito' ? 'Remito' : 'Pres. Web', createdAt:firebase.firestore.FieldValue.serverTimestamp(), ...state});
+      return next;
+    });
+    historialEstados.set(key, resolved);
+    if(tipo === 'presupuesto') {
+      const queueKey = 'corralon_stock_budget_resolution_pending_v1';
+      try { const queued = JSON.parse(localStorage.getItem(queueKey) || '[]'); localStorage.setItem(queueKey, JSON.stringify(queued.filter(number => String(number) !== id))); } catch(_) {}
+    }
+  } catch(error) { historialEstados.set(key, previous); toast('No se pudo guardar el estado. Volvé a intentarlo.'); }
+  finally { historialEstadosGuardando.delete(key); pintarEstadosHistorial(); historialEstadosCache?.refresh(key).catch(error => console.warn('No se pudo actualizar la caché del estado', error)); }
+}, true);
+
+async function resolverRemitoCargadoSql(remito) {
+  const key = historialNotifId('remito', remito.id), previous = historialEstados.get(key);
+  historialEstados.set(key, true);
+  historialEstadosGuardando.add(key); pintarEstadosHistorial();
+  try {
+    await histDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(key).set({
+      tipo:'remito', id:String(remito.id), titulo:'Remito', detalle:remito.cliente || '', fecha:remito.fecha || '',
+      resuelta:true, resueltaAt:firebase.firestore.FieldValue.serverTimestamp(), updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    }, {merge:true});
+  } catch(error) {
+    if(previous === undefined) historialEstados.delete(key); else historialEstados.set(key, previous);
+    toast('SQL quedó cargado, pero no se pudo marcar como resuelto. Volvé a tocar el chip.');
+  } finally { historialEstadosGuardando.delete(key); pintarEstadosHistorial(); historialEstadosCache?.refresh(key).catch(error => console.warn('No se pudo actualizar la caché del estado', error)); }
 }
 
 async function guardarHistorialNotificacion(data) {
@@ -1062,6 +1202,7 @@ async function abrirBusquedaPresupuestos(consultaInicial = '') {
   const search = window.CorralonSystem?.budgetSearch;
   if (!search) return;
   await search.open(consultaInicial, {
+    renderBudgetState: presupuesto => chipEstadoHistorial('presupuesto', presupuesto),
     searchBudgets: async (consulta, desde, hasta) => {
       const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/buscar_presupuestos_web`, {
         method: 'POST',
@@ -1071,10 +1212,12 @@ async function abrirBusquedaPresupuestos(consultaInicial = '') {
       if (!response.ok) throw new Error(await response.text() || 'No se pudieron buscar los presupuestos');
       const data = await response.json();
       const ocultos = presupuestosOcultos();
-      return (Array.isArray(data) ? data : []).filter((item) => !ocultos.has(String(item?.id || '')));
+      const rows = (Array.isArray(data) ? data : []).filter((item) => !ocultos.has(String(item?.id || '')));
+      await cargarEstadosHistorial('presupuesto', rows);
+      return rows;
     },
     onOpenBudget: (presupuesto) => {
-      const index = _presupuestosCache.findIndex((item) => (
+      let index = _presupuestosCache.findIndex((item) => (
         String(item?.id || item?.numero || '') === String(presupuesto?.id || presupuesto?.numero || '')
       ));
       if (index < 0) {
@@ -1116,6 +1259,7 @@ async function cargarPresupuestos(append = false) {
     const visibles = lote.filter((item) => !ocultos.has(String(item?.id || '')));
     const ids = new Set(_presupuestosCache.map((item) => String(item?.id || '')));
     _presupuestosCache.push(...visibles.filter((item) => !ids.has(String(item?.id || ''))));
+    cargarEstadosHistorial('presupuesto', _presupuestosCache);
     window.CorralonSystem?.budgetSearch?.setBudgets(_presupuestosCache);
     if (!_presupuestosCache.length) {
       body.innerHTML = '<div class="h-empty">Sin presupuestos todavia</div>';
@@ -1135,6 +1279,7 @@ async function cargarPresupuestos(append = false) {
             ${metaExtraPresupuestoHtml(p)}
           </div>
           <div class="h-total">${fmt(p.total || 0)}</div>
+          ${chipEstadoHistorial('presupuesto', p)}
           <div class="h-actions">
             <button class="h-mini-btn danger" type="button" onclick="event.stopPropagation();confirmarEliminarPresupuesto(${idx})">Eliminar</button>
           </div>
@@ -1861,11 +2006,185 @@ function setAccionesDetalleModo(modo) {
   if (btnPdf) btnPdf.textContent = esRemito ? 'PDF' : 'Ver PDF';
   if (btnCopy) btnCopy.style.display = esRemito ? 'none' : '';
   if (btnEdit) btnEdit.style.display = esRemito ? '' : 'none';
+  const btnSql = document.getElementById('btnDetalleSql');
+  if(btnSql) {
+    btnSql.style.display = esRemito && cargaSqlDisponible() ? '' : 'none';
+    btnSql.disabled = esRemito && Boolean(_remitoDetalleActual?.sql_resultado);
+    btnSql.textContent = btnSql.disabled ? 'Cargado en SQL' : 'Cargar en SQL';
+  }
   if (btnDel) {
     btnDel.style.display = '';
     btnDel.textContent = esRemito ? '🗑 Eliminar remito' : '🗑 Eliminar presupuesto';
   }
   if (btnCopyBoleta) btnCopyBoleta.style.display = esRemito ? 'none' : '';
+}
+
+function remitoSqlPendingKey(id) { return `corralon_remito_sql_v1:${id}`; }
+function remitoProviderSqlId(value) {
+  const text = String(value ?? '').trim();
+  const digits = /^\d{1,3}(?:\.\d{3})+$/.test(text) ? text.replace(/\./g, '') : text;
+  return /^\d+$/.test(digits) && Number(digits) > 0 && Number(digits) <= 2147483647 ? Number(digits) : null;
+}
+async function recuperarProveedorRemitoSql(remito) {
+  const storedId = remitoProviderSqlId(remito.proveedor_sql_id);
+  if(storedId) { remito.proveedor_sql_id = storedId; return; }
+  const webId = String(remito.proveedor_web_id || '').trim();
+  if(!webId) return;
+  let providers = await CorralonSystem.getProvidersCache();
+  let provider = providers.find(item => CorralonSystem.providerIdentity.internalId(item) === webId);
+  if(!provider) {
+    providers = await CorralonSystem.syncProvidersCache();
+    provider = providers.find(item => CorralonSystem.providerIdentity.internalId(item) === webId);
+  }
+  const id = provider && remitoProviderSqlId(CorralonSystem.providerIdentity.externalId(provider));
+  if(!id) throw new Error('El proveedor web seleccionado no tiene un código SQL válido. Revisá su código en Proveedores.');
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${encodeURIComponent(remito.id)}&proveedor_web_id=eq.${encodeURIComponent(webId)}&proveedor_sql_id=is.null`, {
+    method:'PATCH', headers:CorralonSystem.headers({Prefer:'return=representation'}), body:JSON.stringify({proveedor_sql_id:id})
+  });
+  if(!response.ok) throw new Error('No se pudo guardar el ID recuperado del proveedor. Reintentá.');
+  const rows = await response.json();
+  if(!rows.length) throw new Error('El remito cambió mientras se recuperaba el proveedor. Cerrá y volvé a abrir su detalle.');
+  remito.proveedor_sql_id = id;
+  const cached = _remitosCache.find(item => String(item.id) === String(remito.id));
+  if(cached) cached.proveedor_sql_id = id;
+}
+function remitoSqlPayload(remito, pago) {
+  const user = window.CorralonFunciones?.menuSessionUser?.();
+  if(!user?.id) throw new Error('Ingresá con tu usuario del menú.');
+  const branch = CorralonSystem.normalizeBranch(remito.sucursal);
+  const sucursal = branch === 'Suc. Progreso y Ruta' ? 1 : branch === 'Suc. Calle 5 y Espana' ? 2 : 0;
+  if(!sucursal) throw new Error('El remito no tiene una sucursal válida.');
+  if(!Number.isInteger(Number(remito.proveedor_sql_id)) || Number(remito.proveedor_sql_id) <= 0) throw new Error('Este remito no tiene ID de proveedor. Seleccioná un proveedor web al crear el remito.');
+  const articulos = (remito.items || []).map(item => ({ idart:String(item.idart || '').trim(), cantidad:Number(item.cant), precio:Number(item.precio) }));
+  if(!articulos.length || articulos.some(item => !item.idart || !(item.cantidad > 0) || !(item.precio > 0))) throw new Error('Cada artículo necesita IDArt, cantidad y precio. Los renglones de texto libre no se pueden cargar en SQL.');
+  const parts = String(remito.fecha || '').split('/');
+  const fecha = remito.fecha_iso || (parts.length === 3 ? `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}` : '');
+  return { accion:'importar-remito', remitoId:remito.id, numero:remitoFull(remito.nro), proveedor:Number(remito.proveedor_sql_id), sucursal, fecha, pago:Number(pago), articulos, usuarioId:user.id, idOperador:Number(user.idOperador) || null };
+}
+async function abrirCargaRemitoSql() {
+  if(!cargaSqlDisponible()) return;
+  const remito = _remitoDetalleActual;
+  if(!remito || _detalleTipoActual !== 'remito') return;
+  let pending, options;
+  try {
+    pending = JSON.parse(localStorage.getItem(remitoSqlPendingKey(remito.id)) || 'null');
+    if(!pending) { await recuperarProveedorRemitoSql(remito); remitoSqlPayload(remito,3); }
+    const user = window.CorralonFunciones?.menuSessionUser?.();
+    const url = new URL('/api/facturacion/cargar-facturas',location.href);
+    url.searchParams.set('consulta','opciones'); url.searchParams.set('usuarioId',user?.id || '');
+    const response = await fetch(url,{cache:'no-store'});
+    options = await response.json();
+    if(!response.ok || !options.ok) throw new Error(options.error || 'No se pudieron cargar las opciones de Cargar facturas.');
+  } catch(error) { toast(error.message); return; }
+  const dialog = document.createElement('dialog');
+  dialog.style.cssText = 'margin:auto;border:1px solid #ddd;border-radius:14px;padding:16px;width:600px;box-sizing:border-box;max-width:calc(100vw - 24px);box-shadow:0 12px 45px #0004';
+  dialog.innerHTML = `<h3 style="margin-bottom:14px">Cargar remito en SQL</h3><p>${esc(remitoFull(remito.nro))} · ${esc(remito.cliente || '')}</p><p style="margin:8px 0 16px">${esc(remito.sucursal || '')} · ${fmt(remito.total)}</p><label>Forma de pago<select data-sql-payment style="display:block;width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:8px"></select></label><label>Cuenta<select data-sql-account style="display:block;width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:8px"></select></label><label>Tipo de bien<select data-sql-goods style="display:block;width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:8px"></select></label><p style="font-size:13px;color:#555">Se creará una compra no fiscal con los importes del remito y una carga de stock vinculada. Los pagos distintos de cuenta corriente registrarán su orden de pago.</p><p data-sql-status role="status" style="margin:14px 0"></p><div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-det edit" data-sql-close>Cancelar</button><button class="btn-det pdf" data-sql-save>Cargar en SQL</button></div>`;
+  document.body.appendChild(dialog);
+  dialog.classList.add('remito-sql-compact');
+  const compactStyle = document.createElement('style');
+  compactStyle.textContent = `.remito-sql-compact h3{margin:0 0 8px!important}.remito-sql-compact>p{margin:6px 0 10px!important;line-height:1.3}.remito-sql-compact>label{display:block;font-size:13px}.remito-sql-compact>label:has([data-sql-account]),.remito-sql-compact>label:has([data-sql-goods]){display:inline-block;width:calc(50% - 5px);vertical-align:top}.remito-sql-compact>label:has([data-sql-account]){margin-right:10px}.remito-sql-compact select{box-sizing:border-box;padding:7px 9px!important;margin:4px 0 8px!important}.remito-sql-compact .btn-det{min-height:34px;padding:8px 16px}.remito-sql-compact [data-sql-attempt] p{line-height:1.3;margin:6px 0!important}.remito-sql-compact [data-sql-attempt] .attempt-info{columns:2;column-gap:18px}.remito-sql-compact [data-sql-status]:empty{display:none}@media(max-width:480px){.remito-sql-compact [data-sql-attempt] .attempt-info{columns:1}}`;
+  dialog.prepend(compactStyle);
+  const select = dialog.querySelector('[data-sql-payment]'), account = dialog.querySelector('[data-sql-account]'), goods = dialog.querySelector('[data-sql-goods]'), save = dialog.querySelector('[data-sql-save]'), close = dialog.querySelector('[data-sql-close]'), status = dialog.querySelector('[data-sql-status]');
+  const base = pending?.payload || remitoSqlPayload(remito,3);
+  const point = options.puntosVenta.find(item => Number(item.sucursal) === Number(base.sucursal));
+  const provider = options.proveedores.find(item => Number(item.id) === Number(base.proveedor));
+  const accounts = options.cuentas.filter(item => Number(item.empresa) === Number(point?.empresa));
+  const fill = (field, rows, value, placeholder = '') => {
+    field.replaceChildren();
+    if(placeholder) field.add(new Option(placeholder,''));
+    rows.forEach(item => field.add(new Option(item.nombre,String(item.id))));
+    field.value = String(value ?? '');
+    if(field.selectedIndex < 0) field.selectedIndex = placeholder ? 0 : -1;
+  };
+  fill(select,options.pagos,base.pago);
+  fill(account,accounts,provider?.cuenta,'Sin cuenta válida en el proveedor SQL');
+  fill(goods,options.bienes,provider?.tipoBien,'Sin tipo de bien válido en el proveedor SQL');
+  account.disabled = goods.disabled = true;
+  const concept = document.createElement('p');
+  concept.style.cssText = 'font-size:13px;margin:0 0 8px';
+  concept.textContent = `Concepto: ${accounts.find(item => String(item.id) === account.value)?.nombre || 'Sin cuenta válida'}`;
+  goods.closest('label').after(concept);
+  const attemptDetails = document.createElement('details');
+  attemptDetails.dataset.sqlAttempt = '';
+  attemptDetails.style.cssText = 'margin:8px 0;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:12px';
+  status.before(attemptDetails);
+  const showAttemptDetails = () => {
+    attemptDetails.hidden = !pending;
+    if(!pending) return;
+    const opened = attemptDetails.open;
+    const summary = document.createElement('summary');
+    summary.textContent = 'Ver intento anterior'; summary.style.cursor = 'pointer';
+    const info = document.createElement('p'); info.className = 'attempt-info'; info.style.cssText = 'margin:6px 0;white-space:pre-line';
+    const payload = pending.payload;
+    const payment = options.pagos.find(item => Number(item.id) === Number(payload.pago))?.nombre || payload.pago;
+    info.textContent = `Remito: ${payload.numero}\nID proveedor: ${payload.proveedor}\nSucursal: ${Number(payload.sucursal) === 1 ? 'Progreso y Ruta' : 'Calle 5 y España'}\nForma de pago: ${payment}\n${pending.attemptedAt ? 'Último intento: ' + new Date(pending.attemptedAt).toLocaleString('es-AR') + '\n' : ''}${pending.result ? 'SQL guardado: compra ' + pending.result.numero + ', stock Nº ' + pending.result.stockNumero : 'Sin confirmación de carga en SQL'}\n${pending.error ? 'Último error: ' + pending.error : 'Este intento no tiene un error guardado.'}`;
+    const lines = document.createElement('pre');
+    lines.style.cssText = 'max-height:80px;overflow:auto;margin:6px 0;white-space:pre-wrap;font-size:11px';
+    lines.textContent = 'IDArt · Cantidad · Precio unitario\n' + (payload.articulos || []).map(item => `${item.idart} · ${item.cantidad} · ${fmt(item.precio)}`).join('\n');
+    const help = document.createElement('p');
+    help.textContent = 'Para reintentar, elegí el pago arriba y pulsá Cargar en SQL. La cuenta, el tipo de bien y el concepto se toman del proveedor SQL.';
+    attemptDetails.replaceChildren(summary,info,lines,help); attemptDetails.open = opened;
+  };
+  showAttemptDetails();
+  if(pending) status.textContent = pending.result ? 'La carga ya existe en SQL. Falta sincronizar el vínculo web.' : 'Hay un intento anterior guardado para reintentar. No se ejecuta automáticamente.';
+  if(!account.value || !goods.value) status.textContent = 'Revisá la cuenta y el tipo de bien predeterminados en Proveedores SQL.';
+  if(pending?.result) select.disabled = true;
+  let busy = false;
+  close.onclick = () => dialog.close();
+  dialog.addEventListener('cancel', event => { if(busy) event.preventDefault(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  save.onclick = async () => {
+    if(busy) return;
+    busy = true; save.disabled = close.disabled = select.disabled = account.disabled = goods.disabled = true;
+    try {
+      if(!pending?.result && (!select.value || !account.value || !goods.value)) throw new Error('Seleccioná el pago y revisá la cuenta y el tipo de bien en Proveedores SQL.');
+      if(!pending) {
+        pending = { payload:remitoSqlPayload(remito,select.value) };
+      }
+      if(!pending.result) {
+        pending.payload = {...pending.payload,pago:Number(select.value)};
+        delete pending.payload.cuenta; delete pending.payload.tipoBien;
+        pending.attemptedAt = new Date().toISOString();
+        localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending));
+      }
+      status.textContent = pending.result ? 'Sincronizando vínculo web…' : 'Guardando compra, pago y stock…';
+      if(!pending.result) {
+        const response = await fetch('/api/facturacion/cargar-facturas',{ method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pending.payload) });
+        const result = await response.json();
+        if(!response.ok || !result.ok) {
+          pending.error = result.error || result.message || 'No se pudo cargar el remito en SQL.';
+          localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending));
+          throw new Error(pending.error);
+        }
+        const purchase = result.factura?.[0];
+        if(!purchase?.IDRecibo || !purchase.stockId) throw new Error('No se recibió la compra con su stock vinculado. Reintentá para consultar el resultado.');
+        pending.result = { compraId:purchase.IDRecibo, numero:purchase.NroFactura, stockId:purchase.stockId, stockNumero:purchase.stockNumero, pago:Number(pending.payload.pago) };
+        localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending));
+      }
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/remitos?id=eq.${encodeURIComponent(remito.id)}`,{ method:'PATCH',headers:CorralonSystem.headers({Prefer:'return=representation'}),body:JSON.stringify({sql_resultado:pending.result}) });
+      if(!response.ok) throw new Error('SQL ya quedó cargado. Falta sincronizar el vínculo web; reintentá para completar.');
+      const rows = await response.json();
+      if(!rows.length) throw new Error('SQL ya quedó cargado, pero el remito no se encontró al actualizar su vínculo web.');
+      remito.sql_resultado = pending.result;
+      const cached = _remitosCache.find(item => String(item.id) === String(remito.id));
+      if(cached) cached.sql_resultado = pending.result;
+      resolverRemitoCargadoSql(remito);
+      localStorage.removeItem(remitoSqlPendingKey(remito.id));
+      if(_remitoDetalleActual?.id === remito.id) setAccionesDetalleModo('remito');
+      status.textContent = `Compra ${pending.result.numero} y stock Nº ${pending.result.stockNumero} cargados.`;
+      save.hidden = true; close.textContent = 'Cerrar';
+      attemptDetails.hidden = true;
+    } catch(error) {
+      status.textContent = error.message;
+      if(pending) {
+        pending.error = error.message;
+        try { localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending)); } catch(_) {}
+        showAttemptDetails();
+      }
+    }
+    finally { busy = false; close.disabled = false; save.disabled = false; select.disabled = Boolean(pending?.result); account.disabled = goods.disabled = true; }
+  };
+  dialog.showModal();
 }
 
 async function copiarNumeroBoleta() {
@@ -1927,6 +2246,7 @@ function abrirDetallePresupuesto(index) {
   _detalleTipoActual = 'presupuesto';
   _presupuestoDetalleActual = p;
   _remitoDetalleActual = null;
+  cargarEstadosHistorial('presupuesto', [p]);
   setAccionesDetalleModo('presupuesto');
 
   const items = Array.isArray(p.items) ? p.items : [];
@@ -1937,6 +2257,7 @@ function abrirDetallePresupuesto(index) {
   const titulo = tituloPresupuestoHistorial(p);
 
   document.getElementById('detalleNro').textContent = p.numero || '-';
+  mostrarEstadoDetalle('presupuesto', p);
   const body = document.getElementById('detalleBody');
   body.innerHTML = `
     <div class="detalle-info">
@@ -2090,6 +2411,7 @@ async function buscarRemitosConfirmado() {
 function renderRemitosHistorial() {
   const body = document.getElementById('historialBody');
   const rows = _remitosCache;
+  cargarEstadosHistorial('remito', rows);
   if(!_remitosCache.length) {
     body.innerHTML = `<div class="h-empty">${_remitosBusquedaAplicada ? 'Sin coincidencias' : 'Sin remitos todavía'}</div>`;
     return;
@@ -2106,6 +2428,7 @@ function renderRemitosHistorial() {
         <div class="h-meta">${esc(r.sucursal||'Sin sucursal')} · ${r.fecha||''}${usuarioRegistroNombre(r)?` · Usuario: ${esc(usuarioRegistroNombre(r))}`:''}</div>
       </div>
       <div class="h-total">${fmt(r.total||0)}</div>
+      ${chipEstadoHistorial('remito', r)}
       <span style="color:#ccc;font-size:18px;">›</span>
     </div>`).join('') + (!_remitosBusquedaAplicada && _remitosHasMore ? '<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarHistorial(true)">Cargar anteriores</button></div>' : '');
 }
@@ -2117,8 +2440,10 @@ function renderDetalleRemito(remito) {
   _detalleTipoActual = 'remito';
   _presupuestoDetalleActual = null;
   _remitoDetalleActual = { ...remito, items };
+  cargarEstadosHistorial('remito', [remito]);
   setAccionesDetalleModo('remito');
   document.getElementById('detalleNro').textContent = remito.nro ? remitoFull(remito.nro) : '—';
+  mostrarEstadoDetalle('remito', remito);
   const body = document.getElementById('detalleBody');
   body.innerHTML = `
     <div class="detalle-info">
@@ -2329,7 +2654,7 @@ function abrirEditar() {
   const r = _remitoDetalleActual;
   if(!r) return;
   _detalleTipoActual = 'remito';
-  editItems = (r.items||[]).map(it => ({ id: it.id, cant: it.cant, desc: it.descripcion, precio: it.precio }));
+  editItems = (r.items||[]).map(it => ({ id: it.id, idart:it.idart || null, cant: it.cant, desc: it.descripcion, precio: it.precio }));
   editFocusedField = null;
   document.getElementById('editTitle').textContent = '✏ Editar remito';
   renderEditForm();
@@ -2520,7 +2845,7 @@ function renderEditItems() {
         oninput="this.value=this.value.replace(/[^0-9]/g,'')"
         onchange="editItems[${i}].cant=parseFloat(this.value)||1;actualizarSubEdit()">
       <input type="text" class="edit-item-inp" value="${it.desc||''}" autocomplete="off"
-        onchange="editItems[${i}].desc=this.value">
+        onchange="editItems[${i}].desc=this.value;delete editItems[${i}].idart">
       <input type="text" class="edit-item-inp num" value="${fmt(it.precio||0)}" inputmode="numeric" autocomplete="off"
         oninput="formatearMonedaEdicion(this)" onchange="editItems[${i}].precio=parseMonto(this.value);this.value=fmt(editItems[${i}].precio);actualizarSubEdit()">
       <input type="text" class="edit-item-inp num" id="editSub${i}" value="${fmt((it.cant||0)*(it.precio||0))}" inputmode="numeric" autocomplete="off"
@@ -2862,12 +3187,14 @@ async function guardarEdicion() {
   const fecha    = document.getElementById('editFecha').value.trim();
   const nroCorto = document.getElementById('editNro').value.trim();
   if(!cliente) { toast('⚠️ Ingresá el nombre del cliente'); return; }
-  const nextItems = editItems.map(it => ({ id: it.id, cant: it.cant, descripcion: it.desc, precio: it.precio }));
+  const nextItems = editItems.map(it => ({ id: it.id, idart:it.idart || null, cant: it.cant, descripcion: it.desc, precio: it.precio }));
   const nextRemito = {
     ...r,
     numero_manual: r.numero_manual === true || remitoFull(nroCorto) !== remitoFull(r.nro),
     nro: remitoFull(nroCorto),
     cliente,
+    proveedor_web_id: cliente === r.cliente ? r.proveedor_web_id : null,
+    proveedor_sql_id: cliente === r.cliente ? r.proveedor_sql_id : null,
     fecha,
     total: nextItems.reduce((s,it) => s + (it.cant||0)*(it.precio||0), 0),
     items: nextItems
@@ -2895,6 +3222,8 @@ async function guardarEdicionRemota(remito) {
       nro: remitoFull(nroCorto),
       numero_manual: remito.numero_manual === true,
       cliente: remito.cliente,
+      proveedor_web_id: remito.proveedor_web_id || null,
+      proveedor_sql_id: remito.proveedor_sql_id || null,
       fecha: remito.fecha,
       fecha_iso: (() => {
         const partes = String(remito.fecha || '').trim().split('/');
@@ -2913,7 +3242,7 @@ async function guardarEdicionRemota(remito) {
     await fetch(`${SUPABASE_URL}/rest/v1/items_remito`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-      body: JSON.stringify(items.map(it => ({ remito_id: remito.id, cant: it.cant, descripcion: it.descripcion, precio: it.precio })))
+      body: JSON.stringify(items.map(it => ({ remito_id: remito.id, idart:it.idart || null, cant: it.cant, descripcion: it.descripcion, precio: it.precio })))
     });
   }
   cargarHistorial();

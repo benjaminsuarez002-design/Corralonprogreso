@@ -19,7 +19,34 @@ button,a.back{padding:4px 8px;border:1px solid var(--corralon-line-strong);borde
 button:disabled{opacity:.5;cursor:default}.primary{background:var(--corralon-red);color:var(--corralon-white);border-color:var(--corralon-red)}
 #deleteInvoiceDialog .removal-chips{display:flex;gap:6px;align-items:center;margin:0;white-space:nowrap}#deleteInvoiceDialog .removal-chips button{border-radius:999px;padding:6px 12px}#deleteInvoiceDialog .removal-chips button[aria-pressed="true"]{background:var(--corralon-red);border-color:var(--corralon-red);color:#fff}#deleteInvoiceBody td{padding:6px}#deleteInvoiceBody .removal-reason{display:block;max-width:320px;white-space:normal;font-size:12px;margin-top:4px;color:#555}
 .topbar button,.topbar .back{position:absolute;top:6px;height:28px;text-align:center}
-#accountButton{left:453px;width:100px}#ivaButton{left:574px;width:100px}.topbar .back{left:700px;width:40px;font-size:11px;line-height:18px;padding:4px 0}
+#accountButton{left:453px;width:100px}#ivaButton{left:574px;width:100px}#freightButton{left:695px;width:100px}.topbar .back{left:821px;width:40px;font-size:11px;line-height:18px;padding:4px 0}
+#freightButton{border-radius:7px;box-shadow:0 2px 5px #0001}
+#purchaseFreightDialog{width:min(640px,calc(100vw - 24px));padding:0;border-radius:16px}
+#purchaseFreightPicker{width:min(940px,calc(100vw - 24px));padding:0;border-radius:16px}
+#purchaseFreightDialog button,#purchaseFreightPicker button{border-radius:8px;padding:8px 14px;font:700 14px Barlow,Arial;min-height:34px;box-shadow:0 2px 5px #0001;transition:box-shadow .15s,background .15s}
+#purchaseFreightDialog button:hover:not(:disabled),#purchaseFreightPicker button:hover:not(:disabled){box-shadow:0 3px 9px #0002}
+#purchaseFreightDialog .dialogbar,#purchaseFreightPicker .dialogbar{padding:14px 18px}
+.purchase-freight-body{padding:18px;display:grid;gap:16px}
+.purchase-freight-field{padding:14px;border:1px solid var(--corralon-line);border-radius:12px;background:var(--corralon-soft)}
+.purchase-freight-field label{font:700 14px Barlow,Arial;margin-bottom:8px}
+.purchase-freight-total{display:flex;gap:10px;align-items:center}
+.purchase-freight-total input{height:40px;border-radius:8px;font:700 20px Barlow,Arial;text-align:right;background:var(--corralon-white);flex:1}
+.purchase-freight-total button{white-space:nowrap}
+.purchase-freight-boleta{display:block;margin-top:9px;line-height:1.5;color:var(--corralon-muted);font:13px/1.5 Barlow,Arial}
+.purchase-freight-result{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px;border:1px solid var(--corralon-line);border-radius:12px}
+.purchase-freight-result strong{font:800 28px Barlow,Arial;color:var(--corralon-red)}
+.purchase-freight-result small{display:block;color:var(--corralon-muted);margin-top:5px}
+.purchase-freight-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid var(--corralon-line);padding:12px 18px}
+#purchaseFreightStatus{margin:0;font:13px/1.5 Barlow,Arial;min-height:20px}
+#purchaseFreightPicker .freight-search{display:flex;gap:10px;padding:14px 18px}
+#purchaseFreightPicker input{height:36px;border-radius:8px;flex:1;font:14px Barlow,Arial}
+#purchaseFreightPicker [role="status"]{margin:0;padding:0 18px 12px;color:var(--corralon-muted)}
+#purchaseFreightPicker [data-picker-list]{max-height:52dvh;overflow:auto}
+#purchaseFreightPicker td{padding:10px 12px}
+#purchaseFreightPicker tr[data-freight-row]{cursor:pointer}
+#purchaseFreightPicker tr[data-freight-row]:hover{background:var(--corralon-selection)}
+#purchaseFreightPicker tr[aria-disabled="true"]{opacity:.5;cursor:default}
+#purchaseFreightPicker [data-picker-more]{margin:12px 18px}
 .panel{position:relative;width:810px;margin:6px 0 0 22px;padding:0;border:0;border-radius:0;background:transparent}
 fieldset{border:0;padding:0;margin:0;min-width:0}
 .purchase-layout{position:relative;width:810px;height:423px}
@@ -128,6 +155,7 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
       <h1>Cargar facturas</h1><span id="todayLabel"></span>
       <button id="accountButton" type="button" disabled>Ctas. Ctes.</button>
       <button id="ivaButton" type="button" disabled>IVA Compras</button>
+      <button id="freightButton" type="button">Cargar flete</button>
       <a href="menu.html" class="back">Menú</a>
     </header>
     <form id="purchaseForm" class="panel" autocomplete="off">
@@ -1283,6 +1311,112 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   $('searchNumber').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); openReport('buscar', event.target.value); } });
   $('accountButton').addEventListener('click', () => openReport('cuenta-corriente'));
   $('ivaButton').addEventListener('click', () => openReport('iva'));
+
+  let freightSelection={invoice:null,freight:null},freightPickKind='invoice',freightPickRows=[],freightPickRequest=0,freightSaving=false,freightPending=null,freightDbPromise=null;
+  const freightDialog=document.createElement('dialog');freightDialog.id='purchaseFreightDialog';
+  freightDialog.innerHTML=`<header class="dialogbar"><h2>Calcular porcentaje de flete</h2><button type="button" data-freight-close aria-label="Cerrar">Cerrar ×</button></header>
+    <div class="purchase-freight-body">
+      <div class="purchase-freight-field"><label for="purchaseFreightInvoiceTotal">Total de la factura</label><div class="purchase-freight-total"><input id="purchaseFreightInvoiceTotal" readonly value="$ 0,00"><button type="button" data-freight-choose="invoice">Elegir factura</button></div><span class="purchase-freight-boleta" data-freight-invoice>Sin seleccionar</span></div>
+      <div class="purchase-freight-field"><label for="purchaseFreightCarrierTotal">Total del flete</label><div class="purchase-freight-total"><input id="purchaseFreightCarrierTotal" readonly value="$ 0,00"><button type="button" data-freight-choose="freight">Elegir flete</button></div><span class="purchase-freight-boleta" data-freight-receipt>Sin seleccionar</span></div>
+      <div class="purchase-freight-result"><div>Porcentaje de flete<small data-freight-total>Total con flete: $ 0,00</small></div><strong data-freight-percent>0,00 %</strong></div><p id="purchaseFreightStatus" role="status" aria-live="polite"></p>
+    </div><footer class="purchase-freight-footer"><button type="button" data-freight-close>Cerrar</button><button type="button" class="primary" data-freight-save>Guardar flete</button></footer>`;
+  document.body.append(freightDialog);
+  const freightPicker=document.createElement('dialog');freightPicker.id='purchaseFreightPicker';
+  freightPicker.innerHTML='<header class="dialogbar"><h2>Elegir factura</h2><button type="button" data-picker-close>Cerrar ×</button></header><form class="freight-search"><input placeholder="Nº boleta o proveedor" aria-label="Buscar boleta por número o proveedor"><button type="submit">Buscar</button></form><p role="status"></p><div data-picker-list></div><button type="button" data-picker-more hidden>Cargar más</button>';
+  document.body.append(freightPicker);
+  const freightPendingKey=()=>`corralon_purchase_freight_pending_v1:${user.id}`;
+  function renderPurchaseFreight(){
+    const invoice=freightSelection.invoice,freight=freightSelection.freight;
+    const label=row=>row ? row.proveedor+' · '+row.numero+' · '+row.fecha : 'Sin seleccionar';
+    freightDialog.querySelector('[data-freight-invoice]').textContent=label(invoice);
+    freightDialog.querySelector('[data-freight-receipt]').textContent=label(freight);
+    $('purchaseFreightInvoiceTotal').value=money(invoice?.total||0);
+    $('purchaseFreightCarrierTotal').value=money(freight?.total||0);
+    freightDialog.querySelector('[data-freight-percent]').textContent=decimal(invoice?.total ? Number(freight?.total||0)/Number(invoice.total)*100 : 0)+' %';
+    freightDialog.querySelector('[data-freight-total]').textContent='Total con flete: '+money(Number(invoice?.total||0)+Number(freight?.total||0));
+    freightDialog.querySelectorAll('[data-freight-choose]').forEach(button=>button.disabled=freightSaving||Boolean(freightPending));
+    freightDialog.querySelectorAll('[data-freight-close]').forEach(button=>button.disabled=freightSaving);
+    const save=freightDialog.querySelector('[data-freight-save]');save.disabled=freightSaving||!invoice||!freight;save.textContent=freightSaving?'Guardando…':freightPending?'Reintentar guardado':'Guardar flete';
+  }
+  async function loadFreightInvoices(more=false){
+    const request=++freightPickRequest,status=freightPicker.querySelector('[role="status"]');status.textContent='Consultando boletas…';
+    try {
+      const result=await api({consulta:'buscar',desde:'1900-01-01',hasta:today(),proveedor:0,buscar:freightPicker.querySelector('input').value.trim(),antes:more?freightPickRows.at(-1)?.id||0:0});
+      if(request!==freightPickRequest||!freightPicker.open)return;
+      freightPickRows=more?[...freightPickRows,...result.facturas]:result.facturas;
+      freightPicker.querySelector('[data-picker-list]').innerHTML='<table><thead><tr><th>Fecha</th><th>Nº boleta</th><th>Proveedor</th><th class="numeric">Total</th><th></th></tr></thead><tbody>'+freightPickRows.map((row,index)=>`<tr data-freight-row="${index}" aria-disabled="${Number(row.total)<=0}"><td>${esc(row.fecha)}</td><td>${esc(row.numero)}</td><td>${esc(row.proveedor)}</td><td class="numeric">${money(row.total)}</td><td><button type="button" data-pick-freight="${index}" ${Number(row.total)<=0?'disabled':''}>Elegir</button></td></tr>`).join('')+'</tbody></table>';
+      freightPicker.querySelector('[data-picker-more]').hidden=!result.hayMas;status.textContent=freightPickRows.length+' boletas · Doble clic en una fila para elegirla';
+    }catch(error){if(request===freightPickRequest)status.textContent=error.message;}
+  }
+  function pickFreightInvoice(index){
+    const row=freightPickRows[Number(index)];if(!row||Number(row.total)<=0||freightSaving||freightPending)return;
+    const other=freightSelection[freightPickKind==='invoice'?'freight':'invoice'];
+    if(other&&Number(other.id)===Number(row.id)){freightPicker.querySelector('[role="status"]').textContent='Elegí una boleta distinta para la factura y para el flete.';return;}
+    freightSelection[freightPickKind]={...row};freightPickRequest++;freightPicker.close();$('purchaseFreightStatus').textContent='';renderPurchaseFreight();
+    freightDialog.querySelector(`[data-freight-choose="${freightPickKind}"]`).focus();
+  }
+  async function purchaseFreightDb(){
+    if(!freightDbPromise)freightDbPromise=Promise.all([
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')
+    ]).then(([apps,store])=>{
+      const app=apps.getApps().find(item=>item.name==='purchase-freight')||apps.initializeApp({apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',authDomain:'corralon-progreso.firebaseapp.com',projectId:'corralon-progreso',appId:'1:466583614632:web:42cb839f83e97475fabe9d'},'purchase-freight');
+      return {...store,db:store.getFirestore(app)};
+    }).catch(error=>{freightDbPromise=null;throw error;});
+    return freightDbPromise;
+  }
+  async function savePurchaseFreight(){
+    if(freightSaving||!freightSelection.invoice||!freightSelection.freight)return;
+    const status=$('purchaseFreightStatus');
+    try{
+      if(!freightPending){
+        const invoice={...freightSelection.invoice},freight={...freightSelection.freight};
+        if(Number(invoice.total)<=0||Number(freight.total)<=0||!Number.isFinite(Number(invoice.total)+Number(freight.total)))throw new Error('Elegí boletas con importes válidos.');
+        freightPending={id:FX.createUuid(),date:today(),invoice,freight};
+        // Preserve the same operation after an uncertain connection or a reload.
+        localStorage.setItem(freightPendingKey(),JSON.stringify(freightPending));
+      }
+      freightSaving=true;renderPurchaseFreight();status.textContent='Guardando flete…';
+      const pending=freightPending,invoice=pending.invoice,freight=pending.freight;
+      const db=await purchaseFreightDb();
+      const providers=await CorralonSystem.getProvidersCache().catch(()=>[]);
+      const provider=CorralonSystem.providerIdentity.resolveText(providers,invoice.proveedor);
+      const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toLowerCase();
+      const carrierId='company_'+Array.from(new TextEncoder().encode(normalize(freight.proveedor)),b=>b.toString(16).padStart(2,'0')).join('');
+      const ref=db.doc(db.db,'calculadorasFletes','movement_'+pending.id),carrierRef=db.doc(db.db,'calculadorasFletes',carrierId);
+      const payload={kind:'movement',date:pending.date,invoice:Number(invoice.total),freight:Number(freight.total),percent:Number(freight.total)/Number(invoice.total),providerId:String(provider?.id_proveedor||'sql:'+invoice.idProveedor),providerName:invoice.proveedor,carrierId,carrierName:freight.proveedor,purchaseInvoiceId:invoice.id,purchaseInvoiceNumber:invoice.numero,freightInvoiceId:freight.id,freightInvoiceNumber:freight.numero,purchaseProviderSqlId:invoice.idProveedor,freightProviderSqlId:freight.idProveedor};
+      await db.runTransaction(db.db,async transaction=>{
+        const [existing,company]=await Promise.all([transaction.get(ref),transaction.get(carrierRef)]);
+        if(existing.exists())return;
+        if(!company.exists())transaction.set(carrierRef,{kind:'company',name:freight.proveedor,createdAt:db.serverTimestamp()});
+        transaction.set(ref,{...payload,carrierName:company.exists()?company.data().name:freight.proveedor,createdAt:db.serverTimestamp()});
+      });
+      freightPending=null;localStorage.removeItem(freightPendingKey());freightSelection={invoice:null,freight:null};status.textContent='Flete guardado correctamente.';
+    }catch(error){status.textContent='No se pudo confirmar el guardado: '+error.message+'. Podés reintentar sin duplicar el flete.';}
+    finally{freightSaving=false;renderPurchaseFreight();}
+  }
+  $('freightButton').addEventListener('click',()=>{
+    if(!user)return;
+    if(!freightPending){try{freightPending=JSON.parse(localStorage.getItem(freightPendingKey())||'null');}catch{freightPending=null;}}
+    if(freightPending){freightSelection={invoice:freightPending.invoice,freight:freightPending.freight};$('purchaseFreightStatus').textContent='Hay un guardado pendiente de confirmar. Reintentá para verificarlo sin duplicar.';}
+    renderPurchaseFreight();freightDialog.showModal();
+  });
+  freightDialog.querySelectorAll('[data-freight-close]').forEach(button=>button.onclick=()=>{if(!freightSaving)freightDialog.close();});
+  freightDialog.addEventListener('cancel',event=>{if(freightSaving)event.preventDefault();});
+  freightDialog.querySelector('[data-freight-save]').onclick=savePurchaseFreight;
+  freightDialog.querySelectorAll('[data-freight-choose]').forEach(button=>button.onclick=()=>{
+    if(freightSaving||freightPending)return;
+    freightPickKind=button.dataset.freightChoose;freightPickRows=[];freightPicker.querySelector('input').value='';
+    freightPicker.querySelector('h2').textContent=freightPickKind==='invoice'?'Elegir factura de mercadería':'Elegir boleta del flete';
+    freightPicker.querySelector('[data-picker-list]').innerHTML='';freightPicker.querySelector('[data-picker-more]').hidden=true;freightPicker.showModal();loadFreightInvoices();freightPicker.querySelector('input').focus();
+  });
+  freightPicker.querySelector('[data-picker-close]').onclick=()=>{freightPickRequest++;freightPicker.close();};
+  freightPicker.addEventListener('cancel',()=>freightPickRequest++);
+  freightPicker.querySelector('form').onsubmit=event=>{event.preventDefault();loadFreightInvoices();};
+  freightPicker.querySelector('[data-picker-more]').onclick=()=>loadFreightInvoices(true);
+  freightPicker.querySelector('[data-picker-list]').onclick=event=>{const button=event.target.closest('[data-pick-freight]');if(button)pickFreightInvoice(button.dataset.pickFreight);};
+  freightPicker.querySelector('[data-picker-list]').ondblclick=event=>{const row=event.target.closest('[data-freight-row]');if(row&&freightPicker.open)pickFreightInvoice(row.dataset.freightRow);};
+
   $('reportFilters').addEventListener('submit', event => { event.preventDefault(); loadReport(); });
   $('reportProvider').addEventListener('change',()=>{
     if(reportMode!=='buscar'||!$('reportDialog').open)return;

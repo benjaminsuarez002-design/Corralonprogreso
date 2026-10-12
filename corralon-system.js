@@ -7169,6 +7169,7 @@
           if (card) renderDetail(card.dataset.budgetSearchKey);
         });
         results.addEventListener('dblclick', (event) => {
+          if (event.target.closest('[data-history-state]')) return;
           const card = event.target.closest('[data-budget-search-key]');
           const group = groups.find((item) => item.key === card?.dataset.budgetSearchKey);
           if (!group || typeof openOptions.onOpenBudget !== 'function') return;
@@ -7176,6 +7177,7 @@
           openOptions.onOpenBudget(group.budget, group.index);
         });
         results.addEventListener('keydown', (event) => {
+          if (event.target.closest('[data-history-state]')) return;
           const card = event.target.closest('[data-budget-search-key]');
           if (!card) return;
           const cards = [...results.querySelectorAll('[data-budget-search-key]')];
@@ -7222,6 +7224,7 @@
       if (!group) { detail.innerHTML = '<div class="corralon-budget-search-empty">Elegí un presupuesto para ver el detalle.</div>'; return; }
       const rows = group.lines.map((item) => `<div class="corralon-budget-search-detail-row"><div>${escapeHtml(item.codigo)}</div><div title="${escapeHtml(item.descripcion)}">${escapeHtml(item.descripcion)}</div><div class="num">${escapeHtml(formatQuantity(item.cantidad))}</div><div class="num">${escapeHtml(formatMoney(item.precio))}</div></div>`).join('');
       detail.innerHTML = `<div class="corralon-budget-search-detail-title">${budgetDate(group.budget) ? `${escapeHtml(budgetDate(group.budget))} - ` : ''}${escapeHtml(budgetTitle(group.budget))} - Presupuesto ${escapeHtml(group.budget.numero || group.budget.id || '-')}</div><div class="corralon-budget-search-meta"><div><b>Usuario</b><span>${escapeHtml(budgetUser(group.budget))}</span></div><div><b>Nota</b><span>${escapeHtml(budgetNote(group.budget))}</span></div></div><div class="corralon-budget-search-detail-row head"><div>Código</div><div>Descripción</div><div class="num">Cantidad</div><div class="num">Precio</div></div>${rows}`;
+      if (typeof openOptions.renderBudgetState === 'function') detail.querySelector('.corralon-budget-search-detail-title').insertAdjacentHTML('beforeend', ' ' + openOptions.renderBudgetState(group.budget));
     }
 
     function render() {
@@ -7238,6 +7241,12 @@
       groups = collect(queryText);
       count.textContent = `${groups.length} presupuesto${groups.length === 1 ? '' : 's'} encontrado${groups.length === 1 ? '' : 's'} para "${queryText}"`;
       results.innerHTML = groups.map((group) => `<div class="corralon-budget-search-card" tabindex="0" role="button" data-budget-search-key="${escapeHtml(group.key)}"><div><strong>${budgetDate(group.budget) ? `${escapeHtml(budgetDate(group.budget))} - ` : ''}${escapeHtml(budgetTitle(group.budget))}</strong><span>${group.lines.length} línea${group.lines.length === 1 ? '' : 's'} encontrada${group.lines.length === 1 ? '' : 's'}</span></div><b>Presupuesto ${escapeHtml(group.budget.numero || group.budget.id || '-')} · ${escapeHtml(formatMoney(group.budget.total || 0))}</b></div>`).join('') || '<div class="corralon-budget-search-empty">No encontré presupuestos con ese artículo.</div>';
+      if (typeof openOptions.renderBudgetState === 'function') {
+        results.querySelectorAll('[data-budget-search-key]').forEach(card => {
+          const group = groups.find(item => item.key === card.dataset.budgetSearchKey);
+          if (group) card.insertAdjacentHTML('beforeend', openOptions.renderBudgetState(group.budget));
+        });
+      }
       if (groups.length) renderDetail(groups[0].key);
       else { selectedKey = ''; detail.innerHTML = '<div class="corralon-budget-search-empty">Sin resultados para mostrar.</div>'; }
     }

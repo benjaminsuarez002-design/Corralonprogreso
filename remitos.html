@@ -11,7 +11,7 @@
 <script src="funciones.js?v=20260610-menu-session"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.12"></script>
+<script src="corralon-system.js?v=1.0.13"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -89,6 +89,11 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 
 /* TOAST */
 .toast { position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%); background: var(--texto-dark); color: #fff; padding: 10px 20px; border-radius: 20px; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 700; z-index: 500; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .3s; }
+.remito-suggestions { position:fixed; z-index:12000; max-height:260px; overflow:auto; background:#fff; border:1px solid var(--borde); border-radius:8px; box-shadow:0 5px 18px #0003; }
+.remito-suggestions[hidden] { display:none; }
+.remito-suggestion { padding:9px 12px; display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid #eee; cursor:pointer; font-size:14px; }
+.remito-suggestion.active { background:#e8f2ff; }
+.remito-suggestion small { color:#555; white-space:nowrap; }
 .toast.show { opacity: 1; pointer-events: auto; }
 
 /* CONFIRM POPUP */
@@ -192,7 +197,7 @@ input[type="checkbox"]{accent-color:#ef1015}
 <div class="remito-datos">
   <div class="dato-field" style="grid-column:1/3">
     <div class="dato-label">Nombre de proveedor</div>
-    <input type="text" class="dato-input" id="cliente" placeholder="Ingrese nombre del proveedor..." enterkeyhint="next">
+    <input type="text" class="dato-input" id="cliente" placeholder="Ingrese nombre del proveedor..." enterkeyhint="next" autocomplete="off">
   </div>
   <div class="dato-field">
     <div class="dato-label">Fecha</div>
@@ -347,6 +352,197 @@ const REMITO_DRAFT_KEY = 'corralon_remito_borrador_v1';
 let remitoDraftReady = false;
 let remitoNumeroManual = false;
 
+// Sugerencias de las mismas fuentes web que Proveedores e Index.
+let remitoWebProviders = [];
+let remitoWebArticles = [];
+let remitoSuggestionInput = null;
+let remitoSuggestionRows = [];
+let remitoSuggestionIndex = -1;
+const remitoSuggestions = document.createElement('div');
+remitoSuggestions.className = 'remito-suggestions';
+remitoSuggestions.id = 'remitoSuggestions';
+remitoSuggestions.setAttribute('role', 'listbox');
+remitoSuggestions.hidden = true;
+document.body.appendChild(remitoSuggestions);
+function remitoSearchText(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+function remitoSuggestionKind(input) {
+  if(input?.id === 'cliente') return 'provider';
+  if(input?.id === 'nDesc') return 'article';
+  if(input?.matches?.('.item-row .item-input') && [...input.closest('.item-row').querySelectorAll('.item-input')].indexOf(input) === 1) return 'article';
+  return '';
+}
+function remitoArticleCost(article) {
+  const value = article.PrecioCpraCI ?? article.precioCostoConImpuestos ?? article.precioCpraCI ?? article.precio_compra_con_impuestos;
+  const cost = Number(value);
+  return Number.isFinite(cost) && cost >= 0 ? cost : null;
+}
+function remitoProviderSqlId(value) {
+  const text = String(value ?? '').trim();
+  const digits = /^\d{1,3}(?:\.\d{3})+$/.test(text) ? text.replace(/\./g, '') : text;
+  return /^\d+$/.test(digits) && Number(digits) > 0 && Number(digits) <= 2147483647 ? String(Number(digits)) : '';
+}
+function closeRemitoSuggestions() {
+  remitoSuggestionInput?.setAttribute('aria-expanded', 'false');
+  remitoSuggestionInput?.removeAttribute('aria-activedescendant');
+  remitoSuggestionInput = null;
+  remitoSuggestions.hidden = true;
+}
+function showRemitoSuggestions(input) {
+  const kind = remitoSuggestionKind(input);
+  if(!kind) { closeRemitoSuggestions(); return; }
+  const text = remitoSearchText(input.value);
+  const words = text.split(/\s+/).filter(Boolean);
+  const rows = kind === 'provider'
+    ? remitoWebProviders.map(provider => ({ label:String(provider.proveedor || '').trim(), source:provider }))
+    : remitoWebArticles.map(article => ({ label:String(article.nombre || article.descripcion || '').trim(), source:article }));
+  remitoSuggestionRows = rows.filter(row => row.label && words.every(word => remitoSearchText(row.label).includes(word)))
+    .sort((a,b) => Number(remitoSearchText(b.label) === text) - Number(remitoSearchText(a.label) === text) || a.label.localeCompare(b.label, 'es')).slice(0, 50);
+  if(!remitoSuggestionRows.length) { closeRemitoSuggestions(); return; }
+  remitoSuggestionInput = input;
+  remitoSuggestionIndex = kind === 'article' ? 0 : -1;
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-controls', remitoSuggestions.id);
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'true');
+  remitoSuggestions.replaceChildren();
+  remitoSuggestionRows.forEach((row, index) => {
+    const option = document.createElement('div');
+    option.className = 'remito-suggestion';
+    option.id = `remitoSuggestion${index}`;
+    option.dataset.suggestionIndex = index;
+    option.setAttribute('role', 'option');
+    const label = document.createElement('span'); label.textContent = row.label; option.appendChild(label);
+    if(kind === 'article') {
+      const cost = remitoArticleCost(row.source);
+      const info = document.createElement('small'); info.textContent = cost === null ? 'Sin costo con IVA' : fmt(cost); option.appendChild(info);
+    }
+    remitoSuggestions.appendChild(option);
+  });
+  remitoSuggestions.hidden = false;
+  const rect = input.getBoundingClientRect();
+  remitoSuggestions.style.width = `${Math.min(Math.max(rect.width, 320), window.innerWidth - 16)}px`;
+  remitoSuggestions.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - remitoSuggestions.offsetWidth - 8))}px`;
+  remitoSuggestions.style.top = `${rect.bottom + 3}px`;
+  if(rect.bottom + 3 + remitoSuggestions.offsetHeight > window.innerHeight && rect.top > remitoSuggestions.offsetHeight) remitoSuggestions.style.top = `${rect.top - remitoSuggestions.offsetHeight - 3}px`;
+  paintRemitoSuggestion();
+}
+function paintRemitoSuggestion() {
+  [...remitoSuggestions.children].forEach((option, index) => {
+    option.classList.toggle('active', index === remitoSuggestionIndex);
+    option.setAttribute('aria-selected', String(index === remitoSuggestionIndex));
+  });
+  const active = remitoSuggestions.children[remitoSuggestionIndex];
+  if(active) { remitoSuggestionInput.setAttribute('aria-activedescendant', active.id); active.scrollIntoView?.({ block:'nearest' }); }
+}
+function chooseRemitoSuggestion(index) {
+  const input = remitoSuggestionInput, choice = remitoSuggestionRows[index];
+  if(!input || !choice) return;
+  const kind = remitoSuggestionKind(input);
+  input.value = choice.label;
+  if(kind === 'provider') {
+    input.dataset.providerWebId = CorralonSystem.providerIdentity.internalId(choice.source);
+    input.dataset.providerSqlId = remitoProviderSqlId(CorralonSystem.providerIdentity.externalId(choice.source));
+  }
+  if(kind === 'article') {
+    input.dataset.idart = String(choice.source.codigo || choice.source.idart || choice.source.idArt || '').trim();
+    const cost = remitoArticleCost(choice.source);
+    if(input.id === 'nDesc') {
+      if(cost !== null) {
+        const price = document.getElementById('nPrecio'); price.value = fmt(cost); price.dataset.moneyRaw = rawMoneyTextFromValue(price.value);
+        updatePreview('precio');
+      } else toast('El artículo no tiene costo final con IVA en el catálogo.');
+    } else {
+      const row = input.closest('.item-row');
+      const item = items[[...document.querySelectorAll('.item-row')].indexOf(row)];
+      item.desc = choice.label;
+      item.idart = input.dataset.idart;
+      if(cost !== null) {
+        item.precio = cost;
+        const price = row.querySelectorAll('.item-input')[2]; price.value = fmt(cost); price.dataset.moneyRaw = rawMoneyTextFromValue(price.value);
+        const subtotal = row.querySelectorAll('.item-input')[3]; subtotal.readOnly = Boolean(item.cant && cost); subtotal.tabIndex = subtotal.readOnly ? -1 : 0;
+      } else toast('El artículo no tiene costo final con IVA en el catálogo.');
+      recalc();
+    }
+  }
+  closeRemitoSuggestions(); saveRemitoDraft(); moverCampo(input, 1);
+}
+remitoSuggestions.addEventListener('pointerdown', event => event.preventDefault());
+remitoSuggestions.addEventListener('click', event => {
+  const option = event.target.closest('[data-suggestion-index]');
+  if(option) chooseRemitoSuggestion(Number(option.dataset.suggestionIndex));
+});
+document.addEventListener('input', event => {
+  const kind = remitoSuggestionKind(event.target);
+  if(!kind) return;
+  if(kind === 'provider') { delete event.target.dataset.providerWebId; delete event.target.dataset.providerSqlId; }
+  else {
+    delete event.target.dataset.idart;
+    const row = event.target.closest('.item-row');
+    if(row) delete items[[...document.querySelectorAll('.item-row')].indexOf(row)].idart;
+  }
+  showRemitoSuggestions(event.target);
+});
+document.addEventListener('focusin', event => { if(remitoSuggestionKind(event.target)) showRemitoSuggestions(event.target); else closeRemitoSuggestions(); });
+document.addEventListener('focusout', event => { if(event.target === remitoSuggestionInput) closeRemitoSuggestions(); });
+window.addEventListener('resize', closeRemitoSuggestions);
+document.addEventListener('scroll', event => { if(!remitoSuggestions.contains(event.target)) closeRemitoSuggestions(); }, true);
+function handleRemitoSuggestionKey(event, input) {
+  if(event.isComposing || input !== remitoSuggestionInput || remitoSuggestions.hidden) return false;
+  if(['ArrowDown','ArrowUp'].includes(event.key)) {
+    event.preventDefault();
+    remitoSuggestionIndex = Math.max(0, Math.min(remitoSuggestionRows.length - 1, remitoSuggestionIndex + (event.key === 'ArrowDown' ? 1 : -1)));
+    paintRemitoSuggestion(); return true;
+  }
+  if(event.key === 'Escape') { event.preventDefault(); closeRemitoSuggestions(); return true; }
+  if(esEnterRemito(event)) {
+    const exact = remitoSuggestionRows.findIndex(row => remitoSearchText(row.label) === remitoSearchText(input.value));
+    const index = remitoSuggestionIndex >= 0 ? remitoSuggestionIndex : exact;
+    if(index >= 0) {
+      event.preventDefault(); ultimoEnterRemitoTarget = input; ultimoEnterRemitoAt = Date.now(); chooseRemitoSuggestion(index); return true;
+    }
+    closeRemitoSuggestions();
+  }
+  if(event.key === 'Tab') closeRemitoSuggestions();
+  return false;
+}
+async function loadRemitoWebSuggestions() {
+  const refresh = () => { const input = document.activeElement; if(remitoSuggestionKind(input)) showRemitoSuggestions(input); };
+  await Promise.allSettled([
+    (async () => {
+      remitoWebProviders = await CorralonSystem.getProvidersCache(); refresh();
+      try { remitoWebProviders = await CorralonSystem.syncProvidersCache(); refresh(); }
+      catch(error) { console.warn('No se pudieron sincronizar los proveedores web', error); }
+    })(),
+    (async () => {
+      remitoWebArticles = await CorralonSystem.catalog.cachedRows(); refresh();
+      if(remitoWebArticles.length) {
+        const sync = await CorralonSystem.catalog.refresh({ fallback:false, onlyCached:true });
+        remitoWebArticles = sync.rows;
+      } else {
+        remitoWebArticles = await CorralonSystem.catalog.load({ fallback:true });
+      }
+      refresh();
+      CorralonSystem.catalogRealtime.start();
+    })().catch(error => { console.warn('No se pudo cargar el catálogo web', error); toast('No se pudo cargar el catálogo. Podés seguir escribiendo manualmente.'); })
+  ]);
+}
+window.addEventListener('corralon:catalog-delta', event => {
+  const delta = event.detail || {};
+  const code = article => String(article.codigo || article.idart || article.idArt || '').trim();
+  const byId = new Map(remitoWebArticles.map(article => [code(article), article]));
+  (delta.removedCodes || []).forEach(id => byId.delete(String(id)));
+  (delta.changedRows || []).forEach(article => byId.set(code(article), article));
+  remitoWebArticles = [...byId.values()];
+  if(remitoSuggestionKind(document.activeElement)) showRemitoSuggestions(document.activeElement);
+});
+window.addEventListener('corralon:catalog-ready', event => {
+  if(!Array.isArray(event.detail?.rows)) return;
+  remitoWebArticles = event.detail.rows;
+  if(remitoSuggestionKind(document.activeElement)) showRemitoSuggestions(document.activeElement);
+});
+
 // ── UTILS ──────────────────────────────────────────────────────
 function fmt(n) {
   return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -462,11 +658,14 @@ function getRemitoDraft() {
   return {
     nroManual: remitoNumeroManual ? document.getElementById('nroRemito').value : null,
     cliente: document.getElementById('cliente')?.value || '',
+    proveedor_web_id: document.getElementById('cliente')?.dataset.providerWebId || null,
+    proveedor_sql_id: document.getElementById('cliente')?.dataset.providerSqlId || null,
     fecha: document.getElementById('fechaInput')?.value || '',
     items,
     pendiente: {
       cant: document.getElementById('nCant')?.value || '',
       desc: document.getElementById('nDesc')?.value || '',
+      idart: document.getElementById('nDesc')?.dataset.idart || null,
       precio: document.getElementById('nPrecio')?.value || '',
       sub: document.getElementById('nSub')?.value || ''
     },
@@ -493,6 +692,7 @@ function restoreRemitoDraft() {
     items = Array.isArray(draft.items) ? draft.items.map(it => ({
       cant: Number(it.cant) || 0,
       desc: it.desc || it.descripcion || '',
+      idart: it.idart || null,
       precio: Number(it.precio) || 0
     })).filter(it => it.desc || it.precio || it.cant) : [];
     if(draft.nroManual != null) {
@@ -500,9 +700,12 @@ function restoreRemitoDraft() {
       document.getElementById('nroRemito').value = String(draft.nroManual);
     }
     document.getElementById('cliente').value = draft.cliente || '';
+    document.getElementById('cliente').dataset.providerWebId = draft.proveedor_web_id || '';
+    document.getElementById('cliente').dataset.providerSqlId = remitoProviderSqlId(draft.proveedor_sql_id);
     if(draft.fecha) document.getElementById('fechaInput').value = draft.fecha;
     document.getElementById('nCant').value = draft.pendiente?.cant || '';
     document.getElementById('nDesc').value = draft.pendiente?.desc || '';
+    document.getElementById('nDesc').dataset.idart = draft.pendiente?.idart || '';
     document.getElementById('nPrecio').value = draft.pendiente?.precio || '';
     document.getElementById('nSub').value = draft.pendiente?.sub || '';
     renderItems();
@@ -566,7 +769,7 @@ function renderItems() {
     row.innerHTML = `
       <input type="text" class="item-input num" value="${it.cant}" inputmode="decimal" autocomplete="off"
         onchange="actualizarItemDesdeCampo(${i}, 'cant', this)">
-      <input type="text" class="item-input" value="${it.desc}" autocomplete="off"
+      <input type="text" class="item-input" value="${it.desc}" data-idart="${escapeHtml(it.idart || '')}" autocomplete="off"
         onchange="items[${i}].desc=this.value">
       <input type="text" class="item-input num money-live" value="${fmt(it.precio)}" inputmode="decimal" autocomplete="off"
         onchange="actualizarItemDesdeCampo(${i}, 'precio', this)">
@@ -745,6 +948,7 @@ let ultimoEnterRemitoAt = 0;
 document.addEventListener('keydown', e => {
   const target = esCampoNavegable(e.target) ? e.target : document.activeElement;
   if(!target) return;
+  if(handleRemitoSuggestionKey(e, target)) return;
   if(handleMoneyLiveKey(e)) {
     if(target.id === 'nPrecio') updatePreview('precio');
     return;
@@ -907,6 +1111,7 @@ function limpiarFilaAgregar() {
   const subEl = document.getElementById('nSub');
   cantEl.value = '';
   descEl.value = '';
+  delete descEl.dataset.idart;
   precioEl.value = '';
   subEl.value = '';
   delete precioEl.dataset.moneyRaw;
@@ -923,7 +1128,7 @@ function agregarItem() {
   const subtotal = parseMonto(document.getElementById('nSub').value);
   if(!precio && subtotal) precio = subtotal / cant;
   if(!desc && !precio) return;
-  items.push({cant, desc, precio});
+  items.push({cant, desc, precio, idart: document.getElementById('nDesc').dataset.idart || null});
   limpiarFilaAgregar();
   renderItems();
   setTimeout(() => document.getElementById('nCant').focus(), 30);
@@ -1117,6 +1322,8 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar,
       nro: remitoFull(nroShort),
       numero_manual: numeroManual,
       cliente,
+      proveedor_web_id: document.getElementById('cliente').dataset.providerWebId || null,
+      proveedor_sql_id: /^\d+$/.test(document.getElementById('cliente').dataset.providerSqlId || '') ? Number(document.getElementById('cliente').dataset.providerSqlId) : null,
       fecha,
       fecha_iso: (() => {
         const partes = String(fecha || '').trim().split('/');
@@ -1141,9 +1348,10 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar,
       remito_id: remitoId,
       cant: it.cant,
       descripcion: it.desc,
+      idart: it.idart || null,
       precio: it.precio
     }));
-    await fetch(`${SUPABASE_URL}/rest/v1/items_remito`, {
+    const itemsResponse = await fetch(`${SUPABASE_URL}/rest/v1/items_remito`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${SUPABASE_KEY}`,
@@ -1153,6 +1361,7 @@ async function guardarRemito(nro, cliente, fecha, total, linkPdf, itemsAGuardar,
       },
       body: JSON.stringify(itemsPayload)
     });
+    if(!itemsResponse.ok) throw new Error('No se pudieron guardar los artículos del remito.');
   }
 
   const numeroGuardado = parseInt(nroShort, 10);
@@ -1249,6 +1458,8 @@ function _hacerLimpiar(msg) {
   remitoNumeroManual = false;
   items = [];
   document.getElementById('cliente').value = '';
+  delete document.getElementById('cliente').dataset.providerWebId;
+  delete document.getElementById('cliente').dataset.providerSqlId;
   limpiarFilaAgregar();
   clearRemitoDraft();
   initDp();
@@ -1298,10 +1509,11 @@ function prepararRemitoDesdeFormulario() {
   const itemsSnapshot = items.map(it => ({
     cant: Number(it.cant) || 0,
     desc: it.desc || '',
+    idart: it.idart || null,
     precio: Number(it.precio) || 0
   }));
   const total = itemsSnapshot.reduce((s,it) => s + it.precio * it.cant, 0);
-  return { cliente, fecha, nro, numero_manual: remitoNumeroManual, total, items: itemsSnapshot };
+  return { cliente, fecha, nro, proveedor_web_id: document.getElementById('cliente').dataset.providerWebId || null, proveedor_sql_id: document.getElementById('cliente').dataset.providerSqlId || null, numero_manual: remitoNumeroManual, total, items: itemsSnapshot };
 }
 
 function abrirRemitoActions(remito) {
@@ -1447,6 +1659,7 @@ remitoDraftReady = true;
 saveRemitoDraft();
 cargarNroRemito();
 iniciarAutoRefreshNroRemito();
+loadRemitoWebSuggestions();
 
 // Precargar logo
 window.PresupuestoShared.ensureLogoDataUrl(document.querySelector('.header img').src).then(dataUrl => {
@@ -1463,6 +1676,7 @@ document.addEventListener('input', e => {
 });
 
 document.addEventListener('pointerdown', e => {
+  if(remitoSuggestions.contains(e.target)) return;
   const filaAgregar = document.getElementById('filaAgregar');
   if(!filaAgregar || filaAgregar.contains(e.target)) return;
   confirmarArticuloPendiente();

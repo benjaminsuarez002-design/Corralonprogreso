@@ -52,7 +52,7 @@ internal static class LocalArticleImport
             return rows;
         }
     }
-    private const string ArticleSelect = "SELECT IDArt AS id, [Descripción] AS descripcion, IDArtProv AS codigo, IDProveedor AS proveedor, IDRubro AS rubro, PorcIVA1 AS iva, PorcGanMin AS margen, PorcGanMay AS margenMay, PorcGanInt AS margenInt, PrecioCpraSISDto AS costo, PrecioCpraSI AS costoSI, PrecioCpraCI AS costoCI, PrecioVta1 AS venta1, PrecioVta2 AS venta2, PrecioVta3 AS venta3, PorcDto1 AS dto1, PorcDto2 AS dto2, IDMoneda AS moneda, FechaActPrec AS fecha FROM dbo.[Artículos]";
+    private const string ArticleSelect = "SELECT IDArt AS id, [Descripción] AS descripcion, IDArtProv AS codigo, IDProveedor AS proveedor, IDRubro AS rubro, PorcIVA1 AS iva, PorcGanMin AS margen, PorcGanMay AS margenMay, PorcGanInt AS margenInt, PrecioCpraSISDto AS costo, PrecioCpraSI AS costoSI, PrecioCpraCI AS costoCI, PrecioVta1 AS venta1, PrecioVta2 AS venta2, PrecioVta3 AS venta3, PorcDto1 AS dto1, PorcDto2 AS dto2, IDMoneda AS moneda, UniXBulto AS unidadesBulto, FechaActPrec AS fecha FROM dbo.[Artículos]";
     private static Dictionary<string, object> Article(SqlConnection c, SqlTransaction t, string id)
     {
         var rows = Rows(Command(c, t, ArticleSelect + (t == null ? "" : " WITH (UPDLOCK,HOLDLOCK)") + " WHERE IDArt=@p0 AND ISNULL(Suspendido,0)=0", id));
@@ -84,6 +84,7 @@ internal static class LocalArticleImport
         public decimal iva { get; set; }
         public int rubro { get; set; }
         public decimal? margen { get; set; }
+        public decimal? unidadesBulto { get; set; }
     }
     internal sealed class WebArticle
     {
@@ -195,6 +196,7 @@ internal static class LocalArticleImport
                     if (row.costo <= 0 || row.costo > 1000000000m || row.rubro <= 0 || (row.margen.HasValue && (row.margen.Value < 0 || row.margen.Value > 10000))) throw new InvalidOperationException("Revisa costo, rubro y margen de " + code);
                     using (var cmd = Command(c, tx, "SELECT COUNT(*) FROM dbo.Rubros WHERE IDRubro=@p0", row.rubro))
                         if (Convert.ToInt32(cmd.ExecuteScalar()) != 1) throw new InvalidOperationException("El rubro de " + code + " no existe.");
+                    if(row.unidadesBulto.HasValue && (row.unidadesBulto.Value<=0 || row.unidadesBulto.Value>1000000000m))throw new InvalidOperationException("Cantidad por bulto invalida: " + code);
                     decimal iva = row.iva, min = (row.margen ?? 30m) / 100m, may = min, inter = min;
                     if (iva != .21m && iva != .105m) throw new InvalidOperationException("IVA invalido: " + code);
                     if (update)
@@ -229,10 +231,10 @@ internal static class LocalArticleImport
                     decimal cost = Decimal.Round(row.costo, 2, MidpointRounding.AwayFromZero);
                     decimal ci = Decimal.Round(cost * (1 + iva), 4, MidpointRounding.AwayFromZero);
                     object[] args = { id, code, description, batch.provider, row.rubro, iva, cost, ci,
-                        Decimal.Round(cost*(1+iva)*(1+may),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+inter),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+min),2,MidpointRounding.AwayFromZero), min, may, inter };
+                        Decimal.Round(cost*(1+iva)*(1+may),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+inter),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+min),2,MidpointRounding.AwayFromZero), min, may, inter, (object)row.unidadesBulto ?? DBNull.Value };
                     string sql = update
-                        ? "UPDATE dbo.[Artículos] SET IDArtProv=@p1, IDProveedor=@p3, IDRubro=@p4, PorcIVA1=@p5, IDPorcIVA=CASE WHEN @p5=0.105 THEN 2 ELSE 1 END, PrecioCpraSISDto=@p6, PrecioCpraSI=@p6, PrecioCpraCI=@p7, PrecioVta1=@p8, PrecioVta2=@p9, PrecioVta3=@p10, PorcGanMin=@p11, PorcGanMay=@p12, PorcGanInt=@p13, FechaActPrec=GETDATE() WHERE IDArt=@p0"
-                        : "INSERT INTO dbo.[Artículos] (IDArt,IDArtProv,[Descripción],DescImpr,IDProveedor,IDRubro,PorcIVA1,IDPorcIVA,PrecioCpraSISDto,PrecioCpraSI,PrecioCpraCI,PrecioVta1,PrecioVta2,PrecioVta3,PorcGanMin,PorcGanMay,PorcGanInt,IDMoneda,IDSeccion) VALUES (@p0,@p1,@p2,@p2,@p3,@p4,@p5,CASE WHEN @p5=0.105 THEN 2 ELSE 1 END,@p6,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,1,1)";
+                        ? "UPDATE dbo.[Artículos] SET IDArtProv=@p1, IDProveedor=@p3, IDRubro=@p4, PorcIVA1=@p5, IDPorcIVA=CASE WHEN @p5=0.105 THEN 2 ELSE 1 END, PrecioCpraSISDto=@p6, PrecioCpraSI=@p6, PrecioCpraCI=@p7, PrecioVta1=@p8, PrecioVta2=@p9, PrecioVta3=@p10, PorcGanMin=@p11, PorcGanMay=@p12, PorcGanInt=@p13, UniXBulto=COALESCE(@p14,UniXBulto), FechaActPrec=GETDATE() WHERE IDArt=@p0"
+                        : "INSERT INTO dbo.[Artículos] (IDArt,IDArtProv,[Descripción],DescImpr,IDProveedor,IDRubro,PorcIVA1,IDPorcIVA,PrecioCpraSISDto,PrecioCpraSI,PrecioCpraCI,PrecioVta1,PrecioVta2,PrecioVta3,PorcGanMin,PorcGanMay,PorcGanInt,IDMoneda,IDSeccion,UniXBulto) VALUES (@p0,@p1,@p2,@p2,@p3,@p4,@p5,CASE WHEN @p5=0.105 THEN 2 ELSE 1 END,@p6,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,1,1,COALESCE(@p14,1))";
                     commands.Add(Command(c, tx, sql, args));
                     if (update) updated++; else { added++; commands.Add(Command(c, tx, "INSERT INTO dbo.ArtsStock (IDArt,IDSuc) SELECT @p0,IDSuc FROM dbo.Sucursales", id)); }
                     result.Add(new { id = id, mode = row.mode, codigo = code });

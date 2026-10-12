@@ -52,7 +52,8 @@
 
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
-  const pageId = document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile];
+  const declaredPageId = document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile];
+  const pageId = declaredPageId === 'calculadoras' && new URLSearchParams(location.search).get('embed') === 'flete' ? 'cargar_facturas' : declaredPageId;
   const loginPage = ['facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html';
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));

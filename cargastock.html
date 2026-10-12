@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.42"></script>
+<script src="corralon-system.js?v=1.0.43"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1447,7 +1447,7 @@ stockAdditionalSql.addEventListener('click',async()=>{
   if(stockIngresoBusy || stockPedidoBusy || stockAdditionalSwitching)return;
   document.activeElement?.blur();
   const sourceProvider=provider?{...provider}:null,sourceText=el.providerInput.value;
-  const sourceRows=rowsData.filter(row=>!isBlankStockRow(row)).map(row=>({...row,precio:calcPrecioFinal(row),precioExpression:'',precioOriginal:0,precioDivisor:'',precioMultiplicador:'',stockAdditionalPriceSource:null}));
+  const sourceRows=rowsData.filter(row=>!isBlankStockRow(row)).map(row=>({codigo:String(row.codigo||'').trim(),cantidad:row.cantidad}));
   await stockCloseAdditionalOptions();
   const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
   if(pending?.status==='uncertain'){stockIngresoMessage('Recuperá primero la confirmación pendiente de la carga SQL. Los artículos siguen guardados en Opciones adicionales.','error');return;}
@@ -1455,6 +1455,14 @@ stockAdditionalSql.addEventListener('click',async()=>{
   const next=stockWorkspaceSnapshot();next.rows=sourceRows;next.provider=sourceProvider;next.providerText=sourceText;
   next.pending=null;
   await stockSwitchWorkspace(stockActiveWorkspace,{discardCurrent:true,nextSnapshot:next});
+  rowsData.forEach(row=>{
+    const matches=stockSqlByCode.get(`${stockProviderId()}:${codeKey(row.codigo)}`)||[];
+    if(matches.length!==1)return;
+    const article=matches[0];
+    row.idart=String(article.idart);row.descripcion=String(article.descripcion||'');row.stock=Number(article.stock||0);
+    stockUpdateSelectedArticlePrice(row,stockSelectedArticleCost(article));
+  });
+  render();
   saveRows();stockField('confirmStockIngresoBtn').focus();
 });
 const stockAdditionalCloseAnchor=document.createComment('Cerrar opciones adicionales');
@@ -1510,6 +1518,10 @@ document.addEventListener('keydown', event => {
     event.preventDefault();event.stopImmediatePropagation();stockCloseAdditionalOptions();
   }
 }, true);
+function stockSelectedArticleCost(article) {
+  if (article.source === 'proveedores') return Number(article.precioFinal || article.precioCosto) || 0;
+  return Number(stockCostOptionsActive() ? article.precioCosto : (article.costoListaPesos ?? article.precioCosto)) || 0;
+}
 function stockUpdateSelectedArticlePrice(row, price) {
   if (stockCostOptionsActive() && moneyNumber(row.precio)) return;
   row.precio = precioUnitarioDesdeFinal(row, moneyNumber(price));
@@ -1660,14 +1672,17 @@ function filteredProviderArticles(cell) {
   const rowIndex = Number(cell?.dataset?.row);
   const row = rowsData[rowIndex] || {};
   const bySqlId = cell?.dataset?.field === 'idart';
+  const typedId = codeKey(cell?.textContent);
+  const normalizedId = /^\d+$/.test(typedId) ? typedId.padStart(6, '0') : typedId;
   const duplicateMatches = bySqlId && !stockCostOptionsActive() ? stockMatchesForRow(row) : [];
-  if (duplicateMatches.length > 1) {
+  const choosingDuplicate = duplicateMatches.length > 1 && (!typedId || normalizedId === String(row.idart || '').padStart(6, '0'));
+  if (choosingDuplicate) {
     articleProviderPage = CorralonSystem.articleOptionPager.create(duplicateMatches, {
       isMatch: () => true, hasSearch: false, matchLimit: 100
     });
     return articleProviderPage.options;
   }
-  const idArticles = duplicateMatches.length > 1 ? duplicateMatches : bySqlId && ((stockField('stockArticleFilter').value === 'proveedor-sql') || (stockField('stockArticleFilter').value === 'listas')) && provider
+  const idArticles = bySqlId && ((stockField('stockArticleFilter').value === 'proveedor-sql') || (stockField('stockArticleFilter').value === 'listas')) && provider
     ? stockSqlArticles.filter(item => Number(item.proveedor) === stockProviderId()) : stockSqlArticles;
   const ordered = bySqlId ? CorralonSystem.articleOptionPager.prepare(idArticles, CorralonSystem.articleOptionPager.defaultKey, CorralonSystem.articleOptionPager.defaultDescription) : providerArticlesOrdered;
   const terms = norm(cell?.textContent || '').split(' ').filter(Boolean);
@@ -1678,10 +1693,13 @@ function filteredProviderArticles(cell) {
   const typedCode = cell?.dataset?.field === 'descripcion' ? codeKey(row.codigo) : codeKey(cell?.textContent);
   const exactRank = (item) => {
     const indexed = providerArticleSearch.get(item) || {code:codeKey(item.codProv),id:codeKey(item.idart)};
-    return (cell?.dataset?.field === 'idart' ? indexed?.id === typedCode : indexed?.code === typedCode) ? 0 : 10;
+    return (bySqlId ? String(item.idart || '').padStart(6, '0') === normalizedId : indexed?.code === typedCode) ? 0 : 10;
   };
-  const matches = item => cell?.dataset?.field === 'descripcion' && terms.length
-    ? descriptionMatches(item) : (typedCode && exactRank(item) < 10) || descriptionMatches(item);
+  const matches = item => bySqlId
+    ? !typedId || exactRank(item) === 0 || codeKey(item.idart).includes(typedId)
+    : cell?.dataset?.field === 'descripcion' && terms.length
+    ? descriptionMatches(item) || (stockUsesProviderList() && typedCode && exactRank(item) === 0)
+    : (typedCode && exactRank(item) < 10) || descriptionMatches(item);
   let matchingArticles = terms.length || typedCode ? ordered.filter(matches) : ordered;
   let linkedArticleMatch = false;
   if (!matchingArticles.length && cell?.dataset?.field === 'descripcion' && row.idart && typedCode) {
@@ -1701,7 +1719,7 @@ function filteredProviderArticles(cell) {
 }
 function renderArticleProviderList() {
   el.articleProviderMenu.innerHTML = articleProviderOptions.length
-    ? articleProviderOptions.map((item, index) => `<div class="article-provider-option${item.source !== 'proveedores' ? ' sql-option' : ''}${index === articleProviderActive ? ' active' : ''}" data-article-option="${index}"><b>${escapeHtml(item.codProv || '-')}</b>${item.source !== 'proveedores' ? `<span title="IDArt">${escapeHtml(item.idart || '')}</span>` : ''}<span>${escapeHtml(item.descripcion || '')}</span>${item.source !== 'proveedores' ? `<span class="sql-cost" title="Costo sin IVA SQL">${money(item.precioCosto ?? 0)}</span>` : ''}</div>`).join('')
+    ? articleProviderOptions.map((item, index) => `<div class="article-provider-option${item.source !== 'proveedores' ? ' sql-option' : ''}${index === articleProviderActive ? ' active' : ''}" data-article-option="${index}"><b>${escapeHtml(item.codProv || '-')}</b>${item.source !== 'proveedores' ? `<span title="IDArt">${escapeHtml(item.idart || '')}</span>` : ''}<span>${escapeHtml(item.descripcion || '')}</span>${item.source !== 'proveedores' ? `<span class="sql-cost" title="Costo sin IVA SQL">${money(stockSelectedArticleCost(item))}</span>` : ''}</div>`).join('')
     : '<div class="article-provider-option"><span>Sin coincidencias</span></div>';
   if (stockCanOfferArticleImport(articleProviderCell)) {
     el.articleProviderMenu.insertAdjacentHTML('afterbegin', `<div class="article-provider-option${articleProviderActive === -1 ? ' active' : ''}" data-article-create style="color:var(--corralon-red,#f50916);font-weight:bold;cursor:pointer"><span>Cargar artículo: ${escapeHtml(articleProviderCell.textContent.trim())}</span></div>`);
@@ -1784,7 +1802,7 @@ function pickArticleProviderOption(index = articleProviderActive) {
   row.idartManual = Boolean(row.idart);
   if (!stockCostOptionsActive() || cell.dataset.field !== 'descripcion' || !String(row.codigo || '').trim()) row.codigo = String(item.codProv || '').trim();
   row.descripcion = String(item.descripcion || '').trim();
-  stockUpdateSelectedArticlePrice(row, item.precioFinal || item.precioCosto || 0);
+  stockUpdateSelectedArticlePrice(row, stockSelectedArticleCost(item));
   commitCellEditSnapshot(cell);
   saveRows();
   closeArticleProviderList();
@@ -1816,7 +1834,7 @@ function applyExactProviderCode(cell) {
   row.idart = item.source === 'proveedores' ? '' : String(item.idart || ''); row.stock = item.stock ?? null;
   row.codigo = String(item.codProv || '').trim();
   row.descripcion = String(item.descripcion || '').trim();
-  stockUpdateSelectedArticlePrice(row, item.precioFinal || item.precioCosto || 0);
+  stockUpdateSelectedArticlePrice(row, stockSelectedArticleCost(item));
   commitCellEditSnapshot(cell);
   saveRows();
   render();
@@ -4604,7 +4622,48 @@ async function stockSaveBudgets() {
 function stockBudgetChip(budget) {
   if (!stockBudgetNotificationsReady) return '<span class="stock-budget-chip">Estado no disponible</span>';
   const pending = stockBudgetNotifications.get(String(budget.numero))?.resuelta === false;
-  return `<span class="stock-budget-chip ${pending ? 'unresolved' : 'resolved'}">${pending ? 'No resuelto' : 'Resuelto'}</span>`;
+  return `<button type="button" class="stock-budget-chip ${pending ? 'unresolved' : 'resolved'}" data-budget-toggle title="${pending ? 'Marcar como resuelto' : 'Marcar como no resuelto'}">${pending ? 'No resuelto' : 'Resuelto'}</button>`;
+}
+const stockBudgetStateSaving = new Set();
+async function stockToggleBudgetState(budget) {
+  const number = String(budget.numero);
+  if (!stockBudgetNotificationsReady || stockBudgetStateSaving.has(number)) return;
+  const resolved = stockBudgetNotifications.get(number)?.resuelta === false;
+  const docId = stockBudgetNotifications.get(number)?.docId || `presupuesto_${number.replace(/[^\w-]/g, '_')}`;
+  const status = document.getElementById('stockBudgetStatus');
+  stockBudgetStateSaving.add(number);
+  const paint = () => document.querySelectorAll('#stockBudgetBody [data-budget-index]').forEach(row => {
+    const item = stockWebBudgets[Number(row.dataset.budgetIndex)];
+    if (String(item.numero) !== number) return;
+    row.lastElementChild.innerHTML = stockBudgetChip(item);
+    row.querySelector('[data-budget-toggle]').disabled = stockBudgetStateSaving.has(number);
+  });
+  paint();
+  status.textContent = `Guardando estado del presupuesto Nº ${number}…`;
+  try {
+    const reference = doc(db, 'historialNotificaciones', docId);
+    await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(reference);
+      const state = { resuelta: resolved, resueltaAt: resolved ? serverTimestamp() : null, updatedAt: serverTimestamp() };
+      if (snapshot.exists()) transaction.update(reference, state);
+      else transaction.set(reference, { tipo: 'presupuesto', id: number, titulo: `Presupuesto ${number}`, detalle: budget.cliente_nombre || '', fecha: stockBudgetDate(budget), createdAt: serverTimestamp(), ...state });
+    });
+    stockBudgetNotifications.set(number, { ...stockBudgetNotifications.get(number), docId, resuelta: resolved });
+    // Una elección manual reemplaza cualquier resolución automática pendiente.
+    const queued = JSON.parse(localStorage.getItem(STOCK_BUDGET_RESOLUTION_KEY) || '[]');
+    localStorage.setItem(STOCK_BUDGET_RESOLUTION_KEY, JSON.stringify(queued.filter(item => String(item) !== number)));
+    status.textContent = `Presupuesto Nº ${number} ${resolved ? 'resuelto' : 'no resuelto'}.`;
+    if (stockNotificationRecord) {
+      const previous = stockNotificationRecord.rows.find(row => row.firestoreId === docId);
+      const row = { ...previous, firestoreId: docId, tipo: 'presupuesto', id: number, resuelta: resolved, resueltaAt: resolved ? Timestamp.now() : null };
+      stockNotificationRecord.rows = stockNotificationRecord.rows.filter(item => item.firestoreId !== docId).concat(row);
+      try { await stockBudgetCache('notifications', stockNotificationRecord); }
+      catch (error) { console.warn('Estado guardado; no se pudo actualizar la caché del presupuesto', error); }
+    }
+  } catch (error) {
+    status.textContent = 'No se pudo guardar el estado. Volvé a intentarlo.';
+    console.warn('No se pudo cambiar el estado del presupuesto', error);
+  } finally { stockBudgetStateSaving.delete(number); paint(); }
 }
 async function stockReadBudgetNotifications() {
   const own = await stockBudgetCache('notifications');
@@ -4747,7 +4806,8 @@ async function stockOpenBudgets() {
       resolveBudgetIndex = Number(row.dataset.budgetIndex);
       const budget = stockWebBudgets[resolveBudgetIndex];
       const button = resolveMenu.querySelector('button');
-      button.disabled = !stockBudgetNotificationsReady || stockBudgetNotifications.get(String(budget.numero))?.resuelta !== false;
+      button.textContent = stockBudgetNotifications.get(String(budget.numero))?.resuelta === false ? 'Marcar como resuelto' : 'Marcar como no resuelto';
+      button.disabled = !stockBudgetNotificationsReady || stockBudgetStateSaving.has(String(budget.numero));
       resolveMenu.hidden = false;
       resolveMenu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - resolveMenu.offsetWidth - 8))}px`;
       resolveMenu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - resolveMenu.offsetHeight - 8))}px`;
@@ -4756,28 +4816,14 @@ async function stockOpenBudgets() {
       const budget = stockWebBudgets[resolveBudgetIndex];
       resolveMenu.hidden = true;
       if (!budget) return;
-      const status = document.getElementById('stockBudgetStatus');
-      status.textContent = `Marcando presupuesto Nº ${budget.numero} como resuelto…`;
-      try {
-        await stockResolveConfirmedBudgets([String(budget.numero)]);
-        if (stockNotificationRecord) {
-          stockNotificationRecord.rows = stockNotificationRecord.rows.map(row => row.tipo === 'presupuesto' && String(row.id) === String(budget.numero) ? { ...row, resuelta: true } : row);
-          await stockBudgetCache('notifications', stockNotificationRecord);
-        }
-        popup.querySelectorAll('[data-budget-index]').forEach(row => {
-          const item = stockWebBudgets[Number(row.dataset.budgetIndex)];
-          if (String(item.numero) === String(budget.numero)) row.lastElementChild.innerHTML = stockBudgetChip(item);
-        });
-        status.textContent = `Presupuesto Nº ${budget.numero} resuelto.`;
-      } catch (error) {
-        status.textContent = 'No se pudo sincronizar el estado. Se reintentará al abrir esta ventana.';
-        console.warn('No se pudo resolver el presupuesto', error);
-      }
+      await stockToggleBudgetState(budget);
     });
     document.addEventListener('pointerdown', event => {
       if (!resolveMenu.contains(event.target)) resolveMenu.hidden = true;
     });
     popup.addEventListener('click', event => {
+      const toggle = event.target.closest('[data-budget-toggle]');
+      if (toggle) { stockToggleBudgetState(stockWebBudgets[Number(toggle.closest('[data-budget-index]').dataset.budgetIndex)]); return; }
       const importButton = event.target.closest('[data-budget-import]');
       if (importButton) { stockImportBudget(Number(importButton.dataset.budgetImport)); return; }
       const row = event.target.closest('[data-budget-index]'); if (!row) return;
@@ -4817,7 +4863,7 @@ async function stockImportBudget(index) {
   rowsData = lines.map((line, lineIndex) => {
     const article = line.article;
     const row = normalizeRow({ idart: line.idart, codigo: article.codProv || '', descripcion: article.descripcion, cantidad: rawNumber(line.cantidad), stock: article.stock, descuentoAdicional: 0, presupuestoWeb: String(budget.numero) }, lineIndex);
-    row.precio = precioUnitarioDesdeFinal(row, Number(article.precioCosto) || 0);
+    row.precio = precioUnitarioDesdeFinal(row, stockSelectedArticleCost(article));
     return row;
   });
   stockField('stockRemito').value = String(budget.numero || '');
@@ -4842,7 +4888,7 @@ function stockCompleteIdArt(cell, focusQuantity = true){
   row.idartManual = true;
   cell.textContent=row.idart;
   row.descripcion=String(article.descripcion||'');row.stock=Number(article.stock||0);
-  stockUpdateSelectedArticlePrice(row, Number(article.precioCosto) || 0);
+  stockUpdateSelectedArticlePrice(row, stockSelectedArticleCost(article));
   if(row.conteo!=null)row.cantidad=rawNumber(Number(row.conteo)-row.stock);
   commitCellEditSnapshot(cell);closeArticleProviderList();render();saveRows();
   if (focusQuantity) focusNavigationTarget(editableCellAt(Number(cell.dataset.row),2));
@@ -5201,11 +5247,23 @@ function stockRenderConsult(preserveFilters=false) {
     const form=panel.querySelector('form');
     form.prepend(stockField('stockConsultProvider').closest('label'));
     const movementTypes=stockSqlMeta?.tiposMovimiento||[];
-    const checkedTypes=new Set(String(filters.tipos||'').split(','));
     form.querySelector('button[type="submit"]').insertAdjacentHTML('beforebegin',
-      `<details style="position:relative;min-width:210px"><summary style="cursor:pointer;padding:8px;border:1px solid #bbb;border-radius:6px">Tipo de comprobante</summary><div style="position:absolute;top:100%;left:0;min-width:300px;max-height:260px;overflow:auto;background:white;border:1px solid #bbb;padding:10px;z-index:100;box-shadow:0 4px 12px #0003"><label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="stockConsultAllTypes" ${!filters.tipos?'checked':''}>Todos</label>${movementTypes.map(item=>`<label style="display:flex;gap:7px;align-items:center;margin-top:5px"><input type="checkbox" data-stock-consult-type value="${Number(item.id)}" ${!filters.tipos||checkedTypes.has(String(item.id))?'checked':''}>${escapeHtml(item.codigo||'')} · ${escapeHtml(item.nombre)}</label>`).join('')}</div></details><label>Nº factura o remito<input id="stockConsultNumber" type="text" autocomplete="off" placeholder="Número completo o parcial" value="${escapeHtml(filters.buscar||'')}"></label>`);
-    stockField('stockConsultAllTypes').addEventListener('change',event=>form.querySelectorAll('[data-stock-consult-type]').forEach(check=>{check.checked=event.target.checked;}));
-    form.querySelectorAll('[data-stock-consult-type]').forEach(check=>check.addEventListener('change',()=>{stockField('stockConsultAllTypes').checked=[...form.querySelectorAll('[data-stock-consult-type]')].every(item=>item.checked);}));
+      `<label>Tipo de comprobante<select id="stockConsultType"><option value="">Todos</option>${movementTypes.map(item=>`<option value="${Number(item.id)}" ${String(filters.tipos||'')===String(item.id)?'selected':''}>${escapeHtml(item.codigo||'')} · ${escapeHtml(item.nombre)}</option>`).join('')}</select></label><label>Nº factura o remito<input id="stockConsultNumber" type="text" list="stockConsultNumbers" autocomplete="off" placeholder="Número completo o parcial" value="${escapeHtml(filters.buscar||'')}"><datalist id="stockConsultNumbers"></datalist></label>`);
+    let numberTimer=null,numberRequest=0;
+    const refreshNumbers=()=>{
+      clearTimeout(numberTimer);const request=++numberRequest;
+      numberTimer=setTimeout(async()=>{
+        try {
+          const result=await stockSqlGet('numeros-movimientos',{sucursal:0,proveedor:stockConsultProviderCombo?.getValue()||0,tipo:stockField('stockConsultType').value,buscar:stockField('stockConsultNumber').value.trim()});
+          if(request!==numberRequest||!form.isConnected)return;
+          stockField('stockConsultNumbers').innerHTML=result.numeros.map(item=>`<option value="${escapeHtml(item.numero)}"></option>`).join('');
+        } catch { if(request===numberRequest&&form.isConnected)stockField('stockConsultNumbers').replaceChildren(); }
+      },180);
+    };
+    stockField('stockConsultNumber').addEventListener('input',refreshNumbers);
+    stockField('stockConsultNumber').addEventListener('focus',refreshNumbers);
+    stockField('stockConsultType').addEventListener('change',refreshNumbers);
+    stockField('stockConsultProvider').addEventListener('change',refreshNumbers);
     form.addEventListener('submit',event=>{event.preventDefault();stockApplyConsultFilters();});
     form.querySelectorAll('input').forEach(field=>field.addEventListener('input',()=>field.setCustomValidity('')));
     FX.bindFieldRestore({root:form,capture:true});
@@ -5228,28 +5286,26 @@ function stockRenderConsult(preserveFilters=false) {
       if(event.target.matches('#stockConsultFrom,#stockConsultTo,#stockConsultProvider,#stockConsultNumber'))stockScheduleConsult();
     });
     form.addEventListener('change',event=>{
-      if(event.target.matches('input[type="checkbox"]'))stockScheduleConsult();
+      if(event.target.matches('#stockConsultType,#stockConsultNumber'))stockScheduleConsult();
     });
-    FX.bindLinearNavigation({root:form,selector:'input,button[type="submit"]',selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
+    FX.bindLinearNavigation({root:form,selector:'input,select,button[type="submit"]',selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
 }
 function stockApplyConsultFilters(automatic=false){
   clearTimeout(stockConsultFilterTimer);
-  if(automatic && (['stockConsultFrom','stockConsultTo'].some(id=>!FX.parseFechaFlexible(stockField(id).value)) || stockConsultProviderCombo?.getValue()==null))return;
-  const dates=['stockConsultFrom','stockConsultTo'].map(id=>{
+  const buscar=stockField('stockConsultNumber').value.trim();
+  if(automatic && ((!buscar && ['stockConsultFrom','stockConsultTo'].some(id=>!FX.parseFechaFlexible(stockField(id).value))) || stockConsultProviderCombo?.getValue()==null))return;
+  const dates=buscar ? [stockConsultFilters?.desde||stockToday(),stockConsultFilters?.hasta||stockToday()] : ['stockConsultFrom','stockConsultTo'].map(id=>{
     const field=stockField(id),parsed=FX.parseFechaFlexible(field.value);
     if(!parsed){field.setCustomValidity('Ingresá una fecha válida.');field.reportValidity();return null;}
     field.setCustomValidity('');field.value=parsed.text;
     const d=parsed.date;return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   });
   if(dates.some(date=>!date))return;
-  if(dates[0]>dates[1]){const field=stockField('stockConsultTo');field.setCustomValidity('Hasta debe ser igual o posterior a Desde.');field.reportValidity();return;}
+  if(!buscar && dates[0]>dates[1]){const field=stockField('stockConsultTo');field.setCustomValidity('Hasta debe ser igual o posterior a Desde.');field.reportValidity();return;}
   const provider=stockConsultProviderCombo?.getValue();
   if(provider==null){const field=stockField('stockConsultProvider');field.setCustomValidity('Seleccioná un proveedor de la lista.');field.reportValidity();return;}
-  const selectedTypes=[...stockField('stockConsultPanel').querySelectorAll('[data-stock-consult-type]:checked')].map(check=>check.value);
-  // La transferencia seleccionada comprende la salida (57) y su entrada (58).
-  if (selectedTypes.includes('57') && !selectedTypes.includes('58')) selectedTypes.push('58');
-  const tipos=stockField('stockConsultAllTypes').checked?'':selectedTypes.join(',')||'0';
-  const nextFilters={desde:dates[0],hasta:dates[1],proveedor:provider,tipos,buscar:stockField('stockConsultNumber').value.trim()};
+  const tipos=stockField('stockConsultType').value;
+  const nextFilters={desde:dates[0],hasta:dates[1],proveedor:provider,tipos,buscar};
   if(automatic && JSON.stringify(nextFilters)===JSON.stringify(stockConsultFilters))return;
   stockConsultFilters=nextFilters;
   return stockStartConsult();
@@ -5955,7 +6011,7 @@ el.rows.addEventListener('change', event => {
   if (article && !stockCostOptionsActive()) {
     row.codigo = String(article.codProv || '').trim();
     row.descripcion = String(article.descripcion || '').trim();
-    stockUpdateSelectedArticlePrice(row, article.precioFinal || article.precioCosto || 0);
+    stockUpdateSelectedArticlePrice(row, stockSelectedArticleCost(article));
   }
   if(article && row.conteo!=null)row.cantidad=rawNumber(Number(row.conteo)-row.stock);
   render();saveRows();
@@ -6577,7 +6633,7 @@ async function open(options) {
   backdrop.className = 'local-articles-backdrop';
   backdrop.innerHTML = `<section class="local-articles-dialog" role="dialog" aria-modal="true" aria-labelledby="localArticlesTitle">
     <header><div><h2 id="localArticlesTitle">Importar o actualizar artículos</h2><p data-provider></p><p data-original-description hidden></p></div><button type="button" data-close>Cerrar</button></header>
-    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:115px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:130px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:150px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:130px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
     <div data-status role="status"><span data-status-text>Leyendo artículos de la base local…</span><button type="button" data-reconnect hidden>Restablecer conexión</button></div><footer><span data-summary></span><button type="button" data-cancel>Cancelar</button><button type="button" class="primary" data-apply disabled>Aplicar todos</button></footer>
   </section>`;
   document.body.append(backdrop);
@@ -6603,6 +6659,75 @@ async function open(options) {
   let draftWrite=Promise.resolve();
   let menu = null, menuInput = null, menuIndex = -1, menuKind = '', matches = [];
   let articlePage = null, articleHasMatch = false;
+  let articleContext = null, articleEditor = null;
+  function hideArticleContext() { articleContext?.remove(); articleContext = null; }
+  function existingImporterArticles(row) {
+    if (!row) return [];
+    const id = row.sqlSaved?.id || (row.mode === 'update' ? row.id : '');
+    if (id) return [catalog.find(article => String(article.id) === String(id)) || {id}];
+    const code = normalize(row.codigo);
+    return code ? catalog.filter(article => Number(article.proveedor) === providerId && normalize(article.codigo) === code) : [];
+  }
+  function openImporterArticleEditor(article) {
+    if (busy || articleEditor) return;
+    hideArticleContext(); hideMenu(); flushDraft();
+    const focus = document.activeElement;
+    const popup = document.createElement('dialog'); articleEditor = popup;
+    popup.style.cssText = 'width:min(1100px,98vw);height:94dvh;max-width:none;max-height:none;padding:0;border:1px solid #ccc;border-radius:10px;overflow:hidden';
+    const frame = document.createElement('iframe'); frame.title = 'Ficha del artículo'; frame.style.cssText = 'width:100%;height:100%;border:0';
+    frame.src = `articulos-sql.html?embed=stock&articulo=${encodeURIComponent(article.id)}`;
+    popup.append(frame); backdrop.append(popup);
+    const receive = async event => {
+      if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
+      if (event.data?.type === 'corralon:article-editor-close') popup.close();
+      if (event.data?.type === 'corralon:article-editor-saved') {
+        try {
+          const fresh = await api(`article?id=${encodeURIComponent(article.id)}`);
+          rows.filter(row => row.mode === 'update' && String(row.id) === String(article.id)).forEach(row => { row.original = fresh; row.version = fresh.version; });
+          await refreshConnection();
+          changed(); render(); setStatus('Ficha actualizada. Se conservaron los datos del lote del importador.');
+        } catch (error) { setStatus(error.message, true); }
+      }
+    };
+    window.addEventListener('message', receive);
+    popup.addEventListener('cancel', event => { event.preventDefault(); frame.contentDocument?.getElementById('closeArticle')?.click(); });
+    popup.addEventListener('close', () => { window.removeEventListener('message', receive); popup.remove(); articleEditor = null; if (focus?.isConnected) focus.focus({preventScroll:true}); });
+    popup.showModal();
+  }
+  backdrop.addEventListener('contextmenu', event => {
+    const tr = event.target.closest('tr[data-row]');
+    if (!tr || busy || articleEditor) return;
+    const row = rows[Number(tr.dataset.row)];
+    if (!row) return;
+    const articles = existingImporterArticles(row);
+    event.preventDefault(); event.stopPropagation(); hideMenu(); hideArticleContext();
+    articleContext = document.createElement('div'); articleContext.className = 'local-articles-search';
+    articleContext.setAttribute('role', 'menu');
+    articleContext.style.cssText = `position:fixed;left:${Math.max(8,Math.min(event.clientX,innerWidth-300))}px;top:${Math.max(8,Math.min(event.clientY,innerHeight-200))}px;width:290px;max-height:240px;overflow:auto;z-index:10000;background:white;border:1px solid #bbb;box-shadow:0 4px 12px #0003`;
+    articles.forEach(article => {
+      const button = document.createElement('button'); button.type = 'button'; button.setAttribute('role','menuitem');
+      button.textContent = articles.length === 1 ? 'Editar artículo' : `Editar artículo ${article.id} · ${article.descripcion || ''}`;
+      button.onclick = event => { event.stopPropagation(); openImporterArticleEditor(article); };
+      articleContext.append(button);
+    });
+    const action = (label, run) => {
+      const button=document.createElement('button');button.type='button';button.setAttribute('role','menuitem');button.textContent=label;
+      button.onclick=event=>{event.stopPropagation();hideArticleContext();run();};articleContext.append(button);return button;
+    };
+    action('Cargar web', () => openWebEditor(row,tr.querySelector('[data-field="descripcion"]')).catch(error=>{backdrop.inert=false;setStatus(error.message,true);}));
+    if(row.loadWeb) action('Quitar carga web',()=>{row.loadWeb=false;row.webDraft=null;changed();flushDraft();render();});
+    const bulto=action('Definir cant. x bulto',()=>{
+      const value=window.prompt('Cantidad por bulto (se guarda al aplicar el lote):',String(row.unidadesBulto ?? row.original?.unidadesBulto ?? 1));
+      if(value==null)return;
+      try {
+        const amount=window.CorralonFunciones.evaluateBasicArithmetic(value);
+        if(!Number.isFinite(amount)||amount<=0)throw new Error('La cantidad por bulto debe ser mayor que cero.');
+        row.unidadesBulto=amount;changed();flushDraft();render();
+      } catch(error){setStatus(error.message,true);}
+    });
+    bulto.disabled=Boolean(row.sqlSaved);
+    backdrop.append(articleContext);
+  });
   const fieldSnapshots = new Map(), undoStack = [];
   let movementId = 0, restoring = false, selectedRowUid = '', selectionAnchor = '';
   const setStatus = (text, error = false, recoverable = false) => {
@@ -6644,7 +6769,8 @@ async function open(options) {
   }
   function hideMenu() { menu?.remove(); menu = null; menuInput = null; menuIndex = -1; menuKind = ''; }
   function close(discard = false) {
-    if (busy) return;
+    if (busy || articleEditor) return;
+    hideArticleContext();
     clearTimeout(draftSaveTimer); draftSaveTimer = 0;
     if (discard) clearDraft(); else saveDraft();
     window.removeEventListener('pagehide', flushOnPageHide);
@@ -6740,7 +6866,7 @@ async function open(options) {
       <td><select data-field="iva"><option value="0.21">21 %</option><option value="0.105">10,5 %</option>${![.21,.105].some(v => Math.abs(v-r.iva)<.00001) ? `<option value="${Number(r.iva)}">${Number(r.iva)*100} %</option>` : ''}</select></td>
       <td><input data-field="margen" inputmode="decimal" value="${displayMargin(r.margen)}"></td>
       <td class="num"><input data-field="costo" inputmode="text" value="${escape(r.costoExpression??money(r.costo))}"></td><td class="num">${r.original ? money(r.original.costo) : '—'}</td><td class="num" data-difference>${costDifference(r)}</td>
-      <td><label class="local-load-web"><input type="checkbox" data-load-web ${r.loadWeb ? 'checked' : ''}>Cargar web</label><button type="button" data-remove title="Quitar">×</button></td>
+      <td>${r.loadWeb ? '<span title="Se cargará en la web al aplicar el lote" style="color:#087a43;font-weight:bold">Web ✓</span>' : ''}${r.unidadesBulto != null ? `<span title="Cantidad por bulto"> · Bulto: ${escape(r.unidadesBulto)}</span>` : ''}<button type="button" data-remove title="Quitar">×</button></td>
     </tr>`).join('');
     backdrop.querySelectorAll('tr[data-row]').forEach(tr => {
       const row = rows[Number(tr.dataset.row)];
@@ -6766,7 +6892,7 @@ async function open(options) {
     finally { row.loading = false; if (backdrop.isConnected) render(); }
   }
   function importPayload(selected, op) {
-    return {operation:op,provider:providerId,rows:selected.map(r=>({mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))};
+    return {operation:op,provider:providerId,rows:selected.map(r=>({mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,unidadesBulto:r.unidadesBulto ?? null,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))};
   }
   async function openWebEditor(row, input) {
     if (busy || !confirmNew(row,true)) { input.checked=false; return; }
@@ -6907,6 +7033,7 @@ async function open(options) {
     document.body.append(menu);
   }
   backdrop.addEventListener('click', e => {
+    hideArticleContext();
     if (e.target.closest('[data-cancel]')) { close(); return; }
     if (e.target.closest('[data-close]')) { close(); return; }
     const articleToggle=e.target.closest('[data-article-toggle]');
@@ -7009,13 +7136,6 @@ async function open(options) {
     changed();
   });
   backdrop.addEventListener('change', e => {
-    if (e.target.matches('[data-load-web]')) {
-      const row=rowAt(e.target);
-      if (!row || busy) return;
-      if (e.target.checked || row.sqlSaved) openWebEditor(row,e.target).catch(error=>{backdrop.inert=false;setStatus(error.message,true);});
-      else { row.loadWeb=false; changed(); }
-      return;
-    }
     const input = e.target.closest('[data-field]'); if (!input || busy) return;
     const row = rows[Number(input.closest('[data-row]').dataset.row)], field = input.dataset.field;
     if (field === 'iva') {
@@ -7059,6 +7179,8 @@ async function open(options) {
   function handleDialogKeydown(e) {
     if (backdrop.inert) return;
     if (!backdrop.isConnected) return;
+    if (articleEditor?.open) { e.stopImmediatePropagation(); return; }
+    if (e.key === 'Escape' && articleContext) { e.preventDefault(); e.stopImmediatePropagation(); hideArticleContext(); return; }
     const inDialog = backdrop.contains(e.target) || menu?.contains(e.target);
     const undo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
     e.stopImmediatePropagation();
@@ -7101,10 +7223,9 @@ async function open(options) {
       else searchRubro(input,rowAt(input));
       return;
     }
-    if (menu && input === menuInput && (['ArrowDown','ArrowUp','Enter'].includes(e.key) || (e.key === 'Tab' && !e.shiftKey))) {
+    if (menu && input === menuInput && ['ArrowDown','ArrowUp','Enter'].includes(e.key)) {
       e.preventDefault();
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        if (e.key === 'Tab' && matches.length) menuIndex = 0;
+      if (e.key === 'Enter') {
         if (menuIndex >= 0 && matches[menuIndex]) {
           if (menuKind === 'article') pick(rowAt(input),matches[menuIndex].id);
           else pickRubro(rowAt(input),matches[menuIndex].id);

@@ -160,5 +160,5 @@ export function createNotificationCache({ collectionName, versionField, timestam
     }).finally(()=>{refreshing=null;});
     return refreshing;
   }
-  return { start, stop, refresh, values: () => [...rows.values()], restore: () => onChange([...rows.values()], true) };
+  return { start, stop, refresh, isInitialized: () => initialized, values: () => [...rows.values()], restore: () => onChange([...rows.values()], true) };
 }
