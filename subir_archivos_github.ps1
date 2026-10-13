@@ -310,6 +310,15 @@ try {
         }
         $relativeFiles = @($relativeFiles | Sort-Object -Unique)
     }
+    $catalogoVersionFiles = @('corralon-system.js', 'catalogo-realtime-worker.js', 'catalogo-version-publish.js')
+    if (@($relativeFiles | Where-Object { $catalogoVersionFiles -contains $_ -or $_ -eq 'soloadmin.html' }).Count) {
+        foreach ($dependency in $catalogoVersionFiles) {
+            if ((Test-Path -LiteralPath (Join-Path $repoRoot $dependency) -PathType Leaf) -and $relativeFiles -notcontains $dependency) {
+                $relativeFiles += $dependency
+            }
+        }
+        $relativeFiles = @($relativeFiles | Sort-Object -Unique)
+    }
     $htmlFiles = @($relativeFiles | Where-Object { $_ -match '\.html$' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
     if ($htmlFiles.Count) {
         $manifestSource = Join-Path $repoRoot 'version-web.json'

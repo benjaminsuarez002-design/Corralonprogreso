@@ -1,8 +1,9 @@
 // One connection per browser profile and origin, independent of the visible tab.
-importScripts('vendor/supabase.js');
+importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js');
 const ports = new Set();
-let client = null, channel = null, config = null, meta = null, metaLoading = null;
-let closeTimer = null, subscribed, ready;
+let unsubscribe = null, config = null, meta = null, metaLoading = null;
+let closeTimer = null, ready, resolveReady, signalVersion = -1, pendingVersion = -1, refreshTask = null;
 function send(port, message) { try { port.postMessage(message); } catch (_) { ports.delete(port); } }
 function broadcast(message) { for (const port of ports) send(port, message); }
 async function readMeta() {
@@ -20,30 +21,28 @@ async function readMeta() {
   })().finally(() => { metaLoading = null; });
   return metaLoading;
 }
-function start() {
-  if (client || !config) return;
-  ready = new Promise(resolve => { subscribed = resolve; });
-  client = supabase.createClient(config.url, config.key, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    realtime: { heartbeatIntervalMs: 25000 },
-    global: { headers: { 'x-client-info': 'corralon-shared-catalog' } }
-  });
-  const ownedClient = client;
-  channel = client.channel('catalogo-meta-compartido-v2').on('postgres_changes', {
-    event: '*', schema: 'public', table: 'catalogo_articulos_meta', filter: 'id=eq.principal'
-  }, payload => {
-    if (client !== ownedClient) return;
-    meta = payload.new || null;
-    broadcast({ type: 'meta', meta });
-  }).subscribe(status => {
-    if (client !== ownedClient) return;
-    broadcast({ type: 'status', status });
-    if (status === 'SUBSCRIBED') {
-      // Initial connection, or actual reconnection: recover events missed offline once.
-      readMeta().catch(error => broadcast({ type: 'error', message: error.message }));
-      subscribed();
+function receiveVersion(version) {
+  pendingVersion = Math.max(pendingVersion, version);
+  if (refreshTask || signalVersion >= pendingVersion) return;
+  refreshTask = (async () => {
+    while (signalVersion < pendingVersion) {
+      const target = pendingVersion;
+      await readMeta();
+      signalVersion = target;
     }
-  });
+  })().catch(error => broadcast({ type: 'error', message: error.message }))
+    .finally(() => { refreshTask = null; resolveReady?.(); });
+}
+function start() {
+  if (unsubscribe || !config) return;
+  ready = new Promise(resolve => { resolveReady = resolve; });
+  const app = firebase.apps.find(item => item.options.projectId === 'corralon-progreso')
+    || firebase.initializeApp({ apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0', projectId: 'corralon-progreso' }, 'catalogo-version');
+  unsubscribe = app.firestore().doc('configuracion/catalogo_version').onSnapshot(snapshot => {
+    if (snapshot.metadata?.fromCache) return;
+    broadcast({ type: 'status', status: 'SUBSCRIBED' });
+    receiveVersion(Number(snapshot.exists ? snapshot.data().version || 0 : 0));
+  }, error => { broadcast({ type: 'error', message: error.message }); resolveReady?.(); });
 }
 onconnect = event => {
   clearTimeout(closeTimer);
@@ -68,7 +67,7 @@ onconnect = event => {
       ports.delete(port); port.close();
       if (!ports.size) closeTimer = setTimeout(() => {
         if (ports.size) return;
-        client?.realtime.disconnect(); client = null; channel = null; meta = null;
+        unsubscribe?.(); unsubscribe = null; meta = null; signalVersion = -1; pendingVersion = -1;
       }, 10000);
     }
   };

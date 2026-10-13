@@ -142,6 +142,18 @@ internal static class LocalArticleImport
             throw new InvalidOperationException("No se pudo conectar con Index para publicar. Verifica la conexion a Internet e intenta otra vez.");
         }
     }
+    private static void PublishCatalogVersion()
+    {
+        string document = "projects/corralon-progreso/databases/(default)/documents/configuracion/catalogo_version";
+        var request = (HttpWebRequest)WebRequest.Create("https://firestore.googleapis.com/v1/projects/corralon-progreso/databases/(default)/documents:commit?key=AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0");
+        request.Method = "POST"; request.ContentType = "application/json"; request.Timeout = 20000;
+        byte[] bytes = Encoding.UTF8.GetBytes(Json().Serialize(new { writes = new[] { new { transform = new { document = document, fieldTransforms = new[] { new { fieldPath = "version", increment = new { integerValue = "1" } } } } } } }));
+        request.ContentLength = bytes.Length;
+        try {
+            using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length);
+            using (var response = request.GetResponse()) using (var stream = response.GetResponseStream()) using (var reader = new StreamReader(stream)) reader.ReadToEnd();
+        } catch (WebException) { throw new InvalidOperationException("La publicacion termino en Supabase, pero fallo el aviso de version en Firebase. Reintenta la publicacion."); }
+    }
     private static object Publish(SqlConnection c, WebArticle input)
     {
         var inputs = input == null ? null : input.articles ?? new List<WebArticle> { input };
@@ -163,6 +175,7 @@ internal static class LocalArticleImport
         PublishRequest(config, new { action = "delta_batch", version = version, rows = article, source_file = "Importador SQL local" });
         PublishRequest(config, new { action = "metadata_batch", version = version, rows = metadata, updated_by = "importador_sql_local" });
         PublishRequest(config, new { action = "delta_finalize", version = version, changed_codes = codes, removed_codes = new string[0], source_file = "Importador SQL local" });
+        PublishCatalogVersion();
         return new { ok = true, publicados = inputs.Count, version = version };
     }
     internal static object Apply(SqlConnection c, Batch batch)

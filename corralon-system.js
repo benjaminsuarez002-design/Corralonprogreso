@@ -3781,6 +3781,7 @@
         error.code = 'editor_meta_save_failed';
         throw error;
       }
+      await CATALOG_REALTIME.publishVersion();
       return {
         ok: true,
         version,
@@ -4186,7 +4187,7 @@
       const cached = cachedValue === undefined ? await readCache() : cachedValue;
       let metaRow = null;
       let metadataUrl = '';
-      const sharedLookup = !options.checkRemote && !globalThis.CORRALON_DISABLE_CATALOG_REALTIME && !IS_AUTOMATED_CRAWLER;
+      const sharedLookup = !IS_AUTOMATED_CRAWLER;
       try {
         metaRow = suppliedMeta || (sharedLookup ? await CATALOG_REALTIME.getMeta() : await fetchMetaRow());
       } catch (error) {
@@ -4756,15 +4757,46 @@
 
   const CATALOG_REALTIME = (() => {
     let worker = null, port = null, latestMeta = null, refreshAdapter = null;
+    let fallbackReady = null, fallbackSignalVersion = -1, fallbackPendingVersion = -1, fallbackRefresh = null;
     let refreshQueue = Promise.resolve(), requestId = 0;
     const requests = new Map();
+    function acceptMeta(meta) {
+      if (!meta) return;
+      latestMeta = meta;
+      window.dispatchEvent(new CustomEvent('corralon:catalog-meta-changed', { detail: { rankingVersion: Number(meta.ranking_version || 0), meta } }));
+      refreshQueue = refreshQueue.catch(console.warn).then(() => refreshAdapter ? refreshAdapter(latestMeta) : CATALOG.refresh({ fallback: false, metaRow: latestMeta, onlyCached: true }));
+    }
+    function startFallback() {
+      if (fallbackReady) return;
+      fallbackReady = new Promise((resolve, reject) => {
+        Promise.all([import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')]).then(([apps, firestore]) => {
+          const app = apps.getApps().find(item => item.options.projectId === 'corralon-progreso') || apps.initializeApp({apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',projectId:'corralon-progreso'},'catalogo-version');
+          firestore.onSnapshot(firestore.doc(firestore.getFirestore(app),'configuracion','catalogo_version'),snapshot => {
+            if (snapshot.metadata.fromCache) return;
+            fallbackPendingVersion = Math.max(fallbackPendingVersion, Number(snapshot.exists() ? snapshot.data().version || 0 : 0));
+            if (fallbackRefresh || fallbackSignalVersion >= fallbackPendingVersion) return;
+            fallbackRefresh = (async () => {
+              while (fallbackSignalVersion < fallbackPendingVersion) {
+                const target = fallbackPendingVersion;
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?id=eq.principal&select=*&limit=1`,{headers:headers(),cache:'no-store'});
+                if (!response.ok) throw new Error('No se pudo consultar la versión del catálogo');
+                acceptMeta((await response.json())[0]);fallbackSignalVersion = target;
+              }
+              resolve(latestMeta);
+            })().catch(error=>{console.warn(error);reject(error)}).finally(()=>{fallbackRefresh=null});
+          },reject);
+        }).catch(reject);
+      });
+      fallbackReady.catch(console.warn);
+    }
     function start() {
       if (port || IS_AUTOMATED_CRAWLER || (globalThis.CORRALON_DISABLE_CATALOG_REALTIME && !refreshAdapter)) return;
       if (!('SharedWorker' in window)) {
-        console.warn('Este navegador no admite la conexión compartida del catálogo');
+        startFallback();
         return;
       }
-      worker = new SharedWorker(new URL('catalogo-realtime-worker.js', document.baseURI), { name: 'corralon-catalogo-v2' });
+      try { worker = new SharedWorker(new URL('catalogo-realtime-worker.js', document.baseURI), { name: 'corralon-catalogo-firebase-v1' }); }
+      catch (_) { startFallback(); return; }
       port = worker.port;
       port.onmessage = event => {
         const message = event.data || {};
@@ -4774,19 +4806,18 @@
           if (request) { requests.delete(message.requestId); clearTimeout(request.timer); message.error ? request.reject(new Error(message.error)) : request.resolve(message.meta); }
         }
         if (message.type === 'meta' && message.meta) {
-          latestMeta = message.meta;
-          window.dispatchEvent(new CustomEvent('corralon:catalog-meta-changed', { detail: { rankingVersion: Number(latestMeta.ranking_version || 0), meta: latestMeta } }));
-          refreshQueue = refreshQueue.catch(console.warn).then(() => refreshAdapter ? refreshAdapter(latestMeta) : CATALOG.refresh({ fallback: false, metaRow: latestMeta, onlyCached: true }));
+          acceptMeta(message.meta);
         }
         if (message.type === 'error') console.warn(message.message);
       };
       port.start();
       port.postMessage({ type: 'init', url: SUPABASE_URL, key: SUPABASE_KEY });
-      worker.onerror = error => console.warn('Conexión compartida del catálogo', error.message);
+      worker.onerror = error => { console.warn('Conexión compartida del catálogo', error.message);port?.close();port=null;startFallback(); };
     }
     function getMeta() {
       start();
       if (latestMeta) return Promise.resolve(latestMeta);
+      if (fallbackReady) return fallbackReady;
       if (!port) return Promise.reject(new Error('Conexión compartida del catálogo no disponible'));
       const id = ++requestId;
       return new Promise((resolve, reject) => {
@@ -4797,7 +4828,11 @@
     }
     window.addEventListener('pagehide', () => { port?.postMessage({ type: 'release' }); port?.close(); port = null; latestMeta = null; });
     window.addEventListener('pageshow', () => { if (!globalThis.CORRALON_DISABLE_CATALOG_REALTIME || refreshAdapter) start(); });
-    return { start, getMeta, cacheReady() { port?.postMessage({ type: 'cache-ready' }); }, configure(options = {}) { refreshAdapter = typeof options.refresh === 'function' ? options.refresh : null; }, isLeader: () => false };
+    async function publishVersion() {
+      await import('./catalogo-version-publish.js');
+      return globalThis.CorralonCatalogVersionPublish();
+    }
+    return { start, getMeta, publishVersion, cacheReady() { port?.postMessage({ type: 'cache-ready' }); }, configure(options = {}) { refreshAdapter = typeof options.refresh === 'function' ? options.refresh : null; }, isLeader: () => false };
   })();
 
   const FALTANTES = (() => {
@@ -7656,7 +7691,6 @@
       messagingSenderId: '466583614632',
       appId: '1:466583614632:web:42cb839f83e97475fabe9d'
     };
-    const FALLBACK_CHECK_MS = 60 * 1000;
     let initialManifestVersion = null;
 
     function localVersion() {
@@ -7717,6 +7751,14 @@
         #corralon-version-toast .version-copy{display:grid;gap:2px;min-width:0;flex:1}
         #corralon-version-toast strong{font-size:15px;line-height:1.15}#corralon-version-toast small{font-size:12px;opacity:.86}
         #corralon-version-toast button{flex:0 0 auto;border:1px solid currentColor;border-radius:9px;background:#fff;color:#151515;padding:8px 12px;font:900 13px Barlow,Arial,sans-serif;cursor:pointer}
+        #corralon-version-modal{width:min(540px,calc(100% - 28px));max-width:none;max-height:calc(100% - 28px);margin:auto;padding:0;border:0;border-radius:20px;background:#fff;color:#191919;box-shadow:0 28px 90px #0009;font-family:Barlow,Arial,sans-serif;overflow:auto}
+        #corralon-version-modal::backdrop{background:rgba(15,15,15,.78);backdrop-filter:blur(5px)}
+        #corralon-version-modal .version-modal-head{padding:25px 28px 20px;background:#e71920;color:#fff}
+        #corralon-version-modal .version-modal-head strong{display:block;font-size:26px;line-height:1.12;font-weight:900}
+        #corralon-version-modal .version-modal-body{display:grid;gap:18px;padding:24px 28px 28px}
+        #corralon-version-modal .version-modal-body p{margin:0;font-size:16px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+        #corralon-version-modal .version-modal-body button{width:100%;min-height:48px;border:0;border-radius:10px;background:#e71920;color:#fff;font:900 17px Barlow,Arial,sans-serif;cursor:pointer}
+        #corralon-version-modal .version-modal-body button:focus-visible{outline:3px solid #191919;outline-offset:3px}
         @media(max-width:560px){#corralon-version-toast{align-items:stretch;flex-direction:column}#corralon-version-toast button{width:100%}}
       `;
       document.head.appendChild(style);
@@ -7730,6 +7772,26 @@
       if (!document.body) return;
       ensureStyle();
       const level = priority(manifest.prioridad || manifest.priority);
+      const version = String(manifest.version || '');
+      const label = level === 'important' ? 'Actualización importante' : level === 'medium' ? 'Actualización recomendada' : 'Ajuste disponible';
+      const detail = String(manifest.mensaje || manifest.message || label).trim();
+      if (level === 'important') {
+        document.getElementById('corralon-version-toast')?.remove();
+        let modal = document.getElementById('corralon-version-modal');
+        if (!modal) {
+          modal = document.createElement('dialog');
+          modal.id = 'corralon-version-modal';
+          modal.setAttribute('aria-labelledby', 'corralon-version-modal-title');
+          modal.innerHTML = '<div class="version-modal-head"><strong id="corralon-version-modal-title">Actualización importante</strong></div><div class="version-modal-body"><p></p><button type="button">Actualizar</button></div>';
+          modal.addEventListener('cancel', event => event.preventDefault());
+          document.body.appendChild(modal);
+        }
+        modal.querySelector('p').textContent = detail;
+        modal.querySelector('button').onclick = () => updatePage(version);
+        if (!modal.open) modal.showModal();
+        return;
+      }
+      if (document.getElementById('corralon-version-modal')?.open) return;
       let toast = document.getElementById('corralon-version-toast');
       if (!toast) {
         toast = document.createElement('div');
@@ -7737,11 +7799,19 @@
         toast.setAttribute('role', 'status');
         document.body.appendChild(toast);
       }
-      const label = level === 'important' ? 'Actualización importante' : level === 'medium' ? 'Actualización recomendada' : 'Ajuste disponible';
-      const detail = String(manifest.mensaje || manifest.message || label).trim();
       toast.className = level;
-      toast.innerHTML = `<span class="version-copy"><strong>Nueva versión disponible: ${String(manifest.version || '')}</strong><small>${detail}. Actualizá la página.</small></span><button type="button">Actualizar página</button>`;
-      toast.querySelector('button').onclick = () => updatePage(manifest.version);
+      const copy = document.createElement('span');
+      copy.className = 'version-copy';
+      const title = document.createElement('strong');
+      title.textContent = `Nueva versión disponible: ${version}`;
+      const note = document.createElement('small');
+      note.textContent = `${detail}. Actualizá la página.`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Actualizar página';
+      button.onclick = () => updatePage(version);
+      copy.append(title, note);
+      toast.replaceChildren(copy, button);
       requestAnimationFrame(() => toast.classList.add('visible'));
     }
     async function check(realtimeConfig = null, { preferRaw = false } = {}) {
@@ -7798,7 +7868,6 @@
       const begin = () => {
         recordExecutedVersion();
         check();
-        setInterval(check, FALLBACK_CHECK_MS);
         if (!globalThis.CORRALON_DISABLE_CATALOG_REALTIME) startRealtime().catch(() => {});
         window.addEventListener('focus', () => check());
         window.addEventListener('online', () => check());
