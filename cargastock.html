@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.45"></script>
+<script src="corralon-system.js?v=1.0.46"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -4674,6 +4674,15 @@ async function stockToggleBudgetState(budget) {
     console.warn('No se pudo cambiar el estado del presupuesto', error);
   } finally { stockBudgetStateSaving.delete(number); paint(); }
 }
+function stockBudgetContentSignature(notification = {}) {
+  const stateFields=new Set(['resuelta','resueltaAt','updatedAt','docId','firestoreId']);
+  const canonical=value=>{
+    if(Array.isArray(value))return value.map(canonical);
+    if(value && typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])]));
+    return value;
+  };
+  return JSON.stringify(canonical(Object.fromEntries(Object.entries(notification).filter(([key])=>!stateFields.has(key)))));
+}
 async function stockReadBudgetNotifications() {
   const own = await stockBudgetCache('notifications');
   const seed = await stockBudgetSeedNotifications();
@@ -4690,7 +4699,7 @@ async function stockReadBudgetNotifications() {
   for (const item of snapshot.docs) {
     const row = { ...JSON.parse(JSON.stringify(item.data())), firestoreId: item.id };
     const previous = rows.get(item.id);
-    if (row.tipo === 'presupuesto' && previous && JSON.stringify(previous) !== JSON.stringify(row)) stockChangedBudgetNumbers.add(String(row.id));
+    if (row.tipo === 'presupuesto' && previous && stockBudgetContentSignature(previous) !== stockBudgetContentSignature(row)) stockChangedBudgetNumbers.add(String(row.id));
     if (row.eliminado) rows.delete(item.id); else rows.set(item.id, row);
     const stamp = row.updatedAt;
     if (stamp && (!nextCursor || stamp.seconds > nextCursor.seconds || stamp.seconds === nextCursor.seconds && (stamp.nanoseconds || 0) > (nextCursor.nanoseconds || 0))) nextCursor = stamp;
@@ -5097,8 +5106,11 @@ async function confirmStockIngreso() {
     el.providerInput.focus();
   }
 }
-function stockClearDocumentLinks() {
+function stockClearDocumentLinks(options = {}) {
+  const budgetNumbers=[...new Set(rowsData.filter(row=>!isBlankStockRow(row)).map(row=>String(row.presupuestoWeb || '')).filter(Boolean))];
+  const budgetRemito=options.preserveBudgetRemito && budgetNumbers.length===1 && stockField('stockRemito').value.trim()===budgetNumbers[0] ? budgetNumbers[0] : '';
   ['stockIngresoFactura','stockRemito','stockCompra','stockRelacionado'].forEach(id => stockField(id).value = '');
+  if(budgetRemito)stockField('stockRemito').value=budgetRemito;
   stockField('stockCompra').innerHTML = '<option value="">Sin asociar</option>';
   stockField('stockRelacionado').innerHTML = '<option value="">—</option>';
   stockField('stockPurchaseList').hidden = true;
@@ -5121,7 +5133,8 @@ function stockMovementFields() {
       const transferProvider=providers.find(item=>norm(providerLabel(item))===norm('CORRALON PROGRESO'));
       stockField('stockArticleFilter').value='sql';
       if(transferProvider && String(provider?.id_proveedor)!==String(transferProvider.id_proveedor)){
-        setProvider(transferProvider,{skipUndo:true,skipProviderArticles:true});
+        stockClearDocumentLinks({preserveBudgetRemito:true});
+        setProvider(transferProvider,{skipUndo:true,skipProviderArticles:true,preserveDocumentLinks:true});
       }
       stockRebuildArticleOptions();
     }
@@ -5634,7 +5647,7 @@ document.addEventListener('keydown',event=>{
   closeProviderList();closeArticleProviderList();hideArticleProviderToggle();closePriceComparatorProviderList();
 },true);
 FX.bindComprobanteNumber(stockField('stockRemito'));
-document.querySelectorAll('[data-stock-header]').forEach(field=>field.addEventListener('change',()=>{stockHeaderSave();if(field.id==='stockIngresoSucursal'){stockRefreshSql();stockRefreshRelations();}if(field.id==='stockTipoMovimiento'){stockClearDocumentLinks();stockMovementFields();stockHeaderSave();}if(field.id==='stockArticleFilter'){stockHeaderSave();loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));stockRebuildArticleOptions();render();}}));
+document.querySelectorAll('[data-stock-header]').forEach(field=>field.addEventListener('change',()=>{stockHeaderSave();if(field.id==='stockIngresoSucursal'){stockRefreshSql();stockRefreshRelations();}if(field.id==='stockTipoMovimiento'){stockClearDocumentLinks({preserveBudgetRemito:true});stockMovementFields();stockHeaderSave();}if(field.id==='stockArticleFilter'){stockHeaderSave();loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));stockRebuildArticleOptions();render();}}));
 async function stockOpenPurchaseList() {
   const list=stockField('stockPurchaseList');
   if(stockConfirmed || stockIngresoBusy || stockField('stockCompra').disabled)return;
