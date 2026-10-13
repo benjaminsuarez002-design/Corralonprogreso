@@ -4426,6 +4426,41 @@
     }
 
     let catalogLoadQueue = Promise.resolve();
+    // IndexedDB serializa estas transacciones incluso entre pestañas en HTTP por IP.
+    function updateCatalogDownloadLease(database, owner, action) {
+      return new Promise((resolve, reject) => {
+        const transaction = database.transaction('cache', 'readwrite');
+        const store = transaction.objectStore('cache');
+        const request = store.get('__catalog_download_lock_v1');
+        let acquired = false;
+        request.onsuccess = () => {
+          const lease = request.result, now = Date.now();
+          if (action === 'release') {
+            if (lease?.owner === owner) store.delete('__catalog_download_lock_v1');
+          } else if (lease?.owner === owner || (action === 'acquire' && (!lease || Number(lease.expiresAt) <= now))) {
+            store.put({ id: '__catalog_download_lock_v1', owner, expiresAt: now + 120000 });
+            acquired = true;
+          }
+        };
+        transaction.oncomplete = () => resolve(acquired);
+        transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('No se pudo coordinar la descarga local del catálogo'));
+      });
+    }
+    async function withCatalogDownloadLease(work) {
+      const database = await openCatalogDb();
+      const owner = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      while (!await updateCatalogDownloadLease(database, owner, 'acquire')) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      const heartbeat = setInterval(() => {
+        updateCatalogDownloadLease(database, owner, 'renew').catch(console.warn);
+      }, 20000);
+      try { return await work(); }
+      finally {
+        clearInterval(heartbeat);
+        await updateCatalogDownloadLease(database, owner, 'release');
+      }
+    }
     async function startCatalogLoad(context, options = {}) {
       const work = async () => {
         memoryCache = null;
@@ -4444,8 +4479,8 @@
         return rows;
       };
       if (navigator.locks?.request) return navigator.locks.request('corralon-catalog-download-v2', work);
-      // En HTTP por IP no hay Web Locks; releer la caché antes de cada trabajo.
-      const pending = catalogLoadQueue.catch(() => {}).then(work);
+      // La siguiente pestaña relee la copia guardada por la que terminó primero.
+      const pending = catalogLoadQueue.catch(() => {}).then(() => withCatalogDownloadLease(work));
       catalogLoadQueue = pending;
       return pending;
     }

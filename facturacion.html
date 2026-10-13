@@ -185,6 +185,13 @@
     <div class="recovery-alert" id="recoveryAlert" role="alert" aria-live="assertive"><strong id="recoveryTitle">ATENCIÓN: esta emisión quedó pendiente</strong><p id="recoveryText">No repitas esta venta ni borres este borrador. Verificá qué pasó con este comprobante.</p><button id="checkRecovery" type="button">Consultar estado</button><button id="recoverInvoice" type="button" hidden>Recuperar este comprobante</button><button id="printPendingCopy" type="button">Imprimir detalle sin confirmar</button><button id="continueNewInvoice" type="button">Guardar pendiente y hacer otra venta</button></div>
   </section>
 </main>
+<div id="cajaClosedOverlay" hidden role="alertdialog" aria-modal="true" aria-labelledby="cajaClosedMessage" style="position:fixed;inset:0;z-index:2147483646;background:#0008;align-items:center;justify-content:center;padding:20px">
+  <div style="width:min(520px,100%);background:#fff;border-radius:14px;box-shadow:0 18px 60px #0005;overflow:hidden;text-align:center">
+    <div id="cajaClosedMessage" style="background:#d5001c;color:#fff;padding:24px;font-size:22px;font-weight:800">La caja de esta sucursal está cerrada</div>
+    <p style="padding:0 20px">Facturación está bloqueada hasta que se abra la caja.</p>
+    <div style="display:flex;justify-content:center;gap:10px;padding:0 20px 20px"><button id="checkCajaAgain" type="button">Volver a comprobar</button><button type="button" onclick="location.href='menu.html'">Menú</button></div>
+  </div>
+</div>
 <div class="article-photo-lightbox" id="articlePhotoLightbox" role="dialog" aria-modal="true" aria-label="Imagen ampliada del artículo" hidden><button class="article-photo-close" id="articlePhotoClose" type="button" aria-label="Cerrar imagen">×</button><img id="articlePhotoLarge" alt=""></div>
 <div class="suggestions" id="suggestions"></div>
 <div class="suggestion-context" id="suggestionContextMenu" role="menu"><button id="refreshArticlePrices" type="button" role="menuitem">Actualizar precios</button><button id="budgetSuggestionAridos" type="button" role="menuitem" hidden>Presupuestar áridos</button><button id="importWebCart" type="button" role="menuitem">Importar carrito web</button><button id="sendSuggestionToMissing" type="button" role="menuitem">Enviar a Faltantes</button><button id="editSuggestionWeb" type="button" role="menuitem">Editar p. web</button><button id="editSuggestionSql" type="button" role="menuitem" hidden>Editar artículo SQL</button></div>
@@ -195,7 +202,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.36"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.37"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -874,8 +881,10 @@ function showSuggestions(input,force=false,refreshStock=true){
     const {key,dir}=suggestionSortState,sign=dir==='desc'?-1:1;
     suggestionSource=[...suggestionSource].sort((a,b)=>{
       const matchesFirst=q?Number(Number.isFinite(rank(b)))-Number(Number.isFinite(rank(a))):0;
+      const firstWordPriority=q&&mode==='descripcion'&&Number.isFinite(rank(a))&&Number.isFinite(rank(b))
+        ?Math.floor(rank(a)/10)-Math.floor(rank(b)/10):0;
       const compared=['precioFinal','stock'].includes(key)?n(a[key])-n(b[key]):suggestionSortCollator.compare(String(a[key]||''),String(b[key]||''));
-      return matchesFirst||sign*compared||suggestionSortCollator.compare(String(a.idart),String(b.idart));
+      return matchesFirst||firstWordPriority||sign*compared||suggestionSortCollator.compare(String(a.idart),String(b.idart));
     });
   }
   suggestionPage=CorralonSystem.articleOptionPager.create(suggestionSource,{
@@ -1306,7 +1315,7 @@ function updateTrialButton(){
   $('#issueInvoice').disabled=Boolean(issuedReceipt||recoveryPending||issueInProgress||saleSwitchBusy)||!enabled||!localDraftStoreReady||!$('#pos').value||!$('#seller').value;
 }
 function renderVoucherTypes(preferred){if(!sqlConfig)return;const point=Number($('#pos').value),types=sqlConfig.comprobantes.filter(x=>Number(x.idPuntoVenta)===point);$('#voucherType').innerHTML=types.map(x=>`<option value="${x.id}">${esc(x.codigo)} · ${esc(x.nombre)}</option>`).join('');const chosen=types.find(x=>String(x.id)===String(preferred))||types.find(x=>Number(x.id)===13)||types[0];if(chosen)$('#voucherType').value=String(chosen.id);refreshPaymentTypeOptions();markPaymentRuleProblems();updateTrialButton()}
-function applyData(d){aridosEntrega=d?.aridosEntrega?structuredClone(d.aridosEntrega):null;paymentUndoHistory.length=0;paymentEditState=null;const station=workstation();issuedReceipt=d?.emision||null;draftId=d?.id||'';$('#branch').value=d?.sucursal||station.branch||'';$('#date').value=d?.fecha||today();$('#cae').value=d?.emision?.cae||d?.cae||'';$('#invoiceReference').value=d?.facturaAsociada||'';$('#seller').value=String((sqlConfig?.vendedores||[]).find(x=>String(x.id)===String(d?.vendedor||station.seller)||norm(x.nombre)===norm(d?.vendedor))?.id||'');const listaAnterior={minorista:'3',intermedio:'2',mayorista:'1'};$('#priceList').value=listaAnterior[d?.listaPrecios]||d?.listaPrecios||'3';$('#docType').value=d?.cliente?.tipoDocumento||'DNI';$('#docNumber').value=d?.cliente?.numeroDocumento||'';$('#customerName').value=customerUpper(d?.cliente?.nombre||'CONSUMIDOR FINAL');$('#customerName').dataset.idCliente=d?.idCliente||(norm(d?.cliente?.nombre||'CONSUMIDOR FINAL')==='consumidor final'?'1':'1');$('#customerTax').value=d?.cliente?.condicionIva||'Consumidor final';$('#customerPhone').value=d?.cliente?.telefono||'';$('#customerAddress').value=d?.cliente?.direccion||'';$('#customerEmail').value=d?.cliente?.email||'';$('#note').value=d?.nota||'';articles=(d?.uiArticulos||d?.articulos||[]).map(x=>({...blankArticle(),...x}));payments=(d?.uiValores||d?.valores||[]).map(x=>({...blankPayment(),...x,idTarjeta:Number(x.idTarjeta)||Number((sqlConfig?.tarjetas||[]).find(t=>norm(t.nombre)===norm(x.tarjeta))?.id)||0,coef:n(x.coef),impRec:n(x.impRec)}));renderArticles();renderPayments();lastSaved=d?structuredClone(d):null;$('#pos').value=String(d?.idPuntoVenta||(sqlConfig?.puntosVenta||[]).find(x=>String(x.id)===String(d?.puntoVenta)||norm(x.nombre)===norm(d?.puntoVenta))?.id||station.pos||'');renderVoucherTypes(d?.idComprobante||(sqlConfig?.comprobantes||[]).find(x=>norm(x.nombre)===norm(d?.tipoComprobante))?.id||13);lockIssued();setMsg(issuedReceipt?'Comprobante emitido en SQL. Podés reimprimirlo.':d?'Borrador cargado.':'Nuevo comprobante.','ok')}
+function applyData(d){aridosEntrega=d?.aridosEntrega?structuredClone(d.aridosEntrega):null;paymentUndoHistory.length=0;paymentEditState=null;const station=workstation();issuedReceipt=d?.emision||null;draftId=d?.id||'';$('#branch').value=d?.sucursal||station.branch||'';$('#date').value=d?.fecha||today();$('#cae').value=d?.emision?.cae||d?.cae||'';$('#invoiceReference').value=d?.facturaAsociada||'';$('#seller').value=String((sqlConfig?.vendedores||[]).find(x=>String(x.id)===String(d?.vendedor||station.seller)||norm(x.nombre)===norm(d?.vendedor))?.id||'');const listaAnterior={minorista:'3',intermedio:'2',mayorista:'1'};$('#priceList').value=listaAnterior[d?.listaPrecios]||d?.listaPrecios||'3';$('#docType').value=d?.cliente?.tipoDocumento||'DNI';$('#docNumber').value=d?.cliente?.numeroDocumento||'';$('#customerName').value=customerUpper(d?.cliente?.nombre||'CONSUMIDOR FINAL');$('#customerName').dataset.idCliente=d?.idCliente||(norm(d?.cliente?.nombre||'CONSUMIDOR FINAL')==='consumidor final'?'1':'1');$('#customerTax').value=d?.cliente?.condicionIva||'Consumidor final';$('#customerPhone').value=d?.cliente?.telefono||'';$('#customerAddress').value=d?.cliente?.direccion||'';$('#customerEmail').value=d?.cliente?.email||'';$('#note').value=d?.nota||'';articles=(d?.uiArticulos||d?.articulos||[]).map(x=>({...blankArticle(),...x}));payments=(d?.uiValores||d?.valores||[]).map(x=>({...blankPayment(),...x,idTarjeta:Number(x.idTarjeta)||Number((sqlConfig?.tarjetas||[]).find(t=>norm(t.nombre)===norm(x.tarjeta))?.id)||0,coef:n(x.coef),impRec:n(x.impRec)}));renderArticles();renderPayments();lastSaved=d?structuredClone(d):null;$('#pos').value=String(d?.idPuntoVenta||(sqlConfig?.puntosVenta||[]).find(x=>String(x.id)===String(d?.puntoVenta)||norm(x.nombre)===norm(d?.puntoVenta))?.id||station.pos||'');renderVoucherTypes(d?.idComprobante||(sqlConfig?.comprobantes||[]).find(x=>norm(x.nombre)===norm(d?.tipoComprobante))?.id||13);queueMicrotask(checkBillingCaja);lockIssued();setMsg(issuedReceipt?'Comprobante emitido en SQL. Podés reimprimirlo.':d?'Borrador cargado.':'Nuevo comprobante.','ok')}
 const applyDataOriginal=applyData;
 const INTERRUPTED_SALES_KEY='corralon_facturacion_resguardo_v1';
 function interruptedSales(){try{return JSON.parse(localStorage.getItem(INTERRUPTED_SALES_KEY)||'{}')}catch{return {}}}
@@ -2515,7 +2524,7 @@ async function performAridosDeliverySync(data){
   if(!header){
     // Seguir el orden de Historial. El salto ya vinculado a SQL se conserva,
     // pero no se usa como base de la secuencia web.
-    const last=await request('remitos?select=nro&nro=neq.0001-00748370&order=fecha_iso.desc.nullslast,id.desc&limit=1');
+    const last=await request('remitos?select=nro&numero_manual=eq.false&nro=neq.0001-00748370&order=fecha_iso.desc.nullslast,id.desc&limit=1');
     if(!Array.isArray(last))throw new Error('No se pudo consultar el último número de remito.');
     const previous=last.length?Number(String(last[0].nro||'').split('-').pop()):0;
     if(!Number.isSafeInteger(previous)||previous<0)throw new Error('El último número de remito no es válido.');
@@ -2563,6 +2572,8 @@ aridosRetryButton.addEventListener('click',async()=>{
   }catch(error){setMsg(error.message,'error');}finally{aridosRetryButton.disabled=false;await refreshPendingButton();}
 });
 async function issue(){
+  if(issuedReceipt||issueInProgress||creditCheckInProgress||saleSwitchBusy)return;
+  if(!await checkBillingCaja())return;
   if(issuedReceipt||issueInProgress||creditCheckInProgress||saleSwitchBusy)return;
   const checkingDraftId=draftId;
   if(recoveryPending&&!recoveryCanRetry)return;
@@ -3271,8 +3282,49 @@ window.CorralonAliasObjectives.subscribe(data=>{
 loadPaymentRules().catch(console.warn);
 window.addEventListener('online',()=>{paymentRulesLoading=null;loadPaymentRules().catch(console.warn)});
 loadTicketPrinters().catch(error=>{console.warn(error);$('#ticketPrinter').innerHTML='<option value="">Ticketera no disponible</option>';$('#previewPrinter').innerHTML='<option value="">Ticketera no disponible</option>'});
+let billingCajaBlocked=false,billingCajaRequest=null,billingCajaPoint='';
+function setBillingCajaBlocked(blocked,message='La caja de esta sucursal está cerrada'){
+  billingCajaBlocked=blocked;
+  const overlay=$('#cajaClosedOverlay');
+  overlay.hidden=!blocked;overlay.style.display=blocked?'flex':'none';
+  $('#cajaClosedMessage').textContent=message;
+  document.querySelector('main.app').inert=blocked;
+}
+async function checkBillingCaja(){
+  const point=$('#pos').value;
+  if(!point){setBillingCajaBlocked(false);billingCajaPoint='';return false}
+  if(billingCajaRequest&&billingCajaPoint===point)return billingCajaRequest;
+  if(billingCajaPoint!==point)setBillingCajaBlocked(true,'Comprobando la caja de esta sucursal…');
+  billingCajaPoint=point;
+  const task=(async()=>{
+    try{
+      const response=await fetch(`${SQL_PREPARACION}/caja-estado?puntoVenta=${encodeURIComponent(point)}`,{cache:'no-store',signal:AbortSignal.timeout(8000)});
+      const result=await response.json();
+      if($('#pos').value!==point)return false;
+      if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar la caja');
+      setBillingCajaBlocked(result.abierta!==true);
+      return result.abierta===true;
+    }catch(error){
+      if($('#pos').value===point)setBillingCajaBlocked(true,'No se pudo verificar si la caja está abierta');
+      return false;
+    }
+  })();
+  billingCajaRequest=task;
+  try{return await task}finally{if(billingCajaRequest===task)billingCajaRequest=null}
+}
+$('#checkCajaAgain').addEventListener('click',checkBillingCaja);
+// También frena los atajos y las ventanas auxiliares que estén fuera del formulario.
+for(const type of ['keydown','click','contextmenu'])document.addEventListener(type,event=>{
+  if(billingCajaBlocked&&!$('#cajaClosedOverlay').contains(event.target)){event.preventDefault();event.stopImmediatePropagation()}
+},true);
+$('#pos').addEventListener('change',checkBillingCaja);
+$('#branch').addEventListener('change',()=>{billingCajaPoint='';setBillingCajaBlocked(false)});
+window.addEventListener('focus',()=>{if(sqlConfig)checkBillingCaja()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sqlConfig)checkBillingCaja()});
+setInterval(()=>{if(!document.hidden&&sqlConfig)checkBillingCaja()},15000);
 loadConfig().then(async ready=>{
   await restoreLastLocalState();
+  if(ready)await checkBillingCaja();
   if(ready)await Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()]);
   else setMsg(`${SQL_CONNECTION_MESSAGE} Los borradores siguen guardados en esta PC.`,'error');
 }).catch(error=>{console.warn(error);localDraftStoreReady=false;updateTrialButton();setMsg('No se pudieron leer los borradores guardados en esta PC. No se habilita la emisión hasta recuperarlos.','error')});

@@ -669,6 +669,18 @@ internal static class FacturacionCopiaApi
             }
         }
     }
+    private static bool CajaSucursalAbierta(SqlConnection connection, SqlTransaction transaction, int branch)
+    {
+        object closed = Scalar(connection, transaction,
+            "SELECT TOP 1 CAST(c.Confirmado AS int) FROM dbo.CajaDiaTP c WITH (HOLDLOCK) " +
+            "INNER JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] " +
+            "WHERE d.IDSucAsoc=@p0 AND c.IDEmp=1 AND c.Global<>0 AND ISNULL(c.Anulado,0)=0 " +
+            "AND c.Fecha>=CONVERT(date,GETDATE()) AND c.Fecha<DATEADD(day,1,CONVERT(date,GETDATE())) " +
+            "ORDER BY c.IDRecibo DESC", branch);
+        // Sin caja registrada hoy, el cierre del día anterior no bloquea la nueva jornada.
+        return closed == null || closed == DBNull.Value || Convert.ToInt32(closed) == 0;
+    }
+
     private static object Scalar(SqlConnection connection, SqlTransaction transaction, string sql, params object[] values)
     {
         using (var command = new SqlCommand(sql, connection, transaction))
@@ -968,6 +980,8 @@ internal static class FacturacionCopiaApi
                 var pointInfo = Scalar(connection, tx, "SELECT IDSucAsoc FROM dbo.[Depósitos] WHERE IDDepósito=@p0 AND IDEmp=1", point);
                 if (pointInfo == null) throw new InvalidOperationException("Punto de venta inválido.");
                 int branch = Convert.ToInt32(pointInfo);
+                if (!CajaSucursalAbierta(connection, tx, branch))
+                    throw new InvalidOperationException("La caja de esta sucursal está cerrada.");
                 if (Scalar(connection, tx, "SELECT 1 FROM dbo.TiposCompXPV WHERE IDPtoVta=@p0 AND IDComprob=@p1", point, typeId) == null)
                     throw new InvalidOperationException("El comprobante no está habilitado en este punto de venta.");
                 int afipType = 0;
@@ -3044,6 +3058,16 @@ internal static class FacturacionCopiaApi
                     if (action == "actualizar-costo") { Reply(context, 200, StockActualizarCosto(connection, data)); return; }
                     if (action != "previsualizar" && action != "confirmar") throw new InvalidOperationException("Acción de stock inválida.");
                     Reply(context, 200, StockIngreso(connection, data, action == "confirmar"));
+                    return;
+                }
+                if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/caja-estado")
+                {
+                    int point;
+                    if (!Int32.TryParse(request.QueryString["puntoVenta"], out point))
+                        throw new InvalidOperationException("Elegí un punto de venta.");
+                    object branch = Scalar(connection, null, "SELECT IDSucAsoc FROM dbo.[Depósitos] WHERE [IDDepósito]=@p0 AND IDEmp=1", point);
+                    if (branch == null || branch == DBNull.Value) throw new InvalidOperationException("Punto de venta inválido.");
+                    Reply(context, 200, new { ok = true, abierta = CajaSucursalAbierta(connection, null, Convert.ToInt32(branch)) });
                     return;
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/bootstrap")

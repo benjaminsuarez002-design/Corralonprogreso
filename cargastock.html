@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.44"></script>
+<script src="corralon-system.js?v=1.0.45"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1852,6 +1852,7 @@ function applyExactProviderCode(cell) {
 }
 function setProvider(nextProvider, options = {}) {
   if (!options.skipUndo) pushUndoSnapshot();
+  if (!options.preserveDocumentLinks && String(provider?.id_proveedor || '') !== String(nextProvider?.id_proveedor || '')) stockClearDocumentLinks();
   // Los porcentajes de la barra son ajustes temporales de esta carga.
   // Se trabaja sobre una copia para no modificar el registro maestro de proveedores.
   provider = nextProvider ? { ...nextProvider } : null;
@@ -3541,7 +3542,7 @@ async function loadProviders() {
     providers.sort((a,b)=>providerLabel(a).localeCompare(providerLabel(b),'es'));
     const saved=localStorage.getItem(PROVIDER_KEY);
     const selected=providers.find(item=>String(item.id_proveedor)===saved||String(item.codigo_proveedor)===saved);
-    setProvider(selected||null,{skipUndo:true,skipProviderArticles:true});
+    setProvider(selected||null,{skipUndo:true,skipProviderArticles:true,preserveDocumentLinks:true});
     stockMovementFields();
     el.status.textContent=`${providers.length} proveedores de SQL`;
   }catch(error){
@@ -4512,7 +4513,7 @@ async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitch
       if (field.type === 'checkbox') field.checked = Boolean(next.header[field.id]);
       else field.value = next.header[field.id] ?? (field.id === 'stockArticleFilter' ? 'sql' : '');
     });
-    setProvider(next.provider, { skipUndo: true, skipProviderArticles: true, skipRowDiscount: true });
+    setProvider(next.provider, { skipUndo: true, skipProviderArticles: true, skipRowDiscount: true, preserveDocumentLinks: true });
     el.providerInput.value = next.providerText || '';
     stockField('stockCostOptions').open = stockAdditionalPopup.classList.contains('visible');
     selectedRows.clear(); selectedCols.clear(); undoStack?.clear?.(); lastFocusedTableCell = null;
@@ -4868,6 +4869,7 @@ async function stockImportBudget(index) {
   if (!lines.length || lines.some(line => !line.article || !Number.isFinite(line.cantidad) || line.cantidad <= 0)) { show('El presupuesto tiene artículos o cantidades sin resolver.'); return; }
   if (rowsData.some(row => !isBlankStockRow(row)) && !(await htmlNotice('¿Reemplazar las filas actuales por este presupuesto?'))) return;
   pushUndoSnapshot();
+  stockClearDocumentLinks();
   rowsData = lines.map((line, lineIndex) => {
     const article = line.article;
     const row = normalizeRow({ idart: line.idart, codigo: article.codProv || '', descripcion: article.descripcion, cantidad: rawNumber(line.cantidad), stock: article.stock, descuentoAdicional: 0, presupuestoWeb: String(budget.numero) }, lineIndex);
@@ -5094,6 +5096,13 @@ async function confirmStockIngreso() {
     }
     el.providerInput.focus();
   }
+}
+function stockClearDocumentLinks() {
+  ['stockIngresoFactura','stockRemito','stockCompra','stockRelacionado'].forEach(id => stockField(id).value = '');
+  stockField('stockCompra').innerHTML = '<option value="">Sin asociar</option>';
+  stockField('stockRelacionado').innerHTML = '<option value="">—</option>';
+  stockField('stockPurchaseList').hidden = true;
+  stockHeaderSave();
 }
 function stockMovementFields() {
   const transfer=Number(stockField('stockTipoMovimiento').value)===57;
@@ -5625,7 +5634,7 @@ document.addEventListener('keydown',event=>{
   closeProviderList();closeArticleProviderList();hideArticleProviderToggle();closePriceComparatorProviderList();
 },true);
 FX.bindComprobanteNumber(stockField('stockRemito'));
-document.querySelectorAll('[data-stock-header]').forEach(field=>field.addEventListener('change',()=>{stockHeaderSave();if(field.id==='stockIngresoSucursal'){stockRefreshSql();stockRefreshRelations();}if(field.id==='stockTipoMovimiento')stockMovementFields();if(field.id==='stockArticleFilter'){stockHeaderSave();loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));stockRebuildArticleOptions();render();}}));
+document.querySelectorAll('[data-stock-header]').forEach(field=>field.addEventListener('change',()=>{stockHeaderSave();if(field.id==='stockIngresoSucursal'){stockRefreshSql();stockRefreshRelations();}if(field.id==='stockTipoMovimiento'){stockClearDocumentLinks();stockMovementFields();stockHeaderSave();}if(field.id==='stockArticleFilter'){stockHeaderSave();loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));stockRebuildArticleOptions();render();}}));
 async function stockOpenPurchaseList() {
   const list=stockField('stockPurchaseList');
   if(stockConfirmed || stockIngresoBusy || stockField('stockCompra').disabled)return;
@@ -6605,7 +6614,7 @@ initFuncionesJsBindings();
   stockRebuildArticleOptions();
   await stockRefreshRelations();
   if (stockWorkspaceRestored) {
-    setProvider(stockWorkspaceRestored.provider, { skipUndo: true, skipProviderArticles: true });
+    setProvider(stockWorkspaceRestored.provider, { skipUndo: true, skipProviderArticles: true, preserveDocumentLinks: true });
     el.providerInput.value = stockWorkspaceRestored.providerText || '';
     stockField('stockCostOptions').open = false;
     await stockRefreshRelations();
