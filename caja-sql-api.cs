@@ -105,7 +105,7 @@ internal static partial class FacturacionCopiaApi
         var cards=CajaRows(c,tx,"SELECT v.IDTarjeta,a.[Descripción] Tarjeta,SUM(v.ImpEnt*t.ImpPor) Importe FROM dbo.FacturasATP f JOIN dbo.FacturasTSVal v ON v.IDRecibo=f.IDRecibo JOIN dbo.Tarjetas a ON a.IDTarjeta=v.IDTarjeta JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.IDTipoAcred>0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR f.[IDDepósito]=@p3) AND v.IDTarjeta>0 GROUP BY v.IDTarjeta,a.[Descripción]",date,date.AddDays(1),branch,deposit);
         var sales=CajaRows(c,tx,"SELECT f.[IDDepósito] PV,SUM(f.Total) ImpVta,SUM(ISNULL(a.Costo,0)*t.StkPor*-1) ImpCosto,SUM(ISNULL(a.Articulos,0)*t.StkPor*-1) Articulos FROM dbo.FacturasATP f JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] OUTER APPLY(SELECT SUM(x.PrecioUniCpra*x.Cantidad) Costo,SUM(x.Cantidad) Articulos FROM dbo.FacturasATS x WHERE x.IDRecibo=f.IDRecibo) a WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.IDTipoAcred>0 AND f.EnInfVtas<>0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR f.[IDDepósito]=@p3) GROUP BY f.[IDDepósito]",date,date.AddDays(1),branch,deposit);
         var receipts=CajaRows(c,tx,"SELECT SUM(r.Total) TotCob FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] d ON d.[IDDepósito]=r.[IDDepósito] WHERE r.IDEmp=1 AND r.Fecha>=@p0 AND r.Fecha<@p1 AND r.Confirmado<>0 AND r.Anulado=0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR r.[IDDepósito]=@p3)",date,date.AddDays(1),branch,deposit);
-        var differences=CajaRows(c,tx,"SELECT f.IDRecibo,t.Abreviatura,f.NroFactura,f.Total,SUM(v.ImpEnt*t.ImpPor) TotImp,f.Total-SUM(v.ImpEnt*t.ImpPor) ImpDif FROM dbo.FacturasATP f JOIN dbo.FacturasTSVal v ON v.IDRecibo=f.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.EnCaja<>0 AND t.IDTipoAcred>0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR f.[IDDepósito]=@p3) GROUP BY f.IDRecibo,t.Abreviatura,f.NroFactura,f.Total HAVING ABS(f.Total-SUM(v.ImpEnt*t.ImpPor))>0.01",date,date.AddDays(1),branch,deposit);
+        var differences=CajaRows(c,tx,"SELECT f.IDRecibo,t.Abreviatura,f.NroFactura,f.Total,SUM(v.ImpEnt*t.ImpPor) TotImp,f.Total-SUM(v.ImpEnt*t.ImpPor) ImpDif,ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0) TotXVal,f.Total-(ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0)) ImpDifVal FROM dbo.FacturasATP f JOIN dbo.FacturasTSVal v ON v.IDRecibo=f.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.EnCaja<>0 AND t.IDTipoAcred>0 AND f.EnInfVtas<>0 AND d.IDSucAsoc=@p2 AND ISNULL(f.IDCaja,0) IN(0,@p4) GROUP BY f.IDRecibo,t.Abreviatura,f.NroFactura,f.Total,f.TotalCC,f.TotalEF,f.TotalCH,f.TotalEC HAVING ABS(f.Total-SUM(v.ImpEnt*t.ImpPor))>0.01 OR ABS(f.Total-(ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0)))>0.01 ORDER BY t.Abreviatura,f.NroFactura",date,date.AddDays(1),branch,deposit,id);
         return new {ok=true,cabecera=h,detalle=detail,efectivo=cash,tarjetas=cards,ventas=sales,cobros=receipts,diferencias=differences,version=ProviderVersion(new Dictionary<string,object>{{"cabecera",h},{"detalle",detail},{"efectivo",cash}})};
     }
     private static void CajaVerifyVersion(SqlConnection c,SqlTransaction tx,int id,CajaSession session,string expected) {
@@ -149,8 +149,41 @@ internal static partial class FacturacionCopiaApi
     private static object CajaValueInvoices(SqlConnection c,int id,int pay,int card,CajaSession session) {
         var h=CajaHeader(c,null,id,false,session);DateTime date=Convert.ToDateTime(h["Fecha"]).Date;int branch=Convert.ToInt32(h["IDSucAsoc"]);bool closed=Convert.ToBoolean(h["Confirmado"]);
         var rows=Rows(c,"SELECT f.IDRecibo idRecibo,f.NroFactura numero,t.Abreviatura comprobante,f.ApeYNom cliente,p.TipoPago tipoValor,SUM(v.ImpEnt*t.ImpPor) total,COALESCE(NULLIF(a.[Descripción],''),'Ninguna') cuenta FROM dbo.FacturasATP f JOIN dbo.FacturasTSVal v ON v.IDRecibo=f.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas a ON a.IDTarjeta=v.IDTarjeta WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND d.IDSucAsoc=@p2 AND f.Confirmado<>0 AND f.Anulada=0 AND t.IDTipoAcred>0 AND t.EnCaja<>0 AND f.EnInfVtas<>0 AND (@p3=0 OR v.IDTipoPago=@p3) AND (@p6=0 OR v.IDTarjeta=@p6) AND (f.IDCaja=@p4 OR (@p5=0 AND ISNULL(f.IDCaja,0)=0)) GROUP BY f.IDRecibo,f.NroFactura,t.Abreviatura,f.ApeYNom,p.TipoPago,a.[Descripción] ORDER BY f.IDRecibo DESC",date,date.AddDays(1),branch,pay,id,closed?1:0,card);
+        if(pay>0 && card==0) {
+            rows.AddRange(Rows(c,"SELECT r.IDRecibo idRecibo,r.NroFactura numero,t.Abreviatura comprobante,r.Cliente cliente,p.TipoPago tipoValor,SUM(v.Importe) total,COALESCE(NULLIF(a.[Descripción],''),'Ninguna') cuenta,'recibo-cobro' origen FROM dbo.RecibosXTP r JOIN dbo.RecibosXTS v ON v.IDRecibo=r.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=r.[IDDepósito] AND d.IDEmp=r.IDEmp JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas a ON a.IDTarjeta=v.IDTarjeta WHERE r.IDEmp=1 AND r.Fecha>=@p0 AND r.Fecha<@p1 AND d.IDSucAsoc=@p2 AND r.Confirmado<>0 AND r.Anulado=0 AND t.EnCaja<>0 AND v.IDTipoPago=@p3 AND (r.IDCaja=@p4 OR (@p5=0 AND ISNULL(r.IDCaja,0)=0)) GROUP BY r.IDRecibo,r.NroFactura,t.Abreviatura,r.Cliente,p.TipoPago,a.[Descripción] ORDER BY r.IDRecibo DESC",date,date.AddDays(1),branch,pay,id,closed?1:0));
+        }
         return new {ok=true,filas=rows};
     }
+    private static object CajaCollectionReceipts(SqlConnection c,int id,int receipt,CajaSession session) {
+        var h=CajaHeader(c,null,id,false,session);DateTime date=Convert.ToDateTime(h["Fecha"]).Date;int branch=Convert.ToInt32(h["IDSucAsoc"]);
+        // Same scope as Total cobros: confirmed, non-annulled receipts of this branch and day.
+        var rows=Rows(c,"SELECT r.IDRecibo idRecibo,r.NroFactura numero,t.Abreviatura comprobante,r.Cliente cliente,'Recibo de cobro' tipoValor,r.Total total,'' cuenta,'recibo-cobro' origen FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] d ON d.[IDDepósito]=r.[IDDepósito] AND d.IDEmp=r.IDEmp LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDComprob WHERE r.IDEmp=1 AND r.Fecha>=@p0 AND r.Fecha<@p1 AND r.Confirmado<>0 AND r.Anulado=0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR r.IDRecibo=@p3) ORDER BY r.IDRecibo DESC",date,date.AddDays(1),branch,receipt);
+        if(receipt==0)return new {ok=true,filas=rows};
+        if(rows.Count!=1)throw new InvalidOperationException("El recibo no pertenece a esta sucursal y fecha de Caja.");
+        return CollectionReceiptResult(c,null,receipt);
+    }
+    private static object CajaCorrectInvoiceValues(SqlConnection c,SqlTransaction tx,Dictionary<string,object> input,CajaSession session) {
+                    int cajaId=RequiredId(Value(input,"cajaId"),"la Caja"),receipt=RequiredId(Value(input,"idRecibo"),"la boleta");
+                    var h=CajaHeader(c,tx,cajaId,false,session);
+                    if(Convert.ToBoolean(h["Confirmado"]))throw new InvalidOperationException("La Caja está cerrada. No se pueden corregir sus valores.");
+                    CajaVerifyVersion(c,tx,cajaId,session,Text(Value(input,"versionCaja")));
+                    DateTime cajaDate=Convert.ToDateTime(h["Fecha"]).Date;int branch=Convert.ToInt32(h["IDSucAsoc"]);
+                    if(Scalar(c,tx,"SELECT f.IDRecibo FROM dbo.FacturasATP f WITH(UPDLOCK,HOLDLOCK) JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp WHERE f.IDRecibo=@p0 AND f.IDEmp=1 AND d.IDSucAsoc=@p1 AND f.Fecha>=@p2 AND f.Fecha<@p3 AND ISNULL(f.IDCaja,0) IN(0,@p4)",receipt,branch,cajaDate,cajaDate.AddDays(1),cajaId)==null)throw new InvalidOperationException("La boleta no pertenece a esta Caja.");
+                    InvoiceValuesSaveCore(c,tx,input);CajaRecalculate(c,tx,h);return CajaForm(c,tx,cajaId,session);
+    }
+    private static string CajaToolsVersion(SqlConnection c,DateTime date,CajaSession session) {
+        int branch=session.Restricted?session.Branch:0;
+        var state=Rows(c,"SELECT Seccion,Usuario,Version FROM dbo.CajaWebEstado WHERE Fecha=@p0 AND Seccion<>'efectivo' ORDER BY Seccion,Usuario",date);
+        var sql=Rows(c,"SELECT c.IDRecibo,c.Total,c.Confirmado,ISNULL(x.n,0) Movs,ISNULL(x.sig,0) Firma FROM dbo.CajaDiaTP c JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] AND d.IDEmp=c.IDEmp OUTER APPLY(SELECT COUNT(*) n,CHECKSUM_AGG(BINARY_CHECKSUM(m.IDMov,m.Importe,m.Nota)) sig FROM dbo.CajaDiaTSEfec m WHERE m.IDRecibo=c.IDRecibo) x WHERE c.IDEmp=1 AND c.Anulado=0 AND c.Fecha>=@p0 AND c.Fecha<@p1 AND (@p2=0 OR d.IDSucAsoc=@p2) ORDER BY c.IDRecibo",date,date.AddDays(1),branch);
+        return ProviderVersion(new Dictionary<string,object>{{"estado",state},{"sql",sql}});
+    }
+    private static void CajaSaveCashMovement(SqlConnection c,SqlTransaction tx,Dictionary<string,object> h,Dictionary<string,object> input) {
+        int id=Convert.ToInt32(h["IDRecibo"]);
+                        int mov=(int)Number(Value(input,"idMov") ?? (object)0);if(mov==0)Execute(c,tx,"INSERT dbo.CajaDiaTSEfec(IDRecibo,Importe,Nota,Hora) VALUES(@p0,@p1,@p2,GETDATE())",id,Number(Value(input,"importe")),Text(Value(input,"nota")));
+                        else {int count=Convert.ToBoolean(Value(input,"eliminar")??false)?Execute(c,tx,"DELETE dbo.CajaDiaTSEfec WHERE IDMov=@p0 AND IDRecibo=@p1",mov,id):Execute(c,tx,"UPDATE dbo.CajaDiaTSEfec SET Importe=@p2,Nota=@p3 WHERE IDMov=@p0 AND IDRecibo=@p1",mov,id,Number(Value(input,"importe")),Text(Value(input,"nota")));if(count!=1)throw new InvalidOperationException("El movimiento cambió.");}
+                        CajaRecalculate(c,tx,h);
+    }
+    private static int CajaInputId(Dictionary<string,object> input) {return (int)Number(Value(input,"id") ?? (object)0);}
     private static object CajaSqlHandle(SqlConnection c,HttpListenerRequest request) {
         var input=new Dictionary<string,object>();
         if(request.HttpMethod=="POST") {using(var reader=new StreamReader(request.InputStream,Encoding.UTF8)){string body=reader.ReadToEnd();if(body.Length>2000000)throw new InvalidOperationException("La carga es demasiado grande.");input=Object(Json.DeserializeObject(body));}}
@@ -158,7 +191,7 @@ internal static partial class FacturacionCopiaApi
         if(request.HttpMethod=="GET" && action=="bootstrap")return CajaBootstrap(c,request.QueryString["usuarioId"]);
         var session=CajaAuthorize(request,input);
         DateTime date=CajaDate(request.HttpMethod=="GET"?request.QueryString["fecha"]:Value(input,"fecha"));CajaCheckDate(session,date);
-        int id=request.HttpMethod=="GET"?Convert.ToInt32(request.QueryString["id"]??"0"):(int)Number(Value(input,"id"));
+        int id=request.HttpMethod=="GET"?Convert.ToInt32(request.QueryString["id"]??"0"):CajaInputId(input);
         if(request.HttpMethod=="GET") {
             if(action=="formulario") {
                 if(id==0){int deposit=Convert.ToInt32(request.QueryString["deposito"]??"0");object found=Scalar(c,null,"SELECT TOP 1 c.IDRecibo FROM dbo.CajaDiaTP c JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] AND d.IDEmp=c.IDEmp JOIN dbo.[Depósitos] elegido ON elegido.IDSucAsoc=d.IDSucAsoc AND elegido.IDEmp=d.IDEmp WHERE c.Fecha>=@p0 AND c.Fecha<@p1 AND c.IDEmp=1 AND elegido.[IDDepósito]=@p2 AND c.Anulado=0 ORDER BY c.IDRecibo DESC",date,date.AddDays(1),deposit);id=found==null?0:Convert.ToInt32(found);}
@@ -166,6 +199,9 @@ internal static partial class FacturacionCopiaApi
                 return CajaForm(c,null,id,session);
             }
             if(action=="comprobantes-valor")return CajaValueInvoices(c,id,Convert.ToInt32(request.QueryString["tipoValor"]??"0"),Convert.ToInt32(request.QueryString["tarjeta"]??"0"),session);
+            if(action=="recibos-caja")return CajaCollectionReceipts(c,id,0,session);
+            if(action=="recibo-caja")return CajaCollectionReceipts(c,id,RequiredId(request.QueryString["recibo"],"el recibo"),session);
+            if(action=="version-herramientas")return new {ok=true,version=CajaToolsVersion(c,date,session)};
             if(action=="administradores")return CajaAdministrators();
             if(action=="consultar")return new {ok=true,filas=Rows(c,"SELECT c.IDRecibo,c.NroFactura,c.Fecha,c.Confirmado,c.Total,c.[IDDepósito],c.Nota,d.[Descripción] PV,d.IDSucAsoc FROM dbo.CajaDiaTP c JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] WHERE c.IDEmp=1 AND c.Anulado=0 AND c.Fecha>=@p0 AND c.Fecha<@p1 AND (@p2=0 OR d.IDSucAsoc=@p2) ORDER BY c.IDRecibo DESC",date,CajaDate(request.QueryString["hasta"]??date.ToString("yyyy-MM-dd")).AddDays(1),session.Restricted?session.Branch:0)};
             if(action=="estado") {string section=request.QueryString["seccion"];string user=section=="efectivo"?session.User:"";return new {ok=true,payload=CajaStatePayload(c,null,date,section,user)};}
@@ -177,9 +213,10 @@ internal static partial class FacturacionCopiaApi
             throw new InvalidOperationException("Consulta de Caja no disponible.");
         }
         if(action=="eliminar")CajaVerifyAdministrator(input);
-        else if(!session.Edit)throw new InvalidOperationException("Tu usuario no tiene permiso de edición de Caja.");
+        else if(action!="valores-boleta" && !session.Edit)throw new InvalidOperationException("Tu usuario no tiene permiso de edición de Caja.");
         using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
             try {
+                if(action=="valores-boleta") {var updatedCaja=CajaCorrectInvoiceValues(c,tx,input,session);tx.Commit();return new {ok=true,caja=updatedCaja};}
                 if(action=="actualizar-dia") {
                     var pending=CajaRows(c,tx,"SELECT c.IDRecibo FROM dbo.CajaDiaTP c WITH(UPDLOCK,HOLDLOCK) JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] AND d.IDEmp=c.IDEmp WHERE c.IDEmp=1 AND c.Anulado=0 AND c.Confirmado=0 AND c.Fecha>=@p0 AND c.Fecha<@p1 AND (@p2=0 OR d.IDSucAsoc=@p2)",date,date.AddDays(1),session.Restricted?session.Branch:0);
                     foreach(var row in pending)CajaRecalculate(c,tx,CajaHeader(c,tx,Convert.ToInt32(row["IDRecibo"]),true,session));
@@ -220,9 +257,7 @@ internal static partial class FacturacionCopiaApi
                         foreach(var item in PurchaseArray(Value(input,"filas"))){var r=Object(item);int pay=(int)Number(Value(r,"IDTipoPago"));int count=Execute(c,tx,"UPDATE dbo.CajaDiaTS SET ImpAnt=@p2,ImpCont=@p3,ImpFin=@p4,Nota=@p5,ImpAct=@p2+Importe+ImpRet WHERE IDRecibo=@p0 AND IDTipoPago=@p1",id,pay,Number(Value(r,"ImpAnt")),Number(Value(r,"ImpCont")),Number(Value(r,"ImpFin")),Text(Value(r,"Nota")));if(count!=1)throw new InvalidOperationException("El medio de pago de Caja cambió.");}
                         Execute(c,tx,"UPDATE dbo.CajaDiaTP SET Nota=@p1,Total=(SELECT ISNULL(SUM(ImpAct),0) FROM dbo.CajaDiaTS WHERE IDRecibo=@p0) WHERE IDRecibo=@p0",id,Text(Value(input,"nota")));
                     } else if(action=="efectivo") {
-                        int mov=(int)Number(Value(input,"idMov"));if(mov==0)Execute(c,tx,"INSERT dbo.CajaDiaTSEfec(IDRecibo,Importe,Nota,Hora) VALUES(@p0,@p1,@p2,GETDATE())",id,Number(Value(input,"importe")),Text(Value(input,"nota")));
-                        else {int count=Convert.ToBoolean(Value(input,"eliminar")??false)?Execute(c,tx,"DELETE dbo.CajaDiaTSEfec WHERE IDMov=@p0 AND IDRecibo=@p1",mov,id):Execute(c,tx,"UPDATE dbo.CajaDiaTSEfec SET Importe=@p2,Nota=@p3 WHERE IDMov=@p0 AND IDRecibo=@p1",mov,id,Number(Value(input,"importe")),Text(Value(input,"nota")));if(count!=1)throw new InvalidOperationException("El movimiento cambió.");}
-                        CajaRecalculate(c,tx,h);
+                        CajaSaveCashMovement(c,tx,h,input);
                     } else if(action=="cerrar") {
                         CajaClose(c,tx,h,Text(Value(input,"nota")));
                     } else throw new InvalidOperationException("Acción de Caja no disponible.");

@@ -202,7 +202,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.39"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.40"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -313,6 +313,66 @@ document.addEventListener('keydown',event=>{
   const target=event.target;
   const editingText=target?.matches?.('input:not([readonly]),textarea,[contenteditable="true"]');
   if(editingText||window.getSelection()?.toString())event.stopImmediatePropagation();
+},true);
+// Códigos y cantidades copiados desde Index / Historial.
+let articleClipboardImportBusy=false,articleClipboardPasteUntil=0,articleClipboardPasteTimer;
+function parseArticleClipboard(text){
+  const lines=String(text || '').replace(/^\uFEFF/,'').split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+  if(lines[0]!=='CORRALON_IMPORT_V1' || !lines.includes('MODO=IDART'))throw new Error('Copiá los artículos desde Index o con Copiar contenido en Historial.');
+  const entries=[];
+  for(const line of lines.slice(1)){
+    if(line==='MODO=IDART' || line.startsWith('NROFACTURA='))continue;
+    const match=line.match(/^IDART=(\d+)\s+CANTIDAD=(.+)$/i);
+    const amount=match?n(match[2]):0;
+    if(!match || !/^\d+(?:[.,]\d+)?$/.test(match[2].trim()) || !Number.isFinite(amount) || amount<=0)throw new Error('Hay un código o una cantidad inválida. No se importó ningún artículo.');
+    entries.push({idart:match[1],cantidad:amount});
+  }
+  if(!entries.length)throw new Error('No hay artículos para pegar.');
+  return entries;
+}
+async function importArticleClipboard(text){
+  if(articleClipboardImportBusy)return;
+  if(issuedReceipt || issueInProgress || recoveryPending || billingCajaBlocked || !localDraftStoreReady)throw new Error('Abrí una venta nueva con la Caja habilitada para pegar artículos.');
+  const entries=parseArticleClipboard(text),point=$('#pos').value,list=$('#priceList').value,originalDraft=draftId;
+  if(!point)throw new Error('Elegí el punto de venta.');
+  articleClipboardImportBusy=true;
+  try{
+    setMsg('Consultando los artículos y precios en SQL…');
+    if(!await loadSqlCatalog())throw new Error('No se pudieron consultar los precios en SQL.');
+    if(point!==$('#pos').value || list!==$('#priceList').value || originalDraft!==draftId || issuedReceipt || issueInProgress || recoveryPending || billingCajaBlocked)throw new Error('Cambió la venta durante la importación. Volvé a pegar los artículos.');
+    const byId=new Map(catalog.map(item=>[String(item.idart).replace(/^0+/,'') || '0',item])),missing=[],imported=[];
+    for(const entry of entries){
+      const item=byId.get(entry.idart.replace(/^0+/,'') || '0');
+      if(!item){missing.push(entry.idart);continue;}
+      const price=roundMoney(n(item.precioFinal));
+      const row={...blankArticle(),idart:String(item.idart),codProv:item.codProv || '',descripcion:item.descripcion,cantidad:entry.cantidad,precio:price,precioBase:price,costoFinal:n(item.costoFinal),idMoneda:Number(item.idMoneda)||1,cotizacion:n(item.cotizacion),stock:n(item.stock),iva:n(item.iva)};
+      row.margen=articleMargin(row);imported.push(row);
+    }
+    if(missing.length)throw new Error('No se pegó ningún artículo. No existen en SQL: '+missing.join(', ')+'.');
+    const pending=articles.filter(row=>!String(row.idart || '').trim() && (String(row.codProv || '').trim() || String(row.descripcion || '').trim()));
+    articles=[...articles.filter(articleStarted),...imported,...pending,blankArticle()];
+    hideSuggestions();renderArticles();renderTotals();scheduleDraft();
+    setMsg(imported.length+' artículos pegados con sus cantidades y precios de SQL.','ok');
+  }finally{articleClipboardImportBusy=false;}
+}
+document.addEventListener('keydown',event=>{
+  if(!(event.ctrlKey||event.metaKey) || !event.shiftKey || event.altKey || String(event.key || '').toLowerCase()!=='v')return;
+  if(event.repeat)return;
+  articleClipboardPasteUntil=Date.now()+2500;
+  clearTimeout(articleClipboardPasteTimer);
+  // El evento de pegado nativo funciona también por HTTP en las PCs de la red.
+  if(!event.target.matches?.('input,textarea,[contenteditable="true"]'))$('#articleBody input[data-a="idart"]')?.focus();
+  articleClipboardPasteTimer=setTimeout(async()=>{
+    if(!articleClipboardPasteUntil)return;articleClipboardPasteUntil=0;
+    try{if(!navigator.clipboard?.readText)throw new Error('Hacé clic en una celda de artículos y repetí Ctrl + Shift + V.');await importArticleClipboard(await navigator.clipboard.readText());}
+    catch(error){setMsg(error.message,'error');}
+  },350);
+},true);
+document.addEventListener('paste',event=>{
+  if(Date.now()>articleClipboardPasteUntil)return;
+  articleClipboardPasteUntil=0;clearTimeout(articleClipboardPasteTimer);
+  event.preventDefault();event.stopImmediatePropagation();
+  importArticleClipboard(event.clipboardData?.getData('text/plain') || '').catch(error=>setMsg(error.message,'error'));
 },true);
 function decimalParts(value){
   const number=Number(value);if(!Number.isFinite(number))return null;

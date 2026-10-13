@@ -1736,12 +1736,11 @@ internal static partial class FacturacionCopiaApi
             {"valores", RowsTx(c,tx,"SELECT * FROM dbo.FacturasTSVal WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY Orden",receipt)} });
     }
     private static decimal InvoiceValueNumber(object value) { return value==null || value==DBNull.Value ? 0m : Number(value); }
-    private static object InvoiceValuesSave(SqlConnection c, Dictionary<string,object> input)
-    {
-        int receipt=RequiredId(Value(input,"idRecibo"),"la boleta");
-        var edits=PurchaseArray(Value(input,"valores"));
-        using(var tx=c.BeginTransaction(IsolationLevel.Serializable))
-        {
+    private static object InvoiceValuesSave(SqlConnection c,Dictionary<string,object> input) {
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){var result=InvoiceValuesSaveCore(c,tx,input);tx.Commit();return result;}
+    }
+    private static object InvoiceValuesSaveCore(SqlConnection c,SqlTransaction tx,Dictionary<string,object> input) {
+        int receipt=RequiredId(Value(input,"idRecibo"),"la boleta");var edits=PurchaseArray(Value(input,"valores"));
             var headers=RowsTx(c,tx,"SELECT IDCliente,IDComprob,Confirmado,Anulada,Total FROM dbo.FacturasATP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0",receipt);
             if(headers.Count!=1 || InvoiceValueNumber(Value(headers[0],"Confirmado"))==0 || InvoiceValueNumber(Value(headers[0],"Anulada"))!=0)throw new InvalidOperationException("La boleta debe estar confirmada y sin anular.");
             if(Array.IndexOf(new[]{1,2,5,6,7,8,13,29,43},Convert.ToInt32(InvoiceValueNumber(Value(headers[0],"IDComprob"))))<0)throw new InvalidOperationException("Este comprobante no admite edición desde Facturación.");
@@ -1797,8 +1796,7 @@ internal static partial class FacturacionCopiaApi
             }
             decimal sign=InvoiceValueNumber(Value(headers[0],"Total"))<0?-1m:1m;
             Execute(c,tx,"UPDATE dbo.FacturasATP SET TotalEF=@p0,TotalEC=@p1,TotalCC=@p2,TotalCH=@p3 WHERE IDRecibo=@p4",cash*sign,card*sign,account*sign,bank*sign,receipt);
-            tx.Commit();return new {ok=true};
-        }
+        return new {ok=true};
     }
     private static string ProviderVersion(Dictionary<string, object> row)
     {

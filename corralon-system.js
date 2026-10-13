@@ -1,3 +1,46 @@
+// Tag only catalog requests; x-client-info is captured by Supabase API logs.
+(function installCatalogRequestIdentification() {
+  if (globalThis.CorralonCatalogTrace || typeof globalThis.fetch !== 'function') return;
+  const randomId = () => {
+    const bytes = new Uint8Array(8);
+    if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  };
+  let browser = randomId();
+  try {
+    const key = 'corralon_catalog_trace_browser_v1';
+    const stored = localStorage.getItem(key);
+    if (/^[a-f0-9]{16}$/.test(stored || '')) browser = stored;
+    else localStorage.setItem(key, browser);
+  } catch (_) {}
+  const tab = randomId();
+  const clean = value => encodeURIComponent(String(value || '').slice(0, 120));
+  const page = (() => { try { return decodeURIComponent(location.pathname.split('/').pop()) || 'index.html'; } catch (_) { return 'unknown'; } })();
+  let sequence = 0;
+  const identity = `corralon-catalog/1;page=${clean(page)};origin=${clean(location.host)};browser=${browser};tab=${tab}`;
+  globalThis.CorralonCatalogTrace = Object.freeze({ identity, browser, tab, page });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = function catalogIdentifiedFetch(input, init) {
+    let options = init;
+    try {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
+      if (url.origin === 'https://tizyjenayrcdkcodsjnc.supabase.co'
+        && /^\/rest\/v1\/(?:catalogo_articulos_(?:publico|meta|cambios)|rpc\/buscar_catalogo_publico_reducido)\/?$/.test(url.pathname)) {
+        const requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+        const previous = requestHeaders.get('x-client-info');
+        const caller = (new Error().stack || '').split('\n').slice(2)
+          .map(line => line.match(/\bat\s+(?:async\s+)?([\w.$]+)\s*\(/)?.[1])
+          .find(Boolean) || 'catalog-request';
+        const label = `${identity};caller=${clean(caller)};request=${++sequence}`;
+        requestHeaders.set('x-client-info', previous && !previous.includes('corralon-catalog/1') ? `${previous.slice(0, 160)} | ${label}` : label);
+        options = { ...init, headers: requestHeaders };
+      }
+    } catch (_) { /* Diagnostics must never prevent an existing request. */ }
+    return originalFetch.call(globalThis, input, options);
+  };
+})();
+
 (function () {
   if (!document.querySelector('script[data-sale-reviews-loader]')) {
     const script=document.createElement('script');script.src=new URL('facturacion-revisiones.js',document.currentScript?.src||location.href).href;
@@ -4811,7 +4854,7 @@
         if (message.type === 'error') console.warn(message.message);
       };
       port.start();
-      port.postMessage({ type: 'init', url: SUPABASE_URL, key: SUPABASE_KEY });
+      port.postMessage({ type: 'init', url: SUPABASE_URL, key: SUPABASE_KEY, traceIdentity: globalThis.CorralonCatalogTrace?.identity });
       worker.onerror = error => { console.warn('Conexión compartida del catálogo', error.message);port?.close();port=null;startFallback(); };
     }
     function getMeta() {

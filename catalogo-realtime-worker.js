@@ -4,13 +4,16 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js
 const ports = new Set();
 let unsubscribe = null, config = null, meta = null, metaLoading = null;
 let closeTimer = null, ready, resolveReady, signalVersion = -1, pendingVersion = -1, refreshTask = null;
+let traceSequence = 0;
+const traceWorker = Math.random().toString(16).slice(2);
 function send(port, message) { try { port.postMessage(message); } catch (_) { ports.delete(port); } }
 function broadcast(message) { for (const port of ports) send(port, message); }
 async function readMeta() {
   if (metaLoading) return metaLoading;
   metaLoading = (async () => {
     const response = await fetch(config.url + '/rest/v1/catalogo_articulos_meta?id=eq.principal&select=*&limit=1', {
-      headers: { apikey: config.key, Authorization: 'Bearer ' + config.key }, cache: 'no-store'
+      headers: { apikey: config.key, Authorization: 'Bearer ' + config.key,
+        'x-client-info': `${config.traceIdentity || 'corralon-catalog/1;page=unknown'};worker=${traceWorker};caller=firebase-version;request=${++traceSequence}` }, cache: 'no-store'
     });
     if (!response.ok) throw new Error('Versión del catálogo: HTTP ' + response.status);
     const rows = await response.json();
@@ -50,7 +53,7 @@ onconnect = event => {
   port.onmessage = async event => {
     const message = event.data || {};
     if (message.type === 'init') {
-      if (!config) config = { url: message.url, key: message.key };
+      if (!config) config = { url: message.url, key: message.key, traceIdentity: message.traceIdentity };
       start();
       if (meta) send(port, { type: 'meta', meta });
     }

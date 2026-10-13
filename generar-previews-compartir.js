@@ -81,7 +81,8 @@ async function readSupabaseCatalog() {
         headers: {
           apikey: SUPABASE_ANON_KEY,
           Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          Range: `${from}-${from + pageSize - 1}`
+          Range: `${from}-${from + pageSize - 1}`,
+          'x-client-info': `corralon-catalog/1;page=generar-previews-compartir.js;caller=generate-previews;request=${from}`
         }
       }
     );
