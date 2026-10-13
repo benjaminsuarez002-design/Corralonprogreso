@@ -202,7 +202,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.38"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.39"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -1394,7 +1394,7 @@ function putDraft(data){
   return task;
 }
 async function allDrafts(){const database=await openDB();return new Promise((resolve,reject)=>{const req=database.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>{database.close();resolve(mergeInterruptedSales(req.result))};req.onerror=()=>reject(req.error)})}async function deleteDraft(id){const database=await openDB();return new Promise((resolve,reject)=>{const tx=database.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>{database.close();resolve()};tx.onerror=()=>reject(tx.error)})}
-async function saveDraft(silent=false){const data={...formData(),uiArticulos:structuredClone(articles),uiValores:structuredClone(payments)};draftId=data.id;rememberActiveDraft(data.id);const stored=await putDraft(data);if(draftId!==data.id)return;
+async function saveDraft(silent=false){if(billingCajaBlocked)return;const data={...formData(),uiArticulos:structuredClone(articles),uiValores:structuredClone(payments)};draftId=data.id;rememberActiveDraft(data.id);const stored=await putDraft(data);if(draftId!==data.id)return;
 if(stored?.emision&&!issuedReceipt){recoveryPending=true;lockIssued();setRecoveryAlert('Esta venta ya figura emitida en la copia local. Verificando SQL antes de habilitarla.');await verifyRecovery();return}
 lastSaved=structuredClone(stored||data);if(!silent)setMsg('Borrador guardado localmente.','ok')}function scheduleDraft(){if(issuedReceipt)return;draftViewRevision++;clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft(true).catch(console.warn),700)}async function showDrafts(){const list=await allDrafts(),box=$('#draftList');box.innerHTML=list.length?list.map(d=>`<div class="draft"><div><strong>${esc(d.emision?.numero||d.tipoComprobante)} · ${esc(customerUpper(d.cliente?.nombre||'Sin cliente'))}</strong><small>${d.emision?'EMITIDO · ':''}${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)}</small></div><button data-open-draft="${d.id}">Abrir</button><button data-delete-draft="${d.id}">${d.emision?'Quitar de esta PC':'Eliminar borrador'}</button></div>`).join(''):'<div class="empty">No hay borradores.</div>';$('#draftModal').classList.add('open');$$('[data-open-draft]').forEach(b=>b.addEventListener('click',async()=>{const d=list.find(x=>x.id===b.dataset.openDraft);applyData(d);closeDraftModal()}));$$('[data-delete-draft]').forEach(b=>b.addEventListener('click',async()=>{if(b.dataset.deleteDraft===draftId)applyData(null);await deleteDraft(b.dataset.deleteDraft);showDrafts()}))}
 showDrafts=async function(){
@@ -3290,6 +3290,14 @@ function setBillingCajaBlocked(blocked,message='La caja de esta sucursal está c
   $('#cajaClosedMessage').textContent=message;
   document.querySelector('main.app').inert=blocked;
 }
+let billingCajaDiscarding=false;
+async function discardDraftForClosedCaja(){
+  if(billingCajaDiscarding || issueInProgress || issuedReceipt || recoveryPending || !localDraftStoreReady)return;
+  if(!draftId && !articles.some(r=>String(r.idart||'').trim()))return;
+  billingCajaDiscarding=true;const oldId=draftId,point=$('#pos').value,branch=$('#branch').value;
+  try {clearTimeout(saveTimer);if(oldId)await deleteDraft(oldId);if($('#pos').value!==point || issuedReceipt || issueInProgress || recoveryPending)return;rememberActiveDraft('');applyData(null);$('#branch').value=branch;$('#pos').value=point;setBillingCajaBlocked(true);setMsg('La caja se cerró. Se eliminó la factura pendiente.','error');}
+  finally{billingCajaDiscarding=false;}
+}
 async function checkBillingCaja(){
   const point=$('#pos').value;
   if(!point){setBillingCajaBlocked(false);billingCajaPoint='';return false}
@@ -3303,6 +3311,7 @@ async function checkBillingCaja(){
       if($('#pos').value!==point)return false;
       if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar la caja');
       setBillingCajaBlocked(result.abierta!==true);
+      if(result.abierta!==true)await discardDraftForClosedCaja();
       return result.abierta===true;
     }catch(error){
       if($('#pos').value===point)setBillingCajaBlocked(true,'No se pudo verificar si la caja está abierta');
@@ -3319,6 +3328,7 @@ for(const type of ['keydown','click','contextmenu'])document.addEventListener(ty
 },true);
 $('#pos').addEventListener('change',checkBillingCaja);
 $('#branch').addEventListener('change',()=>{billingCajaPoint='';setBillingCajaBlocked(false)});
+window.addEventListener('storage',event=>{if(event.key==='corralon_caja_estado_aviso'&&sqlConfig)checkBillingCaja()});
 window.addEventListener('focus',()=>{if(sqlConfig)checkBillingCaja()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sqlConfig)checkBillingCaja()});
 setInterval(()=>{if(!document.hidden&&sqlConfig)checkBillingCaja()},15000);

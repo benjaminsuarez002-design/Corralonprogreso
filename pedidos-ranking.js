@@ -165,7 +165,10 @@
   }
 
   async function fetchMeta() {
-    return core.catalogRealtime.getMeta();
+    const url = `${core.SUPABASE_URL}/rest/v1/catalogo_articulos_meta?id=eq.principal&select=ranking_version,ranking_desde,ranking_hasta,ranking_actualizado_at&limit=1`;
+    const response = await fetch(url, { cache: 'no-store', headers: headers() });
+    if (!response.ok) throw new Error(`Ranking: HTTP ${response.status}`);
+    return (await response.json())[0] || null;
   }
 
   async function fetchChanges(after, target) {
@@ -427,16 +430,12 @@
       panel.classList.remove('visible');
     }
   });
-  window.addEventListener('corralon:catalog-meta-changed', (event) => {
-    if (Number(event.detail?.rankingVersion || 0) > state.version || !event.detail) sync(event.detail?.meta || null).catch(console.warn);
-  });
   cacheDb.get(CACHE_KEY).then((cached) => {
     if (cached && Array.isArray(cached.rows)) {
       state = cached;
       byId = new Map(cached.rows.map((row) => [String(row.idart), row]));
       refreshVisible();
     }
-    return sync();
   }).catch((error) => console.warn('No se pudo iniciar el ranking', error));
   loadSupplierNames();
   window.CorralonPedidosRanking = { openConsult, openRanking, sync };

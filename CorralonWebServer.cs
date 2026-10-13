@@ -937,6 +937,7 @@ internal sealed class ServerForm : Form
         allowed = allowed || ((method == "GET" || method == "POST") && route == "cargar-facturas");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "recibos-cobro");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "proveedores-sql");
+        allowed = allowed || ((method == "GET" || method == "POST") && route == "caja");
         if (!allowed) { WriteJson(context, 404, "{\"ok\":false,\"error\":\"Ruta de facturación no disponible.\"}"); return; }
 
         IPAddress address = context.Request.RemoteEndPoint == null ? null : context.Request.RemoteEndPoint.Address;

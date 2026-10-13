@@ -18,7 +18,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 // Servicio local de la copia de Facturación.
-internal static class FacturacionCopiaApi
+internal static partial class FacturacionCopiaApi
 {
     private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 16777216 };
     private static readonly string[] Origins = { "http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8081", "http://127.0.0.1:8081" };
@@ -678,7 +678,11 @@ internal static class FacturacionCopiaApi
             "AND c.Fecha>=CONVERT(date,GETDATE()) AND c.Fecha<DATEADD(day,1,CONVERT(date,GETDATE())) " +
             "ORDER BY c.IDRecibo DESC", branch);
         // Sin caja registrada hoy, el cierre del día anterior no bloquea la nueva jornada.
-        return closed == null || closed == DBNull.Value || Convert.ToInt32(closed) == 0;
+        if(closed==null || closed==DBNull.Value) {
+            object removed=Scalar(connection,transaction,"SELECT 1 FROM dbo.CajaWebEstado WITH(HOLDLOCK) WHERE Fecha=CONVERT(date,GETDATE()) AND Seccion='caja-eliminada' AND Usuario=@p0",branch.ToString(CultureInfo.InvariantCulture));
+            return removed==null || removed==DBNull.Value;
+        }
+        return Convert.ToInt32(closed)==0;
     }
 
     private static object Scalar(SqlConnection connection, SqlTransaction transaction, string sql, params object[] values)
@@ -2956,6 +2960,7 @@ internal static class FacturacionCopiaApi
         {
             using (var connection = Connect())
             {
+                if (request.Url.AbsolutePath == "/caja") { Reply(context, 200, CajaSqlHandle(connection, request)); return; }
                 if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/comprobante-anular")
                 {
                     if (!(request.ContentType ?? "").StartsWith("application/json",StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Se esperaba una solicitud JSON.");
