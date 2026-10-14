@@ -15,6 +15,19 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@splidejs/splide@4.1.4/dist/css/splide.min.css">
 <script>
+(function fitIndexMobileCanvas(){
+  const root=document.documentElement;
+  function fit(){
+    if(!window.matchMedia('(max-width:700px)').matches){root.style.removeProperty('--index-mobile-scale');root.style.removeProperty('--index-mobile-viewport-height');return;}
+    const width=Math.max(1,window.innerWidth);
+    root.style.setProperty('--index-mobile-scale',String(width/390));
+    root.style.setProperty('--index-mobile-viewport-height',window.innerHeight+'px');
+  }
+  fit();window.addEventListener('resize',fit);window.addEventListener('orientationchange',fit);
+  window.visualViewport?.addEventListener('resize',fit);
+})();
+</script>
+<script>
   (function precargarFondoIndex() {
     const fondoUrl = new URL('assets/halloween/fondo-index-halloween.png', document.baseURI).href;
 
@@ -4422,7 +4435,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.37"></script>
+<script src="corralon-system.js?v=1.0.38"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -8025,17 +8038,18 @@ function posicionarMenuOrden() {
   const sortButton = document.getElementById('sortButton');
   if (!sortMenu || !sortButton) return;
   const margen = 8;
+  const canvasScale=window.matchMedia('(max-width:700px)').matches ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--index-mobile-scale')) || 1) : 1;
   const rect = sortButton.getBoundingClientRect();
-  const menuWidth = Math.min(sortMenu.offsetWidth || 190, Math.max(180, window.innerWidth - (margen * 2)));
-  const menuHeight = sortMenu.offsetHeight || 0;
+  const menuWidth = Math.min((sortMenu.offsetWidth || 190)*canvasScale, Math.max(180*canvasScale, window.innerWidth - (margen * 2)));
+  const menuHeight = (sortMenu.offsetHeight || 0)*canvasScale;
   let left = rect.right - menuWidth;
   left = Math.max(margen, Math.min(left, window.innerWidth - menuWidth - margen));
   let top = rect.bottom + 8;
   if (menuHeight && top + menuHeight > window.innerHeight - margen) {
     top = Math.max(margen, rect.top - menuHeight - 8);
   }
-  sortMenu.style.setProperty('--sort-menu-left', `${left}px`);
-  sortMenu.style.setProperty('--sort-menu-top', `${top}px`);
+  sortMenu.style.setProperty('--sort-menu-left', `${left/canvasScale}px`);
+  sortMenu.style.setProperty('--sort-menu-top', `${top/canvasScale}px`);
 }
 
 function cerrarMenuOrden() {
