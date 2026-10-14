@@ -4060,6 +4060,12 @@ body.index-sin-stock .home-card-meta{gap:0}
   </div>
   <div class="scroll-body" id="scrollBody"></div>
 </div>
+<nav class="index-mobile-nav" aria-label="Navegación móvil">
+  <button type="button" data-mobile-nav="inicio" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-8 9 8v11h-6v-7H9v7H3Z"/></svg><span>Inicio</span></button>
+  <button type="button" data-mobile-nav="rubros"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Rubros</span></button>
+  <button type="button" data-mobile-nav="favoritos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4c-3-2-6 0-8 2-2-2-5-4-8-2-6 5 1 12 8 17 7-5 14-12 8-17Z"/></svg><span>Favoritos</span></button>
+  <button type="button" data-mobile-nav="carrito"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h3l3 13h12l2-10H6"/><circle cx="10" cy="21" r="1"/><circle cx="19" cy="21" r="1"/></svg><small id="cartCountMobile">0</small><span>Carrito</span></button>
+</nav>
 <button class="scroll-top-btn" id="scrollTopBtn" type="button" aria-label="Volver arriba" title="Volver arriba">&uarr;</button>
 
 <div id="darkOverlay" class="darkOverlay hidden"></div>
@@ -4416,7 +4422,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.36"></script>
+<script src="corralon-system.js?v=1.0.37"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4593,8 +4599,24 @@ function indexFavoriteButton(code){return `<button class="index-favorite-button"
 function indexUpdateFavorites(){
   document.getElementById('indexFavoritesCount').textContent=indexFavoriteCodes.size;
   document.getElementById('topNavFavorites').setAttribute('aria-pressed',String(indexFavoritesActive));
+  indexUpdateMobileNavigation();
   document.querySelectorAll('[data-index-favorite]').forEach(button=>{const selected=indexFavoriteCodes.has(button.dataset.indexFavorite);button.textContent=selected?'♥':'♡';button.setAttribute('aria-pressed',String(selected));button.setAttribute('aria-label',(selected?'Quitar de':'Agregar a')+' favoritos');});
 }
+function indexUpdateMobileNavigation(){
+  document.querySelectorAll('[data-mobile-nav]').forEach(button=>{
+    const active=button.dataset.mobileNav==='favoritos'?indexFavoritesActive:button.dataset.mobileNav==='inicio' && !indexCategoryActive && !indexFavoritesActive && !document.getElementById('searchInput').value.trim();
+    if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
+  });
+}
+document.querySelector('.index-mobile-nav').addEventListener('click',event=>{
+  const button=event.target.closest('[data-mobile-nav]');if(!button)return;
+  switch(button.dataset.mobileNav){
+    case 'inicio':indexCategoryActive='';indexFavoritesActive=false;indexCategoryHasMore=false;++indexCategoryRequest;rubroActivo='';chipActivo='';sortActivo='';searchInput.value='';indexUpdateFavorites();actualizarChipsEtiqueta();if(INDEX_MENU_SESSION_ACTIVE)aplicarBusquedaActual();else restaurarPortadaCatalogoPublico();scrollMainToTop();break;
+    case 'rubros':document.getElementById('allRubrosButton').click();break;
+    case 'favoritos':document.getElementById('topNavFavorites').click();break;
+    case 'carrito':document.getElementById('cartIconDesktop').click();break;
+  }
+});
 function indexIsArido(article){return Boolean(article.arido) || normalizarTexto(article.rubro||'').includes('arido');}
 function indexMatchesCategory(article,key=indexCategoryActive){
   if(!key || key==='todos')return true;
@@ -4681,7 +4703,7 @@ document.addEventListener('click',event=>{
   if(favorite){event.preventDefault();event.stopImmediatePropagation();const code=favorite.dataset.indexFavorite;if(indexFavoriteCodes.has(code))indexFavoriteCodes.delete(code);else indexFavoriteCodes.add(code);try{localStorage.setItem(indexFavoriteStorageKey,JSON.stringify([...indexFavoriteCodes]));}catch(_){}indexCategoryCache.delete('favoritos|0');indexUpdateFavorites();if(indexFavoritesActive)aplicarBusquedaActual();return;}
   const category=event.target.closest('[data-index-category]');if(category){event.preventDefault();event.stopImmediatePropagation();indexSelectCategory(category.dataset.indexCategory);return;}
   const more=event.target.closest('[data-index-more]');if(more){event.preventDefault();event.stopImmediatePropagation();indexLoadMoreCategory(more);return;}
-  if(!event.target.closest('.halloween-rubros-wrap')){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}
+  if(!event.target.closest('.halloween-rubros-wrap,[data-mobile-nav="rubros"]')){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}
 },true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}});
 document.getElementById('topNavFavorites').addEventListener('click',()=>indexSelectCategory('favoritos'));
@@ -4754,7 +4776,7 @@ let publicCatalogVersion = null;
 let publicCatalogRealtimeStarted = false;
 let publicCatalogVersionChecking = false;
 try {
-  const savedView = localStorage.getItem('vistaArticulos');
+  const savedView = localStorage.getItem(window.matchMedia('(max-width:700px)').matches?'vistaArticulosMovil':'vistaArticulos');
   if (savedView === 'mosaico' || savedView === 'detalle') vistaActiva = savedView;
 } catch (e) {}
 
@@ -5795,8 +5817,8 @@ function renderHomeCompactItem(articulo, idxLocal, label = '') {
 }
 
 function renderHomeSection({ kicker, title, subtitle, chip, items }) {
-  const isMobile = window.matchMedia('(max-width: 640px)').matches;
-  const compactMobile = `<div class="home-mobile-compact-list">${items.slice(0, 3).map((a, i) => renderHomeCompactItem(a, i, title)).join('')}</div>`;
+  const isMobile = window.matchMedia('(max-width: 700px)').matches;
+  const compactMobile = `<div class="home-mobile-compact-list">${items.slice(0, 4).map((a, i) => renderHomeSectionCard(a, i)).join('')}</div>`;
   const slides = items.map((articulo, index) => `<li class="splide__slide home-slide">${renderHomeSectionCard(articulo, index)}</li>`).join('');
   const contenido = items.length && isMobile
     ? compactMobile
@@ -5855,6 +5877,7 @@ function renderHomeLanding() {
       <span>${ofertasCount} en oferta</span>
     </div>`;
   body.classList.add('home-mode');
+  indexUpdateMobileNavigation();
   body.innerHTML = `<div class="home-landing">
     <section class="halloween-hero" aria-label="Halloween en Progreso">
       <div class="halloween-hero-copy"><h1>Halloween<br>en <strong>Progreso</strong></h1><p>Todo para tu próximo proyecto</p><button type="button" data-index-category="todos">Ver artículos <span aria-hidden="true">›</span></button></div>
@@ -7700,6 +7723,7 @@ function abrirDetalleProducto(codigo) {
 }
 
 function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = null } = {}) {
+  indexUpdateMobileNavigation();
   const body   = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
   body.removeAttribute('aria-busy');
@@ -8364,7 +8388,7 @@ document.querySelectorAll('#chipsPanel .filtro-chip').forEach((chip) => {
 document.querySelectorAll('#vistaPanel .vista-chip').forEach((chip) => {
   chip.addEventListener('click', () => {
     vistaActiva = vistaActiva === 'mosaico' ? 'detalle' : 'mosaico';
-    try { localStorage.setItem('vistaArticulos', vistaActiva); } catch (e) {}
+    try { localStorage.setItem(window.matchMedia('(max-width:700px)').matches?'vistaArticulosMovil':'vistaArticulos', vistaActiva); } catch (e) {}
     actualizarVistaEtiqueta();
     renderContenidoActual();
     scrollMainToTop();
@@ -10590,6 +10614,7 @@ function actualizarBurbuja() {
   const c2 = document.getElementById('cartCountDesktop');
   if (c1) c1.textContent = total;
   if (c2) c2.textContent = total;
+  const mobileCount=document.getElementById('cartCountMobile');if(mobileCount)mobileCount.textContent=total;
 }
 function actualizarVistaCarrito() {
   actualizarBurbuja();
