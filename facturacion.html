@@ -220,7 +220,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.43"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.44"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -1282,7 +1282,7 @@ $('#sendSuggestionToMissing').addEventListener('click',async()=>{
 });
 function canEditSqlArticle(){
   const user=window.CorralonFunciones?.menuSessionUser?.()||uid();
-  return String(user?.nivel||'').trim().toLowerCase()==='administrador';
+  return window.CorralonFunciones.menuUserIsAdministrator('facturacion',user);
 }
 $('#editSuggestionSql').addEventListener('click',()=>{
   const article=contextSuggestionItem?{...contextSuggestionItem}:null;
@@ -2548,8 +2548,13 @@ async function chooseAridosDelivery(data){
   const label=provider=>`${provider.proveedor} · ${CorralonSystem.providerIdentity.externalId(provider)}`;
   const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
   const previous=valid.find(provider=>String(provider.id_proveedor)===String(aridosEntrega?.provider?.id_proveedor));
-  let selected=previous||null,matches=[],active=0,searchStarted=false;
-  if(previous)field.value=label(previous);
+  const deliveryTypes=new Set(lines.map(row=>CorralonSystem.aridos.getConfig(row.idart).tipo==='ladrillones'?'ladrillones':'arido'));
+  const defaultMatches=deliveryTypes.size===1?valid.filter(provider=>{
+    const name=normalize(provider.proveedor);
+    return deliveryTypes.has('ladrillones')?(/\bariel\b/.test(name)&&name.includes('ladrillon')):(name.includes('arido')&&/\bgal(?:d)?eano\b/.test(name));
+  }):[];
+  let selected=previous||(defaultMatches.length===1?defaultMatches[0]:null),matches=[],active=0,searchStarted=false;
+  if(selected)field.value=label(selected);
   const closeList=()=>{list.hidden=true;field.setAttribute('aria-expanded','false');field.removeAttribute('aria-activedescendant');};
   const renderList=()=>{
     const query=normalize(field.value);
@@ -2991,7 +2996,7 @@ function invoiceDateAllowed(value){
   const field=$('#date');
   return /^\d{4}-\d{2}-\d{2}$/.test(value)&&field.checkValidity()&&value>=field.min&&value<=field.max;
 }
-function canBackdateInvoice(){return String(uid().nivel||'').trim().toLowerCase()==='administrador'}
+function canBackdateInvoice(){return window.CorralonFunciones.menuUserIsAdministrator('facturacion',uid())}
 function invoiceDatePermissionMessage(){return canBackdateInvoice()?'La fecha debe estar entre hoy y los 5 días corridos anteriores. No se permiten fechas futuras.':'Solo los administradores pueden emitir con fecha anterior. Para tu usuario, la fecha debe ser la de hoy.'}
 function invoiceDateWarning(value){
   const parts=String(value||'').split('-'),shown=parts.length===3?`${parts[2]}/${parts[1]}/${parts[0]}`:'sin fecha';

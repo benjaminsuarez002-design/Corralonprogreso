@@ -340,7 +340,7 @@
   let pastingProviderPrice=false;
   async function pasteProviderPrice(){
     if(pastingProviderPrice||saving||loadingDetail||!draft)return;
-    if(String(FX.menuSessionUser()?.nivel||'').trim().toLowerCase()!=='administrador'){
+    if(!FX.menuUserIsAdministrator('articulos_sql')&&!FX.menuUserIsAdministrator('facturacion')){
       status('Solo los administradores pueden editar artículos.',true);return;
     }
     const currentDraft=draft,currentId=selected;

@@ -1450,6 +1450,13 @@
     return snapshot?.id === activeId ? snapshot : { id: activeId };
   }
 
+  function menuUserIsAdministrator(menuId, user = menuSessionUser()) {
+    const wanted=String(menuId||'').trim();
+    if(!user||!wanted)return false;
+    if(String(user.nivel||'').trim().toLowerCase()==='administrador')return true;
+    return Array.isArray(user.permisos)&&user.permisos.includes(wanted)&&Array.isArray(user.permisosEdicion)&&user.permisosEdicion.includes(wanted);
+  }
+
   function isMenuSessionActive() {
     return Boolean(menuSessionUser());
   }
@@ -1879,6 +1886,7 @@
     bindLabelSelect,
     bindShiftEnterNewLine,
     menuSessionUser,
+    menuUserIsAdministrator,
     isMenuSessionActive,
     menuUserHasAccess,
     presupuestoMediosPago,

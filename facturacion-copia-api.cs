@@ -876,7 +876,7 @@ internal static partial class FacturacionCopiaApi
     {
         return date.Date >= today.Date.AddDays(-5) && date.Date <= today.Date;
     }
-    private static void AssertBackdatedInvoicePermission(Dictionary<string, object> invoice, DateTime date, DateTime today)
+    private static void AssertBackdatedInvoicePermission(Dictionary<string, object> invoice, DateTime date, DateTime today, string permission = "facturacion")
     {
         if(date.Date==today.Date)return;
         string userId=Text(Value(invoice,"usuarioId")).Trim();
@@ -890,7 +890,7 @@ internal static partial class FacturacionCopiaApi
         }
         catch { throw new InvalidOperationException("No se pudo verificar el permiso de administrador. Usá la fecha de hoy o reintentá cuando vuelva la conexión."); }
         string level=Text(Value(Object(Value(Object(Value(document,"fields")),"nivel")),"stringValue")).Trim();
-        if(!String.Equals(level,"administrador",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Solo los administradores pueden emitir con fecha anterior. La fecha debe ser la de hoy.");
+        if(!String.Equals(level,"administrador",StringComparison.OrdinalIgnoreCase)&&!UserHasModuleEditPermission(Object(Value(document,"fields")),permission))throw new InvalidOperationException("Solo los administradores pueden emitir con fecha anterior. La fecha debe ser la de hoy.");
     }
     private static void AssertStoredInvoice(SqlConnection connection, SqlTransaction tx, int receipt, Dictionary<string, object> invoice)
     {
@@ -1412,7 +1412,7 @@ internal static partial class FacturacionCopiaApi
                 if (tx != null) tx.Commit();
                 return new { ok = true, yaCargado = true, idRecibo = saved[0]["IDRecibo"], numeroMovimiento = saved[0]["NroMov"], total = saved[0]["Total"], articulos = savedLines };
             }
-            try { AssertBackdatedInvoicePermission(input,movementDate,DateTime.Today); }
+            try { AssertBackdatedInvoicePermission(input,movementDate,DateTime.Today,"carga_stock"); }
             catch (InvalidOperationException ex) { throw new InvalidOperationException(ex.Message.Replace("emitir con fecha anterior","cargar stock con fecha anterior")); }
             var types = RowsTx(connection, tx, "SELECT IDComprob,IDTipoMovStock,StkPor,ImpPor,GenNS,ConReceta FROM dbo.TipoComprobantes WHERE IDComprob=@p0 AND EnStk=1", movimiento);
             if (types.Count != 1) throw new InvalidOperationException("El tipo de movimiento no está habilitado para stock.");
@@ -1692,7 +1692,10 @@ internal static partial class FacturacionCopiaApi
         catch { throw new InvalidOperationException("No se pudo verificar tu permiso de " + permissionName + ". Reintentá al recuperar la conexión."); }
         string level = Text(Value(Object(Value(fields, "nivel")), "stringValue")).ToLowerInvariant();
         if (level == "administrador") return;
-        if (strictAdministrator) throw new InvalidOperationException("Solo los administradores pueden anular boletas.");
+        if (strictAdministrator) {
+            if (UserHasModuleEditPermission(fields, permission)) return;
+            throw new InvalidOperationException("Solo los administradores de Facturación pueden anular boletas.");
+        }
         if (administratorOnly)
         {
             if (UserHasModuleEditPermission(fields, permission)) return;

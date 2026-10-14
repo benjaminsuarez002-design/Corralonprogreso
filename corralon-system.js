@@ -91,7 +91,7 @@
   let articleEditorImageFiles = new Map();
   let articleEditorApplyTargets = new Set();
   let articleEditorApplyFields = new Set(['etiquetas']);
-  const ARTICLE_EDITOR_LABEL_KEYS = ['oferta', 'destacado', 'masVendido', 'accesoRapido', 'ceramico'];
+  const ARTICLE_EDITOR_LABEL_KEYS = ['oferta', 'destacado', 'masVendido', 'accesoRapido', 'adicionales'];
   let articleEditorApplyLabels = new Set(ARTICLE_EDITOR_LABEL_KEYS);
   let articleEditorFunctionsBound = false;
   let articleEditorBasePrice = 0;
@@ -520,7 +520,8 @@
     const ceramic = articleEditorHost?.querySelector('[data-editor-extra="ceramico"]');
     const arid = articleEditorHost?.querySelector('[data-editor-extra="arido"]');
     const additional=articleEditorHost.querySelector('[data-editor-additional-open]');
-    if(additional)additional.classList.toggle('is-active',Boolean(articleEditorHost.querySelector('[data-editor-additional-dialog] .is-active')));
+    if(additional){const selected=Boolean(articleEditorHost.querySelector('[data-editor-additional-dialog] .is-active'));additional.classList.toggle('is-active',selected);additional.setAttribute('aria-pressed',String(selected));}
+    articleEditorHost.querySelectorAll('[data-editor-chip]').forEach(chip=>chip.setAttribute('aria-pressed',String(chip.classList.contains('is-active'))));
     if (offer) offer.hidden = !articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active');
     if (ceramic) ceramic.hidden = !articleEditorHost.querySelector('[data-editor-chip="ceramico"]')?.classList.contains('is-active');
     if (arid) arid.hidden = !articleEditorHost.querySelector('[data-editor-chip="arido"]')?.classList.contains('is-active');
@@ -755,6 +756,8 @@
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', String(active));
     });
+    const additionalLabel=articleEditorHost.querySelector('[data-editor-apply-label="adicionales"]');
+    if(additionalLabel){const selected=articleEditorHost.querySelector('[data-editor-additional-dialog] [data-editor-chip].is-active');additionalLabel.textContent=selected?`Adicionales: ${selected.textContent}`:'Adicionales (ninguno)';additionalLabel.title='Comparte la función seleccionada y su configuración; reemplaza la función anterior de los artículos elegidos.';}
     updateArticleEditorTargetCount();
   }
 
@@ -833,7 +836,11 @@
       if (labels.has('destacado')) updated.destacado = source.destacado;
       if (labels.has('masVendido')) updated.masVendido = source.masVendido;
       if (labels.has('accesoRapido')) updated.accesoRapido = source.accesoRapido;
-      if (labels.has('ceramico')) {
+      if (labels.has('adicionales')) {
+        updated.arido = Boolean(source.arido);
+        updated.ladrillones = Boolean(source.ladrillones);
+        updated.aridoPrecios = { ...(source.aridoPrecios || {}) };
+        updated.preciosArido = { ...updated.aridoPrecios };
         updated.ceramico = source.ceramico;
         updated.ceramicoM2 = source.ceramicoM2;
         updated.ceramicoPlacas = source.ceramicoPlacas;
@@ -1095,7 +1102,7 @@
             <button type="button" data-editor-apply-label="destacado">Destacado</button>
             <button type="button" data-editor-apply-label="masVendido">Más vendido</button>
             <button type="button" data-editor-apply-label="accesoRapido">Acceso rápido</button>
-            <button type="button" data-editor-apply-label="ceramico">Cerámico</button>
+            <button type="button" data-editor-apply-label="adicionales">Adicionales</button>
           </div>
         </div>
         <div class="corralon-editor-target-list" data-editor-target-list></div>
@@ -1667,18 +1674,28 @@
       });
       const save = operation?.save || articleEditorAdapter.save;
       if (!save) throw new Error('El editor no está conectado a esta página');
+      const additionalConfigs = [{code, config: aridConfig}];
+      if(articleEditorApplyFields.has('etiquetas')&&articleEditorApplyLabels.has('adicionales')){
+        appliedTargets.forEach(target=>additionalConfigs.push({code:articleCode(target),config:normalizeAridConfig({...aridConfig,codigo:articleCode(target)},articleCode(target))}));
+      }
       if (!operation?.deferImages) {
-        if(typeof aridosAdapter.saveArticleConfig === 'function')await aridosAdapter.saveArticleConfig(code,aridConfig);
-        else {
+        if(typeof aridosAdapter.saveArticleConfig === 'function'){
+          for(const entry of additionalConfigs)await aridosAdapter.saveArticleConfig(entry.code,entry.config);
+        }else {
           const [apps,fb]=await Promise.all([import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')]);
           const app=apps.getApps()[0]||apps.initializeApp({apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',projectId:'corralon-progreso'});
-          await fb.setDoc(fb.doc(fb.getFirestore(app),'configAridosArticulos',encodeURIComponent(code)),{...aridConfig,updatedAt:fb.serverTimestamp()},{merge:true});
+          const database=fb.getFirestore(app);
+          for(let offset=0;offset<additionalConfigs.length;offset+=400){
+            const batch=fb.writeBatch(database);
+            additionalConfigs.slice(offset,offset+400).forEach(entry=>batch.set(fb.doc(database,'configAridosArticulos',encodeURIComponent(entry.code)),{...entry.config,updatedAt:fb.serverTimestamp()},{merge:true}));
+            await batch.commit();
+          }
         }
       }
       await save(nextList, updated, articleEditorOriginalCode, appliedTargets);
       if (articleEditorAridEligible && !operation?.deferImages) {
         const nextConfigs = new Map(aridosConfigMap);
-        nextConfigs.set(aridCodeKey(code), aridConfig);
+        additionalConfigs.forEach(entry=>nextConfigs.set(aridCodeKey(entry.code),entry.config));
         setAridosConfigMap(nextConfigs);
         if(aridActive)setAridosFreightConfig(freightConfig);
         const backgroundWrites = [];

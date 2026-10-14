@@ -41,7 +41,7 @@
   let rows=[],page=0,hasMore=false,listController=null,detailController=null,sequence=0,detailSequence=0,detailIndex=-1,searchTimer=null,actionBusy=false,detailData=null;
   let cancellationBusy=false;
   function valuesUser(){return window.CorralonFunciones?.menuSessionUser?.()||{}}
-  function isAdministrator(){return String(valuesUser().nivel||'').toLowerCase()==='administrador';}
+  function isAdministrator(){return window.CorralonFunciones.menuUserIsAdministrator('facturacion',valuesUser());}
   function refreshAnnulButton(){
     annulButton.hidden=!isAdministrator();
     annulButton.disabled=actionBusy||!detailData?.versionAnulacion||!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||Boolean(detailData?.bloqueoAnulacionFiscal)||Boolean(detailData?.valuesDirty);

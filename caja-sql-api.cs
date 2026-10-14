@@ -56,7 +56,7 @@ internal static partial class FacturacionCopiaApi
         Dictionary<string,object> fields;
         using(var response=req.GetResponse())using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8))fields=Object(Value(Object(Json.DeserializeObject(reader.ReadToEnd())),"fields"));
         Func<string,string> field=key=>Text(Value(Object(Value(fields,key)),"stringValue"));
-        bool admin=field("nivel")=="administrador", access=admin;
+        bool admin=field("nivel")=="administrador"||UserHasModuleEditPermission(fields,"caja"), access=admin;
         foreach(var item in PurchaseArray(Value(Object(Value(Object(Value(fields,"permisos")),"arrayValue")),"values")))if(Text(Value(Object(item),"stringValue"))=="caja")access=true;
         if(!access)throw new InvalidOperationException("Tu usuario no tiene permiso de Caja.");
         var session=new CajaSession{User=userId,Token=Guid.NewGuid().ToString("N"),Admin=admin,Edit=admin||UserHasModuleEditPermission(fields,"caja"),Expires=DateTime.UtcNow.AddHours(12)};
@@ -129,7 +129,7 @@ internal static partial class FacturacionCopiaApi
     private static object CajaAdministrators() {
         var users=new List<object>();string page="";
         do { var result=CajaMenuGet("?pageSize=300&mask.fieldPaths=nivel&mask.fieldPaths=nombre&mask.fieldPaths=usuario"+(page.Length>0?"&pageToken="+Uri.EscapeDataString(page):""));
-            foreach(var doc in PurchaseArray(Value(result,"documents"))) {var d=Object(doc);var fields=Object(Value(d,"fields"));if(Text(Value(Object(Value(fields,"nivel")),"stringValue"))!="administrador")continue;string name=Text(Value(d,"name"));users.Add(new {id=name.Substring(name.LastIndexOf('/')+1),nombre=Text(Value(Object(Value(fields,"nombre")),"stringValue")),usuario=Text(Value(Object(Value(fields,"usuario")),"stringValue"))});}
+            foreach(var doc in PurchaseArray(Value(result,"documents"))) {var d=Object(doc);var fields=Object(Value(d,"fields"));if(Text(Value(Object(Value(fields,"nivel")),"stringValue"))!="administrador"&&!UserHasModuleEditPermission(fields,"caja"))continue;string name=Text(Value(d,"name"));users.Add(new {id=name.Substring(name.LastIndexOf('/')+1),nombre=Text(Value(Object(Value(fields,"nombre")),"stringValue")),usuario=Text(Value(Object(Value(fields,"usuario")),"stringValue"))});}
             page=Text(Value(result,"nextPageToken"));
         } while(page.Length>0);return new {ok=true,usuarios=users};
     }
@@ -137,7 +137,7 @@ internal static partial class FacturacionCopiaApi
         string id=Text(Value(input,"administradorId")),password=Text(Value(input,"password"));
         if(id.Length==0 || id.Length>150 || password.Length==0 || password.Length>300)throw new InvalidOperationException("Ingresá el usuario y la contraseña de un administrador.");
         var doc=CajaMenuGet("/"+Uri.EscapeDataString(id)+"?mask.fieldPaths=nivel&mask.fieldPaths=password");var fields=Object(Value(doc,"fields"));
-        if(Text(Value(Object(Value(fields,"nivel")),"stringValue"))!="administrador" || Text(Value(Object(Value(fields,"password")),"stringValue"))!=password)throw new InvalidOperationException("Usuario o contraseña de administrador incorrectos.");
+        if((Text(Value(Object(Value(fields,"nivel")),"stringValue"))!="administrador"&&!UserHasModuleEditPermission(fields,"caja")) || Text(Value(Object(Value(fields,"password")),"stringValue"))!=password)throw new InvalidOperationException("Usuario o contraseña de administrador incorrectos.");
     }
     private static void CajaDelete(SqlConnection c,SqlTransaction tx,Dictionary<string,object> h) {
         int id=Convert.ToInt32(h["IDRecibo"]);

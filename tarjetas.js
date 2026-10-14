@@ -36,7 +36,7 @@ const user = (() => {
     return temporary?.usuario?.id ? temporary.usuario : temporary?.id ? temporary : {};
   } catch { return {}; }
 })();
-const isAdmin = String(user.nivel || '').toLowerCase() === 'administrador';
+const isAdmin = (String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('tarjetas')&&user.permisosEdicion?.includes('tarjetas')));
 let data = [];
 let selectedCard = '';
 let dirtyIds = new Set();
