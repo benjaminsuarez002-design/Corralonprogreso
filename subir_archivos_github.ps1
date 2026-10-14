@@ -319,6 +319,18 @@ try {
         }
         $relativeFiles = @($relativeFiles | Sort-Object -Unique)
     }
+    # Index y su tema deben publicarse junto con las imágenes que utilizan.
+    if ($relativeFiles -contains 'index.html' -or $relativeFiles -contains 'theme-corralon.css') {
+        $indexThemeFiles = @('theme-corralon.css', 'assets/halloween/hero-halloween.png', 'assets/halloween/fondo-index-halloween.png', 'assets/halloween/categorias-halloween-ceramico.png')
+        foreach ($dependency in $indexThemeFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $dependency) -PathType Leaf)) {
+                throw "Falta una imagen o archivo del tema de Index: $dependency. No se publicó la actualización."
+            }
+            if ($relativeFiles -notcontains $dependency) { $relativeFiles += $dependency }
+        }
+        $relativeFiles = @($relativeFiles | Sort-Object -Unique)
+    }
+
     $htmlFiles = @($relativeFiles | Where-Object { $_ -match '\.html$' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
     if ($htmlFiles.Count) {
         $manifestSource = Join-Path $repoRoot 'version-web.json'
