@@ -303,6 +303,7 @@
     return {
       codigo: String(source.codigo ?? code ?? '').trim(),
       activo: articleBool(source.activo ?? source.arido),
+      tipo: source.tipo === 'ladrillones' ? 'ladrillones' : (articleBool(source.activo ?? source.arido) ? 'arido' : ''),
       precios: normalizeAridPrices(source.precios ?? source.aridoPrecios ?? source.preciosArido ?? {})
     };
   }
@@ -433,6 +434,7 @@
       return normalizeAridConfig({
         codigo: code,
         activo: articleOrCode.arido,
+        tipo: articleOrCode.ladrillones ? 'ladrillones' : '',
         precios: articleOrCode.aridoPrecios ?? articleOrCode.preciosArido
       }, code);
     }
@@ -443,7 +445,8 @@
     const config = aridConfigForArticle(article);
     return {
       ...article,
-      arido: config.activo,
+      arido: config.activo && config.tipo !== 'ladrillones',
+      ladrillones: config.tipo === 'ladrillones',
       aridoPrecios: { ...config.precios },
       preciosArido: { ...config.precios }
     };
@@ -516,6 +519,8 @@
     const offer = articleEditorHost?.querySelector('[data-editor-extra="oferta"]');
     const ceramic = articleEditorHost?.querySelector('[data-editor-extra="ceramico"]');
     const arid = articleEditorHost?.querySelector('[data-editor-extra="arido"]');
+    const additional=articleEditorHost.querySelector('[data-editor-additional-open]');
+    if(additional)additional.classList.toggle('is-active',Boolean(articleEditorHost.querySelector('[data-editor-additional-dialog] .is-active')));
     if (offer) offer.hidden = !articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active');
     if (ceramic) ceramic.hidden = !articleEditorHost.querySelector('[data-editor-chip="ceramico"]')?.classList.contains('is-active');
     if (arid) arid.hidden = !articleEditorHost.querySelector('[data-editor-chip="arido"]')?.classList.contains('is-active');
@@ -1015,8 +1020,7 @@
           <button type="button" class="corralon-article-editor-chip" data-editor-chip="destacado">Destacado</button>
           <button type="button" class="corralon-article-editor-chip" data-editor-chip="masVendido">Más vendido</button>
           <button type="button" class="corralon-article-editor-chip" data-editor-chip="accesoRapido">Acceso rápido</button>
-          <button type="button" class="corralon-article-editor-chip" data-editor-chip="ceramico">Cerámico</button>
-          <button type="button" class="corralon-article-editor-chip" data-editor-chip="arido" hidden>Árido</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-additional-open>Adicionales</button>
         </div>
         <div class="corralon-article-editor-extras" data-editor-extra="oferta" hidden>
           <div class="corralon-article-editor-section-title">Configuración de oferta</div>
@@ -1054,6 +1058,14 @@
         </div>
         <div class="corralon-article-editor-actions"><button type="button" data-editor-close>Cancelar</button><button type="button" data-editor-apply-open>Aplicar cambios también a</button><button type="button" data-editor-save>Guardar cambios</button></div>
       </div>
+      <div class="corralon-editor-subdialog" data-editor-additional-dialog><div class="corralon-editor-subcard">
+        <div class="corralon-editor-subhead"><b>Adicionales</b><button type="button" data-editor-additional-close>×</button></div>
+        <div class="corralon-article-editor-chips" style="padding:18px">
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="ceramico">Cerámico</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="arido">Áridos</button>
+          <button type="button" class="corralon-article-editor-chip" data-editor-chip="ladrillones">Ladrillones</button>
+        </div><p style="padding:0 18px 18px">Elegí una sola función. Tocá la opción activa para quitarla.</p>
+      </div></div>
       <div class="corralon-editor-subdialog" data-editor-images-dialog><div class="corralon-editor-subcard">
         <div class="corralon-editor-subhead"><b>Imágenes</b><button type="button" data-editor-images-close>×</button></div>
         <div class="corralon-editor-image-list" data-editor-images-list></div>
@@ -1115,9 +1127,13 @@
         if(url) window.CorralonFunciones.openImagePreview(url,{alt:'Foto del artículo',returnFocus:articleEditorHost.querySelector('[data-editor-photo-change]')});
         else articleEditorHost.querySelector('[data-editor-photo-input]').click();
       }
+      if(event.target.closest('[data-editor-additional-open]')) articleEditorHost.querySelector('[data-editor-additional-dialog]').classList.add('is-open');
+      if(event.target.closest('[data-editor-additional-close]')) articleEditorHost.querySelector('[data-editor-additional-dialog]').classList.remove('is-open');
       const chip = event.target.closest('[data-editor-chip]');
       if (chip) {
-        chip.classList.toggle('is-active');
+        const activating=!chip.classList.contains('is-active');
+        if(['ceramico','arido','ladrillones'].includes(chip.dataset.editorChip))articleEditorHost.querySelectorAll('[data-editor-chip="ceramico"],[data-editor-chip="arido"],[data-editor-chip="ladrillones"]').forEach(other=>other.classList.remove('is-active'));
+        chip.classList.toggle('is-active',activating);
         syncArticleEditorSections();
       }
       if (event.target.closest('[data-editor-arid-paste]')) pasteArticleEditorAridPrices();
@@ -1431,7 +1447,7 @@
     ARID_PRICE_TIERS.forEach((tier) => {
       prices[tier.key] = Math.max(0, Number(parseFlexibleNumber(editorField(`arido_${tier.key}`)?.value) || 0));
     });
-    return normalizeAridConfig({ codigo: code, activo: active, precios: prices }, code);
+    return normalizeAridConfig({ codigo: code, activo: active, precios: prices, tipo: articleEditorHost.querySelector('[data-editor-chip="ladrillones"]')?.classList.contains('is-active') ? 'ladrillones' : (active ? 'arido' : '') }, code);
   }
 
   function readArticleEditorFreightConfig() {
@@ -1458,7 +1474,7 @@
     articleEditorApplyTargets = new Set();
     articleEditorApplyFields = new Set(['etiquetas']);
     articleEditorApplyLabels = new Set(ARTICLE_EDITOR_LABEL_KEYS);
-    articleEditorAridEligible = false;
+    articleEditorAridEligible = true;
     updateArticleEditorTargetCount();
     articleEditorReturnFocus = options.returnFocus || document.activeElement;
     editorInfo('codigo').textContent = options.displayCode || articleCodeValue;
@@ -1477,7 +1493,7 @@
     const articleAridConfig = aridConfigForArticle(article);
     const aridChip = host.querySelector('[data-editor-chip="arido"]');
     if (aridChip) {
-      aridChip.hidden = true;
+      aridChip.hidden = false;
       aridChip.classList.remove('is-active');
     }
     populateArticleEditorAridFields(articleAridConfig);
@@ -1492,8 +1508,9 @@
         destacado: article.destacado,
         masVendido: article.masVendido ?? article.mas_vendido,
         accesoRapido: article.accesoRapido ?? article.rapido,
-        ceramico: article.ceramico,
-        arido: false
+        ceramico: article.ceramico && !articleAridConfig.activo && articleAridConfig.tipo !== 'ladrillones',
+        arido: articleAridConfig.activo && articleAridConfig.tipo !== 'ladrillones',
+        ladrillones: articleAridConfig.tipo === 'ladrillones'
       };
       chip.classList.toggle('is-active', articleBool(aliases[key]));
     });
@@ -1504,16 +1521,6 @@
     renderArticleEditorGallery();
     host.classList.add('is-open');
     host.setAttribute('aria-hidden', 'false');
-    Promise.resolve(resolveAridEligibility(article)).then((eligible) => {
-      if (articleEditorOriginalCode !== articleCodeValue || !host.classList.contains('is-open')) return;
-      articleEditorAridEligible = Boolean(eligible);
-      if (!aridChip) return;
-      aridChip.hidden = !articleEditorAridEligible;
-      aridChip.classList.toggle('is-active', articleEditorAridEligible && articleAridConfig.activo);
-      syncArticleEditorSections();
-    }).catch((error) => {
-      console.warn('No se pudo comprobar el proveedor del árido', error);
-    });
     setTimeout(() => editorField('detalle')?.focus(), 0);
     return true;
   }
@@ -1644,6 +1651,7 @@
         ceramicoM2: active('ceramico') ? Number(parseFlexibleNumber(editorField('ceramicoM2').value) || 0) : 0,
         ceramicoPlacas: active('ceramico') ? Math.max(0, Math.round(Number(parseFlexibleNumber(editorField('ceramicoPlacas').value) || 0))) : 0,
         arido: aridActive,
+        ladrillones: active('ladrillones'),
         aridoPrecios: { ...aridConfig.precios },
         preciosArido: { ...aridConfig.precios },
         timestamp: Date.now()
@@ -1659,17 +1667,22 @@
       });
       const save = operation?.save || articleEditorAdapter.save;
       if (!save) throw new Error('El editor no está conectado a esta página');
+      if (!operation?.deferImages) {
+        if(typeof aridosAdapter.saveArticleConfig === 'function')await aridosAdapter.saveArticleConfig(code,aridConfig);
+        else {
+          const [apps,fb]=await Promise.all([import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')]);
+          const app=apps.getApps()[0]||apps.initializeApp({apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',projectId:'corralon-progreso'});
+          await fb.setDoc(fb.doc(fb.getFirestore(app),'configAridosArticulos',encodeURIComponent(code)),{...aridConfig,updatedAt:fb.serverTimestamp()},{merge:true});
+        }
+      }
       await save(nextList, updated, articleEditorOriginalCode, appliedTargets);
       if (articleEditorAridEligible && !operation?.deferImages) {
         const nextConfigs = new Map(aridosConfigMap);
         nextConfigs.set(aridCodeKey(code), aridConfig);
         setAridosConfigMap(nextConfigs);
-        setAridosFreightConfig(freightConfig);
+        if(aridActive)setAridosFreightConfig(freightConfig);
         const backgroundWrites = [];
-        if (typeof aridosAdapter.saveArticleConfig === 'function') {
-          backgroundWrites.push(Promise.resolve().then(() => aridosAdapter.saveArticleConfig(code, aridConfig)));
-        }
-        if (typeof aridosAdapter.saveFreightConfig === 'function') {
+        if (aridActive && typeof aridosAdapter.saveFreightConfig === 'function') {
           backgroundWrites.push(Promise.resolve().then(() => aridosAdapter.saveFreightConfig(freightConfig)));
         }
         if (backgroundWrites.length) {

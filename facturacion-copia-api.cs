@@ -3309,13 +3309,16 @@ internal static partial class FacturacionCopiaApi
                         throw new InvalidOperationException("Página, sucursal o punto de venta inválido.");
                     string search=Limited(request.QueryString["buscar"],80,"Búsqueda");
                     string pattern="%"+search.Replace("[","[[]").Replace("%","[%]").Replace("_","[_]")+"%";
+                    string article=Limited(request.QueryString["articulo"],100,"Artículo");
+                    string articlePattern="%"+article.Replace("[","[[]").Replace("%","[%]").Replace("_","[_]")+"%";
                     var records=Rows(connection,
                         "SELECT f.IDRecibo AS idRecibo,f.NroFactura AS numero,CONVERT(varchar(10),f.Fecha,103) AS fecha,f.IDComprob AS idComprobante,t.Descripcion AS tipo,f.ApeYNom AS cliente,f.IDSuc AS idSucursal,s.Sucursal AS sucursal,f.Total AS total,f.Anulada AS anulada,f.IDDepósito AS puntoVenta " +
                         "FROM dbo.FacturasATP f LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob LEFT JOIN dbo.Sucursales s ON s.IDSuc=f.IDSuc " +
                         "WHERE f.Confirmado<>0 AND f.IDComprob IN (1,2,5,6,7,8,13,29,43) AND f.Fecha>=@p0 AND f.Fecha<@p1 " +
                         "AND (@p2=0 OR f.IDSuc=@p2) AND (@p6=0 OR f.IDDepósito=@p6) AND (@p3='' OR f.ApeYNom LIKE @p4 OR f.NroFactura LIKE @p4) " +
+                        "AND (@p7='' OR EXISTS (SELECT 1 FROM dbo.FacturasATS d LEFT JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=f.IDRecibo AND (d.IDArt=@p7 OR (TRY_CONVERT(int,@p7) IS NOT NULL AND d.IDArt=RIGHT('000000'+@p7,6)) OR d.IDArt LIKE @p8 OR d.ArtDesc COLLATE Latin1_General_CI_AI LIKE @p8 OR a.IDArtProv COLLATE Latin1_General_CI_AI LIKE @p8 OR a.[Descripción] COLLATE Latin1_General_CI_AI LIKE @p8))) " +
                         "ORDER BY f.Fecha DESC,f.IDRecibo DESC OFFSET @p5 ROWS FETCH NEXT 51 ROWS ONLY",
-                        from.Date,to.Date.AddDays(1),branch,search,pattern,page*50,point);
+                        from.Date,to.Date.AddDays(1),branch,search,pattern,page*50,point,article,articlePattern);
                     bool more=records.Count>50;if(more)records.RemoveAt(50);
                     Reply(context,200,new {ok=true,comprobantes=records,pagina=page,hayMas=more});return;
                 }
