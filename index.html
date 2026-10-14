@@ -4440,7 +4440,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.40"></script>
+<script src="corralon-system.js?v=1.0.41"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -5193,7 +5193,7 @@ async function comprobarVersionCatalogoPublico(suppliedMeta = null) {
     if (!nextVersion || nextVersion === publicCatalogVersion) return;
     publicCatalogVersion = nextVersion;
     cacheBusquedaPublica.clear();
-    indexCategoryCache.clear();indexRubrosKnown.clear();indexRubrosLoading=null;
+    indexCategoryCache.clear();indexRubrosKnown.clear();indexRubrosLoading=null;ceramicoBudgetGlueCatalogo=null;
     window.CorralonCacheDB?.set?.('index_halloween_rubros_v1',{labels:[],savedAt:0}).catch(console.warn);
     const rows = await consultarCatalogoPublicoReducido({
       codigos: codigosPrioritariosCatalogoInicio(),
@@ -5568,6 +5568,7 @@ let ceramicoBudgetModo = 'ceramico';
 let ceramicoBudgetCajas = 0;
 let ceramicoBudgetBolsas = 0;
 let ceramicoBudgetGlueArticulo = null;
+let ceramicoBudgetGlueCatalogo=null,ceramicoBudgetGlueLoad=null,ceramicoBudgetGlueSelectorRequest=0;
 let ceramicoBudgetGroutArticulo = null;
 
 function obtenerIdArticulo(articulo) {
@@ -7228,7 +7229,7 @@ function buscarArticuloPorCodigoFlexible(codigo) {
 }
 
 function obtenerArticulosPegamento() {
-  return (todosArticulos || [])
+  return [...new Map([...(ceramicoBudgetGlueCatalogo || []),...(todosArticulos || [])].map(articulo=>[obtenerIdArticulo(articulo),articulo])).values()]
     .filter((articulo) => normalizarTexto(articulo.rubro || '') === 'pegamentos')
     .sort((a, b) => obtenerDescripcionArticulo(a).principal.localeCompare(obtenerDescripcionArticulo(b).principal, 'es', { sensitivity: 'base' }));
 }
@@ -7292,26 +7293,43 @@ function actualizarSeleccionesCeramico() {
   if (groutLabel) groutLabel.textContent = includeGrout ? groutName : 'Pastina ID 000353';
 }
 
-function abrirSelectorPegamentoCeramico() {
-  const modal = document.getElementById('ceramicoGlueSelectModal');
-  const list = document.getElementById('ceramicoGlueSelectList');
-  if (!modal || !list) return;
-  const articulos = obtenerArticulosPegamento();
-  list.innerHTML = articulos.length
-    ? articulos.map((articulo) => {
-      const codigo = obtenerIdArticulo(articulo);
-      const desc = obtenerDescripcionArticulo(articulo);
-      return `<button class="ceramico-select-item" type="button" data-glue-code="${escaparHtml(codigo)}">
-        <strong>${escaparHtml(desc.principal)}</strong>
-        <span>Código: ${escaparHtml(codigo)} · ${fmtPrecio(precioActualParaCarrito(articulo))}</span>
-      </button>`;
-    }).join('')
-    : '<div class="empty-state" style="padding:20px">No encontré artículos en el rubro pegamentos.</div>';
-  modal.classList.remove('hidden');
-  modal.classList.add('visible');
+async function cargarPegamentosPresupuesto(){
+  if(INDEX_MENU_SESSION_ACTIVE)return obtenerArticulosPegamento();
+  if(ceramicoBudgetGlueCatalogo!==null)return obtenerArticulosPegamento();
+  if(!ceramicoBudgetGlueLoad){
+    ceramicoBudgetGlueLoad=(async()=>{
+      const rows=[];let offset=0,page;
+      do{
+        page=await indexFetchCategory('rubro:PEGAMENTOS',offset);
+        rows.push(...page);offset+=page.length;
+      }while(page.hasMore&&page.length);
+      ceramicoBudgetGlueCatalogo=prepararArticulosParaVista(rows);
+    })();
+  }
+  try{await ceramicoBudgetGlueLoad;}finally{ceramicoBudgetGlueLoad=null;}
+  return obtenerArticulosPegamento();
+}
+async function abrirSelectorPegamentoCeramico() {
+  const modal=document.getElementById('ceramicoGlueSelectModal'),list=document.getElementById('ceramicoGlueSelectList');
+  if(!modal||!list)return;
+  const request=++ceramicoBudgetGlueSelectorRequest;
+  modal.classList.remove('hidden');modal.classList.add('visible');
+  list.innerHTML='<div class="ceramico-select-status" role="status">Cargando pegamentos…</div>';
+  try{
+    const articulos=await cargarPegamentosPresupuesto();
+    if(request!==ceramicoBudgetGlueSelectorRequest||!modal.classList.contains('visible'))return;
+    list.innerHTML=articulos.length?articulos.map(articulo=>{
+      const codigo=obtenerIdArticulo(articulo),desc=obtenerDescripcionArticulo(articulo);
+      return '<button class="ceramico-select-item" type="button" data-glue-code="'+escaparHtml(codigo)+'"><strong>'+escaparHtml(desc.principal)+'</strong><span>Código: '+escaparHtml(codigo)+' · '+fmtPrecio(precioActualParaCarrito(articulo))+'</span></button>';
+    }).join(''):'<div class="ceramico-select-status">No encontré artículos en el rubro pegamentos.</div>';
+  }catch(error){
+    if(request!==ceramicoBudgetGlueSelectorRequest||!modal.classList.contains('visible'))return;
+    list.innerHTML='<div class="ceramico-select-status">No se pudieron cargar los pegamentos. <button type="button" data-glue-retry>Reintentar</button></div>';
+  }
 }
 
 function cerrarSelectorPegamentoCeramico() {
+  ++ceramicoBudgetGlueSelectorRequest;
   const modal = document.getElementById('ceramicoGlueSelectModal');
   if (!modal) return;
   modal.classList.add('hidden');
@@ -10913,9 +10931,10 @@ document.getElementById('ceramicoGlueSelectModal').addEventListener('click', (e)
   }
 });
 document.getElementById('ceramicoGlueSelectList').addEventListener('click', (e) => {
+  if(e.target.closest('[data-glue-retry]')){abrirSelectorPegamentoCeramico();return;}
   const btn = e.target.closest('[data-glue-code]');
   if (!btn) return;
-  ceramicoBudgetGlueArticulo = buscarArticuloPorCodigoFlexible(btn.dataset.glueCode || '');
+  ceramicoBudgetGlueArticulo = obtenerArticulosPegamento().find(articulo=>obtenerIdArticulo(articulo)===btn.dataset.glueCode) || null;
   document.getElementById('ceramicoBudgetIncludeGlue').checked = !!ceramicoBudgetGlueArticulo;
   cerrarSelectorPegamentoCeramico();
   calcularPresupuestoCeramico();
