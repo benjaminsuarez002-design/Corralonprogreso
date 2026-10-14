@@ -720,11 +720,30 @@ internal static partial class FacturacionCopiaApi
             "ISNULL((SELECT SUM(r.Total) FROM dbo.RecibosXTP r WHERE r.IDCliente=c.IDCliente AND r.IDEmp=1 AND r.Anulado=0 AND r.Confirmado=1),0) AS cupoDisponible " +
             "FROM dbo.Clientes c WHERE c.IDCliente=@p0", id);
     }
+    private static Dictionary<string, object> CustomerDefaults(SqlConnection connection)
+    {
+        var defaults = Rows(connection,
+            "SELECT l.IDLocal AS idDepartamento,l.CodPostal AS codigoPostal,p.IDProvincia AS idProvincia," +
+            "r.[IDRegión] AS idRegion,ib.IDTipoIB AS idTipoIb " +
+            "FROM dbo.Localidades l CROSS JOIN dbo.Provincias p CROSS JOIN dbo.Regiones r CROSS JOIN dbo.TiposIB ib " +
+            "WHERE l.Localidad=@p0 AND p.Provincia=@p1 AND r.[Descripción]=@p2 AND ib.TipoIB=@p3",
+            "Rawson", "San Juan", "Capital SJ", "Exento");
+        if (defaults.Count != 1 || Text(defaults[0]["codigoPostal"]).Length == 0)
+            throw new InvalidOperationException("No se pudieron determinar en SQL los valores predeterminados del cliente.");
+        return defaults[0];
+    }
     private static object SaveCustomer(SqlConnection connection, Dictionary<string, object> data)
     {
         int id = 0;
         if (Value(data, "id") != null && Text(Value(data, "id")) != "0") id = Id(Value(data, "id"));
         if (id == 1) throw new InvalidOperationException("No se puede modificar Consumidor Final desde Facturación.");
+        if (id == 0)
+        {
+            var defaults = CustomerDefaults(connection);
+            foreach (string field in new[] { "idDepartamento", "idProvincia", "idRegion", "idTipoIb" })
+                if (Text(Value(data, field)).Length == 0 || Text(Value(data, field)) == "0") data[field] = defaults[field];
+            if (Text(Value(data, "codigoPostal")).Length == 0) data["codigoPostal"] = defaults["codigoPostal"];
+        }
         string name = Limited(Upper(Value(data, "nombre")), 100, "Razón social");
         if (name.Length < 2) throw new InvalidOperationException("Ingresá la razón social del cliente.");
         string document = Limited(Upper(Value(data, "documento")), 13, "Documento");
@@ -3137,6 +3156,7 @@ internal static partial class FacturacionCopiaApi
                     if (Text(request.QueryString["opciones"]) == "1")
                     {
                         Reply(context, 200, new { ok = true,
+                            predeterminados = CustomerDefaults(connection),
                             departamentos = Rows(connection, "SELECT IDLocal AS id,Localidad AS nombre FROM dbo.Localidades ORDER BY Localidad"),
                             provincias = Rows(connection, "SELECT IDProvincia AS id,Provincia AS nombre FROM dbo.Provincias ORDER BY Provincia"),
                             regiones = Rows(connection, "SELECT IDRegión AS id,[Descripción] AS nombre FROM dbo.Regiones ORDER BY [Descripción]"),

@@ -3981,6 +3981,7 @@ body.index-sin-stock .home-card-meta{gap:0}
 
 </style>
 <link rel="stylesheet" href="theme-corralon.css">
+<link rel="stylesheet" href="index-mobile.css">
 </head>
 <style>
   #popupBg { position:fixed; top:var(--popup-visual-top); left:var(--popup-visual-left); width:var(--popup-visual-width); height:var(--popup-visual-height); background:rgba(0,0,0,0.65); z-index:99999; display:flex; align-items:center; justify-content:center; padding:var(--popup-top-safe) 10px var(--popup-bottom-safe); overflow-y:auto; }
@@ -4439,7 +4440,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.39"></script>
+<script src="corralon-system.js?v=1.0.40"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4602,6 +4603,7 @@ try{const stored=JSON.parse(localStorage.getItem(indexFavoriteStorageKey)||'[]')
 const indexCategoryCache=new Map(),indexRubrosKnown=new Set();
 const indexAridosKnown=new Set();
 let indexCategoryHasMore=false,indexCategoryNextOffset=0,indexCategoryMoreBusy=false;
+let indexRubrosViewActive=false;
 const indexPublicCategoryFields='codigo,codigo_proveedor,nombre,rubro,id_rubro,precio_venta,stock,stock_progreso,stock_calle5,sync_version,detalle,tags_ocultos,foto_url,imagenes,oferta,oferta_pct,oferta_hasta,destacado,mas_vendido,acceso_rapido,ceramico,ceramico_m2,ceramico_placas,id_proveedor,edicion_updated_at';
 const indexCategoryDefinitions={
   construccion:{label:'Construcción',rubro:'CONSTRUCCION',copy:'Materiales para obras grandes y pequeñas.'},
@@ -4621,15 +4623,15 @@ function indexUpdateFavorites(){
 }
 function indexUpdateMobileNavigation(){
   document.querySelectorAll('[data-mobile-nav]').forEach(button=>{
-    const active=button.dataset.mobileNav==='favoritos'?indexFavoritesActive:button.dataset.mobileNav==='inicio' && !indexCategoryActive && !indexFavoritesActive && !document.getElementById('searchInput').value.trim();
+    const active=button.dataset.mobileNav==='rubros'?indexRubrosViewActive:button.dataset.mobileNav==='favoritos'?indexFavoritesActive:button.dataset.mobileNav==='inicio' && !indexRubrosViewActive && !indexCategoryActive && !indexFavoritesActive && !document.getElementById('searchInput').value.trim();
     if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
   });
 }
 document.querySelector('.index-mobile-nav').addEventListener('click',event=>{
   const button=event.target.closest('[data-mobile-nav]');if(!button)return;
   switch(button.dataset.mobileNav){
-    case 'inicio':indexCategoryActive='';indexFavoritesActive=false;indexCategoryHasMore=false;++indexCategoryRequest;rubroActivo='';chipActivo='';sortActivo='';searchInput.value='';indexUpdateFavorites();actualizarChipsEtiqueta();if(INDEX_MENU_SESSION_ACTIVE)aplicarBusquedaActual();else restaurarPortadaCatalogoPublico();scrollMainToTop();break;
-    case 'rubros':document.getElementById('allRubrosButton').click();break;
+    case 'inicio':indexExitRubrosView();indexCategoryActive='';indexFavoritesActive=false;indexCategoryHasMore=false;++indexCategoryRequest;rubroActivo='';chipActivo='';sortActivo='';searchInput.value='';indexUpdateFavorites();actualizarChipsEtiqueta();if(INDEX_MENU_SESSION_ACTIVE)aplicarBusquedaActual();else restaurarPortadaCatalogoPublico();scrollMainToTop();break;
+    case 'rubros':indexShowRubrosCards();break;
     case 'favoritos':document.getElementById('topNavFavorites').click();break;
     case 'carrito':document.getElementById('cartIconDesktop').click();break;
   }
@@ -4669,6 +4671,7 @@ async function indexFetchCategory(key,offset=0){
   try{return await task;}catch(error){indexCategoryCache.delete(cacheKey);throw error;}
 }
 async function indexSelectCategory(key){
+  indexExitRubrosView();
   const request=++indexCategoryRequest;++solicitudBusquedaPublica;busquedaPublicaEnCurso='';
   indexFavoritesActive=key==='favoritos';indexCategoryActive=indexFavoritesActive?'':key;rubroActivo='';chipActivo='';sortActivo='';searchInput.value='';terminoBaseBusquedaPublica='';
   indexCategoryHasMore=false;indexCategoryNextOffset=0;
@@ -4710,17 +4713,60 @@ async function indexLoadRubros(){
     await window.CorralonCacheDB?.set?.(cacheKey,{labels:[...indexRubrosKnown],savedAt:Date.now()});
   })();try{await indexRubrosLoading;}catch(error){indexRubrosLoading=null;throw error;}
 }
+function indexExitRubrosView(){
+  indexRubrosViewActive=false;
+  document.body.classList.remove('index-rubros-mode');
+}
+function indexPositionRubrosMenu(){
+  const menu=document.getElementById('indexRubrosMenu'),button=document.getElementById('allRubrosButton');
+  if(window.matchMedia('(max-width:700px)').matches){
+    if(menu.parentElement!==document.body)document.body.appendChild(menu);
+    const rect=button.getBoundingClientRect(),width=Math.min(320,window.innerWidth-24),top=rect.bottom+6;
+    const nav=document.querySelector('.index-mobile-nav').getBoundingClientRect();
+    menu.style.setProperty('--index-rubros-menu-top',top+'px');
+    menu.style.setProperty('--index-rubros-menu-left',Math.max(12,Math.min(rect.left,window.innerWidth-width-12))+'px');
+    menu.style.setProperty('--index-rubros-menu-height',Math.max(60,nav.top-top-12)+'px');
+  }else{
+    const wrap=document.querySelector('.halloween-rubros-wrap');
+    if(menu.parentElement!==wrap)wrap.appendChild(menu);
+  }
+}
+window.addEventListener('resize',()=>{if(!document.getElementById('indexRubrosMenu').hidden)indexPositionRubrosMenu();});
+async function indexShowRubrosCards(){
+  const request=++indexCategoryRequest;
+  ++solicitudBusquedaPublica;busquedaPublicaEnCurso='';
+  indexRubrosViewActive=true;indexCategoryActive='';indexFavoritesActive=false;
+  indexCategoryHasMore=false;rubroActivo='';chipActivo='';sortActivo='';searchInput.value='';terminoBaseBusquedaPublica='';
+  document.getElementById('indexRubrosMenu').hidden=true;
+  document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');
+  destroyHomeCarouselInstances();disconnectPublicListObserver();limpiarResultadoActivo();
+  const content=document.getElementById('scrollBody');
+  content.classList.remove('home-mode');content.removeAttribute('aria-busy');
+  document.body.classList.add('index-rubros-mode');indexUpdateFavorites();
+  content.innerHTML='<section class="index-rubros-page"><h2>Rubros</h2><p role="status">Cargando rubros…</p></section>';
+  scrollMainToTop();
+  try{
+    await indexLoadRubros();
+    if(!indexRubrosViewActive||request!==indexCategoryRequest)return;
+    content.innerHTML='<section class="index-rubros-page"><h2>Rubros</h2><div class="index-rubros-grid"><button type="button" data-index-category="todos">Todos los productos</button>'+[...indexRubrosKnown].sort((a,b)=>a.localeCompare(b,'es')).map(rubro=>'<button type="button" data-index-category="rubro:'+escaparHtml(rubro)+'">'+escaparHtml(rubro)+'</button>').join('')+'</div></section>';
+  }catch(error){
+    if(!indexRubrosViewActive||request!==indexCategoryRequest)return;
+    content.innerHTML='<section class="index-rubros-page"><h2>Rubros</h2><p>No se pudieron cargar los rubros.</p><button type="button" data-index-rubros-retry>Reintentar</button></section>';
+  }
+}
 document.getElementById('allRubrosButton').addEventListener('click',async()=>{
   const menu=document.getElementById('indexRubrosMenu'),button=document.getElementById('allRubrosButton');menu.hidden=!menu.hidden;button.setAttribute('aria-expanded',String(!menu.hidden));if(menu.hidden)return;
+  indexPositionRubrosMenu();
   menu.innerHTML='<p>Cargando rubros…</p>';
   try{await indexLoadRubros();menu.innerHTML='<button type="button" data-index-category="todos">Todos los productos</button>'+[...indexRubrosKnown].sort((a,b)=>a.localeCompare(b,'es')).map(rubro=>`<button type="button" data-index-category="rubro:${escaparHtml(rubro)}">${escaparHtml(rubro)}</button>`).join('');}catch(error){menu.innerHTML=`<p>${escaparHtml(error.message)}</p>`;}
 });
 document.addEventListener('click',event=>{
+  if(event.target.closest('[data-index-rubros-retry]')){event.preventDefault();indexShowRubrosCards();return;}
   const favorite=event.target.closest('[data-index-favorite]');
   if(favorite){event.preventDefault();event.stopImmediatePropagation();const code=favorite.dataset.indexFavorite;if(indexFavoriteCodes.has(code))indexFavoriteCodes.delete(code);else indexFavoriteCodes.add(code);try{localStorage.setItem(indexFavoriteStorageKey,JSON.stringify([...indexFavoriteCodes]));}catch(_){}indexCategoryCache.delete('favoritos|0');indexUpdateFavorites();if(indexFavoritesActive)aplicarBusquedaActual();return;}
   const category=event.target.closest('[data-index-category]');if(category){event.preventDefault();event.stopImmediatePropagation();indexSelectCategory(category.dataset.indexCategory);return;}
   const more=event.target.closest('[data-index-more]');if(more){event.preventDefault();event.stopImmediatePropagation();indexLoadMoreCategory(more);return;}
-  if(!event.target.closest('.halloween-rubros-wrap,[data-mobile-nav="rubros"]')){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}
+  if(!event.target.closest('.halloween-rubros-wrap,.halloween-rubros-menu,[data-mobile-nav="rubros"]')){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}
 },true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}});
 document.getElementById('topNavFavorites').addEventListener('click',()=>indexSelectCategory('favoritos'));
@@ -5180,6 +5226,7 @@ function primeraPalabraBusquedaPublica(value) {
 }
 
 function restaurarPortadaCatalogoPublico() {
+  indexExitRubrosView();
   ++solicitudBusquedaPublica;
   terminoBaseBusquedaPublica = '';
   busquedaPublicaEnCurso = '';
@@ -8042,8 +8089,8 @@ function posicionarMenuOrden() {
   const sortButton = document.getElementById('sortButton');
   if (!sortMenu || !sortButton) return;
   const margen = 8;
-  const canvasScale=window.matchMedia('(max-width:700px)').matches ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--index-mobile-scale')) || 1) : 1;
   const rect = sortButton.getBoundingClientRect();
+  const canvasScale=window.matchMedia('(max-width:700px)').matches ? (rect.width / sortButton.offsetWidth || 1) : 1;
   const menuWidth = Math.min((sortMenu.offsetWidth || 190)*canvasScale, Math.max(180*canvasScale, window.innerWidth - (margen * 2)));
   const menuHeight = (sortMenu.offsetHeight || 0)*canvasScale;
   let left = rect.right - menuWidth;
@@ -8317,6 +8364,7 @@ searchInput.addEventListener('keydown', async (e) => {
   }
 });
 searchInput.addEventListener('input', e => {
+  indexExitRubrosView();
   if(indexCategoryActive || indexFavoritesActive){indexCategoryActive='';indexFavoritesActive=false;indexCategoryHasMore=false;++indexCategoryRequest;indexUpdateFavorites();document.querySelectorAll('[data-index-category]').forEach(button=>button.classList.remove('active'));}
   clearTimeout(debounce);
   debounce = setTimeout(() => {
