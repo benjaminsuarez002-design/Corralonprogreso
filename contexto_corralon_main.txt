@@ -1,11 +1,16 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia: 10/10/2026
+Fecha de referencia y ultimo corte de contexto: 14 de octubre de 2026.
 El cuerpo historico corresponde al 25/08/2026; las secciones 21 a 23 registran
 actualizaciones posteriores. Las secciones 24 a 27 registran cambios hasta el
 08/10/2026. La seccion 30 registra un plan futuro acordado el 10/10/2026,
-todavia no implementado. La seccion mas reciente prevalece sobre las anteriores.
+todavia no implementado. Las secciones 31 a 35 registran el trabajo del otro
+chat del 14/10/2026, desde el diagnostico de remitos hasta la revision de
+trafico. La seccion 36 integra los cambios de este chat al mismo corte.
+La seccion mas reciente prevalece sobre las anteriores.
+Al proximo pedido de actualizar este archivo, revisar los cambios posteriores
+a este corte, incluso si ocurrieron mas tarde el 14 de octubre de 2026.
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -2215,3 +2220,219 @@ Los datos historicos de la nube se preservaron y se migraron los datos manuales.
 El indicador caja-sql-local.enabled desactiva la publicacion antigua desde Access;
 los saldos de proveedores siguen siendo independientes.
 Detalle de instalacion y validacion: docs/caja-sql.md.
+
+31. REMITOS Y CLIENTES CREADOS DESDE FACTURACION (14/10/2026)
+----------------------------------------------------------
+- Casos informados: /impcomp?id=498979 mostraba No se encontro el comprobante;
+  /impcomp?id=498967 tenia una vista previa de Access sin datos del cliente ni
+  detalle. El usuario encontro que el cliente creado desde Facturacion carecia
+  de departamento, provincia, region y condicion de Ingresos Brutos.
+  Registrar esto como diagnostico del usuario; no afirmar que se comprobo una
+  impresion fisica posterior ni que se repararon ambos comprobantes historicos.
+- Se agregaron valores predeterminados para NUEVOS clientes en Facturacion,
+  consultando las tablas reales de SQL, sin tomar los ID dictados como fuente.
+  Datos verificados en ese momento: Rawson, IDLocal 18, codigo postal 5425;
+  San Juan, IDProvincia 10; Capital SJ, IDRegion 1; Exento, IDTipoIB 1.
+  Exento corresponde a Ingresos Brutos: NO cambiar por eso la condicion IVA.
+- facturacion-copia-api.cs: CustomerDefaults consulta dbo.Localidades,
+  dbo.Provincias, dbo.Regiones y dbo.TiposIB por sus nombres de SQL. Exige una
+  unica combinacion y codigo postal. La respuesta de opciones de clientes
+  incluye predeterminados; facturacion.html los aplica al abrir un alta.
+  SaveCustomer tambien completa campos omitidos al crear un cliente, de modo
+  que el servidor no dependa exclusivamente de lo enviado por el navegador.
+  Los valores elegidos por el operador se conservan. La edicion de un cliente
+  existente no aplica estos defaults automaticamente ni hace una reparacion
+  masiva de clientes anteriores. La implementacion del servidor quedo activada.
+- Cliente de prueba 13336, BENJA: NO se elimino. La consulta de SQL encontro
+  factura B IDRecibo 499005 y nota de credito B IDRecibo 499011 vinculadas;
+  saldo cero no significa ausencia de movimientos ni habilita borrar relaciones.
+  No borrar comprobantes ni vaciar referencias para poder eliminarlo.
+
+32. INDEX: CSS MOVIL, ESCALAS Y NAVEGACION (14/10/2026)
+----------------------------------------------------
+- Se separaron los estilos de telefono en index-mobile.css, cargado despues
+  del tema compartido. theme-corralon.css conserva los estilos comunes;
+  index.html conserva los manejadores y el ajuste del viewport. No asumir que
+  toda la logica movil se movio a un JS independiente.
+- Acceso observado: http://100.125.178.53:8080/index.html por Tailscale;
+  LAN http://192.168.100.28:8080/index.html. Son datos de la instalacion de hoy,
+  verificar la direccion vigente antes de reutilizarlos como configuracion.
+- El diseno movil usa una base de 390 px con escala proporcional al ancho.
+  Se corrigio la acumulacion de zoom del tema que desbordaba la vista inicial.
+  Root/body movil mantienen zoom 1; el wrapper ajusta ancho/alto disponible y
+  descuenta la navegacion inferior. scroll-body no agrega otra reserva abajo.
+- Ajustes pedidos y vigentes: encabezado x0.5 manteniendo ancho; filtros/orden
+  inicialmente x0.5, luego +20%, por lo que quedan x0.6; tarjetas en vista
+  detalle x0.75; botones de navegacion al pie x0.75. Encabezado alineado al
+  ancho del selector de filtros y con esquinas redondeadas. Conservar estos
+  factores y comprobar el resultado visible si se modifica el escalado general.
+- Rubros superior despliega su lista junto al boton. En movil, el menu se mueve
+  a body para evitar recortes por contenedores y se posiciona bajo el boton,
+  limitado por el borde superior de la navegacion inferior.
+  Rubros inferior muestra tarjetas de texto de los rubros, SIN imagenes.
+  Son dos presentaciones distintas; no conectar ambos a la misma lista antigua.
+- Se protegieron las transiciones entre rubros, categoria y busqueda para que
+  una respuesta asincrona anterior no reconstruya otra pantalla ni deje el
+  estado Cargando permanentemente. Los carruseles y temporizadores visuales
+  no implican por si mismos consultas de catalogo a Supabase.
+- Hubo pruebas de navegador con viewport movil, incluyendo anchos 320/390/430.
+  Se verificaron alineacion con el pie y ausencia de desborde horizontal en los
+  casos probados. Capturas en .codex-staging/index-*.png. No confundir esas
+  pruebas con una garantia para todos los telefonos, resoluciones y niveles de
+  zoom de Brave; el navegador y el teclado pueden cambiar el viewport visible.
+
+33. INDEX: FOTO, DETALLE, PRESUPUESTO Y PEGAMENTOS (14/10/2026)
+------------------------------------------------------------
+- Se corrigio el visor de imagen para entrar en el viewport y permitir cerrarlo.
+  El popup de detalle sigue una base de 390 px y utiliza visualViewport para
+  ajustar posicion, escala y altura visible. index-mobile-popup se activa tambien
+  en telefonos con puntero grueso cuando el zoom cambia el ancho CSS aparente.
+  La tarjeta puede desplazarse internamente si no entra completa.
+- Se tomo la captura del usuario como referencia: foto arriba, datos/precio
+  debajo y acciones de compra al pie. La foto usa proporcion aproximada 1.72.
+  Se quito el rectangulo de fondo de la barra flotante de acciones; sus botones
+  conservan sus propios fondos. No reintroducir el bloque claro detras de ellos.
+- Junto al favorito del detalle se agregaron iconos de ubicacion y contacto:
+  productDetailLocation y productDetailContact reutilizan las acciones existentes
+  Como llegar y Contacto. No agregan un servicio nuevo ni realizan un envio.
+- Presupuestar -> Anadir pegamento: precios con fuente blanca para que se lean.
+  La lista consulta la categoria PEGAMENTOS, con cache y un arreglo independiente
+  del catalogo visible de ceramicos. No buscar pegamentos solamente en los
+  articulos de la categoria que el usuario tiene abierta. En la validacion se
+  encontraron diez pegamentos; elegir uno recalcula el presupuesto.
+- Index logueado usa la copia completa compartida y busquedas locales.
+  Index publico conserva consultas reducidas de portada, busqueda y categorias;
+  navegar una categoria no debe descargar silenciosamente el catalogo completo.
+
+34. FACTURACION: PROVEEDOR DE ARIDOS ENTRE EQUIPOS (14/10/2026)
+------------------------------------------------------------
+- Reclamo: al confirmar venta de aridos, buscar galde daba Sin coincidencias
+  en otra PC, mientras esta encontraba ARIDOS GALDEANO, codigo proveedor 6072.
+  Se identifico el uso de una lista local vieja en el selector.
+- facturacion.html sincroniza/verifica la version de proveedores antes de abrir
+  el popup de proveedor del arido, aunque la lista local ya tenga registros.
+  No alcanza con sincronizar solamente cuando el arreglo esta vacio.
+  Si falla la sincronizacion, no presentar la lista vieja como actualizada.
+- tests/facturacion-aridos-providers.test.cjs: dos pruebas pasaron, incluyendo
+  el fallo de sincronizacion. No se emitio una venta real para probarlo ni se
+  confirmo el flujo completo de todas las otras PC o una impresion fisica.
+
+35. SUPABASE: LOGS Y CACHE POR VERSION FIREBASE (14/10/2026)
+---------------------------------------------------------
+- Archivo revisado: C:/Users/Administrador/Desktop/supabase_logshoy.json.
+  Exportacion de 1.000 registros, del 14/10/2026 entre 09:50 y 16:48 Argentina;
+  puede ser un recorte del dia. 954 registros HTTP/edge y 46 de Postgres.
+  Los HTTP incluyen 563 peticiones no OPTIONS y 391 comprobaciones CORS.
+  No son 563 busquedas ni necesariamente 563 acciones de una persona.
+- Conteos no OPTIONS: catalogo_articulos_meta GET 153; catalogo publico GET 135
+  (90 lecturas de nombres de rubros y 45 consultas de grupos de articulos),
+  ademas de 5 HEAD; RPC buscar_catalogo_publico_reducido POST 70; cambios GET 53;
+  listas_json_proveedores GET 50, de manifiesto/metadata, no del JSON completo.
+  Tambien hay otras operaciones y escrituras de importadores. Las respuestas
+  HTTP fueron exitosas; cinco 101 son conexiones WebSocket. Aparece un cierre
+  de conexion Postgres por el cliente, sin evidencia de un bucle de errores.
+- El archivo no contiene tamanos de respuesta ni identificacion suficiente por
+  pagina/usuario para calcular egress o atribuir un porcentaje exacto al usuario.
+  Puede incluir sus pruebas moviles, pero no afirmar ni negar un 80% como dato
+  medido. OPTIONS es CORS; no equivale a otra descarga completa de articulos.
+- Causa concreta corregida: Index usaba CorralonCacheDB de forma opcional pero
+  no cargaba corralon-cache-db.js. El guardado de rubros no persistia entre visitas.
+  Ahora ese script se carga antes de corralon-system.js. Rubros se guarda en
+  IndexedDB y se reutiliza mientras coincidan version y patch_version; no depende
+  de la retencion de 24 horas descrita antes. La primera carga sin copia aun
+  pagina nombres en varias consultas pequenas; NO se instalo un RPC SQL DISTINCT.
+- indexCachedPublicRequest guarda portada, busquedas y paginas de categorias
+  en IndexedDB, asociadas a version/patch_version verificadas via Firebase.
+  Conserva como maximo cuarenta respuestas persistidas. Misma busqueda/version
+  reutiliza datos, incluso al reabrir. Una busqueda diferente puede consultar;
+  una categoria tiene paginas de hasta 250 articulos y el RPC limite de hasta
+  600: no afirmar que una sola llamada trae todo un rubro de cualquier tamano.
+- corralon-cache-db.js withLock coordina respuestas y rubros entre pestanas con
+  Web Locks o un lease IndexedDB para HTTP por IP. El bloqueo tiene vencimiento,
+  se renueva durante la operacion y se libera tambien al fallar. No hay polling
+  remoto de catalogo asociado al bloqueo.
+- Firebase configuracion/catalogo_version sigue siendo el aviso de version.
+  Los metadatos SQL se guardan en localStorage bajo
+  corralon_catalog_firebase_meta_v1, asociados al servidor y al contador Firebase.
+  Solo se reutilizan despues de un snapshot confirmado por servidor; un snapshot
+  fromCache no basta. Supabase entrega metadata en el primer acceso sin copia o
+  al cambiar el contador, con solo los campos necesarios, sin consultar en cada
+  entrada ni agregar una consulta HTTP por pestana cuando falla Firebase.
+- catalogo-realtime-worker.js comparte la escucha y metadata entre pestanas.
+  Nombre de protocolo actual: corralon-catalogo-firebase-v2. Si SharedWorker no
+  esta disponible, corralon-system.js usa Firebase modular y coordina la consulta
+  metadata con el lease del catalogo; la seccion 26 que exigia SharedWorker y
+  prohibia toda conexion alternativa queda reemplazada en este punto.
+  No se regreso a postgres_changes ni a comprobaciones remotas por minuto.
+- Se ignoran metadata duplicadas o versiones anteriores. pedidos-ranking.js
+  reutiliza catalogRealtime.getMeta, en vez de consultar metadata por separado.
+  El catalogo descarga parches solo si patch_version supera la copia guardada;
+  las descargas completas/incrementales ya se comparten entre pestanas.
+  Index conserva un aviso nuevo recibido mientras actualiza su portada y luego
+  lo procesa, en lugar de perderlo por estar ocupado.
+- Validacion: 32 pruebas relevantes pasaron, mas analisis de sintaxis. Incluyen
+  cinco pestanas compartiendo metadata/respuestas, ocho compartiendo cambios,
+  reapertura con version igual, cambio de version/parche, snapshots locales,
+  errores, leases vencidos, limite de cuarenta respuestas, ranking y proveedores.
+  Simulacion de diez entradas y veinte busquedas IGUALES: dos consultas de
+  articulos (una portada, una busqueda); no es una medicion de veinte terminos
+  distintos ni de todas las peticiones del navegador.
+  El servidor Tailscale devolvio los archivos nuevos con HTTP 200. No se midio
+  un periodo nuevo de logs reales para cuantificar la reduccion final de egress.
+- El usuario aviso que se habia equivocado de chat y pidio parar. Se detuvo el
+  trabajo adicional; lo ya aplicado se conserva. Este contexto documenta ese
+  estado y no autoriza retomar cambios pendientes o publicar al actualizarlo.
+
+
+36. CONTINUIDAD DE ESTE CHAT Y CORTE DE CONTEXTO (14 DE OCTUBRE DE 2026)
+=======================================================================
+
+Esta seccion incorpora lo hecho en este chat y convive con las secciones 31 a
+35, agregadas desde el otro chat. El codigo actual sigue siendo la fuente
+definitiva si algun detalle posterior difiere.
+
+Index: diseno de Halloween y publicacion
+---------------------------------------
+- La portada de Halloween conserva logo Corralon Progreso, usa categorias de
+  construccion, pinturas, herramientas y ceramico, y tiene favoritos locales,
+  carrito y navegacion movil Inicio/Rubros/Favoritos/Carrito. Los estilos comunes
+  estan en theme-corralon.css; la seccion 32 describe la separacion posterior de
+  estilos de telefono a index-mobile.css, que index.html carga despues del tema.
+- Las imagenes de portada, fondo y ceramico estan en assets/halloween/. El fondo
+  mantiene el difuminado pedido. El publicador subir_archivos_github.ps1 agrega
+  automaticamente theme-corralon.css y esas tres imagenes al elegir index.html
+  o theme-corralon.css. En el codigo inspeccionado para este corte NO agrega
+  index-mobile.css automaticamente: seleccionarlo al publicar cambios moviles.
+- El espacio vacio bajo el listado movil se corrigio haciendo que el wrapper
+  termine donde comienza la barra inferior, cuya altura se mide en index.html,
+  y retirando el padding inferior adicional de scroll-body. La version actual
+  de esa regla esta en index-mobile.css. Hubo comprobaciones locales a 320, 390
+  y 430 px; eso no certifica todos los telefonos o estados del navegador.
+
+Cargar Stock: presupuesto importado y busqueda de movimientos
+-------------------------------------------------------------
+- stockClearDocumentLinks conserva el Nro remito traido de un unico presupuesto
+  web al cambiar sucursal o tipo de movimiento y al elegir automaticamente
+  CORRALON PROGRESO para una transferencia. Un cambio manual de proveedor sigue
+  limpiando factura y remito para no imputar documentos de otro proveedor.
+- stockBudgetContentSignature distingue cambios reales de contenido de un
+  presupuesto de cambios de estado resuelto/no resuelto. El cambio de estado
+  no invalida ni vuelve a descargar ese presupuesto; la apertura del importador
+  conserva su consulta incremental de presupuestos nuevos.
+- Consultar > Movimientos confirmados tiene el campo Articulo. cargastock.html
+  envia el texto junto con fechas, proveedor, tipo y numero a StockConsulta de
+  facturacion-copia-api.cs. SQL filtra los movimientos confirmados que contienen
+  al menos una fila de RecibosTS cuyo articulo coincida por IDArt, codigo de
+  proveedor o descripcion. La paginacion y el total usan el mismo criterio.
+- La busqueda admite IDArt completo o abreviado, fragmentos de codigo, palabras
+  de la descripcion en cualquier orden, separadores como guiones y texto sin
+  tildes. Se limita a 100 caracteres y 12 palabras. Con articulo, el rango de
+  fechas y el proveedor elegidos siguen aplicandose; la busqueda solo por Nro
+  factura/remito conserva su comportamiento previo de buscar sin rango de fecha.
+- La API C# compilo y se aplico al servidor SQL local. Las consultas de solo
+  lectura comprobaron IDArt, codigo de proveedor, palabras invertidas,
+  fragmentos, texto sin tilde y exclusiones por fecha/proveedor. No se publico
+  automaticamente el HTML ni se verifico en todas las otras PC.
+
+PUNTO DE CORTE: 14 de octubre de 2026. En la proxima actualizacion del contexto,
+incorporar los cambios posteriores a este corte, incluidos los del mismo dia.

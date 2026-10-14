@@ -11,7 +11,7 @@ function broadcast(message) { for (const port of ports) send(port, message); }
 async function readMeta() {
   if (metaLoading) return metaLoading;
   metaLoading = (async () => {
-    const response = await fetch(config.url + '/rest/v1/catalogo_articulos_meta?id=eq.principal&select=*&limit=1', {
+    const response = await fetch(config.url + '/rest/v1/catalogo_articulos_meta?id=eq.principal&select=id,version,patch_version,total_articulos,last_full_version,change_mode,updated_at,ranking_version,ranking_desde,ranking_hasta,ranking_actualizado_at&limit=1', {
       headers: { apikey: config.key, Authorization: 'Bearer ' + config.key,
         'x-client-info': `${config.traceIdentity || 'corralon-catalog/1;page=unknown'};worker=${traceWorker};caller=firebase-version;request=${++traceSequence}` }, cache: 'no-store'
     });
@@ -19,7 +19,7 @@ async function readMeta() {
     const rows = await response.json();
     const fetched = rows[0] || null;
     if (!meta || (Number(fetched?.version || 0) >= Number(meta.version || 0) && Number(fetched?.patch_version || 0) >= Number(meta.patch_version || 0) && Number(fetched?.ranking_version || 0) >= Number(meta.ranking_version || 0))) meta = fetched;
-    broadcast({ type: 'meta', meta });
+    // The Firebase signal is attached only after this read completes.
     return meta;
   })().finally(() => { metaLoading = null; });
   return metaLoading;
@@ -30,8 +30,11 @@ function receiveVersion(version) {
   refreshTask = (async () => {
     while (signalVersion < pendingVersion) {
       const target = pendingVersion;
-      await readMeta();
+      const saved = config.savedMeta;
+      if (saved?.url === config.url && saved.signalVersion === target && saved.meta && !meta) meta = saved.meta;
+      else await readMeta();
       signalVersion = target;
+      broadcast({ type: 'meta', meta, signalVersion });
     }
   })().catch(error => broadcast({ type: 'error', message: error.message }))
     .finally(() => { refreshTask = null; resolveReady?.(); });
@@ -53,9 +56,9 @@ onconnect = event => {
   port.onmessage = async event => {
     const message = event.data || {};
     if (message.type === 'init') {
-      if (!config) config = { url: message.url, key: message.key, traceIdentity: message.traceIdentity };
+      if (!config) config = { url: message.url, key: message.key, traceIdentity: message.traceIdentity, savedMeta: message.savedMeta };
       start();
-      if (meta) send(port, { type: 'meta', meta });
+      if (meta && signalVersion >= 0) send(port, { type: 'meta', meta, signalVersion });
     }
     if (message.type === 'cache-ready') { for (const other of ports) if (other !== port) send(other, { type: 'cache-ready' }); }
     if (message.type === 'get-meta') {

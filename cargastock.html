@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.47"></script>
+<script src="corralon-system.js?v=1.0.48"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -5278,7 +5278,7 @@ function stockRenderConsult(preserveFilters=false) {
     form.prepend(stockField('stockConsultProvider').closest('label'));
     const movementTypes=stockSqlMeta?.tiposMovimiento||[];
     form.querySelector('button[type="submit"]').insertAdjacentHTML('beforebegin',
-      `<label>Tipo de comprobante<select id="stockConsultType"><option value="">Todos</option>${movementTypes.map(item=>`<option value="${Number(item.id)}" ${String(filters.tipos||'')===String(item.id)?'selected':''}>${escapeHtml(item.codigo||'')} · ${escapeHtml(item.nombre)}</option>`).join('')}</select></label><label>Nº factura o remito<input id="stockConsultNumber" type="text" list="stockConsultNumbers" autocomplete="off" placeholder="Número completo o parcial" value="${escapeHtml(filters.buscar||'')}"><datalist id="stockConsultNumbers"></datalist></label>`);
+      `<label>Tipo de comprobante<select id="stockConsultType"><option value="">Todos</option>${movementTypes.map(item=>`<option value="${Number(item.id)}" ${String(filters.tipos||'')===String(item.id)?'selected':''}>${escapeHtml(item.codigo||'')} · ${escapeHtml(item.nombre)}</option>`).join('')}</select></label><label>Nº factura o remito<input id="stockConsultNumber" type="text" list="stockConsultNumbers" autocomplete="off" placeholder="Número completo o parcial" value="${escapeHtml(filters.buscar||'')}"><datalist id="stockConsultNumbers"></datalist></label><label>Artículo<input id="stockConsultArticle" type="text" maxlength="100" autocomplete="off" placeholder="IDArt, cód. proveedor o descripción" value="${escapeHtml(filters.articulo||'')}"></label>`);
     let numberTimer=null,numberRequest=0;
     const refreshNumbers=()=>{
       clearTimeout(numberTimer);const request=++numberRequest;
@@ -5313,29 +5313,31 @@ function stockRenderConsult(preserveFilters=false) {
       queueMicrotask(()=>{const number=stockField('stockConsultNumber');number.focus();number.select();});
     });
     form.addEventListener('focusout',event=>{
-      if(event.target.matches('#stockConsultFrom,#stockConsultTo,#stockConsultProvider,#stockConsultNumber'))stockScheduleConsult();
+      if(event.target.matches('#stockConsultFrom,#stockConsultTo,#stockConsultProvider,#stockConsultNumber,#stockConsultArticle'))stockScheduleConsult();
     });
     form.addEventListener('change',event=>{
-      if(event.target.matches('#stockConsultType,#stockConsultNumber'))stockScheduleConsult();
+      if(event.target.matches('#stockConsultType,#stockConsultNumber,#stockConsultArticle'))stockScheduleConsult();
     });
     FX.bindLinearNavigation({root:form,selector:'input,select,button[type="submit"]',selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
 }
 function stockApplyConsultFilters(automatic=false){
   clearTimeout(stockConsultFilterTimer);
   const buscar=stockField('stockConsultNumber').value.trim();
-  if(automatic && ((!buscar && ['stockConsultFrom','stockConsultTo'].some(id=>!FX.parseFechaFlexible(stockField(id).value))) || stockConsultProviderCombo?.getValue()==null))return;
-  const dates=buscar ? [stockConsultFilters?.desde||stockToday(),stockConsultFilters?.hasta||stockToday()] : ['stockConsultFrom','stockConsultTo'].map(id=>{
+  const articulo=stockField('stockConsultArticle').value.trim();
+  const ignoreDates=Boolean(buscar)&&!articulo;
+  if(automatic && ((!ignoreDates && ['stockConsultFrom','stockConsultTo'].some(id=>!FX.parseFechaFlexible(stockField(id).value))) || stockConsultProviderCombo?.getValue()==null))return;
+  const dates=ignoreDates ? [stockConsultFilters?.desde||stockToday(),stockConsultFilters?.hasta||stockToday()] : ['stockConsultFrom','stockConsultTo'].map(id=>{
     const field=stockField(id),parsed=FX.parseFechaFlexible(field.value);
     if(!parsed){field.setCustomValidity('Ingresá una fecha válida.');field.reportValidity();return null;}
     field.setCustomValidity('');field.value=parsed.text;
     const d=parsed.date;return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   });
   if(dates.some(date=>!date))return;
-  if(!buscar && dates[0]>dates[1]){const field=stockField('stockConsultTo');field.setCustomValidity('Hasta debe ser igual o posterior a Desde.');field.reportValidity();return;}
+  if(!ignoreDates && dates[0]>dates[1]){const field=stockField('stockConsultTo');field.setCustomValidity('Hasta debe ser igual o posterior a Desde.');field.reportValidity();return;}
   const provider=stockConsultProviderCombo?.getValue();
   if(provider==null){const field=stockField('stockConsultProvider');field.setCustomValidity('Seleccioná un proveedor de la lista.');field.reportValidity();return;}
   const tipos=stockField('stockConsultType').value;
-  const nextFilters={desde:dates[0],hasta:dates[1],proveedor:provider,tipos,buscar};
+  const nextFilters={desde:dates[0],hasta:dates[1],proveedor:provider,tipos,buscar,articulo};
   if(automatic && JSON.stringify(nextFilters)===JSON.stringify(stockConsultFilters))return;
   stockConsultFilters=nextFilters;
   return stockStartConsult();

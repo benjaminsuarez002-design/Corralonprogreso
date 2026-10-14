@@ -4235,10 +4235,7 @@
         metaRow = suppliedMeta || (sharedLookup ? await CATALOG_REALTIME.getMeta() : await fetchMetaRow());
       } catch (error) {
         console.warn('No se pudo consultar la version del catalogo', error);
-        if(sharedLookup && !suppliedMeta){
-          try { metaRow = await fetchMetaRow(); }
-          catch(fallbackError){console.warn('No se pudo verificar la versión por HTTP; se conserva la caché',fallbackError);}
-        }
+        // Conservar la caché si falla Firebase; no duplicar consultas por pestaña.
       }
       const version = Number(metaRow?.version || 0);
       const patchVersion = Number(metaRow?.patch_version || 0);
@@ -4777,6 +4774,10 @@
     }
 
     return {
+      withDownloadLock: async work => {
+        try { await openCatalogDb(); } catch (_) { return work(); }
+        return withCatalogDownloadLease(work);
+      },
       load,
       loadProgressive,
       refresh,
@@ -4803,11 +4804,26 @@
     let fallbackReady = null, fallbackSignalVersion = -1, fallbackPendingVersion = -1, fallbackRefresh = null;
     let refreshQueue = Promise.resolve(), requestId = 0;
     const requests = new Map();
+    const META_CACHE_KEY = 'corralon_catalog_firebase_meta_v1';
+    function readMetaCache() {
+      try { const value = JSON.parse(localStorage.getItem(META_CACHE_KEY)); return value?.url === SUPABASE_URL && value.meta && Number.isFinite(value.signalVersion) ? value : null; } catch (_) { return null; }
+    }
+    function saveMetaCache(meta, signalVersion) {
+      if (!meta || !Number.isFinite(signalVersion)) return;
+      try { localStorage.setItem(META_CACHE_KEY, JSON.stringify({url: SUPABASE_URL, signalVersion, meta})); } catch (_) {}
+    }
     function acceptMeta(meta) {
       if (!meta) return;
+      if (latestMeta && ['version','patch_version','ranking_version'].some(key => Number(meta[key] || 0) < Number(latestMeta[key] || 0))) return;
+      if (latestMeta && ['version','patch_version','ranking_version','updated_at','ranking_actualizado_at'].every(key => meta[key] === latestMeta[key])) return;
       latestMeta = meta;
       window.dispatchEvent(new CustomEvent('corralon:catalog-meta-changed', { detail: { rankingVersion: Number(meta.ranking_version || 0), meta } }));
       refreshQueue = refreshQueue.catch(console.warn).then(() => refreshAdapter ? refreshAdapter(latestMeta) : CATALOG.refresh({ fallback: false, metaRow: latestMeta, onlyCached: true }));
+    }
+    async function withMetaLock(work) {
+      if(navigator.locks?.request)return navigator.locks.request('corralon-catalog-meta-v1',work);
+      // Reuse the catalog's IndexedDB coordination on insecure HTTP origins.
+      return CATALOG.withDownloadLock(work);
     }
     function startFallback() {
       if (fallbackReady) return;
@@ -4821,9 +4837,18 @@
             fallbackRefresh = (async () => {
               while (fallbackSignalVersion < fallbackPendingVersion) {
                 const target = fallbackPendingVersion;
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?id=eq.principal&select=*&limit=1`,{headers:headers(),cache:'no-store'});
-                if (!response.ok) throw new Error('No se pudo consultar la versión del catálogo');
-                acceptMeta((await response.json())[0]);fallbackSignalVersion = target;
+                await withMetaLock(async () => {
+                const saved = readMetaCache();
+                let value = saved?.signalVersion === target ? saved.meta : null;
+                if (!value) {
+                  const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.catalogMeta}?id=eq.principal&select=id,version,patch_version,total_articulos,last_full_version,change_mode,updated_at,ranking_version,ranking_desde,ranking_hasta,ranking_actualizado_at&limit=1`,{headers:headers(),cache:'no-store'});
+                  if (!response.ok) throw new Error('No se pudo consultar la versión del catálogo');
+                  value = (await response.json())[0];
+                  if (!value) throw new Error('No se recibió la versión del catálogo');
+                }
+                saveMetaCache(value, target);
+                acceptMeta(value);fallbackSignalVersion = target;
+                });
               }
               resolve(latestMeta);
             })().catch(error=>{console.warn(error);reject(error)}).finally(()=>{fallbackRefresh=null});
@@ -4838,7 +4863,7 @@
         startFallback();
         return;
       }
-      try { worker = new SharedWorker(new URL('catalogo-realtime-worker.js', document.baseURI), { name: 'corralon-catalogo-firebase-v1' }); }
+      try { worker = new SharedWorker(new URL('catalogo-realtime-worker.js', document.baseURI), { name: 'corralon-catalogo-firebase-v2' }); }
       catch (_) { startFallback(); return; }
       port = worker.port;
       port.onmessage = event => {
@@ -4849,12 +4874,13 @@
           if (request) { requests.delete(message.requestId); clearTimeout(request.timer); message.error ? request.reject(new Error(message.error)) : request.resolve(message.meta); }
         }
         if (message.type === 'meta' && message.meta) {
+          saveMetaCache(message.meta, message.signalVersion);
           acceptMeta(message.meta);
         }
         if (message.type === 'error') console.warn(message.message);
       };
       port.start();
-      port.postMessage({ type: 'init', url: SUPABASE_URL, key: SUPABASE_KEY, traceIdentity: globalThis.CorralonCatalogTrace?.identity });
+      port.postMessage({ type: 'init', url: SUPABASE_URL, key: SUPABASE_KEY, traceIdentity: globalThis.CorralonCatalogTrace?.identity, savedMeta: readMetaCache() });
       worker.onerror = error => { console.warn('Conexión compartida del catálogo', error.message);port?.close();port=null;startFallback(); };
     }
     function getMeta() {

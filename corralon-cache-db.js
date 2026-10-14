@@ -86,5 +86,23 @@
       transaction.onabort=()=>reject(transaction.error||new Error('Actualización de cargas abortada'));
     });
   }
-  window.CorralonCacheDB={get,set,remove,migrateLocalStorage,updateMany};
+  async function withLock(key, work){
+    if(navigator.locks?.request)return navigator.locks.request('corralon-cache|'+key,work);
+    let db;try{db=await openDb();}catch(_){return work();}
+    const lockKey='__lease|'+key;
+    const owner=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`;
+    function change(action){return new Promise((resolve,reject)=>{
+      const tx=db.transaction(STORE_NAME,'readwrite'),store=tx.objectStore(STORE_NAME),request=store.get(lockKey);
+      let acquired=false;
+      request.onsuccess=()=>{const lease=request.result,now=Date.now();
+        if(action==='release'){if(lease?.owner===owner)store.delete(lockKey);}
+        else if(lease?.owner===owner || (action==='acquire' && (!lease || lease.expiresAt<=now))){store.put({key:lockKey,owner,expiresAt:now+120000});acquired=true;}
+      };
+      tx.oncomplete=()=>resolve(acquired);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('No se pudo coordinar la caché'));
+    });}
+    while(!await change('acquire'))await new Promise(resolve=>setTimeout(resolve,100));
+    const heartbeat=setInterval(()=>change('renew').catch(console.warn),20000);
+    try{return await work();}finally{clearInterval(heartbeat);await change('release');}
+  }
+  window.CorralonCacheDB={get,set,remove,migrateLocalStorage,updateMany,withLock};
 })();

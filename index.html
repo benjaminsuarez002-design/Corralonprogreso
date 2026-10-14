@@ -4442,7 +4442,8 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 })();
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
-<script src="corralon-system.js?v=1.0.42"></script>
+<script src="corralon-cache-db.js"></script>
+<script src="corralon-system.js?v=1.0.43"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4664,9 +4665,11 @@ async function indexFetchCategory(key,offset=0){
       else if(key==='oferta')url.searchParams.set('oferta','eq.true');
       else if(key==='ceramico')url.searchParams.set('ceramico','eq.true');
       else if(key==='aridos')url.searchParams.set('or',`(rubro.ilike.*arido*,rubro.ilike.*árido*${codes.length?',codigo.in.('+codes.map(code=>JSON.stringify(code)).join(',')+')':''})`);
-      const response=await fetch(url,{headers:CorralonSystem.headers(),cache:'no-store'});
-      if(!response.ok)throw new Error('No se pudo cargar esta categoría.');
-      const page=await response.json();rows.push(...page.map(CorralonSystem.catalog.fromSupabase));rows.hasMore=page.length===250;
+      const page=await indexCachedPublicRequest('category|'+url.search,async()=>{
+        const response=await fetch(url,{headers:CorralonSystem.headers(),cache:'no-store'});
+        if(!response.ok)throw new Error('No se pudo cargar esta categoría.');
+        return response.json();
+      });rows.push(...page.map(CorralonSystem.catalog.fromSupabase));rows.hasMore=page.length===250;
     }
     return rows;
   })();indexCategoryCache.set(cacheKey,task);
@@ -4700,11 +4703,13 @@ async function indexLoadRubros(){
   if(local?.length){for(const article of local)if(article.rubro)indexRubrosKnown.add(String(article.rubro).trim());return;}
   if(INDEX_MENU_SESSION_ACTIVE)return;
   if(indexRubrosLoading)return indexRubrosLoading;
-  indexRubrosLoading=(async()=>{
+  indexRubrosLoading=window.CorralonCacheDB.withLock('public-rubros',async()=>{
     // Distinct labels only: skip directly past each fetched label, not all article rows.
     const cacheKey='index_halloween_rubros_v1';
-    const saved=await window.CorralonCacheDB?.get?.(cacheKey);
-    if(saved?.labels?.length && Date.now()-saved.savedAt<86400000){saved.labels.forEach(label=>indexRubrosKnown.add(label));return;}
+    const meta=await window.CorralonSystem.catalogRealtime.getMeta();
+    const signature=`${meta.version||0}|${meta.patch_version||0}`;
+    const saved=await window.CorralonCacheDB.get(cacheKey);
+    if(saved?.signature===signature && saved?.labels?.length){saved.labels.forEach(label=>indexRubrosKnown.add(label));return;}
     let after='';
     while(true){
       const url=new URL(`${SUPABASE_URL}/rest/v1/catalogo_articulos_publico`);url.searchParams.set('select','rubro');url.searchParams.set('activo','eq.true');url.searchParams.set('order','rubro.asc');url.searchParams.set('limit','1000');url.searchParams.set('rubro',after?`gt.${after}`:'not.is.null');
@@ -4712,8 +4717,8 @@ async function indexLoadRubros(){
       const rows=await response.json();rows.forEach(row=>{if(String(row.rubro||'').trim())indexRubrosKnown.add(String(row.rubro).trim());});
       if(rows.length<1000)break;const next=String(rows.at(-1).rubro||'');if(!next || next===after)break;after=next;
     }
-    await window.CorralonCacheDB?.set?.(cacheKey,{labels:[...indexRubrosKnown],savedAt:Date.now()});
-  })();try{await indexRubrosLoading;}catch(error){indexRubrosLoading=null;throw error;}
+    await window.CorralonCacheDB?.set?.(cacheKey,{labels:[...indexRubrosKnown],signature,savedAt:Date.now()});
+  });try{await indexRubrosLoading;}catch(error){indexRubrosLoading=null;throw error;}
 }
 function indexExitRubrosView(){
   indexRubrosViewActive=false;
@@ -5116,7 +5121,33 @@ function codigosPrioritariosCatalogoInicio() {
   ].map((codigo) => String(codigo || '').trim()).filter(Boolean))];
 }
 
+// Persist bounded public responses under the metadata verified through Firebase.
+const indexPublicRequests = new Map();
+async function indexCachedPublicRequest(key, load) {
+  const meta = await window.CorralonSystem.catalogRealtime.getMeta();
+  const signature = `${meta.version || 0}|${meta.patch_version || 0}`;
+  const cacheKey = 'index_public_response_v1|' + key;
+  const pendingKey = signature + '|' + key;
+  if (indexPublicRequests.has(pendingKey)) return indexPublicRequests.get(pendingKey);
+  const task = window.CorralonCacheDB.withLock('public-responses', async () => {
+    const saved = await window.CorralonCacheDB.get(cacheKey);
+    if (saved?.signature === signature) return saved.value;
+    const value = await load();
+    const entriesKey='index_public_response_keys_v1';
+    const entries=(await window.CorralonCacheDB.get(entriesKey)||[]).filter(entry=>entry!==cacheKey);
+    entries.push(cacheKey);
+    const expired=entries.splice(0,Math.max(0,entries.length-40));
+    await window.CorralonCacheDB.updateMany([[cacheKey,{signature,value,savedAt:Date.now()}],[entriesKey,entries]],expired).catch(console.warn);
+    return value;
+  });
+  indexPublicRequests.set(pendingKey, task);
+  if (indexPublicRequests.size > 40) indexPublicRequests.delete(indexPublicRequests.keys().next().value);
+  try { return await task; } catch (error) { indexPublicRequests.delete(pendingKey); throw error; }
+}
+
 async function consultarCatalogoPublicoReducido({ termino = '', codigos = [], portada = false, limite = 400 } = {}) {
+  const parameters = {p_termino: String(termino || '').trim(), p_codigos: [...new Set((codigos || []).map(String).filter(Boolean))].sort(), p_portada: !!portada, p_limite: Number(limite || 400)};
+  const rows = await indexCachedPublicRequest('rpc|' + JSON.stringify(parameters), async () => {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/buscar_catalogo_publico_reducido`, {
     method: 'POST',
     headers: {
@@ -5124,18 +5155,14 @@ async function consultarCatalogoPublicoReducido({ termino = '', codigos = [], po
       'apikey': SUPABASE_ANON_KEY,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      p_termino: String(termino || '').trim(),
-      p_codigos: [...new Set((codigos || []).map((codigo) => String(codigo || '').trim()).filter(Boolean))],
-      p_portada: !!portada,
-      p_limite: Number(limite || 400)
-    })
+    body: JSON.stringify(parameters)
   });
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(detail || 'No se pudo consultar el catálogo público');
   }
-  const rows = await response.json();
+  return await response.json();
+  });
   const fromSupabase = window.CorralonSystem?.catalog?.fromSupabase;
   return (Array.isArray(rows) ? rows : []).map((row) => typeof fromSupabase === 'function' ? fromSupabase(row) : row);
 }
@@ -5170,30 +5197,23 @@ async function cargarPortadaCatalogoPublico() {
   reemplazarCatalogoPublico(rows, 'portada');
 }
 
-async function consultarVersionCatalogoPublico() {
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/catalogo_articulos_meta?id=eq.principal&select=version&limit=1`, {
-    headers: {
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      'apikey': SUPABASE_ANON_KEY
-    },
-    cache: 'no-store'
-  });
-  if (!response.ok) throw new Error(`No se pudo consultar la versión del catálogo (${response.status})`);
-  const rows = await response.json();
-  return Number(Array.isArray(rows) && rows[0] ? rows[0].version : 0);
-}
 
+let publicCatalogPendingMeta = null;
 async function comprobarVersionCatalogoPublico(suppliedMeta = null) {
+  if (suppliedMeta) publicCatalogPendingMeta = suppliedMeta;
   if (INDEX_MENU_SESSION_ACTIVE || document.hidden || publicCatalogVersionChecking) return;
   publicCatalogVersionChecking = true;
   try {
-    const nextVersion = suppliedMeta ? Number(suppliedMeta.version || 0) : await window.CorralonSystem.catalogRealtime.getMeta().then(meta => Number(meta?.version || 0));
+    const meta = publicCatalogPendingMeta || await window.CorralonSystem.catalogRealtime.getMeta();
+    publicCatalogPendingMeta = null;
+    const nextVersion = `${meta.version || 0}|${meta.patch_version || 0}`;
     if (publicCatalogVersion === null) {
       publicCatalogVersion = nextVersion;
       return;
     }
     if (!nextVersion || nextVersion === publicCatalogVersion) return;
     publicCatalogVersion = nextVersion;
+    indexPublicRequests.clear();
     cacheBusquedaPublica.clear();
     indexCategoryCache.clear();indexRubrosKnown.clear();indexRubrosLoading=null;ceramicoBudgetGlueCatalogo=null;
     window.CorralonCacheDB?.set?.('index_halloween_rubros_v1',{labels:[],savedAt:0}).catch(console.warn);
@@ -5209,6 +5229,9 @@ async function comprobarVersionCatalogoPublico(suppliedMeta = null) {
     console.warn('No se pudo comprobar la versión pública del catálogo', error);
   } finally {
     publicCatalogVersionChecking = false;
+    if (publicCatalogPendingMeta && !document.hidden && `${publicCatalogPendingMeta.version || 0}|${publicCatalogPendingMeta.patch_version || 0}` !== publicCatalogVersion) {
+      comprobarVersionCatalogoPublico(publicCatalogPendingMeta).catch(console.warn);
+    }
   }
 }
 
@@ -7012,6 +7035,7 @@ async function iniciarCargaListaArticulos() {
   const loader = document.getElementById('loadingOverlay');
   if (loader) loader.style.display = 'flex';
   if (!INDEX_MENU_SESSION_ACTIVE) {
+    iniciarConsultaVersionCatalogoPublico();
     try {
       await cargarPortadaCatalogoPublico();
     } catch (error) {

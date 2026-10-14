@@ -2782,8 +2782,9 @@ internal static partial class FacturacionCopiaApi
             int before;
             if(!Int32.TryParse(request.QueryString["antes"]??"0",out before)||before<0)throw new InvalidOperationException("Página de movimientos inválida.");
             string numberFilter = (request.QueryString["buscar"] ?? "").Trim();
+            string articleFilter = (request.QueryString["articulo"] ?? "").Trim();
             DateTime from,to;
-            if(numberFilter.Length>0) { from=DateTime.Today; to=DateTime.Today; }
+            if(numberFilter.Length>0 && articleFilter.Length==0) { from=DateTime.Today; to=DateTime.Today; }
             else
             if(!DateTime.TryParseExact(request.QueryString["desde"]??DateTime.Today.ToString("yyyy-MM-dd"),"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out from)||
                !DateTime.TryParseExact(request.QueryString["hasta"]??DateTime.Today.ToString("yyyy-MM-dd"),"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out to)||from>to||to==DateTime.MaxValue.Date)
@@ -2792,10 +2793,32 @@ internal static partial class FacturacionCopiaApi
             if (typeFilter.Length > 500 || (typeFilter.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(typeFilter, @"^\d{1,6}(,\d{1,6})*$"))) throw new InvalidOperationException("Filtro de comprobantes inválido.");
             if (typeFilter.Length > 0) typeFilter = "," + typeFilter + ",";
             if (numberFilter.Length > 80) throw new InvalidOperationException("El número buscado es demasiado largo.");
+            if (articleFilter.Length > 100) throw new InvalidOperationException("La búsqueda de artículos es demasiado larga.");
             string numberLike = "%" + numberFilter.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
-            var records=Rows(connection,"SELECT TOP 201 r.IDRecibo AS id,r.NroMov AS numero,r.IDSuc AS sucursal,r.IDTipoMov AS tipo,r.IDProveedor AS proveedor,r.IDDepósito AS puntoVenta,r.IDVend AS vendedor,r.IDOper AS operador,r.Anulado AS anulado,r.IDDepDes AS destino,r.IDFactura AS compra,r.IDRemito AS relacionado,r.NroFactura AS factura,COALESCE(NULLIF(LTRIM(RTRIM(r.NroRemito)),''),CASE WHEN r.IDTipoMov=58 THEN (SELECT s.NroRemito FROM dbo.RecibosTP s WHERE s.IDRecibo=r.IDRecDes AND s.IDTipoMov=57) END) AS remito,CONVERT(varchar(10),r.Fecha,103) AS fecha,t.Descripcion AS nombre,p.[RazónSocial] AS proveedorNombre,r.Total AS total,r.Nota AS nota FROM dbo.RecibosTP r LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Proveedores p ON p.IDProveedor=r.IDProveedor WHERE (@p0=0 OR r.IDSuc=@p0) AND r.Confirmado=1 AND r.Anulado=0 AND (@p1=0 OR r.IDRecibo<@p1) AND (@p6<>'' OR (r.Fecha>=@p2 AND r.Fecha<@p3)) AND (@p4=0 OR r.IDProveedor=@p4) AND (@p5='' OR CHARINDEX(','+CONVERT(varchar(12),r.IDTipoMov)+',',@p5)>0) AND (@p6='' OR r.NroFactura LIKE @p7 OR COALESCE(NULLIF(LTRIM(RTRIM(r.NroRemito)),''),CASE WHEN r.IDTipoMov=58 THEN (SELECT s.NroRemito FROM dbo.RecibosTP s WHERE s.IDRecibo=r.IDRecDes AND s.IDTipoMov=57) END) LIKE @p7) ORDER BY r.IDRecibo DESC",branch,before,from,to.AddDays(1),provider,typeFilter,numberFilter,numberLike);
+            string articleLike = "%" + articleFilter.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
+            var filterArgs=new List<object>{branch,before,from,to.AddDays(1),provider,typeFilter,numberFilter,numberLike,articleFilter,articleLike};
+            string articleMatches="d.IDArt=@p8 OR (TRY_CONVERT(int,@p8) IS NOT NULL AND d.IDArt=RIGHT('000000'+@p8,6)) OR d.IDArt LIKE @p9 OR a.IDArtProv COLLATE Latin1_General_CI_AI LIKE @p9 OR a.[Descripción] COLLATE Latin1_General_CI_AI LIKE @p9";
+            var words=new List<string>();
+            foreach(System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(articleFilter,@"[\p{L}\p{N}]+"))
+            {
+                if(words.Count==12)throw new InvalidOperationException("Usá hasta 12 palabras para buscar el artículo.");
+                words.Add(match.Value);
+            }
+            if(words.Count>0)
+            {
+                var everyWord=new List<string>();
+                foreach(string word in words)
+                {
+                    string parameter="@p"+filterArgs.Count;
+                    filterArgs.Add("%"+word.Replace("[","[[]").Replace("%","[%]").Replace("_","[_]")+"%");
+                    everyWord.Add("(d.IDArt LIKE "+parameter+" OR a.IDArtProv COLLATE Latin1_General_CI_AI LIKE "+parameter+" OR a.[Descripción] COLLATE Latin1_General_CI_AI LIKE "+parameter+")");
+                }
+                articleMatches+=" OR ("+String.Join(" AND ",everyWord.ToArray())+")";
+            }
+            string filtersSql="(@p0=0 OR r.IDSuc=@p0) AND r.Confirmado=1 AND r.Anulado=0 AND ((@p6<>'' AND @p8='') OR (r.Fecha>=@p2 AND r.Fecha<@p3)) AND (@p4=0 OR r.IDProveedor=@p4) AND (@p5='' OR CHARINDEX(','+CONVERT(varchar(12),r.IDTipoMov)+',',@p5)>0) AND (@p6='' OR r.NroFactura LIKE @p7 OR COALESCE(NULLIF(LTRIM(RTRIM(r.NroRemito)),''),CASE WHEN r.IDTipoMov=58 THEN (SELECT s.NroRemito FROM dbo.RecibosTP s WHERE s.IDRecibo=r.IDRecDes AND s.IDTipoMov=57) END) LIKE @p7) AND (@p8='' OR EXISTS (SELECT 1 FROM dbo.RecibosTS d INNER JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=r.IDRecibo AND ("+articleMatches+")))";
+            var records=Rows(connection,"SELECT TOP 201 r.IDRecibo AS id,r.NroMov AS numero,r.IDSuc AS sucursal,r.IDTipoMov AS tipo,r.IDProveedor AS proveedor,r.IDDepósito AS puntoVenta,r.IDVend AS vendedor,r.IDOper AS operador,r.Anulado AS anulado,r.IDDepDes AS destino,r.IDFactura AS compra,r.IDRemito AS relacionado,r.NroFactura AS factura,COALESCE(NULLIF(LTRIM(RTRIM(r.NroRemito)),''),CASE WHEN r.IDTipoMov=58 THEN (SELECT s.NroRemito FROM dbo.RecibosTP s WHERE s.IDRecibo=r.IDRecDes AND s.IDTipoMov=57) END) AS remito,CONVERT(varchar(10),r.Fecha,103) AS fecha,t.Descripcion AS nombre,p.[RazónSocial] AS proveedorNombre,r.Total AS total,r.Nota AS nota FROM dbo.RecibosTP r LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Proveedores p ON p.IDProveedor=r.IDProveedor WHERE "+filtersSql+" AND (@p1=0 OR r.IDRecibo<@p1) ORDER BY r.IDRecibo DESC",filterArgs.ToArray());
             bool more=records.Count>200;if(more)records.RemoveAt(200);
-            int count=Convert.ToInt32(Scalar(connection,null,"SELECT COUNT(*) FROM dbo.RecibosTP r WHERE (@p0=0 OR r.IDSuc=@p0) AND r.Confirmado=1 AND r.Anulado=0 AND (@p6<>'' OR (r.Fecha>=@p2 AND r.Fecha<@p3)) AND (@p4=0 OR r.IDProveedor=@p4) AND (@p5='' OR CHARINDEX(','+CONVERT(varchar(12),r.IDTipoMov)+',',@p5)>0) AND (@p6='' OR r.NroFactura LIKE @p7 OR COALESCE(NULLIF(LTRIM(RTRIM(r.NroRemito)),''),CASE WHEN r.IDTipoMov=58 THEN (SELECT s.NroRemito FROM dbo.RecibosTP s WHERE s.IDRecibo=r.IDRecDes AND s.IDTipoMov=57) END) LIKE @p7)",branch,before,from,to.AddDays(1),provider,typeFilter,numberFilter,numberLike));
+            int count=Convert.ToInt32(Scalar(connection,null,"SELECT COUNT(*) FROM dbo.RecibosTP r WHERE "+filtersSql,filterArgs.ToArray()));
             return new {ok=true,movimientos=records,hayMas=more,total=count};
         }
         if (query == "detalle") return new { ok = true, articulos = Rows(connection, "SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,d.Cantidad AS cantidad,d.PrecioUni AS precioUnitario,d.Importe AS importe,ISNULL(s.StockAct,0) AS stock FROM dbo.RecibosTS d INNER JOIN dbo.RecibosTP r ON r.IDRecibo=d.IDRecibo INNER JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt LEFT JOIN dbo.ArtsStock s ON s.IDArt=d.IDArt AND s.IDSuc=r.IDSuc WHERE d.IDRecibo=@p0 AND r.IDSuc=@p1 AND r.Confirmado=1 AND r.Anulado=0 ORDER BY d.IDOrden", receipt, branch) };

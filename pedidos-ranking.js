@@ -165,10 +165,7 @@
   }
 
   async function fetchMeta() {
-    const url = `${core.SUPABASE_URL}/rest/v1/catalogo_articulos_meta?id=eq.principal&select=ranking_version,ranking_desde,ranking_hasta,ranking_actualizado_at&limit=1`;
-    const response = await fetch(url, { cache: 'no-store', headers: headers() });
-    if (!response.ok) throw new Error(`Ranking: HTTP ${response.status}`);
-    return (await response.json())[0] || null;
+    return core.catalogRealtime.getMeta();
   }
 
   async function fetchChanges(after, target) {
