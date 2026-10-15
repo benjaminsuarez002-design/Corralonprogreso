@@ -2,7 +2,7 @@
 
 <html lang="es"><head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, interactive-widget=resizes-content">
 <title>Corralon Progreso - Lista de Precios</title>
 <meta name="theme-color" content="#ffffff">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4232,8 +4232,6 @@ body.index-sin-stock .home-card-meta{gap:0}
       <button class="product-detail-edit hidden" id="productDetailEdit" type="button" aria-label="Editar artículo" title="Editar artículo">✎</button>
       <button class="product-detail-share" id="productDetailShare" type="button" aria-label="Compartir"><span class="prode-share-mark" aria-hidden="true"></span></button>
       <button id="productDetailFavorite" class="index-favorite-button" type="button" aria-label="Agregar a favoritos" style="position:static">♡</button>
-      <button class="product-detail-icon-btn" id="productDetailLocation" type="button" aria-label="Ubicación" title="Cómo llegar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg></button>
-      <button class="product-detail-icon-btn" id="productDetailContact" type="button" aria-label="Contacto" title="Contacto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3H4a1 1 0 0 0-1 1c0 9.4 7.6 17 17 17a1 1 0 0 0 1-1v-3l-5-2-2 2a15 15 0 0 1-7-7l2-2Z"/></svg></button>
       <button class="product-detail-close" id="productDetailClose" type="button" aria-label="Cerrar">×</button>
     </div>
     <div class="product-detail-body">
@@ -4256,7 +4254,7 @@ body.index-sin-stock .home-card-meta{gap:0}
         </div>
         <div class="product-detail-actions">
           <div class="product-detail-controls">
-            <input class="product-detail-qty" id="productDetailQty" type="text" value="" inputmode="text">
+            <input class="product-detail-qty" id="productDetailQty" type="text" value="" inputmode="decimal">
             <button class="agregar-btn" id="productDetailAddCart" type="button" aria-label="Agregar al carrito">Agregar</button>
             <button class="product-detail-btn-secondary" id="productDetailOpenCart" type="button">Mi Carrito</button>
             <button class="product-detail-btn-secondary" id="productDetailBack" type="button">Volver</button>
@@ -4443,7 +4441,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
 <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.44"></script>
+<script src="corralon-system.js?v=1.0.45"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4630,10 +4628,23 @@ function indexUpdateMobileNavigation(){
     if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
   });
 }
+function indexGoHome(){
+  indexExitRubrosView();indexCategoryActive='';indexFavoritesActive=false;indexCategoryHasMore=false;++indexCategoryRequest;
+  rubroActivo='';chipActivo='';sortActivo='';searchInput.value='';
+  document.querySelectorAll('[data-index-category]').forEach(button=>button.classList.remove('active'));
+  document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');
+  indexUpdateFavorites();actualizarChipsEtiqueta();ocultarAsistenteBusqueda();
+  if(INDEX_MENU_SESSION_ACTIVE)aplicarBusquedaActual();else restaurarPortadaCatalogoPublico();
+  scrollMainToTop();saveIndexView();
+}
+document.querySelector('.logo-home-link').addEventListener('click',event=>{
+  if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||event.button!==0)return;
+  event.preventDefault();indexGoHome();
+});
 document.querySelector('.index-mobile-nav').addEventListener('click',event=>{
   const button=event.target.closest('[data-mobile-nav]');if(!button)return;
   switch(button.dataset.mobileNav){
-    case 'inicio':indexExitRubrosView();indexCategoryActive='';indexFavoritesActive=false;indexCategoryHasMore=false;++indexCategoryRequest;rubroActivo='';chipActivo='';sortActivo='';searchInput.value='';indexUpdateFavorites();actualizarChipsEtiqueta();if(INDEX_MENU_SESSION_ACTIVE)aplicarBusquedaActual();else restaurarPortadaCatalogoPublico();scrollMainToTop();break;
+    case 'inicio':indexGoHome();break;
     case 'rubros':indexShowRubrosCards();break;
     case 'favoritos':document.getElementById('topNavFavorites').click();break;
     case 'carrito':document.getElementById('cartIconDesktop').click();break;
@@ -4774,6 +4785,11 @@ document.addEventListener('click',event=>{
   const category=event.target.closest('[data-index-category]');if(category){event.preventDefault();event.stopImmediatePropagation();indexSelectCategory(category.dataset.indexCategory);return;}
   const more=event.target.closest('[data-index-more]');if(more){event.preventDefault();event.stopImmediatePropagation();indexLoadMoreCategory(more);return;}
   if(!event.target.closest('.halloween-rubros-wrap,.halloween-rubros-menu,[data-mobile-nav="rubros"]')){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}
+},true);
+document.addEventListener('pointerdown',event=>{
+  if(event.target.closest('#allRubrosButton,#indexRubrosMenu'))return;
+  document.getElementById('indexRubrosMenu').hidden=true;
+  document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');
 },true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.getElementById('indexRubrosMenu').hidden=true;document.getElementById('allRubrosButton').setAttribute('aria-expanded','false');}});
 document.getElementById('topNavFavorites').addEventListener('click',()=>indexSelectCategory('favoritos'));
@@ -5715,7 +5731,7 @@ function renderStockMetaHtml(articulo, codigo) {
   const { hasBranchStock, sucursalStockLines, stockText } = obtenerStockInfo(articulo);
   if (!hasBranchStock) return `Stock: ${escaparHtml(stockText)} · Código: ${escaparHtml(codigo)}`;
   return `<div class="stock-meta-block">
-    ${sucursalStockLines.map((line) => `<div class="stock-meta-line ${line.class}">${escaparHtml(line.label)}: ${escaparHtml(line.text)}</div>`).join('')}
+    ${sucursalStockLines.map((line) => `<div class="stock-meta-line ${line.class}"><span class="stock-label-full">${escaparHtml(line.label)}:</span><span class="stock-label-short">${escaparHtml(line.shortLabel)}:</span> <span class="stock-value-full">${escaparHtml(line.text)}</span><span class="stock-value-short">${escaparHtml(line.short)}</span></div>`).join('')}
     <div class="stock-meta-line codigo-line">Código: ${escaparHtml(codigo)}</div>
   </div>`;
 }
@@ -5937,6 +5953,7 @@ function renderHomeSection({ kicker, title, subtitle, chip, items }) {
 }
 
 function renderHomeLanding() {
+  scheduleIndexViewSnapshot();
   destroyHomeCarouselInstances();
   disconnectPublicListObserver();
   resetPublicWindow();
@@ -7032,6 +7049,7 @@ async function aplicarListaServidor(serverInfo, { desdeCachePermitida = false, c
 }
 
 async function iniciarCargaListaArticulos() {
+  if(await restoreIndexView()){if(!INDEX_MENU_SESSION_ACTIVE)iniciarConsultaVersionCatalogoPublico();return;}
   const loader = document.getElementById('loadingOverlay');
   if (loader) loader.style.display = 'flex';
   if (!INDEX_MENU_SESSION_ACTIVE) {
@@ -7792,6 +7810,7 @@ function abrirDetalleProducto(codigo) {
   const editBtn = document.getElementById('productDetailEdit');
   qtyInput.value = '';
   qtyInput.placeholder = MODO_A_DESCONTAR ? 'Ej: 4p' : '';
+  qtyInput.inputMode = MODO_A_DESCONTAR ? 'text' : 'decimal';
   productDetailAdminCode = obtenerIdArticulo(articulo);
   budgetBtn.dataset.codigo = productDetailAdminCode;
   const printBtn = document.getElementById('productDetailPrint');
@@ -7823,14 +7842,14 @@ function abrirDetalleProducto(codigo) {
   }
   modal.classList.remove('hidden');
   modal.classList.add('visible');
-  requestAnimationFrame(() => {
-    if (window.matchMedia('(max-width: 640px), (pointer: coarse)').matches) return;
-    qtyInput.focus();
+  if(estabaCerrado){
+    qtyInput.focus({preventScroll:true});
     qtyInput.select();
-  });
+  }
 }
 
 function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = null } = {}) {
+  scheduleIndexViewSnapshot();
   indexUpdateMobileNavigation();
   const body   = document.getElementById('scrollBody');
   const estado = document.getElementById('estado');
@@ -7893,7 +7912,7 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
         <div class="foto-wrap">${foto}</div>
         <div class="card-main">
           ${tagsHtml}
-          <div class="card-nombre">${nombreHtml}</div>
+          <div class="card-nombre">${nombreHtml}${a.ceramico ? `<span class="chip-ceramico mobile-name-ceramico">${etiquetaCeramico(a)}</span>` : ''}</div>
           <div class="card-detalle">${detalleHtml}</div>
           <div class="card-meta">
             ${renderStockPillsHtml(a, { withDisponibles: true })}
@@ -8162,10 +8181,57 @@ const searchWrap = document.getElementById('searchWrap');
 const searchAssist = document.getElementById('searchAssist');
 const chipsPanel = document.getElementById('chipsPanel');
 const mainScrollHost = document.getElementById('mainScrollHost');
+const indexViewStorageKey='corralon_index_view_v1:'+location.pathname+location.search+location.hash+':'+(INDEX_MENU_SESSION_ACTIVE?localStorage.getItem('corralon_menu_active_user_v1')||'usuario':'publico');
+let indexViewInteracted=false,indexViewRestoring=false,indexViewSnapshotTimer=0,indexViewScrollTimer=0,indexViewSaveChain=Promise.resolve();
+for(const eventName of ['input','pointerdown','keydown'])document.addEventListener(eventName,event=>{if(event.isTrusted)indexViewInteracted=true},{capture:true,once:true});
+function currentIndexView(){return {query:searchInput.value,category:indexCategoryActive,favorites:indexFavoritesActive,rubro:rubroActivo,chip:chipActivo,sort:sortActivo,count:publicWindowCount,scroll:mainScrollHost.scrollTop}}
+function saveIndexView(){
+  if(indexViewRestoring)return;
+  try{sessionStorage.setItem(indexViewStorageKey,JSON.stringify(currentIndexView()));}catch(_){}
+}
+function scheduleIndexViewSnapshot(){
+  clearTimeout(indexViewSnapshotTimer);
+  indexViewSnapshotTimer=setTimeout(()=>{
+    if(indexViewRestoring||!todosArticulos.length)return;
+    saveIndexView();
+    const snapshot={state:currentIndexView(),articles:todosArticulos,home:articulosPortadaPublica,base:terminoBaseBusquedaPublica,version:publicCatalogVersion,categoryHasMore:indexCategoryHasMore,categoryOffset:indexCategoryNextOffset};
+    indexViewSaveChain=indexViewSaveChain.catch(()=>{}).then(()=>window.CorralonCacheDB.set(indexViewStorageKey,snapshot)).catch(error=>console.warn('No se pudo conservar la vista local',error));
+  },150);
+}
+async function restoreIndexView(){
+  let saved;try{saved=JSON.parse(sessionStorage.getItem(indexViewStorageKey)||'null')}catch(_){return false}
+  if(!saved||typeof saved.query!=='string')return false;
+  let snapshot;try{snapshot=await window.CorralonCacheDB.get(indexViewStorageKey)}catch(_){return false}
+  if(indexViewInteracted||!Array.isArray(snapshot?.articles)||!snapshot.articles.length)return false;
+  if(snapshot.state?.query!==saved.query||snapshot.state?.category!==saved.category||snapshot.state?.favorites!==saved.favorites)return false;
+  indexViewRestoring=true;
+  try{
+    todosArticulos=prepararArticulosParaVista(snapshot.articles);
+    articulosPortadaPublica=Array.isArray(snapshot.home)?snapshot.home:[];
+    terminoBaseBusquedaPublica=String(snapshot.base||'');publicCatalogVersion=snapshot.version??null;
+    if(terminoBaseBusquedaPublica)cacheBusquedaPublica.set(terminoBaseBusquedaPublica,snapshot.articles);
+    searchInput.value=saved.query;indexCategoryActive=String(saved.category||'');indexFavoritesActive=!!saved.favorites;
+    indexCategoryHasMore=!!snapshot.categoryHasMore;indexCategoryNextOffset=Number(snapshot.categoryOffset)||0;
+    rubroActivo=String(saved.rubro||'');chipActivo=String(saved.chip||'');sortActivo=String(saved.sort||'');
+    indexUpdateFavorites();actualizarVistaEtiqueta();aplicarBusquedaActual();
+    document.querySelectorAll('[data-index-category]').forEach(button=>button.classList.toggle('active',button.dataset.indexCategory===indexCategoryActive));
+    if(listaFiltradaActual.length&&!document.getElementById('scrollBody').classList.contains('home-mode')){publicWindowCount=Math.min(listaFiltradaActual.length,Math.max(ITEMS_POR_PAGINA,Number(saved.count)||ITEMS_POR_PAGINA));renderProductos(listaFiltradaActual,{preserveWindow:true})}
+    actualizarChipsEtiqueta();
+    document.getElementById('loadingOverlay')?.style.setProperty('display','none');
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    if(!indexViewInteracted)mainScrollHost.scrollTop=Math.max(0,Number(saved.scroll)||0);
+    return true;
+  }finally{indexViewRestoring=false}
+}
+window.addEventListener('pagehide',saveIndexView);
+window.addEventListener('beforeunload',saveIndexView);
+mainScrollHost.addEventListener('scroll',()=>{clearTimeout(indexViewScrollTimer);indexViewScrollTimer=setTimeout(saveIndexView,100)},{passive:true});
+
 const scrollBody = document.getElementById('scrollBody');
 const scrollTopBtn = document.getElementById('scrollTopBtn');
 const sortWrap = document.getElementById('sortWrap');
 const sortButton = document.getElementById('sortButton');
+let productDetailKeyboardBaseline=window.visualViewport?.height||window.innerHeight;
 function syncPopupVisualViewport() {
   const root = document.documentElement;
   const mobileDetail = window.matchMedia('(max-width:700px)').matches || (window.matchMedia('(pointer:coarse)').matches && Math.min(screen.width,screen.height)<=700);
@@ -8176,6 +8242,12 @@ function syncPopupVisualViewport() {
   const left = vv ? vv.offsetLeft : 0;
   const width = vv ? vv.width : window.innerWidth;
   const height = vv ? vv.height : window.innerHeight;
+  const quantityFocused=document.activeElement?.id==='productDetailQty';
+  if(!quantityFocused&&!document.body.classList.contains('index-detail-keyboard'))productDetailKeyboardBaseline=height;
+  const keyboardOpen=mobileDetail&&quantityFocused&&!!vv&&height<Math.max(window.innerHeight,productDetailKeyboardBaseline)-80;
+  const wasKeyboardOpen=document.body.classList.contains('index-detail-keyboard');
+  document.body.classList.toggle('index-detail-keyboard',keyboardOpen);
+  if(keyboardOpen&&!wasKeyboardOpen)requestAnimationFrame(()=>document.getElementById('productDetailQty')?.scrollIntoView({block:'nearest',inline:'nearest'}));
   root.style.setProperty('--popup-visual-top', `${Math.max(0, top / scale)}px`);
   root.style.setProperty('--popup-visual-left', `${Math.max(0, left / scale)}px`);
   root.style.setProperty('--popup-visual-width', `${Math.max(1, width / scale)}px`);
@@ -8225,6 +8297,7 @@ function schedulePopupVisualViewportSync() {
     syncPopupVisualViewport();
     syncPopupPlacement();
   }, 80);
+  setTimeout(()=>{syncPopupVisualViewport();syncPopupPlacement()},350);
 }
 schedulePopupVisualViewportSync();
 window.addEventListener('resize', schedulePopupVisualViewportSync);
@@ -8532,8 +8605,6 @@ const contactModal = document.getElementById('contactModalOverlay');
 const topNavContacto = document.getElementById('topNavContacto');
 const closeContactModal = () => contactModal?.classList.remove('visible');
 if (topNavContacto) topNavContacto.addEventListener('click', () => contactModal?.classList.add('visible'));
-document.getElementById('productDetailLocation').addEventListener('click',()=>topNavComoLlegar?.click());
-document.getElementById('productDetailContact').addEventListener('click',()=>topNavContacto?.click());
 document.getElementById('contactModalClose')?.addEventListener('click', closeContactModal);
 contactModal?.addEventListener('click', (e) => { if (e.target === contactModal) closeContactModal(); });
 
@@ -10388,7 +10459,7 @@ if (INDEX_MENU_SESSION_ACTIVE) {
 }
 
 setTimeout(() => {
-  iniciarCargaListaArticulos();
+  iniciarCargaListaArticulos().catch(error=>console.warn('No se pudo cargar la vista de Index',error));
   iniciarActualizacionIncrementalCatalogo();
 }, 0);
 

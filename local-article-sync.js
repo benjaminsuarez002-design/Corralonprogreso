@@ -1,7 +1,7 @@
 // Durable FIFO for the local importer. One worker owns SQL and web publication.
 const key='corralon_local_article_sync_queue_v1';
 let jobs=[],ready,writing=Promise.resolve(),running=false,token='';
-const callbacks=new Map();
+const callbacks=new Map(),recoveryCallbacks=new Map();
 const cache=()=>window.CorralonSystem.localCache;
 function persist() {
   const snapshot=structuredClone(jobs);
@@ -29,12 +29,46 @@ function progress(message,percent) {
 async function load() {
   if(!ready)ready=(async()=>{
     jobs=await cache().read(key) || [];
-    jobs.forEach(job=>{if(job.state!=='error')job.state='queued';});
+    jobs.forEach(job=>{if(job.state!=='error')job.state='queued';else try{window.localStorage.setItem(`corralon_local_article_import_draft_v1_${job.provider}`,JSON.stringify({indexedDb:true}));}catch{}});
   })();
   return ready;
 }
+function selectionConflict(job) {
+  return /cambio en la base|cambió en la base|volve a seleccionarlo|volvé a seleccionarlo|suspendido/i.test(job.error||'');
+}
+async function recoverJob(job) {
+  const draftKey=`corralon_local_article_import_draft_v1_${job.provider}`;
+  const existing=await cache().read(draftKey);
+  if(existing?.rows?.length && existing.operation!==job.operation)throw new Error('Hay otro borrador del proveedor. Conservalo antes de recuperar la carga pendiente.');
+  const draft=structuredClone({operation:job.operation,rows:job.rows});
+  await cache().write(draftKey,draft);
+  try{window.localStorage.setItem(draftKey,JSON.stringify({indexedDb:true}));}catch{}
+  const previous=jobs;jobs=jobs.filter(item=>item!==job);
+  try{await persist();}catch(error){jobs=previous;throw error;}
+  callbacks.delete(job.id);
+  return draft;
+}
+export async function recoverDraft(provider) {
+  await load();
+  const existing=await cache().read(`corralon_local_article_import_draft_v1_${provider}`);
+  const failed=jobs.find(job=>String(job.provider)===String(provider)&&job.state==='error');
+  if(failed&&(!existing?.rows?.length||existing.operation===failed.operation))return recoverJob(failed);
+  return existing?.rows?.length ? existing : null;
+}
 async function retry() {
-  jobs.filter(job=>job.state==='error').forEach(job=>{job.state='queued';delete job.error;});
+  const failed=jobs.filter(job=>job.state==='error');
+  const conflict=failed.find(selectionConflict);
+  if(conflict){
+    try{
+      await recoverJob(conflict);
+      const reopen=recoveryCallbacks.get(conflict.id);recoveryCallbacks.delete(conflict.id);
+      window.CorralonSystem.articleSync.set('success','Lote recuperado. Volvé a seleccionar el artículo que cambió y aplicá los cambios.');
+      if(reopen)await reopen();
+      else await window.CorralonLocalArticleImporter?.open({localSql:true,editableSource:true,provider:{id_proveedor:conflict.provider,proveedor:conflict.providerName||`Proveedor SQL ${conflict.provider}`},rows:[]});
+    }catch(error){window.CorralonSystem.articleSync.set('error',error.message,{retry,cancel:cancelFailed});}
+    return;
+  }
+  failed.forEach(job=>{job.state='queued';delete job.error;});
   await persist();start();
 }
 function showResult() {
@@ -65,7 +99,7 @@ async function process(job) {
   const sqlRows=job.rows.filter(row=>!row.sqlSaved);
   if(sqlRows.length){
     progress('Guardando artículos en SQL…',5);
-    const result=await sqlRequest('apply',{operation:job.operation,provider:job.provider,rows:sqlRows.map(r=>({mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))});
+    const result=await sqlRequest('apply',{operation:job.operation,provider:job.provider,rows:sqlRows.map(r=>({mode:r.mode,id:r.id,version:r.version,reactivar:r.reactivar===true,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))});
     sqlRows.forEach((row,index)=>{row.sqlSaved={id:result.rows[index]?.id || row.id};});
     await persist();
     try{callbacks.get(job.id)?.({...result,importados:result.nuevos+result.actualizados,directSql:true},structuredClone(sqlRows));}catch(error){console.warn('SQL guardado; no se pudo refrescar la pantalla.',error);}
@@ -99,7 +133,7 @@ function start() {
     try{
       let job;
       while((job=jobs.find(item=>item.state==='queued'))){
-        try{await process(job);jobs=jobs.filter(item=>item!==job);callbacks.delete(job.id);await persist();}
+        try{await process(job);jobs=jobs.filter(item=>item!==job);callbacks.delete(job.id);recoveryCallbacks.delete(job.id);await persist();}
         catch(error){job.state='error';job.error=(job.rows.some(row=>row.sqlSaved) ? 'SQL guardado. ' : '')+error.message;await persist();}
       }
       showResult();
@@ -107,16 +141,24 @@ function start() {
     finally{running=false;if(jobs.some(job=>job.state==='queued'))start();}
   })();
 }
-export async function enqueue(input,onImported,localToken) {
+export async function enqueue(input,onImported,localToken,onRecover) {
   await load();
   if(localToken)token=localToken;
   const existing=jobs.find(job=>job.id===input.operation);
-  if(existing){if(existing.state==='error')await retry();return existing.id;}
+  if(existing){if(onRecover)recoveryCallbacks.set(existing.id,onRecover);if(existing.state==='error')await retry();return existing.id;}
   const job={...structuredClone(input),id:input.operation,state:'preparing'};
-  jobs.push(job);callbacks.set(job.id,onImported);
+  jobs.push(job);callbacks.set(job.id,onImported);if(onRecover)recoveryCallbacks.set(job.id,onRecover);
   try{await persist();job.state='queued';await persist();}
   catch(error){jobs=jobs.filter(item=>item!==job);callbacks.delete(job.id);throw error;}
   if(running)progress('Carga agregada a la cola…',null);
   start();return job.id;
 }
-export async function resumeQueue() {await load();if(jobs.some(job=>job.state==='queued'))start();else if(jobs.length)showResult();}
+export async function resumeQueue({localOnly=false}={}) {
+  await load();
+  if(localOnly){
+    if(jobs.some(job=>job.state==='error'))showResult();
+    else if(jobs.length)window.CorralonSystem.articleSync.set('error','Hay cargas pendientes guardadas localmente. Tocá Reintentar para continuar.',{retry:()=>start()});
+    return;
+  }
+  if(jobs.some(job=>job.state==='queued'))start();else if(jobs.length)showResult();
+}

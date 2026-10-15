@@ -246,7 +246,7 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
   <dialog id="detailDialog" aria-labelledby="detailTitle">
     <header class="dialogbar"><h2 id="detailTitle">Detalle</h2><button id="printDetail" type="button">Imprimir</button><button type="button" data-close="detailDialog">Cerrar ✕</button></header>
     <div id="detailBody" class="detail-body"></div>
-    <footer class="actions"><a id="openStock" href="cargastock.html" hidden>Cargar stock</a><button id="deleteInvoice" type="button" hidden style="color:var(--corralon-red)">Eliminar movimiento</button></footer>
+    <footer class="actions"><a id="openStock" href="cargastock.html" target="corralon-carga-stock" hidden>Cargar stock</a><button id="deleteInvoice" type="button" hidden style="color:var(--corralon-red)">Eliminar movimiento</button></footer>
   </dialog>
   <dialog id="deleteInvoiceDialog" aria-labelledby="deleteInvoiceTitle">
     <header class="dialogbar"><h2 id="deleteInvoiceTitle">Eliminar movimiento</h2><button type="button" data-close="deleteInvoiceDialog">Cerrar ✕</button></header>
@@ -729,15 +729,22 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   }
   async function confirmPurchase() {
     if (busy || !options || !draft) return;
-    let stockReference = null;
+    let stockReference=null,stockTarget='',stockNeedsNavigation=false;
+    const prepareStockTab=()=>{
+      stockReference=window.open('', 'corralon-carga-stock');
+      if(!stockReference)return;
+      try{
+        stockNeedsNavigation=!/\/cargastock\.html$/.test(stockReference.location.pathname);
+        stockTarget=stockReference.sessionStorage.getItem('corralon_stock_tab_id')||FX.createUuid();
+        stockReference.sessionStorage.setItem('corralon_stock_tab_id',stockTarget);
+      }catch{stockNeedsNavigation=true;stockTarget='';}
+    };
     try {
       const payload = draft.pending || confirmationPayload();
       const sendToStock = payload.enStock && !payload.movimiento && FX.menuUserHasAccess('carga_stock');
       const stockKey = `corralon_stock_factura_${user.id}`;
-      if (!draft.pending && !(await htmlNotice(`Confirmar la factura ${payload.numero || '(numeración automática)'} de ${selectedProvider().nombre} por ${money(rows.reduce((sum, row) => sum + row.importe, 0))}?`, true, () => {
-        const tab = JSON.parse(localStorage.getItem(`${stockKey}_tab`) || 'null');
-        if (sendToStock && tab?.reusable && Date.now() - tab.time < 120000) stockReference = window.open('', 'corralon-carga-stock');
-      }))) return;
+      if (!draft.pending && !(await htmlNotice(`Confirmar la factura ${payload.numero || '(numeración automática)'} de ${selectedProvider().nombre} por ${money(rows.reduce((sum, row) => sum + row.importe, 0))}?`, true, ()=>{if(sendToStock)prepareStockTab();}))) return;
+      if(draft.pending&&sendToStock)prepareStockTab();
       draft.pending = payload; saveDraft(); setBusy(true);
       let result;
       try { result = await api({}, { ...payload, accion: 'confirmar' }); }
@@ -752,35 +759,24 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       resetDraft();
       message(`Factura ${invoice.NroFactura} confirmada. Ya podés cargar la siguiente.`);
       if (sendToStock && !invoice.IDMovStk) {
-        const stockTab = await new Promise(resolve => {
-          const request = FX.createUuid();
-          let timer;
-          const receive = event => {
-            if (event.key !== `${stockKey}_reply` || !event.newValue) return;
-            const reply = JSON.parse(event.newValue);
-            if (reply.request !== request) return;
-            clearTimeout(timer); window.removeEventListener('storage', receive); resolve(reply);
-          };
-          window.addEventListener('storage', receive);
-          timer = setTimeout(() => { window.removeEventListener('storage', receive); resolve(null); }, 700);
-          localStorage.setItem(`${stockKey}_ping`, request);
-        });
+        if(!stockTarget){
+          const existing=JSON.parse(localStorage.getItem(`${stockKey}_tab`)||'null');
+          stockTarget=existing&&Date.now()-existing.time<120000?existing.id:null;
+        }
         localStorage.setItem(stockKey, JSON.stringify({
           id: invoice.IDRecibo, usuarioId: user.id, proveedorId: invoice.IDProveedor,
           proveedor: invoice.Proveedor, numero: invoice.NroFactura,
           sucursal: invoice.sucursalReal || invoice.IDSuc, time: Date.now(),
-          target: stockTab?.id || null
+          target: stockTarget
         }));
-        if (!stockTab) location.assign('cargastock.html');
-        else {
-          if (stockTab.reusable) {
-            stockReference = stockReference || window.open('', 'corralon-carga-stock');
-            stockReference?.focus();
-          }
-          message('Factura confirmada. La carga de stock está preparada en la pestaña abierta.');
-        }
+        if(stockReference&&!stockReference.closed){
+          if(stockNeedsNavigation)stockReference.location.replace('cargastock.html');
+          stockReference.focus();
+          message('Factura confirmada. La carga está preparada en la pestaña de Cargar stock.');
+        }else message('Factura confirmada. Permití las ventanas emergentes o abrí Cargar stock para continuar.');
       }
     } catch (error) {
+      try{if(stockReference&&!stockReference.closed&&stockReference.location.href==='about:blank')stockReference.close();}catch{}
       message(draft?.pending ? `Confirmación pendiente de verificar: ${error.message}. Reintentá con el mismo borrador.` : error.message, true);
     } finally { setBusy(false); }
   }

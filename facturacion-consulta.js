@@ -356,6 +356,24 @@
     if(event.key==='F2'&&event.target.select){event.preventDefault();event.target.select();return}
     if(event.key==='Enter'){event.preventDefault();if(index<controls.length-1){if(event.target.classList.contains('date')&&!dateInput(event.target))return;controls[index+1].focus();controls[index+1].select?.()}else load()}
   });
-  detail.querySelector('[data-detail-close]').addEventListener('click',closeDetail);detail.querySelector('[data-detail-prev]').addEventListener('click',()=>openDetail(detailIndex-1));detail.querySelector('[data-detail-next]').addEventListener('click',()=>openDetail(detailIndex+1));
+  function navigateDetail(direction){
+    if(detail.hidden||actionBusy||cancellationBusy||!detailData)return;
+    const nextIndex=detailIndex+direction;
+    if(nextIndex<0||nextIndex>=rows.length)return;
+    if(detailData.valuesDirty){detail.querySelector('[data-action-status]').textContent='Guardá los valores antes de cambiar de comprobante.';return;}
+    openDetail(nextIndex);
+  }
+  detail.querySelector('[data-detail-close]').addEventListener('click',closeDetail);
+  const previousDetail=detail.querySelector('[data-detail-prev]'),nextDetail=detail.querySelector('[data-detail-next]');
+  previousDetail.title='Comprobante anterior (RePág)';previousDetail.setAttribute('aria-keyshortcuts','PageUp');
+  nextDetail.title='Comprobante siguiente (AvPág)';nextDetail.setAttribute('aria-keyshortcuts','PageDown');
+  previousDetail.addEventListener('click',()=>navigateDetail(-1));nextDetail.addEventListener('click',()=>navigateDetail(1));
+  document.addEventListener('keydown',event=>{
+    if(event.defaultPrevented||event.ctrlKey||event.altKey||event.metaKey||event.shiftKey||!['PageDown','PageUp'].includes(event.key)||detail.hidden)return;
+    if(!warrantyMenu.hidden||[...document.querySelectorAll('dialog[open],.modal-wrap.open')].some(modal=>!detail.contains(modal)))return;
+    event.preventDefault();event.stopImmediatePropagation();
+    if(event.repeat)return;
+    navigateDetail(event.key==='PageDown'?1:-1);
+  },true);
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!warrantyMenu.hidden){event.preventDefault();warrantyMenu.hidden=true;}else if(event.key==='Escape'&&!detail.hidden){event.preventDefault();closeDetail()}else if(event.key==='Escape'&&!overlay.hidden){event.preventDefault();close()}});
 })();

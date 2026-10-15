@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.43"></script>
+<script src="corralon-system.js?v=1.0.44"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -2434,6 +2434,22 @@ els.historyList.addEventListener('dblclick',e=>{const cell=e.target.closest('[da
 els.orderDetailBody.addEventListener('dblclick',e=>{const cell=e.target.closest('[data-provider-text]');if(!cell)return;e.preventDefault();openProviderPage(cell.textContent||cell.dataset.providerText||'')})
 els.prevHistoryOrderBtn.addEventListener('click',()=>navigateOrderDetail(-1))
 els.nextHistoryOrderBtn.addEventListener('click',()=>navigateOrderDetail(1))
+
+els.prevHistoryOrderBtn.title='Pedido anterior (RePág)';
+els.prevHistoryOrderBtn.setAttribute('aria-keyshortcuts','PageUp');
+els.nextHistoryOrderBtn.title='Pedido siguiente (AvPág)';
+els.nextHistoryOrderBtn.setAttribute('aria-keyshortcuts','PageDown');
+function handleConsultedOrderPaging(event){
+  if(!['PageUp','PageDown'].includes(event.key)||event.defaultPrevented||event.repeat||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey)return;
+  if(!els.orderDetailModal.classList.contains('visible'))return;
+  const top=window.PedidosModalFocus?.top?.();
+  if(top&&top!==els.orderDetailModal)return;
+  if(document.querySelector('dialog[open]'))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  navigateOrderDetail(event.key==='PageDown'?1:-1);
+}
+document.addEventListener('keydown',handleConsultedOrderPaging,true);
+
 els.closeOrderDetailBtn.addEventListener('click',()=>els.orderDetailModal.classList.remove('visible'))
 els.orderDetailModal.addEventListener('mousedown',e=>{if(e.target===els.orderDetailModal)els.orderDetailModal.classList.remove('visible')})
 els.sendReviewFromDetailBtn.addEventListener('click',()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();return}if(!detailOrderId)return;sendOrderBackToReview(detailOrderId).catch(error=>{console.warn(error);stopTopProgress('No pude enviar a revisión')})})

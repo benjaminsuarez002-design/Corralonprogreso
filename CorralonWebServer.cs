@@ -52,10 +52,10 @@ internal static class LocalArticleImport
             return rows;
         }
     }
-    private const string ArticleSelect = "SELECT IDArt AS id, [Descripción] AS descripcion, IDArtProv AS codigo, IDProveedor AS proveedor, IDRubro AS rubro, PorcIVA1 AS iva, PorcGanMin AS margen, PorcGanMay AS margenMay, PorcGanInt AS margenInt, PrecioCpraSISDto AS costo, PrecioCpraSI AS costoSI, PrecioCpraCI AS costoCI, PrecioVta1 AS venta1, PrecioVta2 AS venta2, PrecioVta3 AS venta3, PorcDto1 AS dto1, PorcDto2 AS dto2, IDMoneda AS moneda, UniXBulto AS unidadesBulto, FechaActPrec AS fecha FROM dbo.[Artículos]";
-    private static Dictionary<string, object> Article(SqlConnection c, SqlTransaction t, string id)
+    private const string ArticleSelect = "SELECT IDArt AS id, [Descripción] AS descripcion, IDArtProv AS codigo, IDProveedor AS proveedor, IDRubro AS rubro, PorcIVA1 AS iva, PorcGanMin AS margen, PorcGanMay AS margenMay, PorcGanInt AS margenInt, PrecioCpraSISDto AS costo, PrecioCpraSI AS costoSI, PrecioCpraCI AS costoCI, PrecioVta1 AS venta1, PrecioVta2 AS venta2, PrecioVta3 AS venta3, PorcDto1 AS dto1, PorcDto2 AS dto2, IDMoneda AS moneda, UniXBulto AS unidadesBulto, Suspendido AS suspendido, FechaActPrec AS fecha FROM dbo.[Artículos]";
+    private static Dictionary<string, object> Article(SqlConnection c, SqlTransaction t, string id, bool includeSuspended = false)
     {
-        var rows = Rows(Command(c, t, ArticleSelect + (t == null ? "" : " WITH (UPDLOCK,HOLDLOCK)") + " WHERE IDArt=@p0 AND ISNULL(Suspendido,0)=0", id));
+        var rows = Rows(Command(c, t, ArticleSelect + (t == null ? "" : " WITH (UPDLOCK,HOLDLOCK)") + " WHERE IDArt=@p0" + (includeSuspended ? "" : " AND ISNULL(Suspendido,0)=0"), id));
         if (rows.Count != 1) throw new InvalidOperationException("El articulo " + id + " no existe o esta suspendido. Volve a seleccionarlo.");
         var row = rows[0]; row["version"] = Hash(Json().Serialize(row)); return row;
     }
@@ -78,6 +78,7 @@ internal static class LocalArticleImport
         public string mode { get; set; }
         public string id { get; set; }
         public string version { get; set; }
+        public bool reactivar { get; set; }
         public string codigo { get; set; }
         public string descripcion { get; set; }
         public decimal costo { get; set; }
@@ -215,7 +216,7 @@ internal static class LocalArticleImport
                     if (update)
                     {
                         if (id.Length == 0 || !ids.Add(id)) throw new InvalidOperationException("Seleccionaste dos veces el mismo articulo o falta seleccionarlo.");
-                        var old = Article(c, tx, id);
+                        var old = Article(c, tx, id, row.reactivar);
                         if (Str(old["version"]) != row.version) throw new InvalidOperationException("El articulo " + id + " cambio en la base. Volve a seleccionarlo antes de actualizar.");
                         description = Str(old["descripcion"]);
                         if (!row.margen.HasValue) { min = Num(old["margen"]); may = Num(old["margenMay"]); inter = Num(old["margenInt"]); }
@@ -244,9 +245,9 @@ internal static class LocalArticleImport
                     decimal cost = Decimal.Round(row.costo, 2, MidpointRounding.AwayFromZero);
                     decimal ci = Decimal.Round(cost * (1 + iva), 4, MidpointRounding.AwayFromZero);
                     object[] args = { id, code, description, batch.provider, row.rubro, iva, cost, ci,
-                        Decimal.Round(cost*(1+iva)*(1+may),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+inter),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+min),2,MidpointRounding.AwayFromZero), min, may, inter, (object)row.unidadesBulto ?? DBNull.Value };
+                        Decimal.Round(cost*(1+iva)*(1+may),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+inter),2,MidpointRounding.AwayFromZero), Decimal.Round(cost*(1+iva)*(1+min),2,MidpointRounding.AwayFromZero), min, may, inter, (object)row.unidadesBulto ?? DBNull.Value, row.reactivar };
                     string sql = update
-                        ? "UPDATE dbo.[Artículos] SET IDArtProv=@p1, IDProveedor=@p3, IDRubro=@p4, PorcIVA1=@p5, IDPorcIVA=CASE WHEN @p5=0.105 THEN 2 ELSE 1 END, PrecioCpraSISDto=@p6, PrecioCpraSI=@p6, PrecioCpraCI=@p7, PrecioVta1=@p8, PrecioVta2=@p9, PrecioVta3=@p10, PorcGanMin=@p11, PorcGanMay=@p12, PorcGanInt=@p13, UniXBulto=COALESCE(@p14,UniXBulto), FechaActPrec=GETDATE() WHERE IDArt=@p0"
+                        ? "UPDATE dbo.[Artículos] SET IDArtProv=@p1, IDProveedor=@p3, IDRubro=@p4, PorcIVA1=@p5, IDPorcIVA=CASE WHEN @p5=0.105 THEN 2 ELSE 1 END, PrecioCpraSISDto=@p6, PrecioCpraSI=@p6, PrecioCpraCI=@p7, PrecioVta1=@p8, PrecioVta2=@p9, PrecioVta3=@p10, PorcGanMin=@p11, PorcGanMay=@p12, PorcGanInt=@p13, UniXBulto=COALESCE(@p14,UniXBulto), Suspendido=CASE WHEN @p15=1 THEN 0 ELSE Suspendido END, FechaActPrec=GETDATE() WHERE IDArt=@p0"
                         : "INSERT INTO dbo.[Artículos] (IDArt,IDArtProv,[Descripción],DescImpr,IDProveedor,IDRubro,PorcIVA1,IDPorcIVA,PrecioCpraSISDto,PrecioCpraSI,PrecioCpraCI,PrecioVta1,PrecioVta2,PrecioVta3,PorcGanMin,PorcGanMay,PorcGanInt,IDMoneda,IDSeccion,UniXBulto) VALUES (@p0,@p1,@p2,@p2,@p3,@p4,@p5,CASE WHEN @p5=0.105 THEN 2 ELSE 1 END,@p6,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,1,1,COALESCE(@p14,1))";
                     commands.Add(Command(c, tx, sql, args));
                     if (update) updated++; else { added++; commands.Add(Command(c, tx, "INSERT INTO dbo.ArtsStock (IDArt,IDSuc) SELECT @p0,IDSuc FROM dbo.Sucursales", id)); }
@@ -288,11 +289,11 @@ internal static class LocalArticleImport
                 {
                     if (path == "/api/local-articles/catalog")
                     {
-                        var articles = Rows(Command(c, null, "SELECT a.IDArt AS id,a.[Descripción] AS descripcion,a.IDArtProv AS codigo,a.IDProveedor AS proveedor,p.[RazónSocial] AS proveedorNombre,a.IDRubro AS rubro FROM dbo.[Artículos] a LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor WHERE ISNULL(a.Suspendido,0)=0 ORDER BY a.[Descripción],a.IDArt"));
+                        var articles = Rows(Command(c, null, "SELECT a.IDArt AS id,a.[Descripción] AS descripcion,a.IDArtProv AS codigo,a.IDProveedor AS proveedor,p.[RazónSocial] AS proveedorNombre,a.IDRubro AS rubro,a.Suspendido AS suspendido FROM dbo.[Artículos] a LEFT JOIN dbo.Proveedores p ON p.IDProveedor=a.IDProveedor WHERE (@p0=1 OR ISNULL(a.Suspendido,0)=0) ORDER BY a.[Descripción],a.IDArt", ctx.Request.QueryString["suspendidos"] == "1"));
                         var rubros = Rows(Command(c, null, "SELECT IDRubro AS id,[Descripción] AS nombre FROM dbo.Rubros ORDER BY [Descripción]"));
                         Reply(ctx, 200, new { articles = articles, rubros = rubros, token = Token }); return;
                     }
-                    if (path == "/api/local-articles/article") { Reply(ctx, 200, Article(c, null, ctx.Request.QueryString["id"] ?? "")); return; }
+                    if (path == "/api/local-articles/article") { Reply(ctx, 200, Article(c, null, ctx.Request.QueryString["id"] ?? "", ctx.Request.QueryString["suspendidos"] == "1")); return; }
                 }
             }
             if (ctx.Request.HttpMethod == "POST" && path == "/api/local-articles/apply")

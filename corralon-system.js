@@ -97,7 +97,6 @@
   let articleEditorBasePrice = 0;
   let articleEditorTargetRubroOpen = false;
   let articleEditorTargetRubroIndex = -1;
-  let articleSyncIndicatorHideTimer = null;
   const ARID_PRICE_TIERS = [
     { key: 'm1', meters: 1, label: '1 m³' },
     { key: 'm1_5', meters: 1.5, label: '1,5 m³' },
@@ -126,126 +125,27 @@
   let aridosBudgetCustomRate = 0;
   const ARID_COST_VAT_FACTOR = 1.21;
 
-  function ensureArticleSyncIndicator() {
-    let indicator = document.getElementById('corralonArticleSyncIndicator');
-    if (indicator) return indicator;
-    const style = document.createElement('style');
-    style.id = 'corralonArticleSyncIndicatorStyle';
-    style.textContent = `
-      #corralonArticleSyncIndicator {
-        position: fixed;
-        right: 20px;
-        bottom: 20px;
-        z-index: 2147483646;
-        width: min(330px, calc(100vw - 40px));
-        padding: 12px 14px 13px;
-        border: 1px solid #c9c9c9;
-        border-radius: 13px;
-        background: rgba(255,255,255,.98);
-        color: #171717;
-        box-shadow: 0 12px 32px rgba(0,0,0,.22);
-        font: 700 13px/1.25 Arial, sans-serif;
-        opacity: 0;
-        visibility: hidden;
-        transform: translateY(12px);
-        transition: opacity .18s ease, transform .18s ease, visibility .18s ease;
-        pointer-events: none;
-      }
-      #corralonArticleSyncIndicator.is-visible {
-        opacity: 1;
-        visibility: visible;
-        transform: translateY(0);
-      }
-      #corralonArticleSyncIndicator .corralon-sync-copy {
-        display: flex;
-        align-items: center;
-        gap: 9px;
-        margin-bottom: 9px;
-      }
-      #corralonArticleSyncIndicator .corralon-sync-dot {
-        width: 9px;
-        height: 9px;
-        flex: 0 0 9px;
-        border-radius: 50%;
-        background: #f20d18;
-        box-shadow: 0 0 0 4px rgba(242,13,24,.12);
-      }
-      #corralonArticleSyncIndicator .corralon-sync-track {
-        height: 5px;
-        overflow: hidden;
-        border-radius: 999px;
-        background: #e4e4e4;
-      }
-      #corralonArticleSyncIndicator .corralon-sync-fill {
-        width: 42%;
-        height: 100%;
-        border-radius: inherit;
-        background: #f20d18;
-        transform: translateX(-120%);
-      }
-      #corralonArticleSyncIndicator.is-syncing .corralon-sync-fill {
-        animation: corralonArticleSyncProgress 1.05s ease-in-out infinite;
-      }
-      #corralonArticleSyncIndicator.is-success .corralon-sync-dot,
-      #corralonArticleSyncIndicator.is-success .corralon-sync-fill {
-        background: #159447;
-      }
-      #corralonArticleSyncIndicator.is-success .corralon-sync-dot {
-        box-shadow: 0 0 0 4px rgba(21,148,71,.12);
-      }
-      #corralonArticleSyncIndicator.is-success .corralon-sync-fill {
-        width: 100%;
-        transform: translateX(0);
-      }
-      #corralonArticleSyncIndicator.is-error .corralon-sync-fill {
-        width: 100%;
-        transform: translateX(0);
-      }
-      @keyframes corralonArticleSyncProgress {
-        0% { transform: translateX(-120%); }
-        55% { transform: translateX(105%); }
-        100% { transform: translateX(245%); }
-      }
-    `;
-    document.head.appendChild(style);
-    indicator = document.createElement('div');
-    indicator.id = 'corralonArticleSyncIndicator';
-    indicator.setAttribute('role', 'status');
-    indicator.setAttribute('aria-live', 'polite');
-    indicator.innerHTML = `
-      <div class="corralon-sync-copy">
-        <span class="corralon-sync-dot"></span>
-        <span data-corralon-sync-text>Sincronizando en segundo plano…</span>
-      </div>
-      <div class="corralon-sync-track"><div class="corralon-sync-fill"></div></div>
-      <button type="button" data-corralon-sync-retry hidden style="margin-top:8px;padding:4px 10px;border:1px solid #aaa;border-radius:6px;background:#fff;cursor:pointer;pointer-events:auto">Reintentar</button>
-      <button type="button" data-corralon-sync-cancel hidden style="margin-top:8px;padding:4px 10px;border:1px solid #aaa;border-radius:6px;background:#fff;cursor:pointer;pointer-events:auto">Cancelar</button>
-    `;
-    document.body.appendChild(indicator);
-    return indicator;
+  let pendingLoadingAnimation = null;
+  let loadingFunctionsRequested = false;
+  function flushLoadingAnimation() {
+    if (!pendingLoadingAnimation || !window.CorralonFunciones?.animacionCarga) return;
+    const args = pendingLoadingAnimation; pendingLoadingAnimation = null;
+    window.CorralonFunciones.animacionCarga(...args);
   }
-
+  window.addEventListener('corralon:funciones-ready', flushLoadingAnimation);
   function setArticleSyncIndicator(state, message, options = {}) {
-    const indicator = ensureArticleSyncIndicator();
-    const text = indicator.querySelector('[data-corralon-sync-text]');
-    clearTimeout(articleSyncIndicatorHideTimer);
-    indicator.classList.remove('is-syncing', 'is-success', 'is-error');
-    indicator.classList.add('is-visible', `is-${state}`);
-    if (text) text.textContent = message;
-    const fill=indicator.querySelector('.corralon-sync-fill');
-    const determinate=Number.isFinite(options.progress);
-    fill.style.animation=determinate ? 'none' : '';
-    fill.style.width=determinate ? `${Math.max(0,Math.min(100,options.progress))}%` : '';
-    fill.style.transform=determinate ? 'translateX(0)' : '';
-    const retry=indicator.querySelector('[data-corralon-sync-retry]');
-    retry.hidden=!options.retry;retry.onclick=()=>options.retry?.();
-    const cancel=indicator.querySelector('[data-corralon-sync-cancel]');
-    cancel.hidden=!options.cancel;cancel.onclick=()=>options.cancel?.();
-    if ((state === 'success' || state === 'error') && !options.retry) {
-      articleSyncIndicatorHideTimer = setTimeout(() => {
-        indicator.classList.remove('is-visible');
-      }, state === 'success' ? 1700 : 5000);
-    }
+    if (window.CorralonFunciones?.animacionCarga) return window.CorralonFunciones.animacionCarga(state,message,options);
+    pendingLoadingAnimation = [state,message,options];
+    if (loadingFunctionsRequested) return;
+    loadingFunctionsRequested = true;
+    const existing = Array.from(document.scripts).find(script => /(?:^|\/)funciones\.js(?:\?|$)/i.test(script.src || ''));
+    if (existing) { existing.addEventListener('load',flushLoadingAnimation,{once:true}); return; }
+    const script = document.createElement('script');
+    const system = Array.from(document.scripts).find(item => /(?:^|\/)corralon-system\.js(?:\?|$)/i.test(item.src || ''));
+    script.src = new URL('funciones.js',system?.src || location.href).href;
+    script.addEventListener('load',flushLoadingAnimation,{once:true});
+    script.addEventListener('error',()=>{loadingFunctionsRequested=false;console.warn('No se pudo cargar la animación de carga.');},{once:true});
+    document.head.appendChild(script);
   }
 
   window.addEventListener('corralon:article-sync-start', () => {

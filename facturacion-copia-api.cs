@@ -295,6 +295,116 @@ internal static partial class FacturacionCopiaApi
         }
         finally { ReleaseCom(wsaa); }
     }
+    private static readonly object PadronGate = new object();
+    private static string PadronTicket()
+    {
+        string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "padron-constancia-ticket.bin");
+        lock (PadronGate)
+        {
+            if (File.Exists(path)) try
+            {
+                var cached = new XmlDocument { XmlResolver = null };
+                cached.LoadXml(Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(path), null, DataProtectionScope.CurrentUser)));
+                DateTimeOffset expiration;
+                if (DateTimeOffset.TryParse(Tag(cached,"expirationTime"),out expiration) && expiration > DateTimeOffset.Now.AddMinutes(5)
+                    && Tag(cached,"token").Length > 0 && Tag(cached,"sign").Length > 0) return cached.OuterXml;
+            }
+            catch { }
+            string certificate = @"C:\Update\ariel2.crt", key = @"C:\Update\ariel2.key";
+            if (!File.Exists(certificate) || !File.Exists(key)) throw new InvalidOperationException("No se encontró el certificado para consultar el padrón de ARCA.");
+            object wsaa = null;
+            try
+            {
+                Type type = Type.GetTypeFromProgID("WSAA");
+                if (type == null) throw new InvalidOperationException("No está registrado PyAfipWs WSAA.");
+                wsaa = Activator.CreateInstance(type);
+                ComCall(wsaa,"Conectar",@"C:\PyAfipWs","https://wsaa.afip.gov.ar/ws/services/LoginCms?wsdl", "");
+                string tra = Text(ComCall(wsaa,"CreateTRA","ws_sr_constancia_inscripcion",43200));
+                string cms = Text(ComCall(wsaa,"SignTRA",tra,certificate,key));
+                if (cms.Length == 0) throw new InvalidOperationException("No se pudo firmar la consulta del padrón.");
+                string ticket = Text(ComCall(wsaa,"LoginCMS",cms));
+                var xml = new XmlDocument { XmlResolver = null }; xml.LoadXml(ticket);
+                if (Tag(xml,"token").Length == 0 || Tag(xml,"sign").Length == 0) throw new InvalidOperationException("ARCA no entregó el acceso al padrón. Habilitá el servicio ws_sr_constancia_inscripcion para el certificado.");
+                File.WriteAllBytes(path,ProtectedData.Protect(Encoding.UTF8.GetBytes(ticket),null,DataProtectionScope.CurrentUser));
+                return ticket;
+            }
+            catch (TargetInvocationException ex)
+            {
+                string detail = ex.InnerException == null ? ex.Message : ex.InnerException.Message;
+                if (detail.IndexOf("notAuthorized",StringComparison.OrdinalIgnoreCase) >= 0)
+                    throw new InvalidOperationException("ARCA no autorizó este certificado para consultar el padrón. Habilitá ws_sr_constancia_inscripcion en el Administrador de Relaciones de ARCA.");
+                throw new InvalidOperationException("No se pudo autenticar la consulta del padrón de ARCA. Revisá la conexión y la habilitación del servicio ws_sr_constancia_inscripcion.");
+            }
+            finally { ReleaseCom(wsaa); }
+        }
+    }
+    private static string PadronText(XmlNode node, string name)
+    {
+        if (node == null) return "";
+        XmlNode child = node.SelectSingleNode(".//*[local-name()='" + name + "']");
+        return child == null ? "" : child.InnerText.Trim();
+    }
+    private static object ParsePadronCustomer(XmlDocument xml, string cuit)
+    {
+        string fault = PadronText(xml,"faultstring");
+        if (fault.Length > 0) throw new InvalidOperationException("ARCA: " + fault);
+        XmlNode general = xml.SelectSingleNode("//*[local-name()='datosGenerales']");
+        if (general == null) throw new InvalidOperationException("ARCA no devolvió datos para ese CUIT. " + PadronText(xml,"error"));
+        if (PadronText(general,"idPersona") != cuit) throw new InvalidOperationException("El CUIT devuelto por ARCA no coincide con la consulta.");
+        string name = PadronText(general,"razonSocial");
+        if (name.Length == 0) name = (PadronText(general,"apellido") + " " + PadronText(general,"nombre")).Trim();
+        if (name.Length == 0) throw new InvalidOperationException("ARCA no devolvió una razón social.");
+        int tax = 0;
+        foreach (XmlNode item in xml.SelectNodes("//*[local-name()='impuesto']"))
+        {
+            string state = PadronText(item,"estadoImpuesto").ToUpperInvariant(), id = PadronText(item,"idImpuesto");
+            if (state != "AC" && state != "ACTIVO") continue;
+            if (id == "30") { tax = 1; break; }
+            if (id == "20") tax = 6;
+            if (id == "32" && tax == 0) tax = 4;
+        }
+        XmlNode address = general.SelectSingleNode(".//*[local-name()='domicilioFiscal']");
+        string status = PadronText(general,"estadoClave");
+        return new { ok = true, cliente = new { nombre = name, documento = cuit, idTipoDoc = 67, idTipoIva = tax,
+            direccion = PadronText(address,"direccion"), localidad = PadronText(address,"localidad"),
+            codigoPostal = PadronText(address,"codPostal"), provincia = PadronText(address,"descripcionProvincia") },
+            aviso = (status != "ACTIVO" ? "Estado de CUIT en ARCA: " + status + ". " : "") + (tax == 0 ? "ARCA no informó una condición de IVA reconocida. Seleccionala antes de guardar." : "") };
+    }
+    private static object PadronCustomer(SqlConnection connection, string cuit)
+    {
+        cuit = cuit.Replace("-", "").Replace(" ", "");
+        if (!ValidCuit(cuit)) throw new InvalidOperationException("Ingresá un CUIT válido de 11 dígitos.");
+        string company = Text(Scalar(connection,null,"SELECT CUIT FROM dbo.Empresa WHERE IDEmpresa=1")).Replace("-", "").Replace(" ", "");
+        if (!ValidCuit(company)) throw new InvalidOperationException("El CUIT emisor no es válido.");
+        var ticket = new XmlDocument { XmlResolver = null }; ticket.LoadXml(PadronTicket());
+        byte[] body;
+        using (var stream = new MemoryStream())
+        {
+            using (var writer = XmlWriter.Create(stream,new XmlWriterSettings { Encoding = new UTF8Encoding(false), CloseOutput = false }))
+            {
+                writer.WriteStartElement("soap","Envelope","http://schemas.xmlsoap.org/soap/envelope/");
+                writer.WriteStartElement("soap","Body","http://schemas.xmlsoap.org/soap/envelope/");
+                writer.WriteStartElement("a5","getPersona_v2","http://a5.soap.ws.server.puc.sr/");
+                writer.WriteElementString("token",Tag(ticket,"token"));writer.WriteElementString("sign",Tag(ticket,"sign"));
+                writer.WriteElementString("cuitRepresentada",company);writer.WriteElementString("idPersona",cuit);
+                writer.WriteEndElement();writer.WriteEndElement();writer.WriteEndElement();
+            }
+            body = stream.ToArray();
+        }
+        ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+        var request = (HttpWebRequest)WebRequest.Create("https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5");
+        request.Method = "POST";request.ContentType = "text/xml; charset=utf-8";request.Headers["SOAPAction"] = "\"\"";
+        request.Timeout = 25000;request.ReadWriteTimeout = 25000;request.ContentLength = body.Length;
+        using (var stream = request.GetRequestStream()) stream.Write(body,0,body.Length);
+        WebResponse response;
+        try { response = request.GetResponse(); }
+        catch (WebException ex) { if (ex.Response == null) throw new InvalidOperationException("ARCA no respondió a la consulta del padrón.");response = ex.Response; }
+        using (response) using (var stream = response.GetResponseStream())
+        using (var reader = XmlReader.Create(stream,new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 2000000 }))
+        {
+            var xml = new XmlDocument { XmlResolver = null };xml.Load(reader);return ParsePadronCustomer(xml,cuit);
+        }
+    }
     private static int FiscalLastAuthorized(int afipType, int point, string companyCuit)
     {
         var ticket = new XmlDocument(); ticket.LoadXml(FiscalTicket());
@@ -817,6 +927,19 @@ internal static partial class FacturacionCopiaApi
             catch { transaction.Rollback(); throw; }
         }
         return new { ok = true, cliente = CustomerDetail(connection, id)[0] };
+    }
+    private static string QueryUtf8(HttpListenerRequest request, string key)
+    {
+        // HttpListener puede usar la codificación local para un GET sin Content-Type.
+        // URLSearchParams envía UTF-8: decodificarlo de forma explícita y una sola vez.
+        foreach (string part in request.Url.Query.TrimStart('?').Split('&'))
+        {
+            int separator = part.IndexOf('=');
+            string name = separator < 0 ? part : part.Substring(0,separator);
+            if (Uri.UnescapeDataString(name.Replace("+"," ")) != key) continue;
+            return separator < 0 ? "" : Uri.UnescapeDataString(part.Substring(separator+1).Replace("+"," "));
+        }
+        return "";
     }
     private static string Limited(object value, int max, string label)
     {
@@ -3179,6 +3302,11 @@ internal static partial class FacturacionCopiaApi
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/clientes")
                 {
+                    if (Text(request.QueryString["padron"]) == "1")
+                    {
+                        AssertPurchasePermission(request.QueryString["usuarioId"],"facturacion");
+                        Reply(context,200,PadronCustomer(connection,Text(request.QueryString["cuit"])));return;
+                    }
                     if (Text(request.QueryString["opciones"]) == "1")
                     {
                         Reply(context, 200, new { ok = true,
@@ -3310,15 +3438,15 @@ internal static partial class FacturacionCopiaApi
                        !Int32.TryParse(request.QueryString["sucursal"]??"0",out branch)||branch<0||
                        !Int32.TryParse(request.QueryString["puntoVenta"]??"0",out point)||point<0)
                         throw new InvalidOperationException("Página, sucursal o punto de venta inválido.");
-                    string search=Limited(request.QueryString["buscar"],80,"Búsqueda");
+                    string search=Limited(QueryUtf8(request,"buscar"),80,"Búsqueda");
                     string pattern="%"+search.Replace("[","[[]").Replace("%","[%]").Replace("_","[_]")+"%";
-                    string article=Limited(request.QueryString["articulo"],100,"Artículo");
+                    string article=Limited(QueryUtf8(request,"articulo"),100,"Artículo");
                     string articlePattern="%"+article.Replace("[","[[]").Replace("%","[%]").Replace("_","[_]")+"%";
                     var records=Rows(connection,
                         "SELECT f.IDRecibo AS idRecibo,f.NroFactura AS numero,CONVERT(varchar(10),f.Fecha,103) AS fecha,f.IDComprob AS idComprobante,t.Descripcion AS tipo,f.ApeYNom AS cliente,f.IDSuc AS idSucursal,s.Sucursal AS sucursal,f.Total AS total,f.Anulada AS anulada,f.IDDepósito AS puntoVenta " +
                         "FROM dbo.FacturasATP f LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob LEFT JOIN dbo.Sucursales s ON s.IDSuc=f.IDSuc " +
                         "WHERE f.Confirmado<>0 AND f.IDComprob IN (1,2,5,6,7,8,13,29,43) AND f.Fecha>=@p0 AND f.Fecha<@p1 " +
-                        "AND (@p2=0 OR f.IDSuc=@p2) AND (@p6=0 OR f.IDDepósito=@p6) AND (@p3='' OR f.ApeYNom LIKE @p4 OR f.NroFactura LIKE @p4) " +
+                        "AND (@p2=0 OR f.IDSuc=@p2) AND (@p6=0 OR f.IDDepósito=@p6) AND (@p3='' OR f.ApeYNom COLLATE Latin1_General_CI_AI LIKE @p4 OR f.NroFactura LIKE @p4) " +
                         "AND (@p7='' OR EXISTS (SELECT 1 FROM dbo.FacturasATS d LEFT JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=f.IDRecibo AND (d.IDArt=@p7 OR (TRY_CONVERT(int,@p7) IS NOT NULL AND d.IDArt=RIGHT('000000'+@p7,6)) OR d.IDArt LIKE @p8 OR d.ArtDesc COLLATE Latin1_General_CI_AI LIKE @p8 OR a.IDArtProv COLLATE Latin1_General_CI_AI LIKE @p8 OR a.[Descripción] COLLATE Latin1_General_CI_AI LIKE @p8))) " +
                         "ORDER BY f.Fecha DESC,f.IDRecibo DESC OFFSET @p5 ROWS FETCH NEXT 51 ROWS ONLY",
                         from.Date,to.Date.AddDays(1),branch,search,pattern,page*50,point,article,articlePattern);

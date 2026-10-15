@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.50"></script>
+<script src="corralon-system.js?v=1.0.51"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -658,6 +658,7 @@ let articleProviderButtonCell = null;
 let articleProviderOptions = [];
 let articleProviderActive = 0;
 let articleProviderPage = null;
+let articleProviderHasSearchMatch = false;
 let articleProviderPaging = false;
 try { lastPriceComparatorProvider = localStorage.getItem(PRICE_COMPARATOR_LAST_PROVIDER_KEY) || ''; } catch (_) {}
 const selectedRows = new Set();
@@ -893,6 +894,8 @@ let stockWorkspaceRestored = null;
 function stockWorkspaceSnapshot() {
   const savedHeader=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
   const header = savedHeader.stockPedidoOrigen ? {stockPedidoOrigen:savedHeader.stockPedidoOrigen} : {};
+  if(savedHeader.stockAdditionalOrigin)header.stockAdditionalOrigin=savedHeader.stockAdditionalOrigin;
+  if(savedHeader.stockAdditionalTransferToken)header.stockAdditionalTransferToken=savedHeader.stockAdditionalTransferToken;
   document.querySelectorAll('[data-stock-header]').forEach(field => header[field.id] = field.type === 'checkbox' ? field.checked : field.value);
   return {
     rows: rowsData.map(row => ({ ...row })), header,
@@ -912,6 +915,88 @@ function stockWorkspaceIndicator() {
   stockField('stockPrevBtn').disabled = stockIngresoBusy || stockPedidoBusy || stockWorkspaceSwitching || stockActiveWorkspace === 1;
   stockField('stockNextBtn').disabled = stockIngresoBusy || stockPedidoBusy || stockWorkspaceSwitching || stockActiveWorkspace === stockWorkspaceCount;
 }
+let stockReloadReady=false,stockReloadRestoring=false,stockReloadTimer=null;
+let stockReloadWrite=Promise.resolve();
+const stockReloadTab=sessionStorage.getItem('corralon_stock_reload_tab')||FX.createUuid();
+sessionStorage.setItem('corralon_stock_reload_tab',stockReloadTab);
+const stockReloadKey='corralon_stock_reload_v1_'+stockReloadTab;
+function stockSaveReloadView(){
+  if(!stockReloadReady||stockReloadRestoring||stockWorkspaceSwitching||stockAdditionalSwitching)return;
+  const focused=document.activeElement;
+  const view={additional:stockAdditionalPopup.classList.contains('visible'),
+    row:focused?.dataset?.row,col:focused?.dataset?.col,field:focused?.id||'',
+    selected:[...selectedRows],sortKey:currentSortKey,sortDir:currentSortDir,
+    scrolls:[...document.querySelectorAll('.rows,.stock-additional-content,.table-wrap,.app')].map(node=>({id:node.id,cls:node.className,top:node.scrollTop,left:node.scrollLeft})),
+    windowX:window.scrollX,windowY:window.scrollY};
+  sessionStorage.setItem(stockReloadKey+'_view',JSON.stringify(view));
+}
+function stockSaveReloadSnapshot(){
+  if(!stockReloadReady||stockReloadRestoring||stockWorkspaceSwitching||stockAdditionalSwitching||!stockSqlMeta)return stockReloadWrite;
+  stockSaveReloadView();
+  const state=structuredClone({user:String(FX.menuSessionUser()?.id||''),workspace:stockWorkspaceSnapshot(),
+    additional:stockAdditionalPopup.classList.contains('visible'),active:stockActiveWorkspace,count:stockWorkspaceCount,
+    meta:stockSqlMeta,articles:stockSqlArticles,providerArticles:stockProviderListArticles,providers,
+    options:[...document.querySelectorAll('[data-stock-header]')].filter(node=>node.tagName==='SELECT').map(node=>({id:node.id,html:node.innerHTML})),
+    fields:[...document.querySelectorAll('[data-stock-header],#stockNumero,#stockOperador')].map(node=>({id:node.id,value:node.value})),
+    receipt:stockField('stockPrintBtn').dataset.receipt||''});
+  stockReloadWrite=stockReloadWrite.catch(()=>{}).then(()=>window.CorralonCacheDB.set(stockReloadKey,state));
+  return stockReloadWrite;
+}
+function stockScheduleReloadSnapshot(){
+  clearTimeout(stockReloadTimer);
+  stockReloadTimer=setTimeout(()=>stockSaveReloadSnapshot().catch(console.warn),250);
+}
+async function stockRestoreReloadView(){
+  const invoiceTransfer=JSON.parse(localStorage.getItem(`corralon_stock_factura_${FX.menuSessionUser()?.id||''}`)||'null');
+  if(invoiceTransfer&&invoiceTransfer.target===sessionStorage.getItem('corralon_stock_tab_id'))return false;
+  const state=await window.CorralonCacheDB.get(stockReloadKey);
+  if(!state||state.user!==String(FX.menuSessionUser()?.id||'')||!state.meta||!Array.isArray(state.articles))return false;
+  stockReloadRestoring=true;
+  try{
+    if(state.additional){
+      CACHE_KEY='corralon_carga_stock_rows_v1_additional';PROVIDER_KEY='corralon_carga_stock_provider_v1_additional';
+      STOCK_WORKSPACE_KEY='corralon_stock_two_drafts_v1_additional';STOCK_HEADER_KEY='corralon_stock_header_v1_additional';STOCK_INGRESO_DRAFT_KEY='corralon_stock_ingreso_sql_v1_additional';
+      stockAdditionalPopup.querySelector('.stock-additional-content').append(stockAdditionalApp);
+      document.querySelector('#stockCostOptions .toolbar').prepend(stockAdditionalProvider,stockAdditionalFilter);
+      document.querySelector('.header-actions').append(stockField('stockAdditionalClose'));
+      stockAdditionalPopup.classList.add('visible');document.body.classList.add('stock-additional-open');
+    }
+    stockActiveWorkspace=state.active;stockWorkspaceCount=state.count;
+    stockSqlMeta=state.meta;providers=state.providers;stockSqlArticles=state.articles;stockProviderListArticles=state.providerArticles||[];
+    stockSqlById=new Map();stockSqlByCode=new Map();
+    stockSqlArticles.forEach(article=>{stockSqlById.set(String(article.idart),article);const key=`${article.proveedor}:${codeKey(article.codProv)}`;const matches=stockSqlByCode.get(key)||[];matches.push(article);stockSqlByCode.set(key,matches);});
+    state.options.forEach(item=>{const node=stockField(item.id);if(node)node.innerHTML=item.html;});
+    state.fields.forEach(item=>{const node=stockField(item.id);if(node)node.value=item.value;});
+    rowsData=state.workspace.rows.map(normalizeRow);provider=state.workspace.provider;
+    el.providerInput.value=state.workspace.providerText||'';renderProviderInfo();
+    stockConfirmed=state.workspace.pending?.status==='confirmed';stockField('stockCostOptions').open=state.additional||state.workspace.costsOpen;
+    stockField('copySummary').hidden=!state.additional;stockField('stockPrintBtn').hidden=!state.receipt;stockField('stockPrintBtn').dataset.receipt=state.receipt;
+    stockMovementFields();stockRebuildSqlCatalog();stockRebuildArticleOptions();
+    const view=JSON.parse(sessionStorage.getItem(stockReloadKey+'_view')||'{}');
+    selectedRows.clear();(view.selected||[]).forEach(index=>selectedRows.add(index));currentSortKey=view.sortKey||'';currentSortDir=view.sortDir||'';
+    stockWorkspaceReady=true;stockFreeze(stockConfirmed);stockWorkspaceIndicator();render();
+    stockInvoiceReady=true;stockReloadReady=true;
+    requestAnimationFrame(()=>{
+      const focused=view.row!=null?editableCellAt(Number(view.row),Number(view.col)):stockField(view.field);
+      focused?.focus?.({preventScroll:true});
+      for(const item of view.scrolls||[]){const node=item.id?document.getElementById(item.id):[...document.querySelectorAll('.rows,.stock-additional-content,.table-wrap,.app')].find(node=>node.className===item.cls);if(node){node.scrollTop=item.top;node.scrollLeft=item.left;}}
+      window.scrollTo(view.windowX||0,view.windowY||0);
+    });
+    stockIngresoMessage('Vista recuperada desde el almacenamiento local.','ok');
+    return true;
+  }finally{stockReloadRestoring=false;}
+}
+document.addEventListener('input',stockScheduleReloadSnapshot,true);
+document.addEventListener('change',stockScheduleReloadSnapshot,true);
+document.addEventListener('click',stockScheduleReloadSnapshot,true);
+document.addEventListener('scroll',()=>stockSaveReloadView(),true);
+window.addEventListener('pagehide',()=>{stockSaveReloadView();stockSaveReloadSnapshot().catch(console.warn);});
+document.addEventListener('keydown',async event=>{
+  if(event.key!=='F5'||event.ctrlKey||event.altKey||event.metaKey||event.shiftKey||!stockReloadReady)return;
+  event.preventDefault();event.stopImmediatePropagation();stockSaveReloadView();
+  const previousView=sessionStorage.getItem(stockReloadKey+'_view');document.activeElement?.blur();
+  try{await flushRowsSave();await stockSaveReloadSnapshot();if(previousView)sessionStorage.setItem(stockReloadKey+'_view',previousView);location.reload();}catch(error){show('No se pudo guardar la vista. No se recargó la página.');}
+},true);
 function flushRowsSave() {
   clearTimeout(rowsSaveTimer);
   rowsSaveTimer = null;
@@ -928,6 +1013,7 @@ function flushRowsSave() {
   return rowsSavePromise;
 }
 function saveRows() {
+  stockScheduleReloadSnapshot();
   clearTimeout(rowsSaveTimer);
   rowsSaveTimer = setTimeout(flushRowsSave, 250);
 }
@@ -1427,6 +1513,33 @@ stockAdditionalPopup.innerHTML = '<section class="stock-additional-window" role=
 stockAdditionalAnchor.before(stockAdditionalPopup);
 let stockAdditionalReturnFocus = null;
 let stockAdditionalSwitching=false;
+let stockAdditionalSqlSync=Promise.resolve();
+function stockSyncAdditionalProvider(nextProvider,{clear=false,workspace=null}={}){
+  const chosen=nextProvider?{...nextProvider}:null;
+  const text=chosen?providerLabel(chosen):'';
+  const activeNumber=Math.max(1,Number(localStorage.getItem('corralon_stock_two_drafts_v1_additional_active'))||1);
+  const number=workspace==null?activeNumber:Number(workspace);
+  stockAdditionalSqlSync=stockAdditionalSqlSync.catch(()=>{}).then(async()=>{
+    await rowsSavePromise;
+    const key='corralon_stock_two_drafts_v1_additional_'+number;
+    const saved=clear?stockBlankWorkspace():(await window.CorralonCacheDB.get(key)||stockBlankWorkspace());
+    saved.provider=chosen;saved.providerText=text;
+    if(clear){saved.rows=[];saved.pending=null;saved.costsOpen=true;}
+    await window.CorralonCacheDB.set(key,saved);
+    if(number===activeNumber){
+      if(chosen)localStorage.setItem('corralon_carga_stock_provider_v1_additional',String(chosen.id_proveedor));
+      else localStorage.removeItem('corralon_carga_stock_provider_v1_additional');
+    }
+    if(clear&&number===activeNumber){
+      await window.CorralonCacheDB.set('corralon_carga_stock_rows_v1_additional',[]);
+      localStorage.removeItem('corralon_carga_stock_rows_v1_additional');
+      localStorage.removeItem('corralon_stock_ingreso_sql_v1_additional');
+      localStorage.setItem('corralon_stock_header_v1_additional',JSON.stringify(saved.header));
+    }
+  });
+  return stockAdditionalSqlSync;
+}
+
 async function stockSetAdditionalContext(additional){
   localStorage.setItem(STOCK_WORKSPACE_KEY+'_active',String(stockActiveWorkspace));
   localStorage.setItem(STOCK_WORKSPACE_KEY+'_count',String(stockWorkspaceCount));
@@ -1444,6 +1557,9 @@ async function stockSetAdditionalContext(additional){
 const stockAdditionalProvider = document.getElementById('providerCombo').closest('label');
 const stockAdditionalProviderAnchor = document.createComment('Proveedor de carga SQL');
 stockAdditionalProvider.before(stockAdditionalProviderAnchor);
+const stockAdditionalFilter= document.getElementById('stockArticleFilter').closest('label');
+const stockAdditionalFilterAnchor=document.createComment('Filtro de artículos de carga SQL');
+stockAdditionalFilter.before(stockAdditionalFilterAnchor);
 const stockAdditionalCompare = document.createElement('button');
 stockAdditionalCompare.id='stockAdditionalCompare';stockAdditionalCompare.type='button';stockAdditionalCompare.textContent='Comparar';
 document.getElementById('copyBtn').before(stockAdditionalCompare);
@@ -1455,12 +1571,17 @@ stockAdditionalSql.addEventListener('click',async()=>{
   if(stockIngresoBusy || stockPedidoBusy || stockAdditionalSwitching)return;
   document.activeElement?.blur();
   const sourceProvider=provider?{...provider}:null,sourceText=el.providerInput.value;
+  const sourceWorkspace=stockActiveWorkspace,transferToken=stockIngresoUuid();
+  const sourceHeader=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
+  sourceHeader.stockAdditionalTransferToken=transferToken;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(sourceHeader));
+  const sourceSignature=JSON.stringify(rowsData);
   const sourceRows=rowsData.filter(row=>!isBlankStockRow(row)).map(row=>({codigo:String(row.codigo||'').trim(),cantidad:row.cantidad}));
   await stockCloseAdditionalOptions();
   const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
   if(pending?.status==='uncertain'){stockIngresoMessage('Recuperá primero la confirmación pendiente de la carga SQL. Los artículos siguen guardados en Opciones adicionales.','error');return;}
   if(stockConfirmed)await stockNewWorkspace();
   const next=stockWorkspaceSnapshot();next.rows=sourceRows;next.provider=sourceProvider;next.providerText=sourceText;
+  next.header.stockAdditionalOrigin={workspace:sourceWorkspace,token:transferToken,signature:sourceSignature};
   next.pending=null;
   await stockSwitchWorkspace(stockActiveWorkspace,{discardCurrent:true,nextSnapshot:next});
   rowsData.forEach(row=>{
@@ -1483,9 +1604,12 @@ async function stockOpenAdditionalOptions() {
   document.activeElement?.blur();
   stockFreeze(true);
   await flushRowsSave();
+  await stockAdditionalSqlSync;
+  const sqlProvider=selectedProvider();
+  if(sqlProvider)await stockSyncAdditionalProvider(sqlProvider);
   closeProviderList();closeArticleProviderList();
   stockAdditionalPopup.querySelector('.stock-additional-content').append(stockAdditionalApp);
-  document.querySelector('#stockCostOptions .toolbar').prepend(stockAdditionalProvider);
+  document.querySelector('#stockCostOptions .toolbar').prepend(stockAdditionalProvider,stockAdditionalFilter);
   document.querySelector('.header-actions').append(document.getElementById('stockAdditionalClose'));
   stockAdditionalPopup.classList.add('visible');
   document.body.classList.add('stock-additional-open');
@@ -1507,6 +1631,7 @@ async function stockCloseAdditionalOptions() {
   closeProviderList();closeArticleProviderList();
   stockAdditionalAnchor.after(stockAdditionalApp);
   stockAdditionalProviderAnchor.after(stockAdditionalProvider);
+  stockAdditionalFilterAnchor.after(stockAdditionalFilter);
   stockAdditionalCloseAnchor.after(document.getElementById('stockAdditionalClose'));
   stockAdditionalPopup.classList.remove('visible');
   document.body.classList.remove('stock-additional-open');
@@ -1666,6 +1791,7 @@ function hideArticleProviderToggle() {
   articleProviderButtonCell = null;
 }
 async function loadProviderArticles() {
+  if(stockReloadRestoring)return;
   const seq = ++providerArticlesLoadSeq;
   stockProviderListArticles = [];
   stockRebuildArticleOptions();
@@ -1675,6 +1801,14 @@ async function loadProviderArticles() {
   if (seq !== providerArticlesLoadSeq) return;
   stockProviderListArticles = articles.map(item => ({...item,source:'proveedores',codProv:item.codProv || item.codigo || ''}));
   stockRebuildArticleOptions();
+  stockScheduleReloadSnapshot();
+}
+function stockDescriptionMatchesOnly(){
+  try{return localStorage.getItem('corralon_stock_description_matches_only_v1')==='1';}catch{return false;}
+}
+function stockToggleDescriptionFilter(){
+  const next=!stockDescriptionMatchesOnly();
+  try{localStorage.setItem('corralon_stock_description_matches_only_v1',next?'1':'0');}catch{}
 }
 function filteredProviderArticles(cell) {
   const rowIndex = Number(cell?.dataset?.row);
@@ -1685,6 +1819,7 @@ function filteredProviderArticles(cell) {
   const duplicateMatches = bySqlId && !stockCostOptionsActive() ? stockMatchesForRow(row) : [];
   const choosingDuplicate = duplicateMatches.length > 1 && (!typedId || normalizedId === String(row.idart || '').padStart(6, '0'));
   if (choosingDuplicate) {
+    articleProviderHasSearchMatch = true;
     articleProviderPage = CorralonSystem.articleOptionPager.create(duplicateMatches, {
       isMatch: () => true, hasSearch: false, matchLimit: 100
     });
@@ -1714,7 +1849,8 @@ function filteredProviderArticles(cell) {
     matchingArticles = ordered.filter(item => String(item.idart) === String(row.idart) && codeKey(item.codProv) === typedCode);
     linkedArticleMatch = matchingArticles.length > 0;
   }
-  articleProviderPage = CorralonSystem.articleOptionPager.create(matchingArticles, {
+  articleProviderHasSearchMatch = matchingArticles.length > 0;
+  articleProviderPage = CorralonSystem.articleOptionPager.create(cell?.dataset?.field === 'descripcion' && !stockDescriptionMatchesOnly() ? ordered : matchingArticles, {
     preordered: true,
     isMatch: item => linkedArticleMatch || matches(item),
     rank: exactRank,
@@ -1729,12 +1865,16 @@ function renderArticleProviderList() {
   el.articleProviderMenu.innerHTML = articleProviderOptions.length
     ? articleProviderOptions.map((item, index) => `<div class="article-provider-option${item.source !== 'proveedores' ? ' sql-option' : ''}${index === articleProviderActive ? ' active' : ''}" data-article-option="${index}"><b>${escapeHtml(item.codProv || '-')}</b>${item.source !== 'proveedores' ? `<span title="IDArt">${escapeHtml(item.idart || '')}</span>` : ''}<span>${escapeHtml(item.descripcion || '')}</span>${item.source !== 'proveedores' ? `<span class="sql-cost" title="Costo sin IVA SQL">${money(stockSelectedArticleCost(item))}</span>` : ''}</div>`).join('')
     : '<div class="article-provider-option"><span>Sin coincidencias</span></div>';
+  if(articleProviderCell?.dataset?.field==='descripcion'){
+    const filtered=stockDescriptionMatchesOnly(),hasQuery=Boolean(norm(articleProviderCell.textContent));
+    el.articleProviderMenu.insertAdjacentHTML('beforeend',`<button type="button" class="stock-description-filter" data-description-filter aria-pressed="${filtered}" ${hasQuery?'':'disabled'}>${filtered?'▾ Mostrar lista':'▴ Filtrar'}</button>`);
+  }
   if (stockCanOfferArticleImport(articleProviderCell)) {
     el.articleProviderMenu.insertAdjacentHTML('afterbegin', `<div class="article-provider-option${articleProviderActive === -1 ? ' active' : ''}" data-article-create style="color:var(--corralon-red,#f50916);font-weight:bold;cursor:pointer"><span>Cargar artículo: ${escapeHtml(articleProviderCell.textContent.trim())}</span></div>`);
   }
 }
 function stockCanOfferArticleImport(cell) {
-  return cell?.dataset.field==='descripcion' && Boolean(String(cell.textContent||'').trim()) && !articleProviderOptions.length && Boolean(selectedProvider()) && !stockConfirmed && !stockIngresoBusy;
+  return cell?.dataset.field==='descripcion' && Boolean(String(cell.textContent||'').trim()) && !articleProviderHasSearchMatch && Boolean(selectedProvider()) && !stockConfirmed && !stockIngresoBusy;
 }
 function stockImportArticleFromCell(cell) {
   if (!stockCanOfferArticleImport(cell)) return;
@@ -1867,6 +2007,7 @@ function setProvider(nextProvider, options = {}) {
   render();
   loadProviderArticles().catch(error => stockIngresoMessage(error.message, 'error'));
   stockRebuildArticleOptions(); stockRefreshRelations();
+  if(!stockWorkspaceSwitching&&!stockAdditionalSwitching&&!document.body.classList.contains('stock-additional-open'))stockSyncAdditionalProvider(provider).catch(error=>console.warn('No se pudo compartir el proveedor con Opciones adicionales',error));
 }
 function applyProvider() {
   const text = norm(el.providerInput.value);
@@ -2676,7 +2817,11 @@ function placeCaretOnMouseClick(target, event) {
 }
 function moveTableNavigation(cell, rowDelta, colDelta) {
   const position = editableCellPosition(cell);
-  const columns = stockCostOptionsActive() ? [0, 7, 1, 2, 3, 4, 5, 6] : [0, 7, 1, 2, 3, 6];
+  const columnOrder = stockCostOptionsActive() ? [0, 7, 1, 2, 3, 4, 5, 6] : [0, 7, 1, 2, 3, 6];
+  const columns = columnOrder.filter(col=>{
+    const target=editableCellAt(position.row+rowDelta,col);
+    return target&&!target.disabled&&target.getClientRects().length>0;
+  });
   const nextCol = colDelta ? columns[columns.indexOf(position.col) + colDelta] : position.col;
   const next = editableCellAt(position.row + rowDelta, nextCol);
   return focusNavigationTarget(next);
@@ -4481,6 +4626,8 @@ function stockHeaderSave() {
   if (stockConfirmed) return;
   const savedHeader=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
   const header = savedHeader.stockPedidoOrigen ? {stockPedidoOrigen:savedHeader.stockPedidoOrigen} : {};
+  if(savedHeader.stockAdditionalOrigin)header.stockAdditionalOrigin=savedHeader.stockAdditionalOrigin;
+  if(savedHeader.stockAdditionalTransferToken)header.stockAdditionalTransferToken=savedHeader.stockAdditionalTransferToken;
   document.querySelectorAll('[data-stock-header]').forEach(field => header[field.id] = field.type === 'checkbox' ? field.checked : field.value);
   localStorage.setItem(STOCK_HEADER_KEY, JSON.stringify(header));
   if (stockWorkspaceReady && !stockWorkspaceSwitching) saveRows();
@@ -4564,6 +4711,7 @@ async function stockCancelWorkspace() {
   finally{stockWorkspaceSwitching=false;stockFreeze(stockConfirmed);stockWorkspaceIndicator();}
 }
 async function stockSqlGet(query = '', params = {}) {
+  if(stockReloadRestoring)throw new Error('La vista se está recuperando localmente.');
   const search = new URLSearchParams({consulta:query, sucursal:stockField('stockIngresoSucursal').value, proveedor:String(stockProviderId()), ...params, usuarioId: FX.menuSessionUser()?.id || ''});
   const response = await fetch(`/api/facturacion/stock-ingreso?${search}`, {cache:'no-store'});
   const data = await response.json();
@@ -4946,7 +5094,7 @@ function stockSqlArticlesForProvider() {
   return providerId ? stockSqlArticles.filter(article => Number(article.proveedor) === providerId) : stockSqlArticles;
 }
 function stockUsesProviderList() {
-  return document.body.classList.contains('stock-additional-open') || stockField('stockArticleFilter').value === 'listas';
+  return stockField('stockArticleFilter').value === 'listas';
 }
 function stockRebuildArticleOptions() {
   providerArticles = stockUsesProviderList() ? (provider ? stockProviderListArticles : []) : (stockField('stockArticleFilter').value === 'proveedor-sql') && provider ? stockSqlArticles.filter(article=>Number(article.proveedor)===stockProviderId()) : stockSqlArticles;
@@ -5046,9 +5194,17 @@ function stockFreeze(value) {
   ['stockNewBtn','stockCancelBtn','stockConsultBtn','stockPrevBtn','stockNextBtn'].forEach(id => stockField(id).disabled=stockIngresoBusy||stockPedidoBusy);
   if (stockWorkspaceReady) stockWorkspaceIndicator();
 }
+async function stockClearConfirmedAdditional(origin){
+  if(!origin?.token||!origin.workspace)return false;
+  await stockAdditionalSqlSync;await rowsSavePromise;
+  const saved=await window.CorralonCacheDB.get('corralon_stock_two_drafts_v1_additional_'+origin.workspace);
+  if(saved?.header?.stockAdditionalTransferToken!==origin.token||JSON.stringify(saved.rows)!==origin.signature)return false;
+  await stockSyncAdditionalProvider(null,{clear:true,workspace:origin.workspace});
+  return true;
+}
 async function confirmStockIngreso() {
   if (stockIngresoBusy || stockPedidoBusy || stockConfirmed) return;
-  let confirmedNumber=null;
+  let confirmedNumber=null,confirmedAdditionalOrigin=null;
   let budgetResolutionWarning = '';
   try {
     document.activeElement?.blur();
@@ -5056,6 +5212,8 @@ async function confirmStockIngreso() {
     let pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
     const data=pending?.status==='uncertain' ? JSON.parse(pending.fingerprint) : stockIngresoData(), fingerprint=JSON.stringify(data);
     if (!pending || pending.fingerprint !== fingerprint) pending={id:stockIngresoUuid(),fingerprint,status:'draft',presupuestosWeb:[...new Set(rowsData.filter(row=>!isBlankStockRow(row)).map(row=>row.presupuestoWeb).filter(Boolean))]};
+    if(pending.status!=='uncertain')pending.additionalOrigin=Number(data.tipoMovimiento)===23?JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}').stockAdditionalOrigin||null:null;
+    confirmedAdditionalOrigin=pending.additionalOrigin||null;
     stockIngresoBusy=true; stockFreeze(true); stockIngresoMessage('Verificando y confirmando el movimiento en SQL…');
     CorralonSystem.articleSync.set('syncing', 'Verificando el movimiento en SQL…');
     const request={...data,id:pending.id};
@@ -5095,6 +5253,9 @@ async function confirmStockIngreso() {
   }
   finally { stockIngresoBusy=false; stockFreeze(stockConfirmed); }
   if(confirmedNumber!==null){
+    if(!document.body.classList.contains('stock-additional-open')){
+      try{await stockClearConfirmedAdditional(confirmedAdditionalOrigin)}catch(error){console.warn(error);budgetResolutionWarning+='\nNo se pudo limpiar la copia local de Opciones adicionales.';}
+    }
     await htmlNotice(`Movimiento confirmado\nNº ${confirmedNumber}${budgetResolutionWarning}`, false);
     if (stockWorkspaceCount > 1) {
       await stockCancelWorkspace();
@@ -5146,6 +5307,7 @@ function stockMovementFields() {
 }
 let stockRelationsRequest=0;
 async function stockRefreshRelations() {
+  if(stockReloadRestoring)return;
   if(!stockSqlMeta) return;
   const request=++stockRelationsRequest,context=STOCK_WORKSPACE_KEY+':'+stockActiveWorkspace;
   try {
@@ -5165,7 +5327,7 @@ async function stockReset() {
   if(pending?.status==='uncertain'){stockIngresoMessage('Reintentá Confirmar para recuperar el ingreso pendiente antes de limpiar la pantalla.','error');return false;}
   if(!stockConfirmed && rowsData.some(row=>!isBlankStockRow(row)) && !(await htmlNotice('¿Descartar esta carga sin confirmar?'))) return false;
   pushUndoSnapshot(); rowsData=[]; stockConfirmed=false; localStorage.removeItem(STOCK_INGRESO_DRAFT_KEY);
-  const headerForNew=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');delete headerForNew.stockPedidoOrigen;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(headerForNew));
+  const headerForNew=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');delete headerForNew.stockPedidoOrigen;delete headerForNew.stockAdditionalOrigin;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(headerForNew));
   ['stockNumero','stockIngresoFactura','stockRemito','stockIngresoNota','stockCompra','stockRelacionado','stockDestino'].forEach(id=>stockField(id).value='');
   stockField('stockTipoMovimiento').value='23'; stockField('stockFecha').value=stockToday(); stockField('stockPrintBtn').hidden=true;
   el.providerInput.value='';
@@ -5434,7 +5596,7 @@ async function stockOpenMovementPopup(index){
       <div class="stock-popup-table"><table><thead><tr><th>IDArt</th><th>CodProv</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th><th>Stock actual</th></tr></thead><tbody>${lines.map((line,rowIndex)=>`<tr data-movement-row="${rowIndex}" class="${rowIndex===0?'selected':''}"><td>${escapeHtml(line.idart)}</td><td>${escapeHtml(line.codigo||'')}</td><td>${escapeHtml(line.descripcion)}</td><td class="num">${escapeHtml(Number(line.cantidad||0).toLocaleString('es-AR'))}</td><td class="num">${money(line.precioUnitario)}</td><td class="num">${money(line.importe)}</td><td class="num">${escapeHtml(Number(line.stock||0).toLocaleString('es-AR'))}</td></tr>`).join('')}</tbody></table></div>
       <div class="stock-movement-totals"><span>${lines.length} artículos · ${escapeHtml(units.toLocaleString('es-AR'))} unidades</span><span>Total movimiento: <output>${money(item.total)}</output></span></div>
       <div class="stock-movement-bottom"><span><b>IDArt:</b> <output data-selected-movement-article>${escapeHtml(lines[0]?.idart||'—')}</output></span><span><b>Nº Factura:</b> ${escapeHtml(item.factura||'—')}</span><strong>Total: <output>${money(item.total)}</output></strong></div>
-      <div class="stock-movement-actions"><button type="button" data-copy-movement>Copiar contenido</button><button type="button" data-print-movement>Imprimir</button><button type="button" data-cancel-movement style="color:var(--corralon-red,#ed0012)">Anular carga</button></div>
+      <div class="stock-movement-actions"><button type="button" data-copy-movement>Copiar contenido</button>${Number(item.tipo)===23&&!item.anulado&&FX.menuUserIsAdministrator('carga_stock')?'<button type="button" data-send-movement-order>Enviar a pedidos</button>':''}<button type="button" data-print-movement>Imprimir</button><button type="button" data-cancel-movement style="color:var(--corralon-red,#ed0012)">Anular carga</button></div>
       <p data-movement-status role="status" style="margin:0"></p>
       <div class="stock-popup-footer"><span>${escapeHtml(note)}</span></div>`;
     popup.querySelectorAll('[data-movement-row]').forEach(row=>row.addEventListener('click',()=>{popup.querySelectorAll('[data-movement-row]').forEach(other=>other.classList.toggle('selected',other===row));popup.querySelector('[data-selected-movement-article]').textContent=lines[Number(row.dataset.movementRow)].idart;}));
@@ -5444,6 +5606,9 @@ async function stockOpenMovementPopup(index){
       copyTextForContextMenu(text);
       popup.querySelector('[data-movement-status]').textContent='Contenido copiado. En una carga nueva, elegí la sucursal y el proveedor y pegá en la tabla con Ctrl+V.';
     };
+    popup.querySelector('[data-send-movement-order]')?.addEventListener('click',event=>{
+      try{cargarStockEnPedidos(stockPedidoContextForMovement(item,lines,event.currentTarget))}catch(error){popup.querySelector('[data-movement-status]').textContent=error.message;show(error.message)}
+    });
     const purchaseSelect=popup.querySelector('[data-movement-purchase]');
     if(purchaseSelect){
       const purchaseList=document.createElement('div');
@@ -5649,7 +5814,7 @@ document.querySelectorAll('#stockIngresoSucursal,#stockTipoMovimiento,#stockDest
     buttons[stockHeaderOptionIndex]?.scrollIntoView({block:'nearest'});
   });
 });
-document.addEventListener('pointerdown',event=>{if(!event.target.closest('#stockHeaderOptions,.stock-entry select,.stock-provider select'))stockCloseHeaderOptions();});
+document.addEventListener('pointerdown',event=>{if(!event.target.closest('#stockHeaderOptions,#stockIngresoSucursal,#stockTipoMovimiento,#stockDestino,#stockArticleFilter'))stockCloseHeaderOptions();});
 window.addEventListener('resize',stockCloseHeaderOptions);window.addEventListener('blur',stockCloseHeaderOptions);
 document.addEventListener('keydown',event=>{
   if(event.key!=='Escape')return;
@@ -5765,39 +5930,62 @@ FX.bindLinearNavigation({root:document.querySelector('.app'),selector:'[data-sto
   navigateLeftRight:true,smartCaret:true,selectOnAnyFocus:true,selectOnFirstPointerFocus:true});
 stockField('stockRelacionado').addEventListener('change',async()=>{if(!stockField('stockRelacionado').value)return;if(rowsData.some(row=>!isBlankStockRow(row))&&!(await htmlNotice('¿Reemplazar las filas por las cantidades pendientes del comprobante?'))){stockField('stockRelacionado').value='';return;}try{const result=await stockSqlGet('pendientes',{recibo:stockField('stockRelacionado').value});rowsData=(result.articulos||[]).map(line=>normalizeRow({idart:line.idart,codigo:line.codigo||'',descripcion:line.descripcion,cantidad:line.cantidad,precio:precioUnitarioDesdeFinal({},line.precioUnitario)}));render();saveRows();stockHeaderSave();}catch(error){stockIngresoMessage(error.message,'error');}});
 
+function stockPedidoContextForMovement(item,lines,button){
+  if(Number(item.tipo)!==23||item.anulado)throw new Error('Seleccioná una compra de mercadería confirmada y no anulada.');
+  const current=providers.find(provider=>String(CorralonSystem.providerIdentity.externalId(provider))===String(item.proveedor));
+  if(!current)throw new Error('No se encontró el proveedor de esta compra. Actualizá la lista de proveedores.');
+  const date=FX.parseFechaFlexible(item.fecha);
+  if(!date)throw new Error('La compra no tiene una fecha válida.');
+  const movement={fecha:`${date.year}-${String(date.month).padStart(2,'0')}-${String(date.day).padStart(2,'0')}`,sucursal:Number(item.sucursal),tipoMovimiento:23,nota:String(item.nota||'').replace(/\[WEBSTOCK:[^\]]*\]\[HASH:[^\]]*\]\s*/,''),articulos:lines};
+  const details=lines.map(line=>{
+    const article=stockSqlById.get(String(line.idart));
+    const iva=Number(line.iva??article?.iva);
+    if(!Number.isFinite(iva))throw new Error(`No se pudo determinar el IVA del artículo ${line.idart}.`);
+    const cantidad=Number(line.cantidad),precioSiva=Number(line.precioUnitario),precioCiva=Math.round(precioSiva*(1+iva)*10000)/10000;
+    if(!(cantidad>0)||!Number.isFinite(precioSiva)||precioSiva<0)throw new Error(`Revisá cantidad y precio del artículo ${line.idart}.`);
+    return {localUid:stockIngresoUuid(),codProv:String(line.codigo||''),filtro:String(line.idart),articulo:String(line.descripcion||''),cantidad:String(cantidad),precioSiva,precioCiva,subtotal:Math.round(precioCiva*cantidad*100)/100,antes:0,proveedor:current.proveedor||'',idProveedor:String(current.id_proveedor||''),listaOrigen:'corralon'};
+  });
+  const branchName=stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||'';
+  return {movement,current,details,button,branchName,source:`mov_${item.sucursal}_${item.numero}`,confirmedNumber:Number(item.numero)||null};
+}
 let stockPedidoBusy=false;
-async function cargarStockEnPedidos(){
+async function cargarStockEnPedidos(sourceContext=null){
   if(stockPedidoBusy||stockIngresoBusy||stockWorkspaceSwitching)return;
-  const button=document.getElementById('compareStockBtn');
+  sourceContext=sourceContext?.movement?sourceContext:null;
+  const button=sourceContext?.button||document.getElementById('compareStockBtn');
   try{
     const actor=FX.menuSessionUser();
     if(!FX.menuUserIsAdministrator('carga_stock',actor))throw new Error('Solo los administradores pueden marcar un pedido como pedido confirmado.');
-    const current=selectedProvider();if(!current)throw new Error('Seleccioná el proveedor del movimiento.');
-    if(Number(stockField('stockTipoMovimiento').value)!==23)throw new Error('Esta opción es para compras de mercadería.');
-    const movement=stockIngresoData();
+    const current=sourceContext?.current||selectedProvider();if(!current)throw new Error('Seleccioná el proveedor del movimiento.');
+    if(Number(sourceContext?.movement.tipoMovimiento??stockField('stockTipoMovimiento').value)!==23)throw new Error('Esta opción es para compras de mercadería.');
+    const movement=sourceContext?.movement||stockIngresoData();
     const list=rowsData.filter(row=>!isBlankStockRow(row));
-    const details=list.map((row,index)=>{
+    const details=sourceContext?.details||list.map((row,index)=>{
       const article=stockArticleForRow(row),line=movement.articulos[index];
       const iva=Number(article?.iva)||0,precioSiva=line.precioUnitario,precioCiva=Math.round(precioSiva*(1+iva)*10000)/10000;
       return {localUid:stockIngresoUuid(),codProv:String(row.codigo||''),filtro:String(line.idart),articulo:String(row.descripcion||article?.descripcion||''),cantidad:String(line.cantidad),precioSiva,precioCiva,subtotal:Math.round(precioCiva*line.cantidad*100)/100,antes:0,proveedor:current.proveedor||'',idProveedor:String(current.id_proveedor||''),listaOrigen:'corralon'};
     });
     const total=Math.round(details.reduce((sum,row)=>sum+row.subtotal,0)*100)/100;
     if(!(total>0))throw new Error('El movimiento necesita un importe mayor a cero.');
+    const sqlName=String(sourceContext?sourceContext.branchName:(stockField('stockIngresoSucursal').selectedOptions[0]?.textContent||'')).toLowerCase();
+    let branch=/calle\s*5|espa[nñ]a/.test(sqlName)?'calle5_espana':/progreso|ruta/.test(sqlName)?'progreso_ruta':'';
+    if(sourceContext&&!branch)throw new Error('No se pudo identificar la sucursal de esta compra.');
+    stockPedidoBusy=true;button.disabled=true;stockFreeze(true);
+    if(!sourceContext){
     const popup=document.createElement('dialog');popup.style.cssText='width:min(480px,90vw);padding:18px;border:1px solid #bbb;border-radius:10px;font:14px Arial';
     popup.innerHTML=`<h3 style="margin:0 0 12px">Cargar en Pedidos</h3><p>${escapeHtml(current.proveedor||'')} · ${details.length} artículos</p><p>Total con IVA: <b>${money(total)}</b></p><label>Sucursal <select style="margin:8px" data-branch><option value="">Seleccionar sucursal</option>${CorralonSystem.BRANCHES.map(branch=>`<option value="${branch.id}">${escapeHtml(branch.label)}</option>`).join('')}</select></label><p>Se guardará confirmado y marcado como Pedido, y contará en el consumo mensual.</p><div style="display:flex;justify-content:flex-end;gap:8px"><button type="button" data-cancel>Cancelar</button><button type="button" data-save>Cargar en Pedidos</button></div>`;
-    const sqlName=String(stockField('stockIngresoSucursal').selectedOptions[0]?.textContent||'').toLowerCase();
     const branchField=popup.querySelector('[data-branch]');
-    branchField.value=/calle\s*5|espa[nñ]a/.test(sqlName)?'calle5_espana':/progreso|ruta/.test(sqlName)?'progreso_ruta':'';
+    branchField.value=branch;
     document.body.append(popup);popup.showModal();
-    stockPedidoBusy=true;button.disabled=true;stockFreeze(true);
-    const branch=await new Promise(resolve=>{
+    branch=await new Promise(resolve=>{
       popup.querySelector('[data-cancel]').onclick=()=>resolve('');
       popup.addEventListener('cancel',event=>{event.preventDefault();resolve('');});
       popup.querySelector('[data-save]').onclick=()=>{if(!branchField.value){branchField.focus();return;}resolve(branchField.value);};
     });
     popup.close();popup.remove();if(!branch)return;
+    }
     CorralonSystem.articleSync.set('syncing','Cargando el movimiento en Pedidos…',{progress:5});
-    const header=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
+    const header=sourceContext?{stockPedidoOrigen:sourceContext.source}:JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
     if(!header.stockPedidoOrigen){header.stockPedidoOrigen=stockConfirmed?`mov_${movement.sucursal}_${stockField('stockNumero').value}`:`draft_${stockIngresoUuid()}`;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(header));await flushRowsSave();}
     const source=header.stockPedidoOrigen;
     const sourceRef=doc(db,'configuracion',`stockPedido_${source}`),counterRef=doc(db,'configuracion','pedidosNumeracion');
@@ -5819,7 +6007,7 @@ async function cargarStockEnPedidos(){
       const orderDocId=`${next}__${actor.id}`,orderRef=doc(db,'pedidos',orderDocId);
       const existing=await transaction.get(orderRef);if(existing.exists())throw new Error('El número de pedido ya está usado. Volvé a intentar.');
       const stamp=Date.now();
-      const payload={id:String(next),_docId:orderDocId,idProveedor:String(current.id_proveedor||''),proveedor:current.proveedor||'',sucursalId:branch,sucursal:branchInfo.label,fecha:movement.fecha,total,nota:movement.nota,detalles:details,confirmado:true,pedido:true,estadoPedido:'pedido',eliminado:false,revisionOwner:null,usarListaProveedor:false,listaOrigen:'corralon',usuarioId:String(actor.id),usuarioKey:String(actor.id),usuarioNombre:actor.nombre||actor.usuario||'',usuarioLogin:actor.usuario||'',usuarioNivel:actor.nivel||'',syncId:stamp*1000+Math.floor(Math.random()*1000),updatedAt:stamp,origen:'carga-stock',movimientoStock:stockConfirmed?Number(stockField('stockNumero').value)||null:null,origenStock:source};
+      const payload={id:String(next),_docId:orderDocId,idProveedor:String(current.id_proveedor||''),proveedor:current.proveedor||'',sucursalId:branch,sucursal:branchInfo.label,fecha:movement.fecha,total,nota:movement.nota,detalles:details,confirmado:true,pedido:true,estadoPedido:'pedido',eliminado:false,revisionOwner:null,usarListaProveedor:false,listaOrigen:'corralon',usuarioId:String(actor.id),usuarioKey:String(actor.id),usuarioNombre:actor.nombre||actor.usuario||'',usuarioLogin:actor.usuario||'',usuarioNivel:actor.nivel||'',syncId:stamp*1000+Math.floor(Math.random()*1000),updatedAt:stamp,origen:'carga-stock',movimientoStock:sourceContext?sourceContext.confirmedNumber:(stockConfirmed?Number(stockField('stockNumero').value)||null:null),origenStock:source};
       transaction.set(orderRef,payload);
       transaction.set(counterRef,{ultimoNumero:next,updatedAt:serverTimestamp()},{merge:true});
       transaction.set(sourceRef,{numero:String(next),pedidoDocId:orderDocId,createdAt:serverTimestamp()});
@@ -6494,6 +6682,7 @@ el.rows.addEventListener('keydown', (event) => {
   }
 });
 el.articleProviderMenu.addEventListener('mousedown', (event) => {
+  if(event.target.closest('[data-description-filter]')){event.preventDefault();if(norm(articleProviderCell?.textContent)){stockToggleDescriptionFilter();openArticleProviderList(articleProviderCell);}return;}
   if (event.target.closest('[data-article-create]')) { event.preventDefault(); stockImportArticleFromCell(articleProviderCell); return; }
   const option = event.target.closest('[data-article-option]');
   if (!option) return;
@@ -6637,6 +6826,11 @@ document.querySelector('.table-wrap').addEventListener('keydown', (event) => {
 
 initFuncionesJsBindings();
 (async()=>{
+  if(await stockRestoreReloadView()){
+    await loadPriceComparisons();
+    import('./local-article-sync.js').then(module=>module.resumeQueue({localOnly:true})).catch(console.warn);
+    return;
+  }
   await Promise.all([loadRows(), loadPriceComparisons()]);
   render();
   const stockReady = initStockSql();
@@ -6660,10 +6854,11 @@ initFuncionesJsBindings();
   render();
   stockInvoiceReady = true;
   await stockReceiveInvoice();
+  stockReloadReady=true;await stockSaveReloadSnapshot();
 })().catch(console.warn);
 </script>
 <script type="module" id="stockLocalArticleImporterModule">
-import {enqueue, resumeQueue} from './local-article-sync.js';
+import {enqueue, resumeQueue, recoverDraft} from './local-article-sync.js';
 
 // Loaded by the SQL importer on localhost or Tailscale. No database credentials reach the browser.
 const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
@@ -6745,6 +6940,7 @@ async function open(options) {
   let draftWrite=Promise.resolve();
   let menu = null, menuInput = null, menuIndex = -1, menuKind = '', matches = [];
   let articlePage = null, articleHasMatch = false;
+  let showSuspended = false;
   let articleContext = null, articleEditor = null;
   function hideArticleContext() { articleContext?.remove(); articleContext = null; }
   function existingImporterArticles(row) {
@@ -6849,9 +7045,9 @@ async function open(options) {
   function flushDraft(strict = false) { clearTimeout(draftSaveTimer); draftSaveTimer = 0; return saveDraft(strict); }
   async function loadDraft() {
     try {
-      const draft = (draftCache ? await draftCache.read(draftKey(providerId)) : null) || JSON.parse(window.localStorage.getItem(draftKey(providerId)) || 'null');
+      const draft = await recoverDraft(providerId) || (draftCache ? await draftCache.read(draftKey(providerId)) : null) || JSON.parse(window.localStorage.getItem(draftKey(providerId)) || 'null');
       return draft && Array.isArray(draft.rows) && draft.rows.length && draft.rows.every(row => row && typeof row.codigo === 'string' && typeof row.descripcion === 'string') ? draft : null;
-    } catch { return null; }
+    } catch(error) { throw new Error(`No se pudo recuperar el borrador del importador. No se reemplazó la carga pendiente: ${error.message}`); }
   }
   function hideMenu() { menu?.remove(); menu = null; menuInput = null; menuIndex = -1; menuKind = ''; }
   function close(discard = false) {
@@ -6967,9 +7163,10 @@ async function open(options) {
     const requestId = row.lookup = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
     setStatus('Leyendo los datos actuales del artículo…');
     try {
-      const article = await api(`article?id=${encodeURIComponent(id)}`);
+      const article = await api(`article?id=${encodeURIComponent(id)}${showSuspended?'&suspendidos=1':''}`);
       if (!backdrop.isConnected || row.lookup !== requestId || row.mode !== 'update') return;
       row.original = article; row.id = article.id; row.version = article.version;
+      row.reactivar = article.suspendido===true || Number(article.suspendido)===1;
       row.descripcion = article.descripcion; row.rubro = Number(article.rubro); row.iva = Number(article.iva);
       row.margen = Number(article.margen)*100; row.originalMargin = row.margen;
       if (sourceInput) finishFieldEdit(sourceInput);
@@ -7011,6 +7208,9 @@ async function open(options) {
       }
     }});
   }
+  function descriptionMatchesOnly(){
+    try{return localStorage.getItem('corralon_stock_description_matches_only_v1')==='1';}catch{return false;}
+  }
   function search(input, row) {
     hideMenu(); menuInput = input; menuKind = 'article';
     const queryText = input.value;
@@ -7028,7 +7228,7 @@ async function open(options) {
       return value;
     };
     const isMatch = article => Number.isFinite(filterRank(article));
-    articlePage = window.CorralonSystem.articleOptionPager.create(catalogSorted, {
+    articlePage = window.CorralonSystem.articleOptionPager.create(descriptionMatchesOnly() && query ? catalogSorted.filter(isMatch) : catalogSorted, {
       key: article => String(article.id),
       description: article => article.descripcion,
       isMatch,
@@ -7047,7 +7247,23 @@ async function open(options) {
     if (openUp) menu.style.bottom = `${innerHeight-rect.top+3}px`; else menu.style.top = `${rect.bottom+3}px`;
     renderArticleMenu(query);
     menu.addEventListener('mousedown', e => e.preventDefault());
-    menu.addEventListener('click', e => { const button=e.target.closest('[data-match]'); if(button) pick(row,matches[Number(button.dataset.match)].id); });
+    menu.addEventListener('click', e => {
+      if(e.target.closest('[data-show-suspended]')){
+        if(busy)return;
+        const previous=showSuspended;showSuspended=!showSuspended;
+        refreshConnection().then(ok=>{
+          if(!ok){showSuspended=previous;return;}
+          const refreshedInput=backdrop.querySelector(`tr[data-row="${rows.indexOf(row)}"] [data-field="descripcion"]`);
+          if(refreshedInput){refreshedInput.focus({preventScroll:true});search(refreshedInput,row);}
+        });return;
+      }
+      if(e.target.closest('[data-description-filter]')){
+        if(!normalize(input.value))return;
+        try{localStorage.setItem('corralon_stock_description_matches_only_v1',descriptionMatchesOnly()?'0':'1');}catch{}
+        search(input,row);return;
+      }
+      const button=e.target.closest('[data-match]');if(button)pick(row,matches[Number(button.dataset.match)].id);
+    });
     menu.addEventListener('scroll', () => {
       if (menuKind !== 'article' || !articlePage) return;
       if (menu.scrollTop < 16 && articlePage.beforeCursor >= 0) {
@@ -7076,7 +7292,7 @@ async function open(options) {
     if (!menu) return;
     matches = articlePage?.options || [];
     menuIndex = query && articleHasMatch ? matches.findIndex(article => article.id === selectedId) : -1;
-    menu.innerHTML = '<div class="local-articles-search-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Proveedor</span></div>' + (matches.length ? matches.map((article,index) => `<button type="button" data-match="${index}" role="option"${index === menuIndex ? ' class="active"' : ''}><span>${escape(article.id)}</span><span title="${escape(article.codigo)}">${escape(article.codigo)}</span><span title="${escape(article.descripcion)}">${escape(article.descripcion)}</span><span title="${escape(article.proveedorNombre || 'Sin nombre')}">${escape(article.proveedorNombre || 'Sin nombre')}</span></button>`).join('') : '<p>Sin coincidencias en la base local.</p>');
+    menu.innerHTML = '<div class="local-articles-search-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Proveedor</span><span>Suspendido SQL</span></div>' + (matches.length ? matches.map((article,index) => `<button type="button" data-match="${index}" role="option"${index === menuIndex ? ' class="active"' : ''}><span>${escape(article.id)}</span><span title="${escape(article.codigo)}">${escape(article.codigo)}</span><span title="${escape(article.descripcion)}">${escape(article.descripcion)}</span><span title="${escape(article.proveedorNombre || 'Sin nombre')}">${escape(article.proveedorNombre || 'Sin nombre')}</span><span>${article.suspendido===true||Number(article.suspendido)===1?'Sí':'No'}</span></button>`).join('') : '<p>Sin coincidencias en la base local.</p>') + `<div class="stock-description-footer"><button type="button" class="stock-description-filter" data-description-filter aria-pressed="${descriptionMatchesOnly()}" ${query?'':'disabled'}>${descriptionMatchesOnly()?'▾ Mostrar lista':'▴ Filtrar'}</button><button type="button" class="stock-description-filter" data-show-suspended aria-pressed="${showSuspended}">Mostrar suspendidos</button></div>`;
   }
   function showActiveArticle(alignTop = false) {
     if (!menu || menuKind !== 'article') return;
@@ -7123,7 +7339,7 @@ async function open(options) {
   }
   backdrop.addEventListener('click', e => {
     hideArticleContext();
-    if (e.target.closest('[data-cancel]')) { close(); return; }
+    if (e.target.closest('[data-cancel]')) { close(true); return; }
     if (e.target.closest('[data-close]')) { close(); return; }
     const articleToggle=e.target.closest('[data-article-toggle]');
     const rubroToggle=e.target.closest('[data-rubro-toggle]');
@@ -7378,7 +7594,7 @@ async function open(options) {
     try { await flushDraft(true); } catch(error) { setStatus(error.message,true); return; }
     busy=true; apply.disabled=true;
     try {
-      await enqueue({operation,provider:providerId,rows},options.onImported,token);
+      await enqueue({operation,provider:providerId,providerName:options.provider.proveedor||options.provider.nombre||'',rows},options.onImported,token,()=>open(options));
       busy=false; close(true);
       try { options.showMessage?.('Carga en cola. Continúa en segundo plano.'); } catch(error) { console.warn(error); }
     } catch(error) {
@@ -7389,7 +7605,7 @@ async function open(options) {
     if (busy) return;
     busy=true; reconnect.disabled=true; setStatus('Restableciendo la conexión con SQL Server…');
     try {
-      const data=await api('catalog');
+      const data=await api(`catalog${showSuspended?'?suspendidos=1':''}`);
       if (!backdrop.isConnected) return;
       token=data.token; catalog=data.articles.map(a=>{
         const searchDescription=normalizeIndexFilter(a.descripcion);
@@ -7416,8 +7632,10 @@ async function open(options) {
       } else {
         render(); setStatus('Conexión restablecida. Podés continuar y aplicar el lote.');
       }
+      return true;
     } catch(error) {
       setStatus(`${error.message} Cerrá y abrí Corralón Local si tampoco responde al reintentar.`,true,true);
+      return false;
     } finally {
       busy=false; reconnect.disabled=false; summary();
     }
