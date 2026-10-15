@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.20"></script>
+<script src="corralon-system.js?v=1.0.21"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -358,6 +358,17 @@ body::before { content: ''; position: fixed; inset: 0; background-color: #f0ece8
 .spinner { width: 40px; height: 40px; border: 4px solid #d0c8f0; border-top-color: var(--violeta); border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-txt { color: var(--violeta); font-size: 16px; letter-spacing: 1px; text-transform: uppercase; font-family: 'Barlow Condensed', sans-serif; }
+
+.history-table-scroll{overflow-x:auto}
+.history-grid-head,.h-item.history-grid-row{display:grid;grid-template-columns:125px minmax(230px,1fr) 155px 130px 140px 78px;gap:10px;align-items:center;min-width:870px;padding:10px 16px}
+.history-grid-head{background:var(--fila-header);border-bottom:1px solid var(--borde);font-weight:800}
+.history-grid-head button{border:0;background:transparent!important;color:var(--texto-dark)!important;text-align:left;padding:5px 0;cursor:pointer;font:800 14px 'Barlow Condensed',sans-serif;box-shadow:none!important}
+.history-grid-head button.is-sorted{color:var(--violeta)!important}
+.history-grid-head button[data-history-sort="total"]{text-align:right}
+.history-grid-row>div{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.history-grid-row .history-provider,.history-grid-row .history-date{font:600 14px 'Barlow Condensed',sans-serif}
+.history-grid-row .history-result{overflow:visible}
+.history-grid-head .history-date-head{cursor:context-menu}
 </style>
 <style id="corralon-theme-red">
 body,body::before{background-color:#f4f4f2;background-image:none}
@@ -426,6 +437,10 @@ input[type="checkbox"]{accent-color:#ef1015}
   </div>
 </div>
 
+<div class="budget-item-context" id="historyDateContext" role="menu">
+  <button type="button" data-history-date-mode="fecha" role="menuitem">Fecha del comprobante</button>
+  <button type="button" data-history-date-mode="emision" role="menuitem">Fecha de emisión</button>
+</div>
 <div class="budget-item-context" id="budgetItemContext" role="menu">
   <button id="budgetItemSearchAction" type="button" role="menuitem">Buscar en presupuestos</button>
 </div>
@@ -949,6 +964,17 @@ function cerrarSesion() {
 
 // ── HISTORIAL ──
 function inicializarHistorial() {
+  if(new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window){
+    document.getElementById('appContent').style.display='none';
+    window.addEventListener('message',async event=>{
+      if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='corralon:remito-sql-open')return;
+      if(!cargaSqlDisponible()||!window.CorralonFunciones.menuUserIsAdministrator('remitos'))return;
+      _remitoDetalleActual=event.data.remito;_detalleTipoActual='remito';
+      await abrirCargaRemitoSql();
+      if(!document.querySelector('dialog.remito-sql-compact'))window.parent.postMessage({type:'corralon:remito-sql-error'},location.origin);
+    });
+    window.parent.postMessage({type:'corralon:remito-sql-ready'},location.origin);return;
+  }
   initializeHistoryDateInputs();
   setupHistoryDateFunctions();
   activarTabHistorial('remitos');
@@ -1266,26 +1292,7 @@ async function cargarPresupuestos(append = false) {
       return;
     }
 
-    body.innerHTML = _presupuestosCache.map((p, idx) => {
-      const cantItems = Array.isArray(p.items) ? p.items.length : 0;
-      const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '');
-      const titulo = tituloPresupuestoHistorial(p);
-      return `
-        <div class="h-item" onclick="abrirDetallePresupuesto(${idx})">
-          <div class="h-nro">${esc(p.numero || '-')}</div>
-          <div class="h-info">
-            <div class="h-cliente">${esc(titulo)}</div>
-            <div class="h-meta">${esc(fechaTxt)} - ${cantItems} item(s)</div>
-            ${metaExtraPresupuestoHtml(p)}
-          </div>
-          <div class="h-total">${fmt(p.total || 0)}</div>
-          ${chipEstadoHistorial('presupuesto', p)}
-          <div class="h-actions">
-            <button class="h-mini-btn danger" type="button" onclick="event.stopPropagation();confirmarEliminarPresupuesto(${idx})">Eliminar</button>
-          </div>
-          <span style="color:#ccc;font-size:18px;">›</span>
-        </div>`;
-    }).join('') + (_presupuestosHasMore ? '<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarPresupuestos(true)">Cargar anteriores</button></div>' : '');
+    renderPresupuestosHistorial();
   } catch (e) {
     if (!append) {
       _presupuestosCache = [];
@@ -2048,6 +2055,7 @@ async function recuperarProveedorRemitoSql(remito) {
   const cached = _remitosCache.find(item => String(item.id) === String(remito.id));
   if(cached) cached.proveedor_sql_id = id;
 }
+function redondearRenglonesRemitoSql(payload){return {...payload,articulos:(payload.articulos||[]).map(item=>({...item,cantidad:Number(Number(item.cantidad).toFixed(4)),precio:Number(Number(item.precio).toFixed(4))}))};}
 function remitoSqlPayload(remito, pago) {
   const user = window.CorralonFunciones?.menuSessionUser?.();
   if(!user?.id) throw new Error('Ingresá con tu usuario del menú.');
@@ -2059,7 +2067,7 @@ function remitoSqlPayload(remito, pago) {
   if(!articulos.length || articulos.some(item => !item.idart || !(item.cantidad > 0) || !(item.precio > 0))) throw new Error('Cada artículo necesita IDArt, cantidad y precio. Los renglones de texto libre no se pueden cargar en SQL.');
   const parts = String(remito.fecha || '').split('/');
   const fecha = remito.fecha_iso || (parts.length === 3 ? `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}` : '');
-  return { accion:'importar-remito', remitoId:remito.id, numero:remitoFull(remito.nro), proveedor:Number(remito.proveedor_sql_id), sucursal, fecha, pago:Number(pago), articulos, usuarioId:user.id, idOperador:Number(user.idOperador) || null };
+  return redondearRenglonesRemitoSql({ accion:'importar-remito', remitoId:remito.id, numero:remitoFull(remito.nro), proveedor:Number(remito.proveedor_sql_id), sucursal, fecha, pago:Number(pago), articulos, usuarioId:user.id, idOperador:Number(user.idOperador) || null });
 }
 async function abrirCargaRemitoSql() {
   if(!cargaSqlDisponible()) return;
@@ -2097,7 +2105,8 @@ async function abrirCargaRemitoSql() {
     if(field.selectedIndex < 0) field.selectedIndex = placeholder ? 0 : -1;
   };
   fill(select,options.pagos,base.pago);
-  fill(account,accounts,pending?.payload?.cuenta ?? provider?.cuenta,'Seleccionar cuenta');
+  const defaultAccount=accounts.find(item=>String(item.nombre||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()==='ferreteria construccion');
+  fill(account,accounts,pending?.payload?.cuenta ?? defaultAccount?.id ?? provider?.cuenta,'Seleccionar cuenta');
   fill(goods,options.bienes,provider?.tipoBien,'Sin tipo de bien válido en el proveedor SQL');
   account.disabled = Boolean(pending?.result);
   goods.disabled = true;
@@ -2135,7 +2144,7 @@ async function abrirCargaRemitoSql() {
   let busy = false;
   close.onclick = () => dialog.close();
   dialog.addEventListener('cancel', event => { if(busy) event.preventDefault(); });
-  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('close', () => {dialog.remove();if(new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window)window.parent.postMessage({type:'corralon:remito-sql-close'},location.origin);});
   save.onclick = async () => {
     if(busy) return;
     busy = true; save.disabled = close.disabled = select.disabled = account.disabled = goods.disabled = true;
@@ -2145,7 +2154,7 @@ async function abrirCargaRemitoSql() {
         pending = { payload:remitoSqlPayload(remito,select.value) };
       }
       if(!pending.result) {
-        pending.payload = {...pending.payload,pago:Number(select.value),cuenta:account.value};
+        pending.payload = redondearRenglonesRemitoSql({...pending.payload,pago:Number(select.value),cuenta:account.value});
         delete pending.payload.tipoBien;
         pending.attemptedAt = new Date().toISOString();
         localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending));
@@ -2169,6 +2178,7 @@ async function abrirCargaRemitoSql() {
       const rows = await response.json();
       if(!rows.length) throw new Error('SQL ya quedó cargado, pero el remito no se encontró al actualizar su vínculo web.');
       remito.sql_resultado = {...remito.sql_resultado,...pending.result};
+      if(new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window)window.parent.postMessage({type:'corralon:remito-sql-saved',resultado:remito.sql_resultado},location.origin);
       const cached = _remitosCache.find(item => String(item.id) === String(remito.id));
       if(cached) cached.sql_resultado = remito.sql_resultado;
       resolverRemitoCargadoSql(remito);
@@ -2411,6 +2421,38 @@ async function buscarRemitosConfirmado() {
   }
 }
 
+const historySortState={remito:{key:'fecha',direction:-1,dateMode:'fecha'},presupuesto:{key:'fecha',direction:-1,dateMode:'fecha'}};
+try{const saved=JSON.parse(localStorage.getItem('corralon_history_sort_v1')||'null');for(const type of Object.keys(historySortState)){const value=saved?.[type];if(value&&['numero','cliente','proveedor','fecha','total','resultado'].includes(value.key)&&[1,-1].includes(value.direction))historySortState[type]={...value,dateMode:value.dateMode==='emision'?'emision':'fecha'};}}catch{}
+for(const state of Object.values(historySortState))if(state.key==='cliente')state.key='proveedor';
+let historyDateContextType='remito';
+function historySortValue(record,type,key){
+  if(key==='numero')return String(record.nro||record.numero||'');
+  if(key==='cliente')return type==='presupuesto'?tituloPresupuestoHistorial(record):String(record.cliente||'');
+  if(key==='proveedor')return type==='presupuesto'?tituloPresupuestoHistorial(record):String(record.cliente||record.proveedor||record.proveedor_nombre||'');
+  if(key==='fecha'){if(historySortState[type].dateMode==='emision'){const timestamp=Date.parse(record.created_at||'');return Number.isFinite(timestamp)?timestamp:0;}return fechaPresupuestoTimestamp(record);}
+  if(key==='total')return Number(record.total)||0;
+  if(key==='resultado'){const id=type==='remito'?record.id:record.numero||record.id;const state=historialEstados.get(historialNotifId(type,String(id||'')));return state===undefined?'':state===false?'No resuelto':'Resuelto';}
+  return '';
+}
+function sortedHistoryRows(records,type){const state=historySortState[type];return records.map((record,index)=>({record,index})).sort((a,b)=>{const left=historySortValue(a.record,type,state.key),right=historySortValue(b.record,type,state.key);const compared=typeof left==='number'?left-right:String(left).localeCompare(String(right),'es',{numeric:true,sensitivity:'base'});return compared*state.direction||a.index-b.index;});}
+function historyHeaders(type){const state=historySortState[type];return `<div class="history-grid-head">${[['numero','Número de boleta'],['proveedor','Proveedor'],['fecha',state.dateMode==='emision'?'Fecha de emisión':'Fecha'],['total','Total'],['resultado','Resultado']].map(([key,label])=>`<button type="button" data-history-sort="${key}" data-history-sort-type="${type}" class="${state.key===key?'is-sorted ':''}${key==='fecha'?'history-date-head':''}" aria-label="Ordenar por ${label}"${key==='fecha'?' title="Clic derecho: elegir fecha del comprobante o de emisión"':''}>${label}${state.key===key?(state.direction===1?' ▲':' ▼'):''}</button>`).join('')}<span></span></div>`;}
+function historyDateText(record,type){if(historySortState[type].dateMode!=='emision')return record.fecha||'';const date=new Date(record.created_at||'');return Number.isNaN(date.getTime())?'—':date.toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short'});}
+function renderPresupuestosHistorial(){
+ const body=document.getElementById('presupuestosBody');
+ if(!_presupuestosCache.length){body.innerHTML='<div class="h-empty">Sin presupuestos todavía</div>';return;}
+ body.innerHTML='<div class="history-table-scroll">'+historyHeaders('presupuesto')+sortedHistoryRows(_presupuestosCache,'presupuesto').map(({record:p,index:idx})=>`<div class="h-item history-grid-row" onclick="abrirDetallePresupuesto(${idx})"><div class="h-nro">${esc(p.numero||'—')}</div><div class="h-info"><div class="h-cliente">${esc(tituloPresupuestoHistorial(p))}</div><div class="h-meta">${Array.isArray(p.items)?p.items.length:0} item(s)</div>${metaExtraPresupuestoHtml(p)}</div><div class="history-date">${esc(historyDateText(p,'presupuesto'))}</div><div class="h-total">${fmt(p.total||0)}</div><div class="history-result">${chipEstadoHistorial('presupuesto',p)}</div><div class="h-actions"><button class="h-mini-btn danger" type="button" onclick="event.stopPropagation();confirmarEliminarPresupuesto(${idx})">Eliminar</button></div></div>`).join('')+'</div>'+(_presupuestosHasMore?'<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarPresupuestos(true)">Cargar anteriores</button></div>':'');
+}
+function refreshHistorySort(type){try{localStorage.setItem('corralon_history_sort_v1',JSON.stringify(historySortState));}catch{}if(type==='remito')renderRemitosHistorial();else renderPresupuestosHistorial();}
+document.addEventListener('click',event=>{
+ const sort=event.target.closest('[data-history-sort]');
+ if(sort){const type=sort.dataset.historySortType,state=historySortState[type],key=sort.dataset.historySort;state.direction=state.key===key?-state.direction:1;state.key=key;refreshHistorySort(type);return;}
+ const mode=event.target.closest('[data-history-date-mode]');
+ if(mode){historySortState[historyDateContextType].dateMode=mode.dataset.historyDateMode;historySortState[historyDateContextType].key='fecha';refreshHistorySort(historyDateContextType);}
+ document.getElementById('historyDateContext').classList.remove('open');
+});
+document.addEventListener('contextmenu',event=>{const head=event.target.closest('[data-history-sort="fecha"]');if(!head)return;event.preventDefault();historyDateContextType=head.dataset.historySortType;const menu=document.getElementById('historyDateContext');menu.classList.add('open');menu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-menu.offsetWidth-4))+'px';menu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-menu.offsetHeight-4))+'px';});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')document.getElementById('historyDateContext').classList.remove('open');});
+
 function renderRemitosHistorial() {
   const body = document.getElementById('historialBody');
   const rows = _remitosCache;
@@ -2423,17 +2465,14 @@ function renderRemitosHistorial() {
     body.innerHTML = '<div class="h-empty">Sin coincidencias</div>';
     return;
   }
-  body.innerHTML = rows.map(r => `
-    <div class="h-item" onclick="abrirDetalle(${r.id})">
-      <div class="h-nro">${r.nro ? remitoFull(r.nro) : '—'}</div>
-      <div class="h-info">
-        <div class="h-cliente">${r.cliente||'—'}</div>
-        <div class="h-meta">${esc(r.sucursal||'Sin sucursal')} · ${r.fecha||''}${usuarioRegistroNombre(r)?` · Usuario: ${esc(usuarioRegistroNombre(r))}`:''}</div>
-      </div>
+  body.innerHTML = '<div class="history-table-scroll">'+historyHeaders('remito')+sortedHistoryRows(rows,'remito').map(({record:r}) => `
+    <div class="h-item history-grid-row" onclick="abrirDetalle(${r.id})">
+      <div class="h-nro">${esc(r.nro ? remitoFull(r.nro) : '—')}</div>
+      <div class="h-info"><div class="h-cliente">${esc(r.cliente||'—')}</div><div class="h-meta">${esc(r.sucursal||'Sin sucursal')}${usuarioRegistroNombre(r)?` · Usuario: ${esc(usuarioRegistroNombre(r))}`:''}</div></div>
+      <div class="history-date">${esc(historyDateText(r,'remito'))}</div>
       <div class="h-total">${fmt(r.total||0)}</div>
-      ${chipEstadoHistorial('remito', r)}
-      <span style="color:#ccc;font-size:18px;">›</span>
-    </div>`).join('') + (!_remitosBusquedaAplicada && _remitosHasMore ? '<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarHistorial(true)">Cargar anteriores</button></div>' : '');
+      <div class="history-result">${chipEstadoHistorial('remito', r)}</div><span style="color:#ccc;font-size:18px">›</span>
+    </div>`).join('')+'</div>' + (!_remitosBusquedaAplicada && _remitosHasMore ? '<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarHistorial(true)">Cargar anteriores</button></div>' : '');
 }
 
 // ── DETALLE ──

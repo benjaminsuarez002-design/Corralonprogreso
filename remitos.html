@@ -11,7 +11,7 @@
 <script src="funciones.js?v=20260610-menu-session"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.15"></script>
+<script src="corralon-system.js?v=1.0.16"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -292,6 +292,7 @@ input[type="checkbox"]{accent-color:#ef1015}
     <div class="remito-actions-grid">
       <button class="remito-action-btn" onclick="descargarRemitoConfirmado()">Descargar PDF</button>
       <button class="remito-action-btn print" type="button" onclick="imprimirRemitoConfirmado()">Imprimir</button>
+      <button id="remitoSqlAction" class="remito-action-btn" type="button" hidden onclick="cargarRemitoConfirmadoSql()">Cargar en SQL</button>
       <button class="remito-action-btn whatsapp" onclick="whatsappRemitoConfirmado()">WhatsApp</button>
     </div>
   </div>
@@ -461,7 +462,7 @@ function chooseRemitoSuggestion(index) {
       if(cost !== null) {
         item.precio = cost;
         const price = row.querySelectorAll('.item-input')[2]; price.value = fmt(cost); price.dataset.moneyRaw = rawMoneyTextFromValue(price.value);
-        const subtotal = row.querySelectorAll('.item-input')[3]; subtotal.readOnly = Boolean(item.cant && cost); subtotal.tabIndex = subtotal.readOnly ? -1 : 0;
+        const subtotal = row.querySelectorAll('.item-input')[3]; subtotal.readOnly = false; subtotal.tabIndex = 0;
       } else toast('El artículo no tiene costo final con IVA en el catálogo.');
       recalc();
     }
@@ -791,7 +792,7 @@ function renderItems() {
         onchange="items[${i}].desc=this.value">
       <input type="text" class="item-input num money-live" value="${fmt(it.precio)}" inputmode="decimal" autocomplete="off"
         onchange="actualizarItemDesdeCampo(${i}, 'precio', this)">
-      <input type="text" class="item-input num money-live" value="${fmt(it.precio*it.cant)}" inputmode="decimal" autocomplete="off" ${it.cant && it.precio ? 'readonly tabindex="-1"' : ''}
+      <input type="text" class="item-input num money-live" value="${fmt(it.precio*it.cant)}" inputmode="decimal" autocomplete="off"
         onchange="actualizarItemDesdeCampo(${i}, 'subtotal', this)">
       <button class="btn-del-item" onclick="items.splice(${i},1);renderItems()">✕</button>`;
     lista.insertBefore(row, fila);
@@ -1069,8 +1070,8 @@ function actualizarItemDesdeCampo(i, campo, input) {
   if(campo === 'precio') it.precio = parseMonto(input.value);
   if(campo === 'subtotal') {
     const subtotal = parseMonto(input.value);
-    if(subtotal && it.cant && !it.precio) it.precio = subtotal / it.cant;
-    else if(subtotal && !it.cant && it.precio) it.cant = subtotal / it.precio;
+    if(String(input.value).trim() && it.cant) it.precio = subtotal / it.cant;
+    else if(String(input.value).trim() && it.precio) it.cant = subtotal / it.precio;
   } else {
     const subtotalInput = inputs[3];
     if(subtotalInput && it.cant && it.precio) subtotalInput.value = fmt(it.cant * it.precio);
@@ -1088,23 +1089,22 @@ function updatePreview(campo = 'precio') {
   let p = parseMonto(precioEl.value);
   let s = parseMonto(subEl.value);
   if(campo === 'subtotal') {
-    if(s && c && !p) p = s / c;
-    else if(s && !c && p) c = s / p;
+    if(subEl.value.trim() && c) p = s / c;
+    else if(subEl.value.trim() && p) c = s / p;
     if(c && p) s = c * p;
   } else if(c && p) {
     s = c * p;
   }
-  if(campo !== 'cant' && c) cantEl.value = c;
-  if(campo !== 'precio' && p) {
+  if(campo !== 'cant' && (c || campo === 'subtotal')) cantEl.value = c;
+  if(campo !== 'precio' && (p || campo === 'subtotal')) {
     precioEl.value = fmt(p);
     precioEl.dataset.moneyRaw = rawMoneyTextFromValue(precioEl.value);
   }
   if(campo !== 'subtotal') {
     subEl.value = c && p ? fmt(s) : '';
   }
-  const bloquearSubtotal = Boolean(c && p);
-  subEl.readOnly = bloquearSubtotal;
-  subEl.tabIndex = bloquearSubtotal ? -1 : 0;
+  subEl.readOnly = false;
+  subEl.tabIndex = 0;
 }
 
 function hayArticuloPendiente() {
@@ -1508,9 +1508,27 @@ function abrirRemitoActions(remito) {
     <strong>Usuario:</strong> ${escapeHtml(remito.usuario_nombre || remito.usuario_id || '—')}<br>
     <strong>Total:</strong> ${fmt(remito.total)}
   `;
+  document.getElementById('remitoSqlAction').hidden=!remitoSqlDisponible()||Boolean(remito.sql_resultado?.compraId);
   document.getElementById('remitoActionsBg').classList.add('open');
 }
 
+function remitoSqlDisponible(){const host=location.hostname.toLowerCase().replace(/\.$/,'');return (host==='localhost'||host==='[::1]'||/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host))&&window.CorralonFunciones.menuUserIsAdministrator('remitos');}
+function cargarRemitoConfirmadoSql(){
+  if(!remitoSqlDisponible()||!remitoConfirmadoActual?.id||remitoConfirmadoActual.sql_resultado?.compraId)return;
+  const remito=structuredClone(remitoConfirmadoActual);remito.nro=remitoFull(remito.nro);remito.items=remito.items.map(item=>({...item,descripcion:item.desc||item.descripcion||''}));
+  const popup=document.createElement('dialog');popup.style.cssText='width:min(680px,98vw);height:90dvh;max-width:none;max-height:none;padding:0;border:1px solid #ddd;border-radius:14px;background:white';
+  const frame=document.createElement('iframe');frame.title='Cargar remito en SQL';frame.style.cssText='width:100%;height:100%;border:0';frame.src='historial.html?embed=remito-sql';popup.append(frame);
+  const receive=event=>{if(event.origin!==location.origin||event.source!==frame.contentWindow)return;
+    if(event.data?.type==='corralon:remito-sql-ready')frame.contentWindow.postMessage({type:'corralon:remito-sql-open',remito},location.origin);
+    if(event.data?.type==='corralon:remito-sql-saved'){remitoConfirmadoActual.sql_resultado=event.data.resultado;document.getElementById('remitoSqlAction').hidden=true;}
+    if(event.data?.type==='corralon:remito-sql-error')toast('No se pudo abrir la carga en SQL. Revisá proveedor, artículos y permisos.');
+    if(event.data?.type==='corralon:remito-sql-close')popup.close();
+  };
+  window.addEventListener('message',receive);
+  popup.addEventListener('cancel',event=>{event.preventDefault();const dialog=frame.contentDocument?.querySelector('dialog.remito-sql-compact');if(dialog){if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();}else popup.close();});
+  popup.addEventListener('close',()=>{window.removeEventListener('message',receive);popup.remove();});
+  document.body.append(popup);popup.showModal();
+}
 function cerrarRemitoActions() {
   document.getElementById('remitoActionsBg').classList.remove('open');
 }

@@ -172,6 +172,11 @@
   .review-history-btn svg { width: 19px; height: 19px; stroke: currentColor; }
   .review-add-btn { width: 38px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 22px; line-height: 1; }
   .review-list { max-height: 560px; overflow: auto; padding: 10px; }
+  #reviewModal .review-box{display:flex;flex-direction:column;min-height:0}
+  #reviewModal .review-head,.review-search{flex-shrink:0}
+  #reviewModal .review-list{min-height:0}
+  .review-search{padding:10px 16px;border-bottom:1px solid var(--line)}
+  .review-search input{display:block;width:100%;min-width:0;height:36px;padding:7px 11px;border:1px solid var(--line);border-radius:9px;background:#fff;font:14px Barlow,Arial,sans-serif;color:var(--text)}
   .review-tabs { position: sticky; top: -10px; z-index: 2; display: grid; grid-template-columns: 1fr 1fr; margin: -10px -10px 10px; border-bottom: 1px solid #dededb; }
   .review-tab { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 9px 14px; border: 0; background: #f7f7f5; color: #171717; cursor: pointer; font: inherit; font-size: 15px; font-weight: 1000; text-align: left; }
   .review-tab + .review-tab { border-left: 4px solid #171717; }
@@ -698,7 +703,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.35"></script>
+<script src="corralon-system.js?v=1.0.36"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 </head>
 <body data-page-theme="menu">
@@ -812,6 +817,7 @@
   <div class="review-modal" id="reviewModal">
     <div class="review-box">
       <div class="review-head"><h2>Notificaciones</h2><button class="review-history-btn" id="openResolvedNotifications" type="button" title="Ver resueltas" aria-label="Ver resueltas"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></button><button class="review-add-btn" id="reviewPendingBtn" type="button" title="Agregar pendiente" aria-label="Agregar pendiente">+</button><button id="closeReviewModal" type="button">Cerrar</button></div>
+      <div class="review-search"><input id="reviewSearch" type="search" aria-label="Buscar en las notificaciones cargadas" placeholder="Buscar en notificaciones cargadas…" autocomplete="off"></div>
       <div class="review-list" id="reviewList"></div>
     </div>
   </div>
@@ -2090,12 +2096,21 @@
        `;
     }
 
+    function filterLoadedNotifications(items,query){
+      const normalize=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+      const words=normalize(query).trim().split(/\s+/).filter(Boolean);
+      if(!words.length)return items;
+      return items.filter(item=>{const text=normalize([item.title,item.detail,item.id,item.date,item.proveedor,item.providerName,item.cliente,item.tipo,formatNotifDateTime(item.createdAt||item.updatedAt,item.date)].join(' '));return words.every(word=>text.includes(word));});
+    }
+    document.getElementById('reviewSearch').addEventListener('input',renderReviewNotifications);
     function renderReviewNotifications() {
       const currentVisible = allVisibleNotifications();
-      const generalNotifications = currentVisible.filter((item) => item.kind !== 'lista_proveedor');
-      const listNotifications = currentVisible.filter((item) => item.kind === 'lista_proveedor');
+      const search=document.getElementById('reviewSearch').value;
+      const filtered=filterLoadedNotifications(currentVisible,search);
+      const generalNotifications = filtered.filter((item) => item.kind !== 'lista_proveedor');
+      const listNotifications = filtered.filter((item) => item.kind === 'lista_proveedor');
       const visibleItems = reviewActiveSection === 'lists' ? listNotifications : generalNotifications;
-      const emptyText = reviewActiveSection === 'lists'
+      const emptyText = search.trim() ? 'No hay coincidencias entre las notificaciones cargadas.' : reviewActiveSection === 'lists'
         ? 'No hay listas pendientes de actualización.'
         : 'No hay notificaciones pendientes.';
       if (reviewModal.classList.contains('visible')) reviewModalSnapshot = currentVisible;

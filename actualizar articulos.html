@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.15"></script>
+<script src="corralon-system.js?v=1.0.16"></script>
   <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -214,7 +214,15 @@ async function setProvidersCache(data){try{const pdb=await openProvidersDb();awa
 async function putProvidersCacheItem(item){try{const pdb=await openProvidersDb();await new Promise((res,rej)=>{const tx=pdb.transaction('data','readwrite');tx.objectStore('data').put(item);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(error){console.warn(error)}}
 function renderProviders(){providers.sort((a,b)=>String(a.proveedor||'').localeCompare(String(b.proveedor||''),'es'));renderProviderCombo(false)}
 function providerMatches(text){const q=norm(text);return providers.filter(p=>norm(p.proveedor).includes(q)||norm(CorralonSystem.providerIdentity.externalId(p)).includes(q))}
-function selectProviderByText(text){const q=norm(text);const found=CorralonSystem.providerIdentity.resolveText(providers,text);selectProvider(found);closeProviderCombo()}
+function selectProviderByText(text){
+  const q=norm(text);
+  if(provider&&q===norm(provider.proveedor)){providerSearch.value=provider.proveedor;closeProviderCombo();return;}
+  const found=CorralonSystem.providerIdentity.resolveText(providers,text);
+  if(found){selectProvider(found);closeProviderCombo();return;}
+  if(!q||q===norm('Independiente')){selectProvider(null);closeProviderCombo();return;}
+  show('Elegí el proveedor de la lista para conservar su código.');
+  openProviderCombo();
+}
 function selectProvider(found){provider=found||null;providerSearch.value=provider?.proveedor||'Independiente';provId.textContent=CorralonSystem.providerIdentity.externalId(provider);provName.textContent=provider?.proveedor||'';provDiscount.textContent=pct(provider?.descuento_lista||0);provDate.textContent=provider?.ultima_actualizacion||'';note.value=provider?.nota||'';setProviderLinkState();recalcArticles();render()}
 function renderProviderCombo(open=true){comboMatches=providerMatches(providerSearch.value).slice(0,80);if(!comboMatches.length&&providers.length)comboMatches=providers.slice(0,80);comboActive=Math.min(comboActive,Math.max(0,comboMatches.length-1));providerDropdown.innerHTML=comboMatches.map((p,i)=>`<div class="combo-option ${i===comboActive?'active':''}" data-index="${i}"><span class="combo-code">${escapeHtml(CorralonSystem.providerIdentity.externalId(p))}</span><span class="combo-name ${providerPageValue(p)?'provider-link':''}">${escapeHtml(p.proveedor)}</span></div>`).join('');providerCombo.classList.toggle('open',open&&comboMatches.length>0)}
 function openProviderCombo(){renderProviderCombo(true)}

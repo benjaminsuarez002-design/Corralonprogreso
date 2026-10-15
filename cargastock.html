@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.49"></script>
+<script src="corralon-system.js?v=1.0.50"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -5262,12 +5262,12 @@ function stockRenderConsult(preserveFilters=false) {
     const previousForm=preserveFilters?panel.querySelector('form'):null;
     const previousFocus=previousForm?.contains(document.activeElement)?document.activeElement:null;
     const previousSelection=previousFocus?.selectionStart!=null?[previousFocus.selectionStart,previousFocus.selectionEnd]:null;
-    const filters=stockConsultFilters||{desde:stockToday(),hasta:stockToday(),proveedor:'0'};
+    const filters=stockConsultFilters||{desde:stockToday(),hasta:stockToday(),proveedor:'0',sucursal:'0'};
     const dateText=value=>value.split('-').reverse().join('/');
     if(!previousForm)stockConsultProviderCombo?.destroy();
     const providerOptions=[{value:'0',label:'Todos los proveedores'},...providers.map(item=>({value:String(CorralonSystem.providerIdentity.externalId(item)),label:providerLabel(item)}))];
     const providerText=providerOptions.find(item=>item.value===String(filters.proveedor))?.label||'';
-    panel.innerHTML='<div class="stock-consult-title" style="gap:12px;flex-wrap:wrap"><span>Movimientos confirmados</span><button type="button" id="stockCloseConsult">Cerrar</button></div><form class="stock-consult-filters"><label>Desde<input id="stockConsultFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.desde)+'"></label><label>Hasta<input id="stockConsultTo" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.hasta)+'"></label><label>Proveedor<input id="stockConsultProvider" type="text" autocomplete="off" placeholder="Todos los proveedores" value="'+escapeHtml(providerText)+'"></label><button type="submit">Consultar</button></form><div class="stock-consult-grid"><div class="stock-consult-columns"><span>Fecha</span><span>Sucursal</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||item.sucursal||'—')}</span><span>${escapeHtml(item.nombre||'Movimiento de stock')}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>'+`<div style="padding:10px;display:flex;gap:12px;align-items:center"><span>${stockMovements.length} de ${stockConsultTotal} movimientos de todas las sucursales</span>${stockConsultMore?'<button id="stockConsultMore" type="button">Cargar más movimientos</button>':''}</div>`;
+    panel.innerHTML='<div class="stock-consult-title" style="gap:12px;flex-wrap:wrap"><span>Movimientos confirmados</span><button type="button" id="stockCloseConsult">Cerrar</button></div><form class="stock-consult-filters"><label>Desde<input id="stockConsultFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.desde)+'"></label><label>Hasta<input id="stockConsultTo" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.hasta)+'"></label><label>Proveedor<input id="stockConsultProvider" type="text" autocomplete="off" placeholder="Todos los proveedores" value="'+escapeHtml(providerText)+'"></label><button type="submit">Consultar</button></form><div class="stock-consult-grid"><div class="stock-consult-columns"><span>Fecha</span><span>Sucursal</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||item.sucursal||'—')}</span><span>${escapeHtml(item.nombre||'Movimiento de stock')}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>'+`<div style="padding:10px;display:flex;gap:12px;align-items:center"><span>${stockMovements.length} de ${stockConsultTotal} movimientos · ${escapeHtml(Number(filters.sucursal)?stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(filters.sucursal))?.nombre||'Sucursal seleccionada':'Todas las sucursales')}</span>${stockConsultMore?'<button id="stockConsultMore" type="button">Cargar más movimientos</button>':''}</div>`;
     if(!stockMovements.length) panel.insertAdjacentHTML('beforeend','<p>No hay movimientos confirmados.</p>');
     stockField('stockCloseConsult').onclick=()=>{panel.hidden=true;stockConsultRequest++;stockConsultLoading=false;};
     panel.querySelectorAll('[data-stock-view]').forEach(button=>button.onclick=()=>stockOpenMovementPopup(Number(button.dataset.stockView)));
@@ -5276,6 +5276,7 @@ function stockRenderConsult(preserveFilters=false) {
     if(previousForm){panel.querySelector('form').replaceWith(previousForm);previousFocus?.focus({preventScroll:true});if(previousSelection)previousFocus.setSelectionRange(...previousSelection);return;}
     const form=panel.querySelector('form');
     form.prepend(stockField('stockConsultProvider').closest('label'));
+    form.querySelector('button[type="submit"]').insertAdjacentHTML('beforebegin',`<label>Sucursal<select id="stockConsultBranch"><option value="0">Todas las sucursales</option>${(stockSqlMeta?.sucursales||[]).map(branch=>`<option value="${Number(branch.id)}" ${Number(filters.sucursal)===Number(branch.id)?'selected':''}>${escapeHtml(branch.nombre||branch.id)}</option>`).join('')}</select></label>`);
     const movementTypes=stockSqlMeta?.tiposMovimiento||[];
     form.querySelector('button[type="submit"]').insertAdjacentHTML('beforebegin',
       `<label>Tipo de comprobante<select id="stockConsultType"><option value="">Todos</option>${movementTypes.map(item=>`<option value="${Number(item.id)}" ${String(filters.tipos||'')===String(item.id)?'selected':''}>${escapeHtml(item.codigo||'')} · ${escapeHtml(item.nombre)}</option>`).join('')}</select></label><label>Nº factura o remito<input id="stockConsultNumber" type="text" list="stockConsultNumbers" autocomplete="off" placeholder="Número completo o parcial" value="${escapeHtml(filters.buscar||'')}"><datalist id="stockConsultNumbers"></datalist></label><label>Artículo<input id="stockConsultArticle" type="text" maxlength="100" autocomplete="off" placeholder="IDArt, cód. proveedor o descripción" value="${escapeHtml(filters.articulo||'')}"></label>`);
@@ -5284,7 +5285,7 @@ function stockRenderConsult(preserveFilters=false) {
       clearTimeout(numberTimer);const request=++numberRequest;
       numberTimer=setTimeout(async()=>{
         try {
-          const result=await stockSqlGet('numeros-movimientos',{sucursal:0,proveedor:stockConsultProviderCombo?.getValue()||0,tipo:stockField('stockConsultType').value,buscar:stockField('stockConsultNumber').value.trim()});
+          const result=await stockSqlGet('numeros-movimientos',{sucursal:stockField('stockConsultBranch').value,proveedor:stockConsultProviderCombo?.getValue()||0,tipo:stockField('stockConsultType').value,buscar:stockField('stockConsultNumber').value.trim()});
           if(request!==numberRequest||!form.isConnected)return;
           stockField('stockConsultNumbers').innerHTML=result.numeros.map(item=>`<option value="${escapeHtml(item.numero)}"></option>`).join('');
         } catch { if(request===numberRequest&&form.isConnected)stockField('stockConsultNumbers').replaceChildren(); }
@@ -5293,6 +5294,7 @@ function stockRenderConsult(preserveFilters=false) {
     stockField('stockConsultNumber').addEventListener('input',refreshNumbers);
     stockField('stockConsultNumber').addEventListener('focus',refreshNumbers);
     stockField('stockConsultType').addEventListener('change',refreshNumbers);
+    stockField('stockConsultBranch').addEventListener('change',refreshNumbers);
     stockField('stockConsultProvider').addEventListener('change',refreshNumbers);
     form.addEventListener('submit',event=>{event.preventDefault();stockApplyConsultFilters();});
     form.querySelectorAll('input').forEach(field=>field.addEventListener('input',()=>field.setCustomValidity('')));
@@ -5316,7 +5318,7 @@ function stockRenderConsult(preserveFilters=false) {
       if(event.target.matches('#stockConsultFrom,#stockConsultTo,#stockConsultProvider,#stockConsultNumber,#stockConsultArticle'))stockScheduleConsult();
     });
     form.addEventListener('change',event=>{
-      if(event.target.matches('#stockConsultType,#stockConsultNumber,#stockConsultArticle'))stockScheduleConsult();
+      if(event.target.matches('#stockConsultType,#stockConsultNumber,#stockConsultArticle,#stockConsultBranch'))stockScheduleConsult();
     });
     FX.bindLinearNavigation({root:form,selector:'input,select,button[type="submit"]',selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
 }
@@ -5337,7 +5339,7 @@ function stockApplyConsultFilters(automatic=false){
   const provider=stockConsultProviderCombo?.getValue();
   if(provider==null){const field=stockField('stockConsultProvider');field.setCustomValidity('Seleccioná un proveedor de la lista.');field.reportValidity();return;}
   const tipos=stockField('stockConsultType').value;
-  const nextFilters={desde:dates[0],hasta:dates[1],proveedor:provider,tipos,buscar,articulo};
+  const nextFilters={desde:dates[0],hasta:dates[1],proveedor:provider,sucursal:stockField('stockConsultBranch').value,tipos,buscar,articulo};
   if(automatic && JSON.stringify(nextFilters)===JSON.stringify(stockConsultFilters))return;
   stockConsultFilters=nextFilters;
   return stockStartConsult();
@@ -5359,7 +5361,7 @@ async function stockLoadConsult(append=false){
 }
 async function stockConsult() {
   if(stockIngresoBusy||stockConsultLoading)return;
-  stockConsultFilters={desde:stockToday(),hasta:stockToday(),proveedor:'0'};
+  stockConsultFilters={desde:stockToday(),hasta:stockToday(),proveedor:'0',sucursal:'0'};
   await stockStartConsult(false);
 }
 async function stockStartConsult(preserveFilters=true){
@@ -5369,17 +5371,32 @@ async function stockStartConsult(preserveFilters=true){
 }
 let stockMovementPopupRequest=0;
 function stockPopupNavigation(index){
-  return `<div class="stock-popup-nav"><button type="button" data-stock-popup-prev ${index===0?'disabled':''} aria-label="Movimiento anterior">‹ Anterior</button><span>${index+1} de ${stockConsultTotal||stockMovements.length}</span><button type="button" data-stock-popup-next ${index===stockMovements.length-1&&!stockConsultMore?'disabled':''} aria-label="Movimiento siguiente">Siguiente ›</button><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div>`;
+  return `<div class="stock-popup-nav"><button type="button" data-stock-popup-prev ${index===0?'disabled':''} title="Movimiento anterior (RePág)" aria-label="Movimiento anterior">‹ Anterior</button><span>${index+1} de ${stockConsultTotal||stockMovements.length}</span><button type="button" data-stock-popup-next ${index===stockMovements.length-1&&!stockConsultMore?'disabled':''} title="Movimiento siguiente (AvPág)" aria-label="Movimiento siguiente">Siguiente ›</button><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div>`;
 }
 async function stockPopupNext(index){
   const request=stockMovementPopupRequest;
   if(index+1===stockMovements.length&&stockConsultMore){await stockLoadConsult(true);}
   if(request===stockMovementPopupRequest&&!stockField('stockMovementPopup').hidden&&stockMovements[index+1])await stockOpenMovementPopup(index+1);
 }
+let stockPopupKeyboardBusy=false;
+document.addEventListener('keydown',async event=>{
+  if(!['PageUp','PageDown'].includes(event.key)||event.ctrlKey||event.metaKey||event.altKey)return;
+  const popup=stockField('stockMovementPopup');
+  if(!popup||popup.hidden)return;
+  if(document.querySelector('dialog[open]'))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(stockPopupKeyboardBusy||!popup.querySelector('[data-stock-popup-next]'))return;
+  const index=Number(popup.dataset.movementIndex);
+  if(!Number.isInteger(index))return;
+  stockPopupKeyboardBusy=true;
+  try{if(event.key==='PageDown')await stockPopupNext(index);else if(index>0)await stockOpenMovementPopup(index-1);}
+  catch(error){stockIngresoMessage(error.message,'error');}
+  finally{stockPopupKeyboardBusy=false;}
+},true);
 async function stockOpenMovementPopup(index){
   const item=stockMovements[index];if(!item)return;
   const request=++stockMovementPopupRequest,popup=stockField('stockMovementPopup');
-  popup.hidden=false;
+  popup.hidden=false;popup.dataset.movementIndex=String(index);
   popup.innerHTML='<div class="stock-popup-head"><strong>Movimiento de stock</strong><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div><p>Cargando movimiento…</p>';
   const bindClose=()=>{
     popup.querySelector('[data-close-stock-popup]').onclick=()=>{popup.hidden=true;stockMovementPopupRequest++;};
