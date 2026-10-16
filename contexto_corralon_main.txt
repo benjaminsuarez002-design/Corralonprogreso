@@ -1,13 +1,14 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia y ultimo corte de contexto: 14 de octubre de 2026.
+Fecha de referencia y ultimo corte de contexto: 16 de octubre de 2026.
 El cuerpo historico corresponde al 25/08/2026; las secciones 21 a 23 registran
 actualizaciones posteriores. Las secciones 24 a 27 registran cambios hasta el
 08/10/2026. La seccion 30 registra un plan futuro acordado el 10/10/2026,
 todavia no implementado. Las secciones 31 a 35 registran el trabajo del otro
 chat del 14/10/2026, desde el diagnostico de remitos hasta la revision de
 trafico. La seccion 36 integra los cambios de este chat al mismo corte.
+La seccion 37 documenta la copia de respaldo Index SQL/Cloudflare (16/10/2026).
 La seccion mas reciente prevalece sobre las anteriores.
 Al proximo pedido de actualizar este archivo, revisar los cambios posteriores
 a este corte, incluso si ocurrieron mas tarde el 14 de octubre de 2026.
@@ -2436,3 +2437,137 @@ Cargar Stock: presupuesto importado y busqueda de movimientos
 
 PUNTO DE CORTE: 14 de octubre de 2026. En la proxima actualizacion del contexto,
 incorporar los cambios posteriores a este corte, incluidos los del mismo dia.
+
+
+37. COPIA DE RESPALDO INDEX SQL/CLOUDFLARE (16 DE OCTUBRE DE 2026)
+================================================================
+
+DECISION FINAL DEL USUARIO
+-------------------------
+El usuario cancelo la migracion y la promocion de la copia: el Index oficial
+con Supabase ya esta optimizado. Conservar esta alternativa COMO RESPALDO.
+NO reemplazar index.html ni continuar cambios pendientes sin un pedido nuevo.
+Para retomar: "leete el contexto sobre la copia" significa leer esta seccion,
+tools/index-sql-prueba/README.md y comprobar el codigo actual. Este registro
+no autoriza reemplazos, publicaciones ni modificaciones de funcionamiento.
+
+Archivos y enlaces
+------------------
+- Copia: index - copia.html. Original index.html y modulos oficiales
+  corralon-system.js / wrangler.jsonc quedaron intactos durante esta migracion.
+- Local: http://localhost:8080/index%20-%20copia.html
+- Alojamiento aislado: https://corralon-index-sql-prueba.benjaminsuarez002.workers.dev/
+- El usuario subio manualmente el HTML a corralonprogreso.com/index%20-%20copia;
+  no asumir que esa ruta contiene el ultimo HTML. Subir solo la copia si lo pide.
+- La copia fue recreada desde el HTML original. Conserva su interfaz, calculos
+  y corralon-system.js; agrega index-sql-api.js, index-sql-prueba.js e
+  index-cloudflare.js cargados del alojamiento aislado. El ultimo adapta las
+  consultas originales a la lista local y backend Cloudflare. La primera
+  integracion corralon-system-sql-prueba.js / preparar-system.cjs ya no se usa
+  en la copia actual. No confundir esos restos con la implementacion vigente.
+
+Sincronizacion QUE EXISTE
+------------------------
+- tools/index-sql-prueba/exportar.ps1 consulta SQL en modo lectura: 9649 activos
+  en la ultima comprobacion, PrecioVta3 convertido por moneda, rubros y stock
+  sucursales 1/2. Es una cantidad observada, no un requisito fijo.
+- catalogo-sql-prueba/manifest.json y 16 fragmentos por hash. Manifiesto escrito
+  al terminar los fragmentos. publicar.ps1 usa lista blanca y Worker aislado,
+  publica solo si cambia el contenido; preserva ultima publicacion ante fallo.
+- Tarea Windows "Corralon - Index SQL prueba", cada DOS minutos y al iniciar
+  sesion. SIGUE HABILITADA al dejar la copia de respaldo; no se desactivo.
+  Requiere sesion Windows del usuario iniciada, SQL e Internet. Al apagar o
+  cerrar sesion, Cloudflare sigue entregando ultima lista publicada.
+- Inicio silencioso: instalar-sincronizacion.ps1 registra wscript.exe con
+  sincronizar-oculto.vbs; procesos secundarios UseShellExecute=false y
+  CreateNoWindow=true. Verificados sin ventana y ejecuciones exitosas.
+  Log: tools/index-sql-prueba/sincronizacion.log.
+- Navegador revisa version cada UN minuto mientras visible y al recuperar
+  conexion/visibilidad; IndexedDB separado, descarga solo fragmentos cambiados,
+  conserva ultima lista valida si una actualizacion falla. Si falta manifiesto
+  en localhost/dominio, usa alojamiento Cloudflare de prueba. No es web offline
+  completa: HTML y dependencias externas necesitan conexion inicialmente.
+- Busquedas/filtros locales. Una edicion se ve inmediatamente en esa pantalla;
+  otros visitantes pueden esperar unos 3 minutos mas tiempo de publicacion.
+  No existe aun el render incremental garantizado sin parpadeo/foco del plan.
+
+Datos, login y aislamiento
+-------------------------
+- tools/index-sql-prueba/worker.mjs y wrangler.jsonc exclusivos. Durable Object
+  SQLite IndexTestStore guarda ofertas, destacados, etiquetas, detalles, fotos
+  URL, datos ceramicos y revisiones de la copia. El exportador mezcla estos
+  metadatos con SQL. Si no puede leerlos, evita publicar para no borrarlos.
+  No escribe precios ni stock SQL. Fotos/carga siguen en Cloudinary. No usa R2.
+- metadatos.json: importacion inicial completa de 9766 entradas. Se corrigio
+  una primera importacion limitada a mil. El ciclo normal NO consulta Supabase;
+  ediciones nuevas del oficial no se importan automaticamente al respaldo.
+- Misma sesion del Menu SIN otro login. El snapshot omite password y el guard
+  de otras paginas tambien limpia claves de cache. index-sql-api.js consulta
+  el registro menuUsuarios en Firebase cuando falta clave o cache quedo vieja,
+  la usa en memoria para validar backend y no persiste otra clave. No pedir
+  cuenta Cloudflare al usuario del catalogo. Fallo interno no bloquea lista.
+- Costos/margenes y proveedores SQL cifrados AES-GCM; clave privada entregada
+  tras validar sesion. No publicar costos claros ni credenciales. SQL usa
+  DPAPI del usuario Windows; secretos en credenciales.private.json protegidos.
+  No imprimir secretos ni repetir migraciones iniciales sin necesidad.
+- Se copiaron 366 presupuestos a historial aislado; nuevos con PRUEBA-0001-...
+  Revisar notificaciones Firebase y otras escrituras antes de promocionar:
+  la copia limpia conserva codigo original y no se certifico aislamiento total
+  de todas las notificaciones. No confundir con afirmaciones del prototipo.
+- Aridos/fletes: el prototipo anterior los llevaba a Cloudflare; LA COPIA
+  LIMPIA ACTUAL conserva lectura/edicion originales en Firebase. Archivos de
+  config/migracion antiguos siguen presentes. Carrito, portada, ranking y
+  sesion conservan servicios existentes. No toda la aplicacion fue migrada.
+- Archivos estaticos y backend tienen cuotas distintas; no prometer todo
+  ilimitado. Supabase Log Query mide registros tecnicos escaneados, no egress
+  del catalogo. No confundir contadores ni atribuir todo trafico al HTML.
+
+Correcciones exclusivas de la copia
+----------------------------------
+- Prode eliminado por pedido expreso: ventanas, estilos, funciones, intervalos,
+  listeners y peticiones ESPN. Icono de compartir productos conservado con
+  clase product-share-mark. Original sin cambiar.
+- Guardar oculta editor y dispara animacion existente mientras termina. No
+  borra campos durante guardado; si falla fase inicial, muestra editor intacto.
+  Sincronizacion posterior mantiene eventos de exito/error originales. Adaptado
+  en index-cloudflare.js sin modificar editor oficial compartido.
+- HTTP 409 falso: conversion de filas perdia sqlEditRevision. Se conserva en
+  fromSupabase y proyecciones de categoria; vistas antiguas sin revision usan
+  la conocida en la lista. Conflictos verdaderos siguen protegidos. No forzar
+  sobrescrituras para resolver 409.
+- Stock 000512 ARENA FINA X 1MT: SQL devolvio -2.98023223876953e-7 (casi cero).
+  Supabase original mostraba -2.98 por interpretacion previa incorrecta. Copia
+  interpreta numero/notacion cientifica y muestra 0.00 a dos decimales. No
+  cambiar SQL para imitar ese error del original.
+- Ultima suite: 32 pruebas pasadas de catalogo/cache/fallback, backend, sesion
+  sin clave/cache vieja, editor/carga, revisiones y stock cientifico:
+  node --test tests/index-sql-prueba.test.cjs tests/index-sql-backend.test.cjs tests/index-sql-integration.test.cjs
+  Hubo verificaciones HTTP locales/publicadas. No equivale a probar cada accion
+  real ni todos los equipos. No crear ventas ni cambiar stock para verificar.
+
+PLAN CANCELADO: NO IMPLEMENTADO
+------------------------------
+- No hay WebSockets/realtime Cloudflare. Ultima propuesta usaria Firebase
+  SOLO para avisar version; navegador descargaria cambios desde Cloudflare.
+  Orden obligatorio: publicar completo primero, avisar despues. Aislar senal
+  mientras sea copia para no afectar version oficial.
+- Exportar desde Access dispararia publicacion inmediata, adicional al ciclo
+  de 2 min. Editar ofertas/etiquetas entregaria cambios sin esperar SQL.
+- Render incremental preservaria busqueda, filtros, orden, scroll, foco,
+  carrito, ventanas y campos en edicion, sin vaciar listado. SIGUE PENDIENTE.
+- Se inspecciono SIN CAMBIAR C:\Update\actualizaciones\Subir Lista Index\:
+  run_sync_articulos.bat parsea C:\Update\Articulosexp.xls, sincroniza Supabase
+  y ranking. publish_lista_from_json.js delega al sincronizador.
+  catalogo-version-publish.js / publicar-version-catalogo.ps1 incrementan
+  configuracion/catalogo_version en Firebase. NO se engancho Cloudflare a ese
+  flujo ni se quitaron publicacion/avisos oficiales.
+- El usuario cancelo ese trabajo por estar optimizado el sistema oficial:
+  respaldo disponible, no continuar ni promover automaticamente.
+
+Para una futura promocion, confirmar alcance con el nuevo pedido y revisar
+fuentes de cada funcion, aridos/fletes, presupuestos/notificaciones, costos
+para Corralon System, sincronizacion manual, avisos y render. No asumir que
+la copia permite migrar todo el sistema cambiando una unica URL.
+
+PUNTO DE CORTE ACTUAL: 16 de octubre de 2026. Esta seccion prevalece para
+todo lo referido a la copia de respaldo Index SQL/Cloudflare.
