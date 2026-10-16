@@ -1508,8 +1508,10 @@ internal static partial class FacturacionCopiaApi
         }else if(source=="presupuesto"){
             if(String.IsNullOrWhiteSpace(sourceId)||sourceId.Length>150)throw new InvalidOperationException("Presupuesto inválido.");
             marker="[WEBSTOCK:"+StockBudgetTransferGuid(sourceId).ToString("N")+"]";
-            history=RowsTx(c,tx,"SELECT IDRecibo FROM dbo.RecibosTP WHERE CHARINDEX(@p0,CONVERT(nvarchar(max),Nota))>0",marker);
-            movements=RowsTx(c,tx,"SELECT IDRecibo,NroMov,IDTipoMov,IDRecDes,IDSuc FROM dbo.RecibosTP WHERE Confirmado=1 AND Anulado=0 AND (CHARINDEX(@p0,CONVERT(nvarchar(max),Nota))>0 OR IDRecibo IN(SELECT IDRecDes FROM dbo.RecibosTP WHERE CHARINDEX(@p0,CONVERT(nvarchar(max),Nota))>0) OR IDRecDes IN(SELECT IDRecibo FROM dbo.RecibosTP WHERE CHARINDEX(@p0,CONVERT(nvarchar(max),Nota))>0))",marker);
+            history=RowsTx(c,tx,"SELECT IDRecibo,IDRecDes FROM dbo.RecibosTP WHERE CHARINDEX(@p0,CONVERT(nvarchar(max),Nota))>0",marker);
+            var relatedIds=new HashSet<int>();
+            foreach(var row in history){relatedIds.Add(Convert.ToInt32(row["IDRecibo"]));if(Number(row["IDRecDes"])>0)relatedIds.Add(Convert.ToInt32(row["IDRecDes"]));}
+            movements=relatedIds.Count==0?new List<Dictionary<string,object>>():RowsTx(c,tx,"SELECT IDRecibo,NroMov,IDTipoMov,IDRecDes,IDSuc FROM dbo.RecibosTP WHERE Confirmado=1 AND Anulado=0 AND (IDRecibo IN("+String.Join(",",relatedIds)+") OR IDRecDes IN("+String.Join(",",relatedIds)+"))");
         }else throw new InvalidOperationException("Origen SQL inválido.");
         bool active=purchases.Count>0||movements.Count>0,complete=false;
         object result=null;

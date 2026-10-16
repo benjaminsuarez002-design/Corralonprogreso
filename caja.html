@@ -1120,7 +1120,7 @@
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.24"></script>
+<script src="corralon-system.js?v=1.0.25"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -7854,7 +7854,7 @@ initializeCashHistory(true);
   oldApp.querySelector('#cajaBranchCombo').insertAdjacentElement('afterend',returnToSql);
   popup.firstElementChild.append(oldApp); document.body.append(popup);
   const main = document.createElement('main'); main.id = 'cajaSqlMain';
-  main.innerHTML = `<header><h1>Caja Diaria</h1><label>Sucursal: <select id="sqlCajaDeposit"></select></label><span id="sqlCajaClock"></span><button id="sqlCajaReports">Informes Diarios</button><button id="sqlCajaAdditional">Opciones adicionales</button><a href="menu.html">Menú</a></header>
+  main.innerHTML = `<header><h1>Caja Diaria</h1><label>Sucursal: <select id="sqlCajaDeposit"></select></label><span id="sqlCajaClock"></span><button id="sqlCajaReports">Informes Diarios</button><button id="sqlCajaAdditional">Opciones adicionales</button><button id="sqlCajaCollections">Cobranzas en caja</button><a href="menu.html">Menú</a></header>
   <div class="caja-sql-toolbar"><label>Caja Nº: <input id="sqlCajaNumber" readonly size="16"></label><label>Fecha: <input id="sqlCajaDate" type="date" readonly></label><label><input id="sqlCajaGlobal" type="checkbox" checked disabled> Caja Global</label><label>Operador: <select id="sqlCajaOperator"></select></label><button id="sqlCajaOpen">Abrir Caja</button><button id="sqlCajaRefresh">Actualizar<br>Saldo Actual</button><button id="sqlCajaComplete">Ver Caja Completa</button></div>
   <div class="caja-sql-layout"><section>
     <div class="caja-sql-box"><h2>Detalle de Valores</h2><div class="caja-sql-grid"><table><thead><tr><th>Tipo Valor</th><th>Caja Inicial</th><th>Movs. Día</th><th>Imp. I/E</th><th>Imp. Final</th><th>Nota</th></tr></thead><tbody id="sqlCajaValues"></tbody></table></div><div class="caja-sql-record"><span id="sqlCajaValueCount">Registro: 0 de 0</span><span>Sin filtro</span><span>Buscar</span></div></div>
@@ -7882,7 +7882,7 @@ initializeCashHistory(true);
     for (const id of ['sqlCajaDeposit','sqlCajaDate','sqlCajaGlobal','sqlCajaOperator']) $(id).disabled = busy || (id === 'sqlCajaDate' ? boot?.restringido : id === 'sqlCajaDeposit' ? boot?.restringido : id === 'sqlCajaGlobal' ? true : Boolean(current?.cabecera));
     $('sqlCajaNote').disabled = busy || !editable;
     main.querySelectorAll('[data-caja-detail],[data-caja-cash],[data-caja-new],[data-caja-delete]').forEach(input => { input.disabled = busy || !editable; });
-    for (const id of ['sqlCajaConsult','sqlCajaCancel','sqlCajaPrint','sqlCajaAdditional']) $(id).disabled = busy;
+    for (const id of ['sqlCajaConsult','sqlCajaCancel','sqlCajaPrint','sqlCajaAdditional','sqlCajaCollections']) $(id).disabled = busy;
     $('sqlCajaRefresh').classList.toggle('caja-sql-busy', busy);
   }
   function render(data) {
@@ -8120,6 +8120,10 @@ initializeCashHistory(true);
     await run(async () => { await saveDetail(); await CajaSQL.flush(); synchronizeDate(); if (!toolsReady) toolsReady = CajaSQLInitializeTools().catch(error => { toolsReady = null; throw error; }); await toolsReady; const branch = current?.cabecera?.IDSucAsoc || boot.sucursal; if (branch && !cajaBranches.some(item => item.id === localStorage.getItem(CAJA_BRANCH_KEY))) selectCajaBranch(branch === 2 ? 'calle5_espana' : 'progreso_ruta'); if (loadedSupabaseCajaCacheDate !== selectedDateKey) { loadState(selectedDateKey); await Promise.all([CajaSQL.load(),loadUserCashState()]); } else await CajaSQL.load(); popup.classList.add('open'); fitAdditionalTools(); $('cajaAdditionalClose').focus(); if (!window.cajaSqlDollarStarted) { window.cajaSqlDollarStarted = true; iniciarActualizacionDolar(); } });
   }
   $('sqlCajaAdditional').onclick = openAdditional;
+  $('sqlCajaCollections').onclick = () => run(async () => {
+    await saveDetail(); await CajaSQL.flush();
+    await window.CajaCobranzas.open({main,branch:current?.cabecera?.IDSucAsoc || boot.sucursal,onBack:async()=>{await load();$('sqlCajaCollections').focus();}});
+  });
   let cajaFitFrame=0;
   function fitCajaForm(){
     cajaFitFrame=0;if(window.matchMedia('print').matches)return;
@@ -8156,7 +8160,7 @@ initializeCashHistory(true);
   }
   let mainRemoteVersion='',mainRemoteCaja=0,mainSyncBusy=false;
   function canRefreshMain(){
-    return !busy && !dirty && !document.hidden && !popup.classList.contains('open') && current?.cabecera
+    return !main.hidden && !busy && !dirty && !document.hidden && !popup.classList.contains('open') && current?.cabecera
       && !main.contains(document.activeElement?.closest('input:not([readonly]),textarea,select'))
       && !Array.from($('sqlCajaCash').querySelectorAll('tr[data-caja-draft] input')).some(input=>input.value.trim())
       && !document.querySelector('.modal-bg.open,.caja-sql-dialog[open],.invoice-history-overlay:not([hidden])');
@@ -8205,6 +8209,7 @@ initializeCashHistory(true);
 
 </script>
 <script src="facturacion-medios-pago.js" defer></script>
+<script src="caja-cobranzas.js" defer></script>
 <script src="facturacion-consulta.js" defer></script>
 <script src="recargar-deslizando.js" defer></script>
 </body>

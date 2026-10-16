@@ -184,6 +184,35 @@ internal static partial class FacturacionCopiaApi
                         CajaRecalculate(c,tx,h);
     }
     private static int CajaInputId(Dictionary<string,object> input) {return (int)Number(Value(input,"id") ?? (object)0);}
+    private const string CajaPendingFrom=" FROM dbo.FacturasATP f JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND ISNULL(f.Pagada,0)=0 AND (@p2=0 OR d.IDSucAsoc=@p2)";
+    private static Dictionary<string,object> CajaPendingHeader(SqlConnection c,SqlTransaction tx,int receipt,CajaSession session) {
+        var rows=CajaRows(c,tx,"SELECT f.IDRecibo,f.Total,f.TotalME,f.IDCaja"+CajaPendingFrom+" AND f.IDRecibo=@p3",DateTime.Today,DateTime.Today.AddDays(1),session.Restricted?session.Branch:0,receipt);
+        if(rows.Count!=1)throw new InvalidOperationException("El comprobante ya fue cobrado, anulado o no pertenece a los pendientes de hoy. Actualizá la lista.");
+        return rows[0];
+    }
+    private static object CajaPendingDetail(SqlConnection c,SqlTransaction tx,int receipt,CajaSession session) {
+        var h=CajaPendingHeader(c,tx,receipt,session);
+        return new {ok=true,idRecibo=receipt,version=InvoiceValuesVersion(c,tx,receipt),
+            articulos=CajaRows(c,tx,"SELECT IDArt idart,ArtDesc descripcion,Cantidad cantidad,PrecioUni precio,Importe importe FROM dbo.FacturasATS WHERE IDRecibo=@p0 ORDER BY Orden",receipt),
+            valores=CajaRows(c,tx,"SELECT v.Orden orden,p.TipoPago tipo,t.[Descripción] tarjeta,v.Cuotas cuotas,v.Coef coef,v.Importe importe,v.ImpRec impRec,v.ImpEnt total,CONVERT(varchar(10),v.FechaVto,23) vencimiento,v.Concepto descripcion FROM dbo.FacturasTSVal v LEFT JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta WHERE v.IDRecibo=@p0 ORDER BY v.Orden",receipt)};
+    }
+    private static object CajaPendingWrite(SqlConnection c,SqlTransaction tx,Dictionary<string,object> input,CajaSession session,bool values) {
+        int receipt=RequiredId(Value(input,"idRecibo"),"el comprobante");
+        // Serialize with the existing invoice editor and concurrent cashiers.
+        Scalar(c,tx,"SELECT IDRecibo FROM dbo.FacturasATP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0",receipt);
+        var h=CajaPendingHeader(c,tx,receipt,session);
+        if(Text(Value(input,"version"))!=InvoiceValuesVersion(c,tx,receipt))throw new InvalidOperationException("El comprobante cambió en otra PC. Volvé a seleccionarlo antes de guardar.");
+        int cash=h["IDCaja"]==DBNull.Value?0:Convert.ToInt32(h["IDCaja"]);
+        if(cash>0)CajaHeader(c,tx,cash,true,session);
+        if(values) {InvoiceValuesSaveCore(c,tx,input);if(cash>0)CajaRecalculate(c,tx,CajaHeader(c,tx,cash,true,session));}
+        else {
+            decimal total=Convert.ToDecimal(h["TotalME"]==DBNull.Value?h["Total"]:h["TotalME"]);
+            decimal paid=Convert.ToDecimal(Scalar(c,tx,"SELECT ISNULL(SUM(ImpEnt),0) FROM dbo.FacturasTSVal WHERE IDRecibo=@p0",receipt));
+            if(Math.Abs(Math.Abs(total)-paid)>0.01m)throw new InvalidOperationException("Los medios de pago no coinciden con el total. Revisalos antes de marcar Pagada.");
+            Execute(c,tx,"UPDATE dbo.FacturasATP SET Pagada=1 WHERE IDRecibo=@p0",receipt);
+        }
+        return new {ok=true};
+    }
     private static object CajaSqlHandle(SqlConnection c,HttpListenerRequest request) {
         var input=new Dictionary<string,object>();
         if(request.HttpMethod=="POST") {using(var reader=new StreamReader(request.InputStream,Encoding.UTF8)){string body=reader.ReadToEnd();if(body.Length>2000000)throw new InvalidOperationException("La carga es demasiado grande.");input=Object(Json.DeserializeObject(body));}}
@@ -193,6 +222,8 @@ internal static partial class FacturacionCopiaApi
         DateTime date=CajaDate(request.HttpMethod=="GET"?request.QueryString["fecha"]:Value(input,"fecha"));CajaCheckDate(session,date);
         int id=request.HttpMethod=="GET"?Convert.ToInt32(request.QueryString["id"]??"0"):CajaInputId(input);
         if(request.HttpMethod=="GET") {
+            if(action=="cobranzas")return new {ok=true,fecha=DateTime.Today.ToString("yyyy-MM-dd"),filas=Rows(c,"SELECT f.IDRecibo id,f.NroFactura numero,f.ApeYNom cliente,t.Descripcion tipo,f.Total total,CONVERT(varchar(8),f.FechaYHora,108) hora,d.IDSucAsoc sucursal"+CajaPendingFrom+" ORDER BY f.IDRecibo DESC,f.FechaYHora DESC",DateTime.Today,DateTime.Today.AddDays(1),session.Restricted?session.Branch:Convert.ToInt32(request.QueryString["sucursal"]??"0"))};
+            if(action=="cobranza-detalle") {using(var readTx=c.BeginTransaction(IsolationLevel.Serializable)){var detail=CajaPendingDetail(c,readTx,id,session);readTx.Commit();return detail;}}
             if(action=="formulario") {
                 if(id==0){int deposit=Convert.ToInt32(request.QueryString["deposito"]??"0");object found=Scalar(c,null,"SELECT TOP 1 c.IDRecibo FROM dbo.CajaDiaTP c JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] AND d.IDEmp=c.IDEmp JOIN dbo.[Depósitos] elegido ON elegido.IDSucAsoc=d.IDSucAsoc AND elegido.IDEmp=d.IDEmp WHERE c.Fecha>=@p0 AND c.Fecha<@p1 AND c.IDEmp=1 AND elegido.[IDDepósito]=@p2 AND c.Anulado=0 ORDER BY c.IDRecibo DESC",date,date.AddDays(1),deposit);id=found==null?0:Convert.ToInt32(found);}
                 if(id==0)return new {ok=true,cabecera=(object)null,detalle=new object[0],efectivo=new object[0],tarjetas=new object[0],version="",eliminada=Scalar(c,null,"SELECT 1 FROM dbo.CajaWebEstado w JOIN dbo.[Depósitos] d ON CONVERT(nvarchar(40),d.IDSucAsoc)=w.Usuario WHERE w.Fecha=@p0 AND w.Seccion='caja-eliminada' AND d.[IDDepósito]=@p1 AND d.IDEmp=1",date,Convert.ToInt32(request.QueryString["deposito"]??"0"))!=null};
@@ -216,6 +247,7 @@ internal static partial class FacturacionCopiaApi
         else if(action!="valores-boleta" && !session.Edit)throw new InvalidOperationException("Tu usuario no tiene permiso de edición de Caja.");
         using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
             try {
+                if(action=="cobranza-pagada" || action=="cobranza-valores") {var result=CajaPendingWrite(c,tx,input,session,action=="cobranza-valores");tx.Commit();return result;}
                 if(action=="valores-boleta") {var updatedCaja=CajaCorrectInvoiceValues(c,tx,input,session);tx.Commit();return new {ok=true,caja=updatedCaja};}
                 if(action=="actualizar-dia") {
                     var pending=CajaRows(c,tx,"SELECT c.IDRecibo FROM dbo.CajaDiaTP c WITH(UPDLOCK,HOLDLOCK) JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] AND d.IDEmp=c.IDEmp WHERE c.IDEmp=1 AND c.Anulado=0 AND c.Confirmado=0 AND c.Fecha>=@p0 AND c.Fecha<@p1 AND (@p2=0 OR d.IDSucAsoc=@p2)",date,date.AddDays(1),session.Restricted?session.Branch:0);
