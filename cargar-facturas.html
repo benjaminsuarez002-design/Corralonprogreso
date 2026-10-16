@@ -308,7 +308,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     accept.type = 'button';
     accept.textContent = confirmation ? 'Confirmar' : 'Aceptar';
     accept.style.cssText = 'background:var(--corralon-red,#f50916);color:white;padding:9px 16px;border:0';
-    const finish = accepted => { dialog.close(); dialog.remove(); previous?.focus(); resolve(accepted); };
+    const finish = accepted => { dialog.close(); dialog.remove(); const focusTransferred=accepted&&onAccept?.()===true; if(!focusTransferred)previous?.focus(); resolve(accepted); };
     if (confirmation) {
       const cancel = document.createElement('button');
       cancel.type = 'button'; cancel.textContent = 'Cancelar';
@@ -316,7 +316,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       cancel.onclick = () => finish(false);
       actions.append(cancel);
     }
-    accept.onclick = () => { onAccept?.(); finish(true); };
+    accept.onclick = () => finish(true);
     actions.append(accept);
     dialog.addEventListener('cancel', event => { event.preventDefault(); finish(false); });
     dialog.append(title, message, actions);
@@ -738,12 +738,14 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
         stockTarget=stockReference.sessionStorage.getItem('corralon_stock_tab_id')||FX.createUuid();
         stockReference.sessionStorage.setItem('corralon_stock_tab_id',stockTarget);
       }catch{stockNeedsNavigation=true;stockTarget='';}
+      stockReference.focus();
+      return true;
     };
     try {
       const payload = draft.pending || confirmationPayload();
       const sendToStock = payload.enStock && !payload.movimiento && FX.menuUserHasAccess('carga_stock');
       const stockKey = `corralon_stock_factura_${user.id}`;
-      if (!draft.pending && !(await htmlNotice(`Confirmar la factura ${payload.numero || '(numeración automática)'} de ${selectedProvider().nombre} por ${money(rows.reduce((sum, row) => sum + row.importe, 0))}?`, true, ()=>{if(sendToStock)prepareStockTab();}))) return;
+      if (!draft.pending && !(await htmlNotice(`Confirmar la factura ${payload.numero || '(numeración automática)'} de ${selectedProvider().nombre} por ${money(rows.reduce((sum, row) => sum + row.importe, 0))}?`, true, ()=>sendToStock?prepareStockTab():false))) return;
       if(draft.pending&&sendToStock)prepareStockTab();
       draft.pending = payload; saveDraft(); setBusy(true);
       let result;

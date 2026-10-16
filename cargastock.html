@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.51"></script>
+<script src="corralon-system.js?v=1.0.52"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -527,11 +527,11 @@
   </section>
 </div>
 <div class="table-context-menu" id="tableContextMenu">
+  <button type="button" id="copyAccessPriceContextBtn" hidden>Actualizar costo en SQL</button>
   <button type="button" id="pasteStockContextBtn">Pegar tabla</button>
   <button type="button" id="editStockArticleContextBtn" hidden>Editar artículo</button>
   <button type="button" id="editStockWebContextBtn" hidden>Editar para web</button>
   <button type="button" id="stockImportBudgetBtn">Importar presupuesto web</button>
-  <button type="button" id="copyAccessPriceContextBtn" hidden>Actualizar costo en SQL</button>
   <button type="button" id="sendToComparatorContextBtn">Enviar al comparador</button>
   <button type="button" id="importNewArticlesContextBtn">Importar artículos nuevos</button>
   <button type="button" id="calcPriceContextBtn" hidden>Dividir / multiplicar</button>
@@ -1422,6 +1422,7 @@ function cancelActiveCellEdit(cell) {
   if (!snapshot) return false;
   const row = rowsData.find((item) => item.id === snapshot.rowId);
   if (!row || JSON.stringify(row) === JSON.stringify(snapshot.before)) return false;
+  cell.dataset.stockDescriptionEdited='0';
   cellEditSnapshots.delete(key);
   restoreStockFieldMovement({ ...snapshot, idMov: fieldMovementSequence });
   show('Edición actual deshecha');
@@ -1849,7 +1850,7 @@ function filteredProviderArticles(cell) {
     matchingArticles = ordered.filter(item => String(item.idart) === String(row.idart) && codeKey(item.codProv) === typedCode);
     linkedArticleMatch = matchingArticles.length > 0;
   }
-  articleProviderHasSearchMatch = matchingArticles.length > 0;
+  articleProviderHasSearchMatch = terms.length ? ordered.some(descriptionMatches) : matchingArticles.length > 0;
   articleProviderPage = CorralonSystem.articleOptionPager.create(cell?.dataset?.field === 'descripcion' && !stockDescriptionMatchesOnly() ? ordered : matchingArticles, {
     preordered: true,
     isMatch: item => linkedArticleMatch || matches(item),
@@ -1863,7 +1864,7 @@ function filteredProviderArticles(cell) {
 }
 function renderArticleProviderList() {
   el.articleProviderMenu.innerHTML = articleProviderOptions.length
-    ? articleProviderOptions.map((item, index) => `<div class="article-provider-option${item.source !== 'proveedores' ? ' sql-option' : ''}${index === articleProviderActive ? ' active' : ''}" data-article-option="${index}"><b>${escapeHtml(item.codProv || '-')}</b>${item.source !== 'proveedores' ? `<span title="IDArt">${escapeHtml(item.idart || '')}</span>` : ''}<span>${escapeHtml(item.descripcion || '')}</span>${item.source !== 'proveedores' ? `<span class="sql-cost" title="Costo sin IVA SQL">${money(stockSelectedArticleCost(item))}</span>` : ''}</div>`).join('')
+    ? articleProviderOptions.map((item, index) => `<div class="article-provider-option${item.source !== 'proveedores' ? ' sql-option' : ' provider-list-option'}${index === articleProviderActive ? ' active' : ''}" data-article-option="${index}"><b>${escapeHtml(item.codProv || '-')}</b>${item.source !== 'proveedores' ? `<span title="IDArt">${escapeHtml(item.idart || '')}</span>` : ''}<span>${escapeHtml(item.descripcion || '')}</span><span class="sql-cost" title="${item.source === 'proveedores' ? 'Precio de lista del proveedor' : 'Costo sin IVA SQL'}">${money(stockSelectedArticleCost(item))}</span></div>`).join('')
     : '<div class="article-provider-option"><span>Sin coincidencias</span></div>';
   if(articleProviderCell?.dataset?.field==='descripcion'){
     const filtered=stockDescriptionMatchesOnly(),hasQuery=Boolean(norm(articleProviderCell.textContent));
@@ -1874,10 +1875,14 @@ function renderArticleProviderList() {
   }
 }
 function stockCanOfferArticleImport(cell) {
-  return cell?.dataset.field==='descripcion' && Boolean(String(cell.textContent||'').trim()) && !articleProviderHasSearchMatch && Boolean(selectedProvider()) && !stockConfirmed && !stockIngresoBusy;
+  const description=norm(cell?.textContent||'');
+  return cell?.dataset.field==='descripcion' && Boolean(description)
+    && !providerArticlesOrdered.some(item=>norm(item.descripcion||'')===description)
+    && Boolean(selectedProvider()) && !stockConfirmed && !stockIngresoBusy;
 }
 function stockImportArticleFromCell(cell) {
   if (!stockCanOfferArticleImport(cell)) return;
+  cell.dataset.stockDescriptionEdited='0';
   const index = Number(cell.dataset.row);
   rowsData[index].descripcion = String(cell.textContent || '').trim();
   rowsData[index].idart='';rowsData[index].idartManual=false;rowsData[index].stock=null;
@@ -1890,7 +1895,7 @@ function openArticleProviderList(cell) {
   articleProviderInputTimer = null;
   articleProviderCell = cell;
   articleProviderOptions = filteredProviderArticles(cell);
-  articleProviderActive = stockCanOfferArticleImport(cell) ? -1 : articleProviderPage?.focusIndex || 0;
+  articleProviderActive = stockCanOfferArticleImport(cell) && !articleProviderHasSearchMatch ? -1 : articleProviderPage?.focusIndex || 0;
   renderArticleProviderList();
   const rect = cell.getBoundingClientRect();
   const viewportMargin = 8;
@@ -1943,6 +1948,7 @@ function pickArticleProviderOption(index = articleProviderActive) {
   const item = articleProviderOptions[index];
   const cell = articleProviderCell;
   if (!item || !cell) return false;
+  cell.dataset.stockDescriptionEdited='0';
   const rowIndex = Number(cell.dataset.row);
   const row = rowsData[rowIndex];
   if (!row) return false;
@@ -2265,6 +2271,12 @@ async function openNewArticlesModal(rowIndex = null, editableSource = false) {
   }
   const candidates = Number.isInteger(rowIndex) && rowsData[rowIndex] ? [rowsData[rowIndex]] : selectedRedRowsForNewArticles();
   const sourceWorkspace=stockActiveWorkspace,sourceWorkspaceKey=STOCK_WORKSPACE_KEY;
+  const sourceRowId=(Number.isInteger(rowIndex)?rowsData[rowIndex]?.id:null)||(candidates.length===1?candidates[0].id:null);
+  let importerReturned=false;
+  const returnToSourceRow=()=>{
+    if(!sourceRowId||stockActiveWorkspace!==sourceWorkspace||STOCK_WORKSPACE_KEY!==sourceWorkspaceKey)return;
+    requestAnimationFrame(()=>stockRestoreImportedRow(sourceRowId));
+  };
   if (!candidates.length && !hasLocalArticleImportDraft()) {
     show(selectedRows.size
       ? 'Las filas seleccionadas ya existen o no se pueden importar'
@@ -2287,10 +2299,12 @@ async function openNewArticlesModal(rowIndex = null, editableSource = false) {
     catalogRows: stockSqlCatalogRows,
     catalogSource: 'sql',
     showMessage: show,
+    onClose(){importerReturned=true;returnToSourceRow();},
     onImported(payload, appliedRows) {
       if(stockActiveWorkspace!==sourceWorkspace || STOCK_WORKSPACE_KEY!==sourceWorkspaceKey)return;
       stockApplyImportedArticleIds(candidates,appliedRows||[]);
-      stockRefreshSql().then(()=>{render();saveRows();}).catch(error=>stockIngresoMessage(error.message,'error'));
+      stockRefreshSql().then(()=>{render();saveRows();if(importerReturned)returnToSourceRow();}).catch(error=>{stockIngresoMessage(error.message,'error');if(importerReturned)returnToSourceRow();});
+      if(importerReturned)returnToSourceRow();
       el.status.textContent = payload.directSql
         ? `${payload.nuevos} artículos nuevos y ${payload.actualizados} actualizados en la base local`
         : `${payload.importados || candidates.length} artículos nuevos importados en Access`;
@@ -2739,18 +2753,28 @@ function focusNavigationTarget(target, preserveTableSelection = false) {
   }
   return true;
 }
+let stockImportQuantityRowId='';
+function stockRowHasQuantity(row){
+  const text=String(row?.cantidad??'').trim();
+  try{const quantity=/^['’]/.test(text)?stockPlainNumber(text.slice(1)):stockPlainNumber(text);return Boolean(text)&&(Number(stockField('stockTipoMovimiento').value)===35||quantity>0);}catch{return false;}
+}
+function stockRestoreImportedRow(rowId){
+  if(document.querySelector('.local-articles-backdrop'))return;
+  const index=rowsData.findIndex(row=>row.id===rowId);
+  if(index<0||stockConfirmed||stockRowHasQuantity(rowsData[index])){if(stockImportQuantityRowId===rowId)stockImportQuantityRowId='';return;}
+  stockImportQuantityRowId=rowId;
+  const quantity=editableCellAt(index,2);quantity?.focus({preventScroll:true});if(quantity)selectEditableCellText(quantity);
+}
 function stockBlockRowWithoutQuantity(current,target){
-  const cell=current?.closest?.('#rows [data-field][data-row]');
+  const cell=current?.closest?.('#rows [data-field][data-row]')
+    || (stockImportQuantityRowId?editableCellAt(rowsData.findIndex(row=>row.id===stockImportQuantityRowId),2):null);
   if(!cell || !target || stockTableRendering || stockConfirmed || stockIngresoBusy)return false;
   const row=rowsData[Number(cell.dataset.row)];
   if(!row || row.id!==cell.closest('.row')?.dataset.id || (!String(row.descripcion||'').trim() && !row.idart && !String(row.codigo||'').trim()))return false;
   const next=target.closest?.('#rows [data-field][data-row]');
   if(next && next.dataset.row===cell.dataset.row)return false;
   if(target.closest?.('button,.modal-backdrop.visible,dialog[open],.local-articles-backdrop,#articleProviderMenu,#tableContextMenu'))return false;
-  const text=String(row.cantidad??'').trim();
-  let valid=false;
-  try{const quantity=/^['’]/.test(text)?stockPlainNumber(text.slice(1)):stockPlainNumber(text);valid=Boolean(text) && (Number(stockField('stockTipoMovimiento').value)===35 || quantity>0);}catch{}
-  if(valid)return false;
+  if(stockRowHasQuantity(row)){if(stockImportQuantityRowId===row.id)stockImportQuantityRowId='';return false;}
   show('Ingresá la cantidad para continuar');
   const quantity=editableCellAt(Number(cell.dataset.row),2);
   quantity?.focus({preventScroll:true});if(quantity)selectEditableCellText(quantity);
@@ -5991,7 +6015,7 @@ async function cargarStockEnPedidos(sourceContext=null){
     const sourceRef=doc(db,'configuracion',`stockPedido_${source}`),counterRef=doc(db,'configuracion','pedidosNumeracion');
     const counter=await getDocFromServer(counterRef);
     let observedMax=0;
-    if(!counter.exists()||!(Number(counter.data().ultimoNumero)>0)){
+    if(!counter.exists()||!(Number(counter.data().ultimoNumero)>0)||counter.data().numeracionGlobalVersion!==1){
       const historical=await getDocsFromServer(collection(db,'pedidos'));
       historical.forEach(snapshot=>{observedMax=Math.max(observedMax,Number(snapshot.data().id)||0);});
     }
@@ -6004,12 +6028,12 @@ async function cargarStockEnPedidos(sourceContext=null){
       if(sourceSnap.exists()){savedNumber=String(sourceSnap.data().numero);already=true;return;}
       const counterSnap=await transaction.get(counterRef),summarySnap=await transaction.get(summaryRef);
       const next=Math.max(Number(counterSnap.exists()?counterSnap.data().ultimoNumero:0)||0,observedMax)+1;
-      const orderDocId=`${next}__${actor.id}`,orderRef=doc(db,'pedidos',orderDocId);
+      const orderDocId=String(next),orderRef=doc(db,'pedidos',orderDocId);
       const existing=await transaction.get(orderRef);if(existing.exists())throw new Error('El número de pedido ya está usado. Volvé a intentar.');
       const stamp=Date.now();
       const payload={id:String(next),_docId:orderDocId,idProveedor:String(current.id_proveedor||''),proveedor:current.proveedor||'',sucursalId:branch,sucursal:branchInfo.label,fecha:movement.fecha,total,nota:movement.nota,detalles:details,confirmado:true,pedido:true,estadoPedido:'pedido',eliminado:false,revisionOwner:null,usarListaProveedor:false,listaOrigen:'corralon',usuarioId:String(actor.id),usuarioKey:String(actor.id),usuarioNombre:actor.nombre||actor.usuario||'',usuarioLogin:actor.usuario||'',usuarioNivel:actor.nivel||'',syncId:stamp*1000+Math.floor(Math.random()*1000),updatedAt:stamp,origen:'carga-stock',movimientoStock:sourceContext?sourceContext.confirmedNumber:(stockConfirmed?Number(stockField('stockNumero').value)||null:null),origenStock:source};
       transaction.set(orderRef,payload);
-      transaction.set(counterRef,{ultimoNumero:next,updatedAt:serverTimestamp()},{merge:true});
+      transaction.set(counterRef,{ultimoNumero:next,numeracionGlobalVersion:1,updatedAt:serverTimestamp()},{merge:true});
       transaction.set(sourceRef,{numero:String(next),pedidoDocId:orderDocId,createdAt:serverTimestamp()});
       if(summarySnap.exists()&&summarySnap.data().initialized===true)transaction.set(summaryRef,{[branch]:increment(total),updatedAt:serverTimestamp()},{merge:true});
       savedNumber=String(next);already=false;
@@ -6412,16 +6436,18 @@ el.copyAccessPriceContextBtn.addEventListener('click', async () => {
   const row = Number.isFinite(contextMenuRowIndex) ? rowsData[contextMenuRowIndex] : null;
   closeTableContextMenu();
   const article=stockArticleForRow(row),price=row?calcPrecioFinal(row):0;
-  if(!article || stockConfirmed || stockIngresoBusy || !(price>0))return;
-  if(!(await htmlNotice(`Actualizar el costo sin IVA de ${article.idart} · ${article.descripcion}\nDe ${money(article.precioCosto)} a ${money(price)}?`)))return;
+  if(!article || stockConfirmed || stockIngresoBusy || el.copyAccessPriceContextBtn.disabled || !(price>0))return;
   el.copyAccessPriceContextBtn.disabled=true;
   try{
+    CorralonSystem.articleSync.set('syncing',`Actualizando costo de ${article.idart}…`,{progress:10});
     const response=await fetch('/api/facturacion/stock-ingreso',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarioId:FX.menuSessionUser()?.id||'',idOperador:Number(FX.menuSessionUser()?.idOperador)||null,accion:'actualizar-costo',idart:article.idart,costo:price,costoAnterior:Number(article.precioCosto)})});
     const result=await response.json();
     if(!response.ok || !result.ok)throw new Error(result.error||result.message||'No se pudo actualizar el costo.');
+    CorralonSystem.articleSync.set('syncing','Costo guardado. Actualizando la lista…',{progress:75});
     await stockRefreshSql();
     stockIngresoMessage(`Costo de ${article.idart} actualizado en SQL.`,'ok');
-  }catch(error){stockIngresoMessage(error.message,'error');}
+    CorralonSystem.articleSync.set('success',`Costo de ${article.idart} actualizado en SQL`,{progress:100});
+  }catch(error){stockIngresoMessage(error.message,'error');CorralonSystem.articleSync.set('error',error.message||'No se pudo actualizar el costo.');}
   finally{el.copyAccessPriceContextBtn.disabled=false;}
 });
 function sendStockRowToComparator(rowIndex) {
@@ -6556,6 +6582,7 @@ el.rows.addEventListener('input', (event) => {
   const row = rowsData[rowIndex];
   if (!row || row.id !== rowEl.dataset.id) return;
   const field = cell.dataset.field;
+  if(field==='descripcion')cell.dataset.stockDescriptionEdited='1';
   if (field === 'idart') { scheduleArticleProviderList(cell); return; }
   if (field === 'codigo' && codeKey(cell.textContent) !== codeKey(row.codigo)) { row.idart = ''; row.idartManual = false; }
   if(field==='descripcion' && !String(row.codigo||'').trim() && norm(cell.textContent)!==norm(row.descripcion)){
@@ -6728,7 +6755,19 @@ el.rows.addEventListener('blur', (event) => {
   const cell = event.target.closest('[data-field]');
   if (!cell) return;
   cell.classList.remove('text-caret-visible');
+  const importOnLeave=cell.dataset.stockDescriptionEdited==='1' && stockCanOfferArticleImport(cell)
+    && !stockTableRendering && !restoringUndo && document.hasFocus()
+    && !event.relatedTarget?.closest?.('#articleProviderMenu,#articleProviderToggle');
   if (cell.dataset.field === 'descripcion') closeArticleProviderList();
+  if(importOnLeave){
+    const row=rowsData[Number(cell.dataset.row)];
+    cell.dataset.stockDescriptionEdited='0';
+    setTimeout(()=>{
+      if(rowsData[Number(cell.dataset.row)]!==row || stockIngresoBusy || stockWorkspaceSwitching || stockAdditionalSwitching)return;
+      const modal=topVisibleModalBackdrop();if(modal&&modal!==stockAdditionalPopup)return;
+      if(stockCanOfferArticleImport(cell))stockImportArticleFromCell(cell);
+    },0);
+  }
   commitCellEditSnapshot(cell);
   if (cell.dataset.field === 'precio') finalizeStockNumberCell(cell);
   if (cell.dataset.field === 'descuento') {
@@ -7061,6 +7100,7 @@ async function open(options) {
     window.removeEventListener('keyup', guardKeyup, true);
     backgroundInert.forEach(([element, inert]) => { element.inert = inert; });
     backdrop.remove(); active = false; returnFocus?.focus?.({ preventScroll:true });
+    options.onClose?.({discard});
   }
   function changed() {
     operation = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
@@ -7159,6 +7199,7 @@ async function open(options) {
   }
   async function pick(row, id) {
     const sourceInput = menuInput;
+    let selected=false;
     hideMenu(); row.loading = true; row.mode = 'update'; row.id = ''; row.newConfirmed = true; summary();
     const requestId = row.lookup = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
     setStatus('Leyendo los datos actuales del artículo…');
@@ -7170,9 +7211,19 @@ async function open(options) {
       row.descripcion = article.descripcion; row.rubro = Number(article.rubro); row.iva = Number(article.iva);
       row.margen = Number(article.margen)*100; row.originalMargin = row.margen;
       if (sourceInput) finishFieldEdit(sourceInput);
+      selected=true;
       changed(); setStatus('Revisá los datos. El proveedor, código y costo nuevos vienen de la lista seleccionada.');
     } catch (error) { setStatus(error.message, true); }
-    finally { row.loading = false; if (backdrop.isConnected) render(); }
+    finally {
+      if(row.lookup===requestId){
+        row.loading=false;
+        if(backdrop.isConnected){
+          render();
+          const index=rows.indexOf(row);
+          if(index>=0)focusGrid(index,editableFields.indexOf(selected?'rubro':'descripcion'));
+        }
+      }
+    }
   }
   function importPayload(selected, op) {
     return {operation:op,provider:providerId,rows:selected.map(r=>({mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,unidadesBulto:r.unidadesBulto ?? null,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))};
