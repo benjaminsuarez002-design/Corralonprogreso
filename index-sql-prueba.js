@@ -3,6 +3,7 @@
   'use strict';
   const system=window.CorralonSystem,db=window.CorralonCacheDB;
   const endpoint=new URL('catalogo-sql-prueba/',location.href);
+  const publishedEndpoint=new URL('https://corralon-index-sql-prueba.benjaminsuarez002.workers.dev/catalogo-sql-prueba/');
   const cacheKey='index_sql_prueba_snapshot_v1';
   let current=null,pending=null,refresh=null,timer=null;
   const normalized=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -13,7 +14,9 @@
     pending=db.withLock('index-sql-prueba-sync',async()=>{
       const saved=await db.get(cacheKey);if(valid(saved))current=saved;
       try {
-        const manifest=await json(new URL('manifest.json',endpoint));
+        let source=endpoint,manifest;
+        try{manifest=await json(new URL('manifest.json',source));}
+        catch(error){if(source.href===publishedEndpoint.href)throw error;source=publishedEndpoint;manifest=await json(new URL('manifest.json',source));}
         if(manifest.schema!==1||!Array.isArray(manifest.files)||!Number.isInteger(manifest.count)||manifest.count<1||manifest.files.length>256)throw Error('Manifiesto SQL invalido.');
         if(current?.manifest.version===manifest.version){show(false);return current;}
         const chunks={},rows=[];let index=0;
@@ -22,7 +25,7 @@
             const file=manifest.files[index++];
             if(!/^[a-f0-9]-[a-f0-9]{64}\.json$/.test(file.file)||file.file!==file.file.slice(0,2)+file.hash+'.json')throw Error('Fragmento SQL invalido.');
             let data=current?.chunks?.[file.hash];
-            if(!data){const response=await fetch(new URL(file.file,endpoint),{cache:'force-cache',signal:AbortSignal.timeout(20000)});if(!response.ok)throw Error('Actualizacion SQL incompleta.');const content=await response.text();if(crypto.subtle){const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(content))),b=>b.toString(16).padStart(2,'0')).join('');if(digest!==file.hash)throw Error('No coincide el contenido SQL publicado.');}data=JSON.parse(content);}
+            if(!data){const response=await fetch(new URL(file.file,source),{cache:'force-cache',signal:AbortSignal.timeout(20000)});if(!response.ok)throw Error('Actualizacion SQL incompleta.');const content=await response.text();if(crypto.subtle){const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(content))),b=>b.toString(16).padStart(2,'0')).join('');if(digest!==file.hash)throw Error('No coincide el contenido SQL publicado.');}data=JSON.parse(content);}
             if(!Array.isArray(data)||data.length!==file.count)throw Error('Fragmento SQL incompleto.');
             chunks[file.hash]=data;
           }
