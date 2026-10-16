@@ -1120,7 +1120,7 @@
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.25"></script>
+<script src="corralon-system.js?v=1.0.26"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -7874,6 +7874,46 @@ initializeCashHistory(true);
   function appendBlankCashRow(){ $('sqlCajaCash').insertAdjacentHTML('beforeend',cashDraftMarkup('nuevo-'+(++cashDraftSequence))); }
   const status = (text, kind = '') => { $('sqlCajaStatus').textContent = text; $('sqlCajaStatus').className = 'caja-sql-status ' + kind; };
   const dateOf = value => { const match = /\/Date\(([-\d]+)/.exec(String(value)); const date = match ? new Date(Number(match[1])) : new Date(value); return dateKeyFromDate(date); };
+  // INICIO INFORME DIARIO CAJA
+  function cajaDailyReportHtml(data) {
+    const h=data.cabecera||{},values=data.detalle||[],cash=data.efectivo||[],cards=data.tarjetas||[],sales=data.ventas||[];
+    const sum=(rows,key)=>rows.reduce((total,row)=>total+Number(row[key]||0),0);
+    const amount=value=>esc(money(Number(value||0)));
+    const date=dateOf(h.Fecha),shortDate=date.split('-').reverse().join('/');
+    const longDate=new Date(date+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    const branch=String(h.PV||h.Sucursal||'');
+    const title=/^\d+\s*-/.test(branch)?branch:[h['IDDepósito'],branch].filter(Boolean).join('-');
+    function hour(value){
+      const raw=String(value||''),plain=raw.match(/^\d{1,2}:\d{2}/);
+      if(plain)return plain[0];
+      const stamp=/\/Date\(([-\d]+)/.exec(raw),parsed=new Date(stamp?Number(stamp[1]):value);
+      return Number.isNaN(parsed.getTime())?'':parsed.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    }
+    const detailRows=values.map(row=>`<tr><td>${esc(row.TipoPago)}</td><td class="num">${amount(row.ImpAnt)}</td><td class="num">${amount(row.Importe)}</td><td class="num">${amount(row.ImpRet)}</td><td class="num">${amount(row.ImpAct)}</td></tr>`).join('');
+    const cashRows=cash.map(row=>`<tr><td class="num">${amount(row.Importe)}</td><td class="note">${esc(row.Nota||'')}</td><td>${esc(hour(row.Hora))}</td></tr>`).join('');
+    const cardRows=cards.map(row=>`<tr><td>${esc(row.Tarjeta)}</td><td class="num">${amount(row.Importe)}</td></tr>`).join('');
+    const interest=h.TotalInteres??h.Interes;
+    return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Caja ${esc(h.NroFactura||'')} · ${esc(shortDate)}</title><style>
+      @page{size:A4 portrait;margin:14mm}*{box-sizing:border-box}body{margin:0;padding:18px;font:12px Arial,sans-serif;color:#000;background:#fff}.report{max-width:800px;margin:auto}.stamp{text-align:right;font-size:10px;margin-bottom:8px}h1{margin:0 0 5px;font-size:19px;text-decoration:underline}.meta{display:flex;justify-content:space-between;font-weight:bold;margin-bottom:13px}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;text-decoration:underline}td,th{padding:3px 5px;vertical-align:top}.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.values td{border-bottom:1px dotted #777}.values td:first-child{width:28%}.values tfoot td{border-top:1px solid #000;border-bottom:0;font-weight:bold;padding-top:7px}.section{margin-top:15px}.section h2{font-size:13px;margin:0 0 4px;text-decoration:underline}.boxed td,.boxed th{border:1px solid #777}.boxed th{text-decoration:none;background:#f4f4f4}.cash td:first-child{width:125px}.cash td:last-child{width:62px}.note{white-space:pre-wrap;overflow-wrap:anywhere}.lower{display:flex;gap:25px;align-items:flex-start}.cards{width:45%;min-width:240px}.cards tfoot{font-weight:bold}.footer{margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;font-weight:bold}.receipts{margin-top:14px;font-weight:bold}.receipts span{display:inline-block;border:1px solid #777;padding:4px 10px;margin-left:7px}tr{break-inside:avoid}@media print{body{padding:0}.report{max-width:none}.stamp{margin-bottom:10px}}
+    </style></head><body><article class="report"><div class="stamp">${esc(longDate)} · 1</div><h1>Caja Diaria de: ${esc(title)}</h1><div class="meta"><span>Caja Nº ${esc(h.NroFactura||'')}</span><span>Fecha: ${esc(shortDate)}</span></div><table class="values"><thead><tr><th>Tipo de Valor</th><th class="num">Imp. Inicial</th><th class="num">Movs. Día</th><th class="num">Ingr./Egr.</th><th class="num">Saldo Final</th></tr></thead><tbody>${detailRows}</tbody><tfoot><tr><td>Totales:</td><td class="num">${amount(sum(values,'ImpAnt'))}</td><td class="num">${amount(sum(values,'Importe'))}</td><td class="num">${amount(sum(values,'ImpRet'))}</td><td class="num">${amount(sum(values,'ImpAct'))}</td></tr></tfoot></table><section class="section"><h2>Nota</h2><div class="note">${esc(h.Nota||'')}</div></section><section class="section"><h2>Ingresos/Egresos</h2><table class="boxed cash"><thead><tr><th class="num">Importe</th><th>Nota</th><th>Hora</th></tr></thead><tbody>${cashRows||'<tr><td colspan="3">Sin movimientos</td></tr>'}</tbody></table></section><div class="lower section"><section class="cards"><table class="boxed"><thead><tr><th>Tarjeta</th><th class="num">Importe</th></tr></thead><tbody>${cardRows||'<tr><td colspan="2">Sin movimientos</td></tr>'}</tbody><tfoot><tr><td>Total:</td><td class="num">${amount(sum(cards,'Importe'))}</td></tr></tfoot></table></section></div><div class="footer"><span>Total Venta: ${amount(sum(sales,'ImpVta'))}</span><span>Total Interés: ${interest==null?'—':amount(interest)}</span><span>Total Costo: ${amount(sum(sales,'ImpCosto'))}</span><span>Pendientes</span></div><div class="receipts">Cobros Cta. Cte.:<span>${amount(sum(data.cobros||[],'TotCob'))}</span></div></article></body></html>`;
+  }
+  // FIN INFORME DIARIO CAJA
+  const reportDialog=document.createElement('dialog');reportDialog.className='caja-sql-dialog';reportDialog.id='sqlCajaReport';
+  reportDialog.style.cssText='padding:0;width:min(1000px,96vw);max-height:94dvh;overflow:hidden';
+  reportDialog.innerHTML='<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #bbb"><strong id="sqlCajaReportTitle" style="flex:1">Caja Diaria</strong><button id="sqlCajaReportPrint" type="button" disabled>Imprimir</button><button id="sqlCajaReportClose" type="button" aria-label="Cerrar reporte" style="min-width:30px">×</button></div><iframe id="sqlCajaReportFrame" title="Reporte de Caja Diaria" style="display:block;width:100%;height:min(78dvh,800px);border:0;background:white"></iframe>';
+  document.body.append(reportDialog);
+  $('sqlCajaReportClose').onclick=()=>reportDialog.close();
+  reportDialog.addEventListener('keydown',event=>event.stopPropagation());
+  reportDialog.addEventListener('click',event=>{if(event.target===reportDialog)reportDialog.close();});
+  $('sqlCajaReportFrame').onload=()=>{$('sqlCajaReportPrint').disabled=false;};
+  $('sqlCajaReportPrint').onclick=()=>{const page=$('sqlCajaReportFrame').contentWindow;page.focus();page.print();};
+  function showDailyReport(data){
+    if(!data?.cabecera?.IDRecibo)throw new Error('No hay una Caja para imprimir.');
+    $('sqlCajaReportTitle').textContent='Caja Diaria · '+data.cabecera.NroFactura;
+    $('sqlCajaReportPrint').disabled=true;$('sqlCajaReportFrame').srcdoc=cajaDailyReportHtml(data);
+    if(!reportDialog.open)reportDialog.showModal();
+  }
+  $('sqlCajaPrint').onclick=()=>{try{showDailyReport(current);}catch(error){status(error.message,'error');}};
   function synchronizeDate() { selectedDateKey = $('sqlCajaDate').value; updateDateLabel(); }
   function lockControls() {
     const closed = Boolean(current?.cabecera?.Confirmado), editable = boot?.editar && !closed && current?.cabecera;
@@ -7888,7 +7928,7 @@ initializeCashHistory(true);
   function render(data) {
     current = data; dirty = false; const h = data.cabecera || {}, rows = data.detalle || [], cash = data.efectivo || [];
     if (h.IDRecibo) { $('sqlCajaDate').value = dateOf(h.Fecha); synchronizeDate(); $('sqlCajaDeposit').value = h['IDDepósito']; $('sqlCajaGlobal').checked = true; $('sqlCajaOperator').value = h.IDOper; }
-    $('sqlCajaNumber').value = h.NroFactura || ''; $('sqlCajaNote').value = h.Nota || '';
+    $('sqlCajaNumber').value = h.NroFactura || ''; $('sqlCajaNote').value = h.Nota || ''; $('sqlCajaPrint').hidden=!h.IDRecibo;
     $('sqlCajaValues').innerHTML = rows.map(r => `<tr data-pay="${r.IDTipoPago}"><td>${esc(r.TipoPago)}</td><td><input class="caja-sql-money" data-caja-detail="ImpAnt" value="${esc(money(r.ImpAnt))}" aria-label="Caja inicial ${esc(r.TipoPago)}"></td><td class="numeric">${money(r.Importe)}</td><td class="numeric">${money(r.ImpRet)}</td><td class="numeric">${money(r.ImpAct)}</td><td><input data-caja-detail="Nota" value="${esc(r.Nota || '')}" aria-label="Nota ${esc(r.TipoPago)}"></td></tr>`).join('');
     const sum = (values, field) => values.reduce((n, r) => n + Number(r[field] || 0), 0);
     for (const [id, field] of [['sqlCajaInitial','ImpAnt'],['sqlCajaDaily','Importe'],['sqlCajaIE','ImpRet'],['sqlCajaFinal','ImpAct']]) $(id).value = money(sum(rows, field));
@@ -7934,7 +7974,7 @@ initializeCashHistory(true);
   $('sqlCajaValues').addEventListener('input', () => { dirty = true; }); $('sqlCajaNote').addEventListener('input', () => { dirty = true; });
   $('sqlCajaRefresh').onclick = () => run(refresh);
   $('sqlCajaOpen').onclick = () => run(async () => { synchronizeDate(); render(await CajaSQL.request('abrir', {}, { deposito:Number($('sqlCajaDeposit').value), operador:Number($('sqlCajaOperator').value), global:$('sqlCajaGlobal').checked, nota:$('sqlCajaNote').value })); });
-  $('sqlCajaConfirm').onclick = () => run(async () => { if (!confirm('¿Estás seguro de confirmar el cierre de esta Caja en SQL?')) return; await saveDetail(); render(await CajaSQL.request('cerrar', {}, { id:current.cabecera.IDRecibo, version:current.version, nota:$('sqlCajaNote').value })); try {localStorage.setItem('corralon_caja_estado_aviso',String(Date.now()));} catch {} });
+  $('sqlCajaConfirm').onclick = () => run(async () => { if (!confirm('¿Estás seguro de confirmar el cierre de esta Caja en SQL?')) return; await saveDetail(); const closed=await CajaSQL.request('cerrar', {}, { id:current.cabecera.IDRecibo, version:current.version, nota:$('sqlCajaNote').value }); render(closed); try {localStorage.setItem('corralon_caja_estado_aviso',String(Date.now()));} catch {} showDailyReport(closed); });
   const cancelDialog=document.createElement('dialog');cancelDialog.className='caja-sql-dialog';cancelDialog.style.maxWidth='440px';
   cancelDialog.innerHTML='<h2>Eliminar Caja</h2><p>Ingresá la contraseña de un administrador.</p><label for="sqlCajaAdmin">Usuario</label><select id="sqlCajaAdmin" style="display:block;width:100%;margin:6px 0 14px"></select><label for="sqlCajaAdminPassword">Contraseña</label><input id="sqlCajaAdminPassword" type="password" autocomplete="current-password" style="display:block;width:100%;margin:6px 0 14px"><p>Se eliminará la caja abierta de hoy y su detalle de valores e ingresos/egresos. Esta acción no se puede deshacer.</p><p id="sqlCajaAdminError" role="alert" style="color:#b60000"></p><button id="sqlCajaAdminBack">Volver</button> <button id="sqlCajaAdminDelete">Eliminar Caja</button>';document.body.append(cancelDialog);
   $('sqlCajaAdminBack').onclick=()=>cancelDialog.close();
@@ -8113,7 +8153,14 @@ initializeCashHistory(true);
   consult.innerHTML = '<h2>Consultar Cajas</h2><label>Desde <input id="sqlCajaConsultFrom" type="date"></label> <label>Hasta <input id="sqlCajaConsultTo" type="date"></label> <button id="sqlCajaConsultSearch">Consultar</button> <button id="sqlCajaConsultClose">Cerrar</button><div class="caja-sql-list"><table><thead><tr><th>Nº Caja</th><th>Fecha</th><th>Punto de venta</th><th>Estado</th><th>Total</th></tr></thead><tbody id="sqlCajaConsultRows"></tbody></table></div><div id="sqlCajaConsultStatus" role="status"></div>'; document.body.append(consult);
   $('sqlCajaConsultClose').onclick = () => consult.close();
   $('sqlCajaConsultSearch').onclick = async () => { $('sqlCajaConsultSearch').disabled = true; try { const data = await CajaSQL.request('consultar', { fecha:$('sqlCajaConsultFrom').value, hasta:$('sqlCajaConsultTo').value }); $('sqlCajaConsultRows').innerHTML = data.filas.map(r => `<tr data-id="${r.IDRecibo}" data-date="${dateOf(r.Fecha)}" tabindex="0"><td>${esc(r.NroFactura)}</td><td>${esc(dateOf(r.Fecha).split('-').reverse().join('/'))}</td><td>${esc(r.PV)}</td><td>${r.Confirmado ? 'Cerrada' : 'Abierta'}</td><td>${money(r.Total)}</td></tr>`).join(''); $('sqlCajaConsultStatus').textContent = `${data.filas.length} Cajas`; } catch (error) { $('sqlCajaConsultStatus').textContent = error.message; } finally { $('sqlCajaConsultSearch').disabled = false; } };
-  $('sqlCajaConsultRows').onclick = event => { const row = event.target.closest('[data-id]'); if (!row) return; $('sqlCajaDate').value = row.dataset.date; consult.close(); run(() => load(Number(row.dataset.id))); };
+  let reportLoading=false;
+  $('sqlCajaConsultRows').onclick = async event => {
+    const row=event.target.closest('[data-id]');if(!row||reportLoading)return;
+    reportLoading=true;row.setAttribute('aria-busy','true');$('sqlCajaConsultStatus').textContent='Consultando Caja…';
+    try{const data=await CajaSQL.request('formulario',{id:Number(row.dataset.id)});showDailyReport(data);$('sqlCajaConsultStatus').textContent='';}
+    catch(error){$('sqlCajaConsultStatus').textContent=error.message;}
+    finally{reportLoading=false;row.removeAttribute('aria-busy');}
+  };
   $('sqlCajaConsultRows').onkeydown = event => { if (event.key === 'Enter') event.target.closest('[data-id]')?.click(); };
   $('sqlCajaConsult').onclick = () => { const date = dateFromKey($('sqlCajaDate').value); date.setDate(date.getDate() - (boot.restringido ? 0 : 30)); $('sqlCajaConsultFrom').value = dateKeyFromDate(date); $('sqlCajaConsultTo').value = $('sqlCajaDate').value; consult.showModal(); $('sqlCajaConsultSearch').click(); };
   async function openAdditional() {
