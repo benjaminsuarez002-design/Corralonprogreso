@@ -14,6 +14,7 @@
     .invoice-history-filters{padding:12px 16px;display:flex;gap:10px;flex-wrap:wrap;border-bottom:1px solid #ddd;align-items:end}.invoice-history-filters label{display:grid;gap:4px;font-weight:700}.invoice-history-filters input,.invoice-history-filters select{height:33px;padding:4px 7px;border:1px solid #bbb;border-radius:5px;font:14px Barlow,Arial,sans-serif;max-width:100%}.invoice-history-filters input.date{width:130px}.invoice-history-filters .search{flex:1;min-width:180px}.invoice-history-status{padding:8px 16px;color:#666;min-height:30px}.invoice-history-status.error{color:#b00020}
     .invoice-history-scroll{flex:1;min-height:0;overflow:auto;padding:0 16px}.invoice-history-table{width:100%;border-collapse:collapse;font-size:14px}.invoice-history-table th{position:sticky;top:0;background:#eee;text-align:left;z-index:1}.invoice-history-table th,.invoice-history-table td{padding:9px 8px;border-bottom:1px solid #ddd}.invoice-history-table tbody tr:nth-child(even){background:#f6f6f6}.invoice-history-table tbody tr[data-invoice]{cursor:pointer}.invoice-history-table tbody tr[data-invoice]:hover{background:#ffe8e9}.invoice-history-table .money{text-align:right;white-space:nowrap}.invoice-history-table .cancelled{color:#b00020}.invoice-history-footer{padding:10px 16px;border-top:1px solid #ddd;display:flex;align-items:center;justify-content:space-between;gap:10px}.invoice-history-detail-summary{padding:12px 0;display:flex;gap:12px;flex-wrap:wrap}.invoice-history-detail-summary strong{display:block}.invoice-history-detail-summary>div{min-width:125px}.invoice-history-detail h3{margin:16px 0 8px}.invoice-history-detail-total{font-size:20px;font-weight:800;text-align:right;padding:12px 0}
     
+    .invoice-history-card .invoice-history-table th button[data-sort]{display:inline-flex;align-items:center;gap:5px;border:0;border-radius:0;background:transparent!important;color:inherit!important;padding:0;font:inherit;font-weight:700;box-shadow:none;text-align:inherit}.invoice-history-table [data-sort-icon]{font-size:10px;color:#777}.invoice-history-table th[aria-sort="ascending"] [data-sort-icon],.invoice-history-table th[aria-sort="descending"] [data-sort-icon]{color:#ed1019}
     @media print{.invoice-history-overlay{display:none!important}}
   `;styles.textContent+='\n    .invoice-receipt-detail .invoice-history-card{width:min(1330px,100%);font-size:12px;background:#f3f3f3}\n    .invoice-receipt-detail .invoice-history-head{padding:7px 12px;background:white}.invoice-receipt-detail .invoice-history-head h2{font-size:19px}\n    .invoice-receipt-detail .invoice-history-detail{padding:8px 12px;overflow:auto}.receipt-layout{min-width:1080px;max-width:1300px}\n    .receipt-row{display:flex;align-items:center;gap:9px;margin-bottom:5px;white-space:nowrap}.receipt-field{display:flex;align-items:center;gap:3px;font-size:11px;font-weight:700;min-width:0}.receipt-field span{display:block;height:22px;padding:2px 5px;border:1px solid #b9b9b9;background:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;font-weight:600}.receipt-field span.receipt-number{background:#111;color:#ffef66}.receipt-field span.receipt-highlight{background:#fff5ad}.receipt-field input{margin:0;width:14px;height:14px}\n    .receipt-grid{border:1px solid #999;background:#fff;overflow:auto;margin-top:7px;width:1110px;max-width:100%}.receipt-grid .invoice-history-table{font-size:13px;table-layout:fixed}.receipt-grid .invoice-history-table th,.receipt-grid .invoice-history-table td{padding:2px 5px;height:22px;border-right:1px solid #ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.receipt-grid .invoice-history-table th{font-weight:600;background:#e5e8eb}.receipt-grid .invoice-history-table tr.receipt-empty td{height:22px;background:#fff}.receipt-records{padding:2px 5px;font-size:11px;border-top:1px solid #bbb;background:#ececec}\n    .receipt-values-area{display:flex;align-items:start;gap:16px;width:1110px;margin:3px 0 7px}.receipt-values-area .receipt-grid{width:835px;margin:0}.receipt-tax-summary{width:265px;display:grid;gap:5px;padding-top:1px}.receipt-tax-summary .receipt-field{justify-content:end}.receipt-tax-summary .receipt-field span{text-align:right;width:115px}\n    .receipt-totals .receipt-field span{text-align:right}.receipt-totals .receipt-field .receipt-total{color:#fff;background:#111;font-weight:800}.receipt-actions .invoice-history-footer{background:transparent;justify-content:start;border:1px solid #bbb;padding:5px;margin-top:8px;gap:8px}.receipt-actions .invoice-history-footer [data-action-status]:empty{display:none}.receipt-actions .invoice-history-footer button{border-radius:3px;height:34px;font-size:12px}\n';styles.textContent+=`
     .invoice-receipt-detail .invoice-history-card{height:calc(100vh - 32px);height:calc(100dvh - 32px);max-height:calc(100dvh - 32px);min-height:0}
@@ -31,7 +32,7 @@
   mobileStyles.rel='stylesheet';mobileStyles.href='facturacion-mobile.css';mobileStyles.setAttribute('data-facturacion-mobile','');
   document.head.appendChild(mobileStyles);
   const overlay=document.createElement('div');overlay.className='invoice-history-overlay';overlay.hidden=true;overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','Consultar boletas');
-  overlay.innerHTML=`<section class="invoice-history-card"><header class="invoice-history-head"><h2>Consultar boletas</h2><button data-close type="button">Cerrar</button></header><form class="invoice-history-filters"><label>Sucursal<select data-branch><option value="0">Todas las sucursales</option></select></label><label>Punto de venta<select data-point><option value="0">Todos los puntos de venta</option></select></label><label>Desde<input class="date" data-from inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" required></label><label>Hasta<input class="date" data-to inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" required></label><label class="search">Cliente o número<input data-search autocomplete="off" placeholder="Buscar cliente o boleta…" maxlength="80"></label><label class="search">Artículo<input data-article autocomplete="off" placeholder="Descripción, IDArt o código de proveedor…" maxlength="100"></label><button class="primary" type="submit">Consultar</button></form><div class="invoice-history-status" data-status role="status" aria-live="polite"></div><div class="invoice-history-scroll"><table class="invoice-history-table"><thead><tr><th>Número</th><th>Tipo</th><th>Cliente</th><th>Sucursal</th><th>Fecha</th><th class="money">Total</th><th>Estado</th><th></th></tr></thead><tbody data-rows></tbody></table></div><footer class="invoice-history-footer"><span data-position></span><div><button data-prev type="button">‹ Anterior</button> <button data-next type="button">Siguiente ›</button></div></footer></section>`;document.body.appendChild(overlay);
+  overlay.innerHTML=`<section class="invoice-history-card"><header class="invoice-history-head"><h2>Consultar boletas</h2><button data-close type="button">Cerrar</button></header><form class="invoice-history-filters"><label>Sucursal<select data-branch><option value="0">Todas las sucursales</option></select></label><label>Punto de venta<select data-point><option value="0">Todos los puntos de venta</option></select></label><label>Desde<input class="date" data-from inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" required></label><label>Hasta<input class="date" data-to inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" required></label><label class="search">Cliente o número<input data-search autocomplete="off" placeholder="Buscar cliente o boleta…" maxlength="80"></label><label class="search">Artículo<input data-article autocomplete="off" placeholder="Descripción, IDArt o código de proveedor…" maxlength="100"></label><button class="primary" type="submit">Consultar</button></form><div class="invoice-history-status" data-status role="status" aria-live="polite"></div><div class="invoice-history-scroll"><table class="invoice-history-table"><thead><tr><th aria-sort="none"><button type="button" data-sort="numero">Número <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="tipo">Tipo <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="cliente">Cliente <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="sucursal">Sucursal <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="fecha">Fecha <span data-sort-icon aria-hidden="true">↕</span></button></th><th class="money" aria-sort="none"><button type="button" data-sort="total">Total <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="estado">Estado <span data-sort-icon aria-hidden="true">↕</span></button></th><th></th></tr></thead><tbody data-rows></tbody></table></div><footer class="invoice-history-footer"><span data-position></span><span data-more-status role="status" aria-live="polite"></span><button data-retry-more type="button" hidden>Reintentar carga</button></footer></section>`;document.body.appendChild(overlay);
   const get=selector=>overlay.querySelector(selector),status=get('[data-status]');
   const detail=document.createElement('div');detail.className='invoice-history-overlay';detail.hidden=true;detail.style.zIndex='96';detail.classList.add('invoice-receipt-detail');detail.setAttribute('role','dialog');detail.setAttribute('aria-modal','true');detail.setAttribute('aria-label','Detalle de boleta');
   detail.innerHTML=`<section class="invoice-history-card"><header class="invoice-history-head"><h2 data-title>Boleta</h2><button data-detail-prev type="button" aria-label="Boleta anterior">‹</button><span data-detail-position></span><button data-detail-next type="button" aria-label="Boleta siguiente">›</button><button data-detail-close type="button">Cerrar</button></header><div class="invoice-history-scroll invoice-history-detail" data-detail-body></div><footer class="invoice-history-footer"><span data-action-status role="status"></span><div><button data-preview type="button" disabled>Vista previa</button> <button data-reprint type="button" disabled>Reimprimir</button> <button data-recall class="primary" type="button" disabled>Llamar a facturar</button></div></footer></section>`;document.body.appendChild(detail);
@@ -39,6 +40,23 @@
   const annulButton=document.createElement('button');annulButton.type='button';annulButton.dataset.annul='';annulButton.textContent='Anular boleta';annulButton.hidden=true;annulButton.disabled=true;annulButton.style.cssText='margin-left:8px;color:#b00020;border-color:#e4aab3;background:#fff3f4';
   detail.querySelector('.invoice-history-footer>div').appendChild(annulButton);
   let rows=[],page=0,hasMore=false,listController=null,detailController=null,sequence=0,detailSequence=0,detailIndex=-1,searchTimer=null,actionBusy=false,detailData=null;
+  let listLoading=false,moreError=false,listQuery='',totalRecords=null;
+  let sortField='',sortDirection='';
+  function paintSort(){
+    overlay.querySelectorAll('[data-sort]').forEach(button=>{
+      const active=button.dataset.sort===sortField;
+      button.closest('th').setAttribute('aria-sort',active?(sortDirection==='asc'?'ascending':'descending'):'none');
+      button.querySelector('[data-sort-icon]').textContent=active?(sortDirection==='asc'?'▲':'▼'):'↕';
+      button.title=active?(sortDirection==='asc'?'Ordenar descendente':'Restaurar orden original'):'Ordenar ascendente';
+    });
+  }
+  overlay.querySelector('thead').addEventListener('click',event=>{
+    const button=event.target.closest('[data-sort]');if(!button)return;
+    if(sortField!==button.dataset.sort){sortField=button.dataset.sort;sortDirection='asc'}
+    else if(sortDirection==='asc')sortDirection='desc';else{sortField='';sortDirection=''}
+    paintSort();load(0);
+  });
+  paintSort();
   let cancellationBusy=false;
   function valuesUser(){return window.CorralonFunciones?.menuSessionUser?.()||{}}
   function isAdministrator(){return window.CorralonFunciones.menuUserIsAdministrator('facturacion',valuesUser());}
@@ -219,17 +237,39 @@
     try{const response=await fetch('/api/facturacion/'+path,{cache:'no-store',signal:controller.signal});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar SQL.');return result}finally{clearTimeout(timeout)}
   }
   function message(text,error=false){status.textContent=text;status.classList.toggle('error',error)}
-  function pager(){get('[data-prev]').disabled=page===0||!rows.length;get('[data-next]').disabled=!hasMore;get('[data-position]').textContent=`Página ${page+1} · ${rows.length} boletas`}
+  function pager(){
+    get('[data-position]').textContent=`${rows.length} boletas cargadas de ${totalRecords===null?'…':totalRecords}`;
+    get('[data-more-status]').textContent=listLoading?'Cargando boletas…':moreError?'No se pudieron cargar más boletas.':hasMore?'Deslizá hacia abajo para cargar más.':rows.length?'No hay más boletas.':'';
+    get('[data-retry-more]').hidden=!moreError;
+  }
+  function loadMore(){if(!overlay.hidden&&detail.hidden&&!listLoading&&!moreError&&hasMore)load(page+1)}
+  get('.invoice-history-scroll').addEventListener('scroll',event=>{
+    const panel=event.currentTarget;
+    if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<=80)loadMore();
+  },{passive:true});
+  get('[data-retry-more]').addEventListener('click',()=>{moreError=false;loadMore()});
   async function load(targetPage=0){
-    clearTimeout(searchTimer);const from=dateInput(get('[data-from]')),to=dateInput(get('[data-to]'));if(!from||!to)return;
-    if(from>to){message('La fecha Desde debe ser anterior o igual a Hasta.',true);return}
+    const append=targetPage>0;
+    if(append&&(listLoading||!hasMore||!listQuery))return;
+    let params;
+    if(append){params=new URLSearchParams(listQuery);params.set('pagina',String(targetPage))}
+    else{
+      clearTimeout(searchTimer);const from=dateInput(get('[data-from]')),to=dateInput(get('[data-to]'));if(!from||!to)return;
+      if(from>to){message('La fecha Desde debe ser anterior o igual a Hasta.',true);return}
+      params=new URLSearchParams({desde:from,hasta:to,sucursal:get('[data-branch]').value,puntoVenta:get('[data-point]').value,buscar:get('[data-search]').value.trim(),articulo:get('[data-article]').value.trim(),pagina:'0',orden:sortField,direccion:sortDirection});
+      listQuery=params.toString();rows=[];page=0;hasMore=false;totalRecords=null;get('[data-rows]').innerHTML='';get('.invoice-history-scroll').scrollTop=0;
+    }
     listController?.abort();const controller=listController=new AbortController(),request=++sequence;
-    rows=[];get('[data-rows]').innerHTML='';get('[data-prev]').disabled=true;get('[data-next]').disabled=true;get('[data-position]').textContent='';message('Consultando boletas…');
-    try{const params=new URLSearchParams({desde:from,hasta:to,sucursal:get('[data-branch]').value,puntoVenta:get('[data-point]').value,buscar:get('[data-search]').value.trim(),articulo:get('[data-article]').value.trim(),pagina:String(targetPage)});const result=await sql('consultar-comprobantes?'+params,controller);if(request!==sequence||overlay.hidden)return;
-      page=result.pagina;hasMore=Boolean(result.hayMas);rows=result.comprobantes;
-      get('[data-rows]').innerHTML=rows.map((r,i)=>`<tr data-invoice="${i}" tabindex="0" aria-label="Abrir boleta ${escape(r.numero)}"><td>${escape(r.numero)}</td><td>${escape(r.tipo)}</td><td>${escape(String(r.cliente||'').toUpperCase())}</td><td>${escape(r.sucursal||'Sin sucursal')}</td><td>${escape(r.fecha)}</td><td class="money">${escape(money(r.total))}</td><td class="${Number(r.anulada)?'cancelled':''}">${Number(r.anulada)?'Anulada':'Confirmada'}</td><td><button data-invoice="${i}" type="button">Abrir</button></td></tr>`).join('');
-      message(rows.length?'Boletas consultadas en SQL.': 'No hay boletas para esos filtros.');pager();
-    }catch(error){if(request===sequence&&!overlay.hidden){message(controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a consultar.':error.message,true)}}
+    listLoading=true;moreError=false;pager();if(!append)message('Consultando boletas…');
+    try{
+      const result=await sql('consultar-comprobantes?'+params,controller);if(request!==sequence||overlay.hidden)return;
+      page=result.pagina;hasMore=Boolean(result.hayMas);totalRecords=Number(result.totalComprobantes)||0;
+      const seen=new Set(rows.map(row=>Number(row.idRecibo))),added=result.comprobantes.filter(row=>!seen.has(Number(row.idRecibo))),offset=rows.length;
+      rows.push(...added);
+      get('[data-rows]').insertAdjacentHTML('beforeend',added.map((r,index)=>{const i=offset+index;return `<tr data-invoice="${i}" tabindex="0" aria-label="Abrir boleta ${escape(r.numero)}"><td>${escape(r.numero)}</td><td>${escape(r.tipo)}</td><td>${escape(String(r.cliente||'').toUpperCase())}</td><td>${escape(r.sucursal||'Sin sucursal')}</td><td>${escape(r.fecha)}</td><td class="money">${escape(money(r.total))}</td><td class="${Number(r.anulada)?'cancelled':''}">${Number(r.anulada)?'Anulada':'Confirmada'}</td><td><button data-invoice="${i}" type="button">Abrir</button></td></tr>`}).join(''));
+      message(rows.length?'Boletas consultadas en SQL.': 'No hay boletas para esos filtros.');
+    }catch(error){if(request===sequence&&!overlay.hidden){moreError=append;message(controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a consultar.':error.message,true)}}
+    finally{if(request===sequence){listLoading=false;pager()}}
   }
   function receiptLayout(result,row){
     const h=result.comprobante,items=result.articulos||[],values=result.valores||[];
@@ -319,7 +359,7 @@
     }
   });
   function closeDetail(){if(cancellationBusy)return;const wasOpen=!detail.hidden;warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;detailController?.abort();const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='';if(overlay.hidden)returnFocus?.focus();else get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus();if(wasOpen)detailOptions.onClose?.();}
-  function close(){clearTimeout(searchTimer);closeDetail();overlay.hidden=true;sequence++;listController?.abort();rows=[];get('[data-rows]').textContent='';button?.focus()}
+  function close(){clearTimeout(searchTimer);closeDetail();overlay.hidden=true;sequence++;listController?.abort();rows=[];listLoading=false;hasMore=false;moreError=false;listQuery='';get('[data-rows]').textContent='';button?.focus()}
   window.CorralonInvoiceHistory={
     async openInvoice(id,context=[],options={}){
       id=Number(id);if(!Number.isInteger(id)||id<=0)throw new Error('Seleccioná una factura válida.');
@@ -340,7 +380,7 @@
     close:closeDetail
   };
   button?.addEventListener('click',async()=>{
-    if(!overlay.hidden)return;detailOptions={};overlay.hidden=false;get('[data-search]').value='';get('[data-article]').value='';page=0;const current=dateText(new Date());get('[data-from]').value=current;get('[data-to]').value=current;get('[data-branch]').innerHTML='<option value="0">Todas las sucursales</option>';
+    if(!overlay.hidden)return;detailOptions={};overlay.hidden=false;get('[data-search]').value='';get('[data-article]').value='';sortField='';sortDirection='';paintSort();page=0;const current=dateText(new Date());get('[data-from]').value=current;get('[data-to]').value=current;get('[data-branch]').innerHTML='<option value="0">Todas las sucursales</option>';
     const selectedPoint=Number(document.getElementById('pos')?.value)||0;
     message('Consultando la sucursal del punto de venta…');get('[data-search]').focus();const controller=new AbortController();
     try{const config=await sql('bootstrap',controller);historyConfig=config;if(overlay.hidden)return;get('[data-branch]').innerHTML='<option value="0">Todas las sucursales</option>'+config.sucursales.map(s=>`<option value="${Number(s.id)}">${escape(s.nombre)}</option>`).join('');
@@ -348,7 +388,7 @@
       get('[data-branch]').value=String(branch);get('[data-point]').innerHTML='<option value="0">Todos los puntos de venta</option>'+(config.puntosVenta||[]).map(p=>`<option value="${Number(p.id)}">${escape(p.id)} · ${escape(p.nombre)}</option>`).join('');await load();
     }catch(error){if(!overlay.hidden)message('No se pudieron cargar las sucursales: '+error.message,true)}
   });
-  get('form').addEventListener('submit',event=>{event.preventDefault();load()});get('[data-close]').addEventListener('click',close);get('[data-prev]').addEventListener('click',()=>load(page-1));get('[data-next]').addEventListener('click',()=>load(page+1));get('[data-branch]').addEventListener('change',()=>load());get('[data-point]').addEventListener('change',()=>load());
+  get('form').addEventListener('submit',event=>{event.preventDefault();load()});get('[data-close]').addEventListener('click',close);get('[data-branch]').addEventListener('change',()=>load());get('[data-point]').addEventListener('change',()=>load());
   for(const selector of ['[data-from]','[data-to]']){const field=get(selector);field.addEventListener('input',()=>field.setCustomValidity(''));field.addEventListener('change',()=>load())}
   for(const selector of ['[data-search]','[data-article]'])get(selector).addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>load(),350)});
   get('[data-rows]').addEventListener('click',event=>{const row=event.target.closest('[data-invoice]');if(row)openDetail(Number(row.dataset.invoice))});get('[data-rows]').addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.matches('tr[data-invoice]')){event.preventDefault();openDetail(Number(event.target.dataset.invoice))}});

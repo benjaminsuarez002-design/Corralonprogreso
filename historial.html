@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.21"></script>
+<script src="corralon-system.js?v=1.0.22"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -462,6 +462,7 @@ input[type="checkbox"]{accent-color:#ef1015}
       <button id="btnDetalleCopy" class="btn-det edit" onclick="copiarContenidoDetalle()">Copiar contenido</button>
       <button id="btnDetalleEdit" class="btn-det edit" onclick="abrirEditar()">✏️ Editar</button>
       <button id="btnDetalleSql" class="btn-det edit" style="display:none" onclick="abrirCargaRemitoSql()">Cargar en SQL</button>
+      <button id="btnDetalleTransferStock" class="btn-det edit" style="display:none" onclick="abrirTransferenciaPresupuestoSql()">Transferir stock en SQL</button>
       <button id="btnDetalleDel" class="btn-det del" onclick="confirmarEliminar()">🗑 Eliminar</button>
     </div>
   </div>
@@ -2016,14 +2017,118 @@ function setAccionesDetalleModo(modo) {
   const btnSql = document.getElementById('btnDetalleSql');
   if(btnSql) {
     btnSql.style.display = esRemito && cargaSqlDisponible() ? '' : 'none';
-    btnSql.disabled = esRemito && Boolean(_remitoDetalleActual?.sql_resultado?.compraId);
-    btnSql.textContent = btnSql.disabled ? 'Cargado en SQL' : 'Cargar en SQL';
+    btnSql.disabled = false;
+    btnSql.textContent = 'Cargar en SQL';
   }
+  const btnTransferStock = document.getElementById('btnDetalleTransferStock');
+  if(btnTransferStock) btnTransferStock.style.display = !esRemito && cargaSqlDisponible() ? '' : 'none';
   if (btnDel) {
     btnDel.style.display = '';
     btnDel.textContent = esRemito ? '🗑 Eliminar remito' : '🗑 Eliminar presupuesto';
   }
   if (btnCopyBoleta) btnCopyBoleta.style.display = esRemito ? 'none' : '';
+}
+
+let _transferenciaStockAbriendo = false;
+async function comprobarCargaOrigenSql(origen,origenId) {
+  const user=window.CorralonFunciones?.menuSessionUser?.();
+  if(!user?.id)throw new Error('Ingresá con tu usuario del menú.');
+  const response=await fetch('/api/facturacion/stock-ingreso?'+new URLSearchParams({consulta:'estado-origen',origen,origenId:String(origenId),usuarioId:user.id}),{cache:'no-store'});
+  const result=await response.json();
+  if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo comprobar la carga anterior en SQL.');
+  return result;
+}
+
+function transferenciaPresupuestoKey(presupuesto) {
+  const id=String(presupuesto?.id||'').trim();
+  if(!id)throw new Error('Este presupuesto no tiene un identificador guardado.');
+  return `corralon_historial_transferencia_sql_v1:${id}`;
+}
+function transferenciaPresupuestoItems(presupuesto) {
+  const rows=Array.isArray(presupuesto?.items)?presupuesto.items:[],combined=new Map();
+  if(!rows.length)throw new Error('El presupuesto no tiene artículos.');
+  rows.forEach((item,index)=>{
+    let idart=String(item.idart||item.idArt||item.codigo||'').trim();
+    if(/^\d{1,6}$/.test(idart))idart=idart.padStart(6,'0');
+    const cantidad=Number(item.cantidad??item.cant);
+    if(!idart||!Number.isFinite(cantidad)||cantidad<=0)throw new Error(`Revisá el código y la cantidad de la fila ${index+1}.`);
+    const sum=Number(((combined.get(idart)?.cantidad||0)+cantidad).toFixed(4));
+    if(sum<=0||sum>100000)throw new Error(`Cantidad fuera de rango para ${idart}.`);
+    combined.set(idart,{idart,cantidad:sum});
+  });
+  return [...combined.values()];
+}
+async function abrirTransferenciaPresupuestoSql() {
+  if(_transferenciaStockAbriendo||document.querySelector('[data-budget-transfer-dialog]')||!cargaSqlDisponible()||_detalleTipoActual!=='presupuesto')return;
+  const presupuesto=_presupuestoDetalleActual,user=window.CorralonFunciones?.menuSessionUser?.();
+  let pending,meta,key,items,sqlState;
+  _transferenciaStockAbriendo=true;
+  try{
+    if(!user?.id)throw new Error('Ingresá con tu usuario del menú.');
+    key=transferenciaPresupuestoKey(presupuesto);
+    pending=JSON.parse(localStorage.getItem(key)||'null');
+    sqlState=await comprobarCargaOrigenSql('presupuesto',presupuesto.id);
+    if(sqlState.bloqueado)throw new Error(sqlState.mensaje);
+    if(sqlState.cargado){pending={...pending,payload:pending?.payload||{sucursal:sqlState.resultado.sucursal},result:sqlState.resultado};}
+    else if(sqlState.puedeRecargar&&(pending?.result||sqlState.hayAnterior)){pending=null;localStorage.removeItem(key);}
+    items=pending?.payload?.articulos||transferenciaPresupuestoItems(presupuesto);
+    const response=await fetch('/api/facturacion/stock-ingreso?'+new URLSearchParams({consulta:'transferencia-presupuesto',usuarioId:user.id}),{cache:'no-store'});
+    meta=await response.json();
+    if(!response.ok||!meta.ok)throw new Error(meta.error||'No se pudieron cargar las sucursales de SQL.');
+    if(!(Number(meta.proveedorTransferencia)>0))throw new Error('No se encontró el proveedor CORRALON PROGRESO en SQL.');
+    if(!meta.tiposMovimiento?.some(item=>Number(item.id)===57))throw new Error('La transferencia de stock no está habilitada en SQL.');
+    for(const branch of [1,2])if(!meta.sucursales?.some(item=>Number(item.id)===branch)||!meta.puntosVenta?.some(item=>Number(item.idSucursal)===branch))throw new Error('Falta configurar una sucursal o su punto de venta en SQL.');
+    if(_presupuestoDetalleActual!==presupuesto||_detalleTipoActual!=='presupuesto')return;
+  }catch(error){toast(error.message);return}
+  finally{_transferenciaStockAbriendo=false}
+  const dialog=document.createElement('dialog');dialog.dataset.budgetTransferDialog='';
+  dialog.style.cssText='margin:auto;border:1px solid #ddd;border-radius:14px;padding:20px;width:530px;max-width:calc(100vw - 24px);box-sizing:border-box;box-shadow:0 12px 45px #0004';
+  dialog.innerHTML=`<h3 style="margin:0 0 10px">Transferir stock en SQL</h3><p style="margin:0 0 16px">Presupuesto ${esc(presupuesto.numero||'')} · ${items.length} artículos</p><p style="margin:0 0 14px">Proveedor: <strong>CORRALON PROGRESO</strong></p><div style="display:grid;gap:12px"><label>Tipo de movimiento<select data-transfer-type style="display:block;width:100%;padding:9px;margin-top:4px"><option value="57">Transferencia de stock</option></select></label><label>Sucursal de origen<select data-transfer-origin style="display:block;width:100%;padding:9px;margin-top:4px"></select></label><label>Sucursal de destino<select data-transfer-destination disabled style="display:block;width:100%;padding:9px;margin-top:4px"></select></label></div><p data-transfer-summary style="margin:14px 0;color:#555"></p><p data-transfer-status role="status" style="margin:12px 0;white-space:pre-line"></p><div style="display:flex;justify-content:flex-end;gap:8px"><button type="button" class="btn-det edit" data-transfer-close>Cancelar</button><button type="button" class="btn-det pdf" data-transfer-save>Transferir stock</button></div>`;
+  document.body.appendChild(dialog);
+  const origin=dialog.querySelector('[data-transfer-origin]'),destination=dialog.querySelector('[data-transfer-destination]'),type=dialog.querySelector('[data-transfer-type]'),save=dialog.querySelector('[data-transfer-save]'),close=dialog.querySelector('[data-transfer-close]'),status=dialog.querySelector('[data-transfer-status]');
+  for(const branch of meta.sucursales.filter(item=>[1,2].includes(Number(item.id)))){
+    origin.add(new Option(branch.nombre,String(branch.id)));destination.add(new Option(branch.nombre,String(branch.id)));
+  }
+  const normalized=CorralonSystem.normalizeBranch(presupuesto.sucursal||'');
+  origin.value=String(pending?.payload?.sucursal||(normalized==='Suc. Calle 5 y Espana'?2:1));
+  const syncDestination=()=>{
+    destination.value=String(Number(origin.value)===1?2:1);
+    dialog.querySelector('[data-transfer-summary]').textContent=`Se descontarán las cantidades de ${origin.selectedOptions[0]?.textContent||''} y se registrará la entrada en ${destination.selectedOptions[0]?.textContent||''}.`;
+  };
+  syncDestination();origin.addEventListener('change',syncDestination);
+  let busy=false;
+  const showResult=()=>{
+    origin.disabled=type.disabled=true;save.disabled=true;close.textContent='Cerrar';
+    status.textContent=`Transferencia Nº ${pending.result.numeroMovimiento} confirmada en SQL. La salida y la entrada de stock quedaron registradas.`;
+  };
+  if(pending?.result)showResult();
+  else if(pending){origin.disabled=type.disabled=true;save.textContent='Reintentar transferencia';status.textContent='Hay una transferencia pendiente de comprobar. Reintentar recupera la misma operación.';}
+  close.onclick=()=>{if(!busy)dialog.close()};
+  dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault()});
+  dialog.addEventListener('close',()=>dialog.remove());
+  save.onclick=async()=>{
+    if(busy||pending?.result)return;
+    busy=true;save.disabled=close.disabled=origin.disabled=type.disabled=true;
+    try{
+      if(!pending){
+        const branch=Number(origin.value),point=meta.puntosVenta.find(item=>Number(item.idSucursal)===branch),date=new Date();
+        const fecha=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+        pending={payload:{presupuestoId:String(presupuesto.id),fecha,sucursal:branch,puntoVenta:Number(point.id),tipoMovimiento:57,sucursalDestino:Number(destination.value),proveedor:Number(meta.proveedorTransferencia),numeroRemito:String(presupuesto.numero||'').trim(),numeroFactura:'',idFactura:0,idRelacionado:0,nota:`Presupuesto ${presupuesto.numero||presupuesto.id}`.slice(0,300),articulos:items,usuarioId:user.id,idOperador:Number(user.idOperador)||null}};
+      }
+      // Persistir antes de enviar: un corte no autoriza emitir otra transferencia.
+      localStorage.setItem(key,JSON.stringify(pending));
+      status.textContent='Registrando salida y entrada de stock…';
+      const response=await fetch('/api/facturacion/stock-ingreso',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...pending.payload,accion:'transferir-presupuesto'})});
+      const result=await response.json();
+      if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo confirmar la transferencia.');
+      if(!result.idRecibo)throw new Error('No se recibió el movimiento confirmado. Reintentá para comprobarlo.');
+      pending.result={idRecibo:result.idRecibo,numeroMovimiento:result.numeroMovimiento};
+      try{localStorage.setItem(key,JSON.stringify(pending))}catch(error){console.warn('La transferencia está guardada en SQL; no se pudo guardar su copia local.',error)}
+      showResult();toast(`Transferencia Nº ${result.numeroMovimiento} confirmada`);
+    }catch(error){status.textContent=error.message;save.textContent='Reintentar transferencia';}
+    finally{busy=false;close.disabled=false;save.disabled=Boolean(pending?.result);}
+  };
+  dialog.showModal();(pending?.result?close:origin.disabled?save:origin).focus();
 }
 
 function remitoSqlPendingKey(id) { return `corralon_remito_sql_v1:${id}`; }
@@ -2076,6 +2181,15 @@ async function abrirCargaRemitoSql() {
   let pending, options;
   try {
     pending = JSON.parse(localStorage.getItem(remitoSqlPendingKey(remito.id)) || 'null');
+    const sqlState=await comprobarCargaOrigenSql('remito',remito.id);
+    if(sqlState.vigente){
+      if(!sqlState.cargado||!pending?.payload)throw new Error(sqlState.mensaje);
+      pending.result={...pending.result,...sqlState.resultado,pago:Number(pending.payload.pago)};
+    }
+    if(sqlState.puedeRecargar&&(remito.sql_resultado||pending?.result||sqlState.hayAnterior)){
+      pending=null;localStorage.removeItem(remitoSqlPendingKey(remito.id));remito.sql_resultado=null;
+      const cached=_remitosCache.find(item=>String(item.id)===String(remito.id));if(cached)cached.sql_resultado=null;
+    }
     if(!pending) { await recuperarProveedorRemitoSql(remito); remitoSqlPayload(remito,3); }
     const user = window.CorralonFunciones?.menuSessionUser?.();
     const url = new URL('/api/facturacion/cargar-facturas',location.href);
