@@ -12,7 +12,7 @@
   const USERS_COLLECTION = 'menuUsuarios';
   const CATALOG_EDITOR_LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
   const CATALOG_EDITOR_SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
-  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
+  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'ventas_tarjeta', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const firebaseConfig = {
     apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -32,6 +32,7 @@
     facturacion: 'facturacion',
     'cargar-facturas': 'cargar_facturas',
     'proveedores-sql': 'proveedores_sql',
+    'ventas-tarjeta': 'ventas_tarjeta',
     tarjetas: 'tarjetas',
     'actualizar articulos': 'actualizar_articulos',
     'actualizar%20articulos': 'actualizar_articulos',
@@ -54,7 +55,7 @@
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const declaredPageId = (rawFile==='historial.html'&&new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window)?'remitos':(document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile]);
   const pageId = declaredPageId === 'calculadoras' && new URLSearchParams(location.search).get('embed') === 'flete' ? 'cargar_facturas' : declaredPageId;
-  const loginPage = document.currentScript?.dataset?.menuLogin || (['caja', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html');
+  const loginPage = document.currentScript?.dataset?.menuLogin || (['caja', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'ventas_tarjeta', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html');
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));
 
@@ -229,3 +230,4 @@
 
   validate();
 })();
+

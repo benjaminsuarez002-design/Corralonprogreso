@@ -285,8 +285,21 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
   <script id="purchase-entry-layout">
   (()=>{
     const app=document.querySelector('body.purchase-entry-reference>.app');
-    const fit=()=>{app.style.setProperty('--purchase-entry-scale',String(Math.max(.01,Math.min(1,window.innerWidth/(2*1536),(window.innerHeight-74)/950))*1.4));};
-    window.addEventListener('resize',fit);fit();
+    const form=document.getElementById('purchaseForm'),status=app.querySelector('.form-status');
+    const fit=()=>{
+      const headerHeight=app.querySelector('.topbar').getBoundingClientRect().height;
+      const formStyle=getComputedStyle(form),statusStyle=getComputedStyle(status);
+      const contentHeight=Math.max(form.offsetHeight,form.scrollHeight)+parseFloat(formStyle.marginTop||0)+parseFloat(formStyle.marginBottom||0)
+        +status.offsetHeight+parseFloat(statusStyle.marginTop||0)+parseFloat(statusStyle.marginBottom||0)+6;
+      const scale=Math.max(.01,Math.min(1.4,(window.innerWidth/2-20)/1070,(window.innerHeight-headerHeight-6)/contentHeight));
+      app.style.setProperty('--purchase-entry-scale',String(scale));
+    };
+    let fitFrame=0;
+    const scheduleFit=()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(fit)};
+    window.addEventListener('resize',scheduleFit);
+    form.addEventListener('toggle',scheduleFit,true);
+    if(window.ResizeObserver){const observer=new ResizeObserver(scheduleFit);observer.observe(form);observer.observe(status);}
+    document.fonts?.ready.then(scheduleFit);fit();
     document.getElementById('entrySearchButton').addEventListener('click',()=>document.getElementById('search').click());
   })();
   </script>

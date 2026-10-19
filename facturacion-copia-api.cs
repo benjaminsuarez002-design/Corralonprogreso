@@ -164,6 +164,8 @@ internal static partial class FacturacionCopiaApi
             cliente = Value(invoice, "cliente"), articulos = Value(invoice, "articulos"),
             valores = Value(invoice, "valores"), nota = Value(invoice, "nota"),
             facturaAsociada = Value(invoice, "facturaAsociada") });
+        if(InvoiceValueNumber(Value(invoice,"facturarOrigenId"))>0)
+            core += "|origenX:"+Text(Value(invoice,"facturarOrigenId"))+"|"+Text(Value(invoice,"facturarOrigenVersion"));
         using (var hash = SHA256.Create())
             return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(core)));
     }
@@ -1051,6 +1053,17 @@ internal static partial class FacturacionCopiaApi
     }
     private static object Emit(SqlConnection connection, Dictionary<string, object> invoice, bool dryRun, bool recoveryOnly)
     {
+        Guid pendingId;
+        if(Guid.TryParse(Text(Value(invoice,"id")),out pendingId) && File.Exists(PendingDraftPath(pendingId))) {
+            var saved=Object(Json.DeserializeObject(Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(PendingDraftPath(pendingId)),null,DataProtectionScope.CurrentUser))));
+            var original=Object(Value(saved,"comprobante"));
+            if(InvoiceValueNumber(Value(original,"facturarOrigenId"))>0 &&
+                (Text(Value(original,"facturarOrigenId"))!=Text(Value(invoice,"facturarOrigenId")) || Text(Value(original,"facturarOrigenVersion"))!=Text(Value(invoice,"facturarOrigenVersion"))))
+                throw new InvalidOperationException("Esta emisión corresponde a una boleta X. Recuperala desde Ventas con Tarjeta para conservar sus opciones de stock e informe de ventas.");
+        }
+        int cardSource=(int)InvoiceValueNumber(Value(invoice,"facturarOrigenId"));
+        bool cardConversion=cardSource>0;
+        if(cardConversion)AssertPurchasePermission(Text(Value(invoice,"usuarioId")),"ventas_tarjeta",true);
         int typeId = RequiredId(Value(invoice, "idComprobante"), "el comprobante");
         if (Array.IndexOf(new[] { 1,2,5,6,7,8,13,29,43 }, typeId) < 0)
             throw new InvalidOperationException("Tipo de comprobante no admitido para esta pantalla.");
@@ -1069,7 +1082,7 @@ internal static partial class FacturacionCopiaApi
         if (!DateTime.TryParseExact(Text(Value(invoice, "fecha")), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.None, out date) || (!savedAuthorization && !InvoiceDateAllowed(date, DateTime.Today)))
             throw new InvalidOperationException("La fecha debe estar entre hoy y los 5 días corridos anteriores. No se permiten fechas futuras.");
-        if(!savedAuthorization)AssertBackdatedInvoicePermission(invoice,date,DateTime.Today);
+        if(!savedAuthorization)AssertBackdatedInvoicePermission(invoice,date,DateTime.Today,cardConversion?"ventas_tarjeta":"facturacion");
         var items = Value(invoice, "articulos") as System.Collections.ArrayList;
         var payments = Value(invoice, "valores") as System.Collections.ArrayList;
         if (items == null || items.Count == 0 || items.Count > 200) throw new InvalidOperationException("Agregá entre 1 y 200 artículos.");
@@ -1111,6 +1124,16 @@ internal static partial class FacturacionCopiaApi
             {
                 // Se conserva el GUID en un campo no impreso para reconocer reintentos.
                 string marker = DraftMarker(draftId);
+                Dictionary<string,object> cardOrigin=null;
+                if(cardConversion){
+                    if(typeId!=1&&typeId!=2)throw new InvalidOperationException("Elegí Factura A o B.");
+                    if(draftId!=CardFiscalDraftId(cardSource))throw new InvalidOperationException("Identificador de facturación de boleta inválido.");
+                    if(Number(Scalar(connection,tx,"DECLARE @r int; EXEC @r=sp_getapplock @Resource=@p0,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=10000; SELECT @r","CorralonWeb.FacturarX."+cardSource))<0)throw new InvalidOperationException("Esta boleta se está facturando en otro equipo.");
+                    var linked=RowsTx(connection,tx,"SELECT IDComprob,NroFactura FROM dbo.FacturasATP WITH(UPDLOCK,HOLDLOCK) WHERE NroOTrab=@p0 AND Confirmado=-1",marker);
+                    if(linked.Count>0&&(linked.Count!=1||Number(linked[0]["IDComprob"])!=typeId))throw new InvalidOperationException("Esta boleta ya tiene una factura emitida. Consultala antes de continuar.");
+                    cardOrigin=AssertCardFiscalOrigin(connection,tx,invoice);
+                    if(Number(Scalar(connection,tx,"SELECT COUNT(*) FROM dbo.FacturasATP WITH(UPDLOCK,HOLDLOCK) WHERE IDEmp=1 AND IDComprob IN(1,2) AND Confirmado=-1 AND Anulada=0 AND NroFacNC=@p0 AND ISNULL(NroOTrab,'')<>@p1",cardOrigin["NroFactura"],marker))>0)throw new InvalidOperationException("La boleta X ya está vinculada a otra factura. Consultala antes de continuar.");
+                }
                 object existing = Scalar(connection, tx, "SELECT TOP 1 IDRecibo FROM dbo.FacturasATP WITH (UPDLOCK,HOLDLOCK) WHERE IDComprob=@p0 AND NroOTrab=@p1 ORDER BY IDRecibo DESC", typeId, marker);
                 if (existing != null && existing != DBNull.Value)
                 {
@@ -1140,7 +1163,7 @@ internal static partial class FacturacionCopiaApi
                 string companyCuit = "";
                 if (fiscal)
                 {
-                    if (customer == 1 && docId == 50 && (doc.Length == 0 || doc == "00000001000")) { docId = 32; doc = ""; }
+                    if (customer == 1 && docId == 50 && (doc.Length == 0 || doc == "00000001000" || doc == "00001000000")) { docId = 32; doc = ""; }
                     object afip = Scalar(connection, tx,
                         "SELECT IDTipoAFIP FROM dbo.TipoComprobantes WHERE IDComprob=@p0 AND EnLibroIVA=1", typeId);
                     if (afip == null || !Int32.TryParse(Text(afip), out afipType) || afipType < 1)
@@ -1292,6 +1315,7 @@ internal static partial class FacturacionCopiaApi
                     valueLines.Add(new object[] { paymentId, amount, fee, finalAmount, installments, cardId, coefficient, Limited(Value(row, "descripcion"), 30, "Concepto") });
                 }
                 decimal grandTotal = gross + adjustment;
+                if(cardConversion&&Math.Abs(grandTotal-Math.Abs(Number(cardOrigin["Total"])))>.005m)throw new InvalidOperationException("El total recalculado no coincide con la boleta X. No se solicitó CAE.");
                 if (grandTotal <= 0 || Math.Abs(paidBase - gross) > .005m || Math.Abs(paid - grandTotal) > .005m)
                     throw new InvalidOperationException("Los valores recibidos no coinciden con el total recalculado en SQL. Artículos: " + gross.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + "; importes de pago sin dto./rec.: " + paidBase.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + "; total con dto./rec.: " + grandTotal.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + "; valores recibidos: " + paid.ToString("N2", CultureInfo.GetCultureInfo("es-AR")) + ". Revisá Valores recibidos.");
                 if (account > 0 && !returnType && !quotation)
@@ -1391,8 +1415,12 @@ internal static partial class FacturacionCopiaApi
                     "OUTPUT INSERTED.IDRecibo VALUES (@p0,@p32,@p1,@p2,@p3,@p4,@p5,@p6,1,-1,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p14,-1,-1,@p16,@p17,@p18,@p19,@p20,@p21,@p22,@p23,@p24,@p25,@p26,@p27,@p28,@p29,@p33,DATEADD(month,1,@p2),@p30,@p31)",
                     point, number, date, customer, name, address, phone, grandTotal * sign, ivaType, sqlDocumentType, sqlDocument, seller,
                     // Access marca "Completo" con Pagada; la caja debe hacerlo al cobrar, aun si ya hay valores cargados.
-                    cash * sign, card * sign, net * sign, (iva21 + iva105 + other) * sign, branch, net21 * sign, iva21 * sign, net105 * sign, iva105 * sign, list, oper, quotation, 1, items.Count, account * sign, bank * sign,
+                    cash * sign, card * sign, net * sign, (iva21 + iva105 + other) * sign, branch, net21 * sign, iva21 * sign, net105 * sign, iva105 * sign, list, oper, quotation||cardConversion, 1, items.Count, account * sign, bank * sign,
                     note, marker, adjustment, net == 0 ? 0 : adjustment / net, typeId, grandTotal));
+                if(cardConversion){
+                    if(Math.Abs(grandTotal-Math.Abs(Number(cardOrigin["Total"])))>.005m)throw new InvalidOperationException("El total no coincide con la boleta X. No se confirmó la factura.");
+                    Execute(connection,tx,"UPDATE dbo.FacturasATP SET ActStock=0,EnInfVtas=0,Pagada=1 WHERE IDRecibo=@p0",receipt);
+                }
                 if (fiscal)
                     Execute(connection, tx,
                         "UPDATE dbo.FacturasATP SET CAE=@p0,NroFacNC=@p1,CodBarra=@p2 WHERE IDRecibo=@p3",
@@ -1406,7 +1434,7 @@ internal static partial class FacturacionCopiaApi
                         "INSERT dbo.FacturasATS (IDRecibo,IDArt,Cantidad,PrecioUni,Importe,ImpIVA1,ImpGan,PorcIVA,PorcDto,PrecioUniCpra,ArtDesc,PrecioUniSI,IDLista,PrecioUniOrig,PUMonExt,Stock,PorcMV,UniMed) " +
                         "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17)",
                         receipt,line[0],line[1],line[2],line[3],line[4],line[5],line[6],line[7],line[8],line[9],line[10],line[11],line[12],line[13],line[14],line[15],line[16]);
-                    if (!quotation)
+                    if (!quotation && !cardConversion)
                     {
                         int updated = Execute(connection, tx, "UPDATE dbo.ArtsStock SET StockAct=StockAct-@p0 WHERE IDArt=@p1 AND IDSuc=@p2", Convert.ToDecimal(line[1]) * sign,line[0],branch);
                         if (updated != 1 && (bool)line[17]) throw new InvalidOperationException("Falta un registro de stock único para " + line[0] + ".");
@@ -1420,7 +1448,7 @@ internal static partial class FacturacionCopiaApi
                 if (savedItems != lines.Count || savedPayments != valueLines.Count)
                     throw new InvalidOperationException("No se pudieron verificar todos los renglones del comprobante.");
                 if (Convert.ToInt32(Scalar(connection, tx,
-                    "SELECT COUNT(*) FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND TotalME=@p1 AND FechaPriVto=DATEADD(month,1,@p2) AND Pagada=@p3", receipt, grandTotal, date, quotation)) != 1)
+                    "SELECT COUNT(*) FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND TotalME=@p1 AND FechaPriVto=DATEADD(month,1,@p2) AND Pagada=@p3", receipt, grandTotal, date, quotation||cardConversion)) != 1)
                     throw new InvalidOperationException("No se guardaron el total, el primer vencimiento y el estado pendiente de caja.");
                 if (Convert.ToInt32(Scalar(connection, tx,
                     "SELECT COUNT(*) FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND Total=@p1 AND IDComprob=@p2 AND (CAE=@p3 OR (@p3='' AND (CAE IS NULL OR CAE='')))",
@@ -1436,13 +1464,17 @@ internal static partial class FacturacionCopiaApi
                     string id = (string)line[0];
                     if (!(bool)line[17]) continue;
                     if (!stockExpected.ContainsKey(id)) stockExpected[id] = Convert.ToDecimal(line[14]);
-                    if (!quotation) stockExpected[id] = StoredStock(stockExpected[id] - Convert.ToDecimal(line[1]) * sign);
+                    if (!quotation && !cardConversion) stockExpected[id] = StoredStock(stockExpected[id] - Convert.ToDecimal(line[1]) * sign);
                 }
                 foreach (var expected in stockExpected)
                 {
                     object actual = Scalar(connection, tx, "SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1", expected.Key, branch);
                     if (!StockMatches(actual, expected.Value))
                         throw new InvalidOperationException("La actualización de stock no coincide para " + expected.Key + ".");
+                }
+                if(cardConversion){
+                    Execute(connection,tx,"UPDATE dbo.FacturasATP SET NroFacNC=@p1 WHERE IDRecibo=@p0",receipt,cardOrigin["NroFactura"]);
+                    if(Number(Scalar(connection,tx,"SELECT COUNT(*) FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND ActStock=0 AND EnInfVtas=0 AND Pagada=1 AND NroFacNC=@p1",receipt,cardOrigin["NroFactura"]))!=1)throw new InvalidOperationException("No se guardaron los indicadores de facturación de la boleta.");
                 }
                 if (dryRun) tx.Rollback(); else tx.Commit();
                 try { if (!dryRun && fiscal && File.Exists(fiscalRecovery)) File.Delete(fiscalRecovery); } catch { }
@@ -2869,6 +2901,107 @@ internal static partial class FacturacionCopiaApi
             {"facturas", RowsTx(c,tx,"SELECT * FROM dbo.RecibosXTSFac WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY IDFactura",receipt)},
             {"valores", RowsTx(c,tx,"SELECT * FROM dbo.RecibosXTS WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY IDOrden",receipt)} });
     }
+    private const string CardSalesFrom = " FROM dbo.FacturasATP h JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob JOIN dbo.FacturasTSVal v ON v.IDRecibo=h.IDRecibo JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago JOIN dbo.Tarjetas a ON a.IDTarjeta=v.IDTarjeta JOIN dbo.[Depósitos] d ON d.IDDepósito=h.IDDepósito WHERE h.IDEmp=1 AND h.Confirmado=-1 AND h.Anulada=0 AND t.IDTipoAcred>0 AND v.IDTarjeta>0 AND h.Fecha>=@p0 AND h.Fecha<@p1 AND (@p2=0 OR v.IDTarjeta=@p2)";
+    private static Guid CardFiscalDraftId(int source)
+    {
+        using(var hash=SHA256.Create()){byte[] bytes=hash.ComputeHash(Encoding.UTF8.GetBytes("CorralonWeb.FacturarX."+source));byte[] id=new byte[16];Array.Copy(bytes,id,16);return new Guid(id);}
+    }
+    private static Dictionary<string,object> CardFiscalSnapshot(SqlConnection c,SqlTransaction tx,int source)
+    {
+        var h=RowsTx(c,tx,"SELECT * FROM dbo.FacturasATP WITH(HOLDLOCK) WHERE IDRecibo=@p0 AND IDComprob=13 AND IDEmp=1 AND Confirmado=-1 AND Anulada=0 AND EXISTS(SELECT 1 FROM dbo.FacturasTSVal WHERE IDRecibo=@p0 AND IDTarjeta>0)",source);
+        if(h.Count!=1)throw new InvalidOperationException("Solo se puede facturar una boleta X/PRES. ESPECIAL confirmada y sin anular de esta consulta.");
+        var rows=RowsTx(c,tx,"SELECT * FROM dbo.FacturasATS WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY Orden",source);
+        var values=RowsTx(c,tx,"SELECT * FROM dbo.FacturasTSVal WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY Orden",source);
+        return new Dictionary<string,object>{{"cabecera",h[0]},{"articulos",rows},{"valores",values}};
+    }
+    private static Dictionary<string,object> CardFiscalInvoice(SqlConnection c,SqlTransaction tx,Dictionary<string,object> snapshot,Dictionary<string,object> input)
+    {
+        var h=Object(snapshot["cabecera"]);int source=Convert.ToInt32(h["IDRecibo"]),type=RequiredId(Value(input,"tipo"),"el tipo de factura"),customer=RequiredId(Value(input,"cliente"),"el cliente");
+        if(type!=1&&type!=2)throw new InvalidOperationException("Elegí Factura A o B.");
+        int point=RequiredId(Value(input,"puntoVenta"),"el punto de venta");
+        if(Number(Scalar(c,tx,"SELECT COUNT(*) FROM dbo.[Depósitos] d JOIN dbo.TiposCompXPV p ON p.IDPtoVta=d.IDDepósito WHERE d.IDEmp=1 AND d.FE=1 AND d.IDDepósito=@p0 AND p.IDComprob=@p1",point,type))!=1)throw new InvalidOperationException("Elegí un punto de venta electrónico habilitado para este tipo de factura.");
+        var customers=RowsTx(c,tx,"SELECT [RazónSocial] nombre,IDTipoIVA idTipoIva,IDTipoDoc idTipoDoc,CUIT documento,[Dirección] direccion,[Teléfono] telefono,Email email,Suspendido suspendido FROM dbo.Clientes WITH(HOLDLOCK) WHERE IDCliente=@p0",customer);if(customers.Count!=1||Convert.ToBoolean(customers[0]["suspendido"]))throw new InvalidOperationException("Seleccioná una razón social vigente.");
+        var client=customers[0];int tax=(int)Number(client["idTipoIva"]),doc=(int)Number(client["idTipoDoc"]);
+        if((type==1&&tax!=1)||(type==2&&tax==1))throw new InvalidOperationException("La condición de IVA no corresponde al tipo de factura seleccionado.");
+        var items=new System.Collections.ArrayList();foreach(var item in (List<Dictionary<string,object>>)snapshot["articulos"]){
+            var r=Object(item);var rates=RowsTx(c,tx,"SELECT a.PorcIVA1,a.IDMoneda,CASE WHEN a.IDMoneda=1 THEN CONVERT(decimal(18,4),1) ELSE m.ImpCotiz END cotizacion FROM dbo.[Artículos] a LEFT JOIN dbo.Monedas m ON m.IDMoneda=a.IDMoneda WHERE a.IDArt=@p0",r["IDArt"]);
+            if(rates.Count!=1||Math.Abs(InvoiceValueNumber(r["PorcIVA"])-InvoiceValueNumber(rates[0]["PorcIVA1"]))>.0001m)throw new InvalidOperationException("Cambió el IVA de un artículo de la boleta. Revisala antes de facturar.");
+            items.Add(new {idart=Text(r["IDArt"]),descripcion=Text(r["ArtDesc"]),cantidad=Number(r["Cantidad"]),precio=Number(r["PrecioUni"]),precioBase=InvoiceValueNumber(Value(r,"PrecioUniOrig")),descuento=InvoiceValueNumber(r["PorcDto"])*100,iva=InvoiceValueNumber(r["PorcIVA"])*100,cotizacion=InvoiceValueNumber(rates[0]["cotizacion"])});
+        }
+        var payments=new System.Collections.ArrayList();foreach(var item in (List<Dictionary<string,object>>)snapshot["valores"]){
+            var r=Object(item);if(InvoiceValueNumber(r["Importe"])<=0)throw new InvalidOperationException("La boleta tiene un valor sin importe positivo. Revisala antes de facturar.");
+            payments.Add(new {idTipoPago=Number(r["IDTipoPago"]),idTarjeta=InvoiceValueNumber(r["IDTarjeta"]),importe=Number(r["Importe"]),impRec=InvoiceValueNumber(r["ImpRec"]),coef=InvoiceValueNumber(r["Coef"]),cuotas=InvoiceValueNumber(r["Cuotas"]),descripcion=Text(r["Concepto"])});
+        }
+        string[] taxNames={"","Responsable inscripto","Responsable no inscripto","No responsable","Exento","Consumidor final","Monotributista"};
+        var invoice=new {id=CardFiscalDraftId(source).ToString("D"),usuarioId=Text(Value(input,"usuarioId")),idComprobante=type,idPuntoVenta=point,idCliente=customer,fecha=Text(Value(input,"fecha")),vendedor=Number(h["IDVend"]),listaPrecios=Math.Max(1,Math.Min(3,InvoiceValueNumber(h["IDTipoCli"]))),
+            cliente=new {nombre=Text(client["nombre"]),tipoDocumento=doc==67?"CUIT":doc==32?"Sin identificar":"DNI",numeroDocumento=Text(client["documento"]),condicionIva=tax>=1&&tax<=6?taxNames[tax]:"",direccion=Text(client["direccion"]),telefono=Text(client["telefono"]),email=Text(client["email"])},
+            articulos=items,valores=payments,totales=new {total=Math.Abs(Number(h["Total"]))},nota=Text(h["Nota"]),facturarOrigenId=source,facturarOrigenVersion=Text(Value(input,"version"))};
+        // Igual que /emitir: Deserialize<T> conserva los renglones como ArrayList.
+        return Json.Deserialize<Dictionary<string,object>>(Json.Serialize(invoice));
+    }
+    private static Dictionary<string,object> AssertCardFiscalOrigin(SqlConnection c,SqlTransaction tx,Dictionary<string,object> invoice)
+    {
+        int source=RequiredId(Value(invoice,"facturarOrigenId"),"la boleta X");var snapshot=CardFiscalSnapshot(c,tx,source);
+        if(Text(Value(invoice,"facturarOrigenVersion"))!=ProviderVersion(snapshot))throw new InvalidOperationException("La boleta X cambió. Volvé a consultarla antes de facturar.");
+        var expected=CardFiscalInvoice(c,tx,snapshot,new Dictionary<string,object>{{"tipo",Value(invoice,"idComprobante")},{"puntoVenta",Value(invoice,"idPuntoVenta")},{"cliente",Value(invoice,"idCliente")},{"fecha",Value(invoice,"fecha")},{"usuarioId",Value(invoice,"usuarioId")},{"version",Value(invoice,"facturarOrigenVersion")}});
+        if(DraftFingerprint(invoice)!=DraftFingerprint(expected))throw new InvalidOperationException("Los datos no coinciden exactamente con la boleta X y el receptor elegidos. No se solicitó CAE.");
+        return Object(snapshot["cabecera"]);
+    }
+    private static object CardFiscalPrepare(SqlConnection c,int source)
+    {
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
+            var snapshot=CardFiscalSnapshot(c,tx,source);var h=Object(snapshot["cabecera"]);
+            var linked=RowsTx(c,tx,"SELECT IDRecibo idRecibo,NroFactura numero FROM dbo.FacturasATP WHERE IDEmp=1 AND IDComprob IN(1,2) AND Confirmado=-1 AND Anulada=0 AND (NroOTrab=@p0 OR NroFacNC=@p1)",DraftMarker(CardFiscalDraftId(source)),h["NroFactura"]);
+            var result=new {ok=true,borradorId=CardFiscalDraftId(source).ToString("D"),version=ProviderVersion(snapshot),origen=new {idRecibo=source,numero=h["NroFactura"],total=h["Total"],puntoVenta=h["IDDepósito"]},facturas=linked,puntosVenta=RowsTx(c,tx,"SELECT d.IDDepósito id,d.[Descripción] nombre,p.IDComprob tipo FROM dbo.[Depósitos] d JOIN dbo.TiposCompXPV p ON p.IDPtoVta=d.IDDepósito WHERE d.IDEmp=1 AND d.FE=1 AND p.IDComprob IN(1,2) ORDER BY d.IDDepósito,p.IDComprob"),clientes=RowsTx(c,tx,"SELECT IDCliente id,[RazónSocial] nombre,CUIT documento,IDTipoIVA idTipoIva FROM dbo.Clientes WHERE IDCliente>1 AND Suspendido=0 ORDER BY [RazónSocial]")};
+            tx.Commit();return result;
+        }
+    }
+    private static object CardFiscalIssue(SqlConnection c,Dictionary<string,object> input)
+    {
+        int source=RequiredId(Value(input,"idRecibo"),"la boleta X");Dictionary<string,object> invoice;
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
+            var snapshot=CardFiscalSnapshot(c,tx,source);
+            if(Text(Value(input,"version"))!=ProviderVersion(snapshot))throw new InvalidOperationException("La boleta X cambió. Volvé a consultarla antes de facturar.");
+            invoice=CardFiscalInvoice(c,tx,snapshot,input);tx.Commit();
+        }
+        return Emit(c,invoice,false,false);
+    }
+    private static object CardSalesQuery(SqlConnection c,HttpListenerRequest request)
+    {
+        if(Text(request.QueryString["consulta"])=="opciones")return new {ok=true,tarjetas=Rows(c,"SELECT IDTarjeta id,[Descripción] nombre FROM dbo.Tarjetas WHERE Susp=0 ORDER BY [Descripción]")};
+        if(Text(request.QueryString["consulta"])=="preparar-factura"){AssertPurchasePermission(request.QueryString["usuarioId"],"ventas_tarjeta",true);return CardFiscalPrepare(c,RequiredId(request.QueryString["idRecibo"],"la boleta X"));}
+        DateTime from,to;
+        if(!DateTime.TryParseExact(request.QueryString["desde"],"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out from)||!DateTime.TryParseExact(request.QueryString["hasta"],"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out to)||to<from||to>=DateTime.MaxValue.Date)throw new InvalidOperationException("Revisá las fechas Desde y Hasta.");
+        int card; if(!Int32.TryParse(request.QueryString["tarjeta"]??"0",out card)||card<0)throw new InvalidOperationException("Tarjeta inválida.");
+        bool report=Text(request.QueryString["consulta"])=="informe";
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
+            object result;
+            if(report)result=new {ok=true,filas=RowsTx(c,tx,"SELECT d.IDDepósito puntoVenta,d.[Descripción] deposito,v.IDTarjeta tarjetaId,a.[Descripción] tarjeta,SUM(ISNULL(v.Importe,0)-ISNULL(v.ImpRec,0)) total"+CardSalesFrom+" AND h.EnInfVtas<>0 GROUP BY d.IDDepósito,d.[Descripción],v.IDTarjeta,a.[Descripción] ORDER BY d.IDDepósito,a.[Descripción]",from,to.AddDays(1),card)};
+            else {
+                var rows=RowsTx(c,tx,"SELECT h.IDRecibo idRecibo,h.IDComprob idComprobante,v.Orden orden,CONVERT(varchar(10),h.Fecha,23) fecha,CASE WHEN h.IDComprob=13 AND EXISTS(SELECT 1 FROM dbo.FacturasATP f WHERE f.IDEmp=h.IDEmp AND f.IDComprob IN(1,2) AND f.Confirmado=-1 AND f.Anulada=0 AND f.NroFacNC=h.NroFactura) THEN RTRIM(t.Abreviatura)+' - F' ELSE t.Abreviatura END tipo,h.NroFactura numero,v.Cuotas cuotas,h.ApeYNom cliente,v.Concepto numeroTarjeta,v.ImpEnt*t.ImpPor total,h.Pagada cobrada,p.TipoPago tipoPago,v.IDTarjeta tarjetaId,a.[Descripción] tarjeta,d.[Descripción] puntoVenta"+CardSalesFrom+" ORDER BY h.Fecha,t.Abreviatura,h.NroFactura,h.IDRecibo,v.Orden",from,to.AddDays(1),card);
+                var versions=new Dictionary<int,string>();
+                foreach(var row in rows){int id=Convert.ToInt32(row["idRecibo"]);if(!versions.ContainsKey(id))versions[id]=CardSalesVersion(c,tx,id);row["version"]=versions[id];}
+                result=new {ok=true,filas=rows};
+            }
+            tx.Commit();return result;
+        }
+    }
+    private static string CardSalesVersion(SqlConnection c,SqlTransaction tx,int receipt)
+    {
+        return ProviderVersion(new Dictionary<string,object>{{"cabecera",RowsTx(c,tx,"SELECT IDRecibo,Pagada,Confirmado,Anulada,Total,IDEmp FROM dbo.FacturasATP WITH(HOLDLOCK) WHERE IDRecibo=@p0",receipt)},{"valores",RowsTx(c,tx,"SELECT Orden,IDTarjeta,IDTipoPago,Cuotas,ImpEnt,Concepto FROM dbo.FacturasTSVal WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY Orden",receipt)}});
+    }
+    private static object CardSalesUncheck(SqlConnection c,Dictionary<string,object> input)
+    {
+        int receipt=RequiredId(Value(input,"idRecibo"),"la boleta");
+        if(Text(Value(input,"accion"))!="desmarcar")throw new InvalidOperationException("Solo se permite desmarcar Cobrada.");
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
+            var h=RowsTx(c,tx,"SELECT h.Pagada FROM dbo.FacturasATP h WITH(UPDLOCK,HOLDLOCK) JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob WHERE h.IDRecibo=@p0 AND h.IDEmp=1 AND h.Confirmado=-1 AND h.Anulada=0 AND t.IDTipoAcred>0 AND EXISTS(SELECT 1 FROM dbo.FacturasTSVal WHERE IDRecibo=h.IDRecibo AND IDTarjeta>0)",receipt);
+            if(h.Count!=1)throw new InvalidOperationException("La boleta ya no está disponible en esta consulta.");
+            if(String.IsNullOrWhiteSpace(Text(Value(input,"version")))||Text(Value(input,"version"))!=CardSalesVersion(c,tx,receipt))throw new InvalidOperationException("La boleta cambió en otro equipo. Actualizá antes de desmarcar.");
+            Execute(c,tx,"UPDATE dbo.FacturasATP SET Pagada=0 WHERE IDRecibo=@p0",receipt);
+            var version=CardSalesVersion(c,tx,receipt);tx.Commit();return new {ok=true,idRecibo=receipt,cobrada=false,version=version};
+        }
+    }
     private static object CollectionReceiptCancel(SqlConnection c, Dictionary<string, object> input)
     {
         int receipt=RequiredId(Value(input,"id"),"el recibo");
@@ -3273,6 +3406,16 @@ internal static partial class FacturacionCopiaApi
                     AssertPurchasePermission(Text(Value(input,"usuarioId")),"facturacion",true);
                     Reply(context,200,InvoiceValuesSave(connection,input));return;
                 }
+                if(request.Url.AbsolutePath=="/ventas-tarjeta"){
+                    if(request.HttpMethod=="GET"){
+                        AssertPurchasePermission(request.QueryString["usuarioId"],"ventas_tarjeta");Reply(context,200,CardSalesQuery(connection,request));return;
+                    }
+                    if(request.HttpMethod=="POST"){
+                        if(!(request.ContentType??"").StartsWith("application/json",StringComparison.OrdinalIgnoreCase)||request.ContentLength64>10000)throw new InvalidOperationException("Solicitud inválida.");
+                        string body;using(var reader=new StreamReader(request.InputStream,Encoding.UTF8))body=reader.ReadToEnd();if(body.Length>10000)throw new InvalidOperationException("Solicitud demasiado grande.");
+                        var input=Object(Json.DeserializeObject(body));AssertPurchasePermission(Text(Value(input,"usuarioId")),"ventas_tarjeta",true);Reply(context,200,Text(Value(input,"accion"))=="facturar"?CardFiscalIssue(connection,input):CardSalesUncheck(connection,input));return;
+                    }
+                }
                 if (request.Url.AbsolutePath == "/recibos-cobro")
                 {
                     if (request.HttpMethod == "GET") { AssertPurchasePermission(request.QueryString["usuarioId"], "recibos_cobro"); Reply(context, 200, CollectionReceiptQuery(connection, request)); return; }
@@ -3483,6 +3626,7 @@ internal static partial class FacturacionCopiaApi
                     int startRow;
                     if (!int.TryParse(Text(request.QueryString["start"]), out startRow) || startRow < 1) startRow = 0;
                     if (startRow > 1000000) throw new InvalidOperationException("Página fuera de rango.");
+                    bool excludeRegistered=Array.IndexOf(new[]{2,6,8},Id(request.QueryString["tipoComprobante"]))>=0;
                     var patterns = new object[words.Length + 3];
                     var match = new StringBuilder("1=1");
                     for (int i = 0; i < words.Length; i++)
@@ -3502,7 +3646,7 @@ internal static partial class FacturacionCopiaApi
                        .Append(" THEN 0 WHEN [RazónSocial] COLLATE Latin1_General_CI_AI LIKE @p").Append(words.Length + 1)
                        .Append(" AND (").Append(match).Append(") THEN 1 WHEN ").Append(match)
                        .Append(" THEN 2 WHEN [RazónSocial] COLLATE Latin1_General_CI_AI LIKE @p").Append(words.Length + 1)
-                       .Append(" THEN 3 ELSE 4 END AS matchRank FROM dbo.Clientes WHERE Suspendido=0),")
+                       .Append(" THEN 3 ELSE 4 END AS matchRank FROM dbo.Clientes WHERE Suspendido=0").Append(excludeRegistered?" AND ISNULL(IDTipoIVA,0)<>1":"").Append("),")
                        .Append(" best AS (SELECT *,FIRST_VALUE(alphaRn) OVER(ORDER BY matchRank,alphaRn) AS bestAlphaRn FROM ordered),")
                        .Append(" grouped AS (SELECT *,CASE WHEN matchRank<4 THEN 1 WHEN alphaRn<bestAlphaRn THEN 0 ELSE 2 END AS sortGroup FROM best),")
                        .Append(" ranked AS (SELECT *,ROW_NUMBER() OVER(ORDER BY sortGroup,CASE WHEN sortGroup=1 THEN matchRank ELSE 0 END,nombre,id) AS rn FROM grouped),")
@@ -3725,7 +3869,7 @@ internal static partial class FacturacionCopiaApi
                                 int docId = docType == "CUIT" ? 67 : docType == "DNI" ? 50 : docType == "Sin identificar" ? 32 : 0;
                                 string doc = Text(Value(client, "numeroDocumento"));
                                 if (Id(Value(invoice, "idCliente")) == 1 && docId == 50 &&
-                                    (doc.Length == 0 || doc == "00000001000")) { docId = 32; doc = ""; }
+                                    (doc.Length == 0 || doc == "00000001000" || doc == "00001000000")) { docId = 32; doc = ""; }
                                 int fiscalDocType = docId == 67 ? 80 : docId == 50 ? 96 : 99;
                                 string fiscalDoc = docId == 32 ? "0" : doc.Replace(".", "").Replace(" ", "");
                                 DateTime date = DateTime.ParseExact(Text(Value(invoice, "fecha")), "yyyy-MM-dd",
@@ -3899,3 +4043,4 @@ internal static partial class FacturacionCopiaApi
         }
     }
 }
+

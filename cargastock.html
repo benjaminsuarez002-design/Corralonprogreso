@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.53"></script>
+<script src="corralon-system.js?v=1.0.54"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -406,8 +406,8 @@
     <div class="stock-summary"><label class="stock-reference-note"><span>Nota (Observaciones del movimiento)</span><textarea id="stockIngresoNota" data-stock-header maxlength="300" rows="2"></textarea></label><section class="stock-reference-totals"><h2 class="stock-reference-title">Totales</h2><div><label>Total unidades:<output id="stockTotalUnits">0</output></label><label>Total:<output id="stockTotalAmount">$ 0,00</output></label></div></section></div>
     <div class="actions-bottom"><button id="compareStockBtn" type="button">Cargar en Pedidos</button><button id="copyBtn" type="button">Copiar</button><button id="stockConsultBtn" type="button">Consultar</button><button id="stockCancelBtn" type="button">Cancelar</button><button id="stockNewBtn" type="button">Nuevo</button><button id="stockPrevBtn" title="Movimiento anterior" type="button">‹</button><button id="stockNextBtn" title="Movimiento siguiente" type="button">›</button><button id="stockPrintBtn" type="button" hidden>Imprimir comprobante</button><button class="primary" id="confirmStockIngresoBtn" type="button">Confirmar</button><span class="stock-ingreso-message" id="stockIngresoMessage" role="status" aria-live="polite">Conectando con SQL…</span><div class="summary-pill" id="copySummary" hidden>0 listos para copiar</div></div>
   </section>
-  <section id="stockConsultPanel" class="stock-consult-panel" hidden></section>
-  <section id="stockMovementPopup" class="stock-movement-popup" role="dialog" aria-modal="true" aria-label="Detalle del movimiento de stock" hidden></section>
+  <section id="stockConsultPanel" class="stock-consult-panel stock-screen-section" role="region" aria-label="Consultar cargas de stock" hidden></section>
+  <section id="stockMovementPopup" class="stock-movement-popup stock-screen-section" role="region" aria-label="Detalle del movimiento de stock" hidden></section>
 
 </div>
 <div class="modal-backdrop" id="priceComparatorBackdrop">
@@ -585,6 +585,11 @@
 
 <script id="stock-reference-layout">
 (()=>{
+  // El detalle usa el viewport real, fuera del escalado de la carga.
+  const movementPopup=document.getElementById('stockMovementPopup');
+  if(movementPopup)document.body.appendChild(movementPopup);
+  const consultSection=document.getElementById('stockConsultPanel');
+  if(consultSection)document.body.appendChild(consultSection);
   const app=document.querySelector('body.stock-reference-design>.app');
   const fit=()=>{
     const scale=Math.max(.01,Math.min(window.innerWidth/1536,window.innerHeight/1024));
@@ -978,6 +983,7 @@ async function stockRestoreReloadView(){
     stockSqlArticles.forEach(article=>{stockSqlById.set(String(article.idart),article);const key=`${article.proveedor}:${codeKey(article.codProv)}`;const matches=stockSqlByCode.get(key)||[];matches.push(article);stockSqlByCode.set(key,matches);});
     state.options.forEach(item=>{const node=stockField(item.id);if(node)node.innerHTML=item.html;});
     state.fields.forEach(item=>{const node=stockField(item.id);if(node)node.value=item.value;});
+    stockSqlLoadedBranch=Number(stockField('stockIngresoSucursal').value);
     rowsData=state.workspace.rows.map(normalizeRow);provider=state.workspace.provider;
     el.providerInput.value=state.workspace.providerText||'';renderProviderInfo();
     stockConfirmed=state.workspace.pending?.status==='confirmed';stockField('stockCostOptions').open=state.additional||state.workspace.costsOpen;
@@ -1520,10 +1526,10 @@ function stockCostOptionsActive() {
 const stockAdditionalApp = document.querySelector('.app');
 const stockAdditionalAnchor = document.createComment('Carga SQL principal');
 stockAdditionalApp.before(stockAdditionalAnchor);
-const stockAdditionalPopup = document.createElement('div');
+const stockAdditionalPopup = document.createElement('section');
 stockAdditionalPopup.id = 'stockAdditionalPopup';
-stockAdditionalPopup.className = 'modal-backdrop stock-additional-popup';
-stockAdditionalPopup.innerHTML = '<section class="stock-additional-window" role="dialog" aria-modal="true" aria-labelledby="stockAdditionalTitle"><div class="stock-additional-title"><strong id="stockAdditionalTitle">Opciones adicionales</strong><button type="button" id="stockAdditionalClose">Volver a carga SQL ✕</button></div><div class="stock-additional-content"></div></section>';
+stockAdditionalPopup.className = 'stock-additional-popup stock-screen-section';
+stockAdditionalPopup.innerHTML = '<section class="stock-additional-window" role="region" aria-labelledby="stockAdditionalTitle"><div class="stock-additional-title"><strong id="stockAdditionalTitle">Opciones adicionales</strong><button type="button" id="stockAdditionalClose">Volver a carga SQL ✕</button></div><div class="stock-additional-content"></div></section>';
 stockAdditionalAnchor.before(stockAdditionalPopup);
 let stockAdditionalReturnFocus = null;
 let stockAdditionalSwitching=false;
@@ -1566,7 +1572,7 @@ async function stockSetAdditionalContext(additional){
   stockActiveWorkspace=Math.max(1,Number(localStorage.getItem(STOCK_WORKSPACE_KEY+'_active'))||1);
   stockWorkspaceCount=Math.max(1,stockActiveWorkspace,Number(localStorage.getItem(STOCK_WORKSPACE_KEY+'_count'))||1);
   providerArticlesLoadSeq++;
-  await stockSwitchWorkspace(stockActiveWorkspace,{discardCurrent:true,restoring:true});
+  await stockSwitchWorkspace(stockActiveWorkspace,{discardCurrent:true,restoring:true,reuseLoaded:true});
 }
 const stockAdditionalProvider = document.getElementById('providerCombo').closest('label');
 const stockAdditionalProviderAnchor = document.createComment('Proveedor de carga SQL');
@@ -1610,6 +1616,13 @@ stockAdditionalSql.addEventListener('click',async()=>{
 });
 const stockAdditionalCloseAnchor=document.createComment('Cerrar opciones adicionales');
 document.getElementById('stockAdditionalClose').before(stockAdditionalCloseAnchor);
+function stockReleaseSectionLock(){
+  // Las secciones no bloquean el fondo; los diálogos reales conservan su bloqueo.
+  if(topVisibleModalBackdrop())return;
+  stockAdditionalApp.inert=false;
+  stockAdditionalPopup.inert=false;
+  stockFreeze(stockConfirmed || stockIngresoBusy || stockPedidoBusy || stockWorkspaceSwitching);
+}
 async function stockOpenAdditionalOptions() {
   if(stockIngresoBusy || stockPedidoBusy || stockWorkspaceSwitching || stockAdditionalSwitching || !stockWorkspaceReady || stockAdditionalPopup.classList.contains('visible'))return;
   stockAdditionalSwitching=true;
@@ -1631,9 +1644,8 @@ async function stockOpenAdditionalOptions() {
   await stockSetAdditionalContext(true);
   stockField('copySummary').hidden=false;
   stockRebuildArticleOptions();render();
-  loadProviderArticles().catch(error => stockIngresoMessage(error.message, 'error'));
   stockField('stockAdditionalClose').focus();
-  }finally{stockAdditionalSwitching=false;}
+  }finally{stockAdditionalSwitching=false;stockReleaseSectionLock();}
 }
 async function stockCloseAdditionalOptions() {
   if(stockIngresoBusy || stockPedidoBusy || stockAdditionalSwitching || !stockAdditionalPopup.classList.contains('visible'))return;
@@ -1654,14 +1666,14 @@ async function stockCloseAdditionalOptions() {
   stockField('copySummary').hidden=true;
   stockRebuildArticleOptions();render();
   stockAdditionalReturnFocus?.focus?.();
-  }finally{stockAdditionalSwitching=false;}
+  }finally{stockAdditionalSwitching=false;stockReleaseSectionLock();}
 }
 document.getElementById('stockCostOptions').querySelector('summary').addEventListener('click', event => {
   event.preventDefault();stockOpenAdditionalOptions();
 });
 document.getElementById('stockAdditionalClose').addEventListener('click', stockCloseAdditionalOptions);
 document.addEventListener('keydown', event => {
-  if(event.key==='Escape' && stockAdditionalPopup.classList.contains('visible') && topVisibleModalBackdrop()===stockAdditionalPopup){
+  if(event.key==='Escape' && stockAdditionalPopup.classList.contains('visible') && !topVisibleModalBackdrop() && stockField('stockMovementPopup').hidden && stockField('stockConsultPanel').hidden){
     event.preventDefault();event.stopImmediatePropagation();stockCloseAdditionalOptions();
   }
 }, true);
@@ -1884,18 +1896,37 @@ function renderArticleProviderList() {
     const filtered=stockDescriptionMatchesOnly(),hasQuery=Boolean(norm(articleProviderCell.textContent));
     el.articleProviderMenu.insertAdjacentHTML('beforeend',`<div class="stock-article-list-footer"><span>${providerArticlesOrdered.length.toLocaleString('es-AR')} artículos</span><button type="button" class="stock-description-filter" data-description-filter aria-pressed="${filtered}" ${hasQuery?'':'disabled'}>${filtered?'Mostrar lista':'Filtrar'}</button><span></span></div>`);
   }
-  if (stockCanOfferArticleImport(articleProviderCell)) {
-    el.articleProviderMenu.insertAdjacentHTML('afterbegin', `<div class="article-provider-option${articleProviderActive === -1 ? ' active' : ''}" data-article-create style="color:var(--corralon-red,#f50916);font-weight:bold;cursor:pointer"><span>Cargar artículo: ${escapeHtml(articleProviderCell.textContent.trim())}</span></div>`);
-  }
+
 }
 function stockCanOfferArticleImport(cell) {
   const description=norm(cell?.textContent||'');
   return cell?.dataset.field==='descripcion' && Boolean(description)
     && !providerArticlesOrdered.some(item=>norm(item.descripcion||'')===description)
-    && Boolean(selectedProvider()) && !stockConfirmed && !stockIngresoBusy;
+    && !stockConfirmed && !stockIngresoBusy;
+}
+let stockArticleImportPromptBusy=false;
+async function stockAskImportOnTab(cell){
+  if(stockArticleImportPromptBusy)return;
+  stockArticleImportPromptBusy=true;
+  const index=Number(cell.dataset.row),row=rowsData[index],description=String(cell.textContent||'').trim();
+  cell.dataset.stockDescriptionEdited='0';
+  closeArticleProviderList();commitCellEditSnapshot(cell);saveRows();
+  try{
+    const accepted=await htmlNotice('El artículo «'+description+'» no existe. ¿Querés cargarlo?');
+    if(rowsData[index]!==row || stockConfirmed || stockIngresoBusy)return;
+    const current=editableCellAt(index,1)||cell;
+    if(accepted)stockImportArticleFromCell(current);
+    else moveTableNavigation(current,0,1);
+  }finally{stockArticleImportPromptBusy=false;}
 }
 function stockImportArticleFromCell(cell) {
   if (!stockCanOfferArticleImport(cell)) return;
+  if(!selectedProvider()?.id_proveedor){
+    closeArticleProviderList();
+    show('Elegí el proveedor para cargar el artículo nuevo. La fila queda conservada.');
+    el.providerInput.focus();openProviderList();
+    return;
+  }
   cell.dataset.stockDescriptionEdited='0';
   const index = Number(cell.dataset.row);
   rowsData[index].descripcion = String(cell.textContent || '').trim();
@@ -1909,26 +1940,25 @@ function openArticleProviderList(cell) {
   articleProviderInputTimer = null;
   articleProviderCell = cell;
   articleProviderOptions = filteredProviderArticles(cell);
-  articleProviderActive = stockCanOfferArticleImport(cell) && !articleProviderHasSearchMatch ? -1 : articleProviderPage?.focusIndex || 0;
+  articleProviderActive = articleProviderPage?.focusIndex || 0;
   renderArticleProviderList();
   const rect = cell.getBoundingClientRect();
-  const viewportMargin = 8;
-  const gap = 4;
-  const width = Math.min(Math.max(1000, rect.width), window.innerWidth - viewportMargin * 2);
-  el.articleProviderMenu.style.left = `${Math.max(viewportMargin, Math.min(rect.left, window.innerWidth - width - viewportMargin))}px`;
-  el.articleProviderMenu.style.width = `${width}px`;
-  el.articleProviderMenu.style.maxHeight = '280px';
+  const viewportMargin = 8, gap = 4;
+  const scale=1;
+  const width=Math.min(Math.max(1000*scale,rect.width),window.innerWidth-viewportMargin*2);
+  el.articleProviderMenu.style.setProperty('--stock-article-popup-scale',String(scale));
+  el.articleProviderMenu.style.width=(width/scale)+'px';
+  el.articleProviderMenu.style.left=Math.max(viewportMargin,Math.min(rect.left,window.innerWidth-width-viewportMargin))+'px';
+  el.articleProviderMenu.style.maxHeight='280px';
   el.articleProviderMenu.classList.add('open');
-  const naturalHeight = Math.min(280, el.articleProviderMenu.scrollHeight + 2);
-  const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - gap - viewportMargin);
-  const spaceAbove = Math.max(0, rect.top - gap - viewportMargin);
-  const openAbove = spaceBelow < naturalHeight && spaceAbove > spaceBelow;
-  const availableHeight = Math.max(40, Math.min(280, openAbove ? spaceAbove : spaceBelow));
-  el.articleProviderMenu.style.maxHeight = `${availableHeight}px`;
-  const renderedHeight = Math.min(el.articleProviderMenu.scrollHeight + 2, availableHeight);
-  el.articleProviderMenu.style.top = openAbove
-    ? `${Math.max(viewportMargin, rect.top - gap - renderedHeight)}px`
-    : `${rect.bottom + gap}px`;
+  const naturalHeight=Math.min(280,el.articleProviderMenu.scrollHeight+2)*scale;
+  const spaceBelow=Math.max(0,window.innerHeight-rect.bottom-gap-viewportMargin);
+  const spaceAbove=Math.max(0,rect.top-gap-viewportMargin);
+  const openAbove=spaceBelow<naturalHeight&&spaceAbove>spaceBelow;
+  const availableHeight=Math.max(1,Math.min(280*scale,openAbove?spaceAbove:spaceBelow));
+  el.articleProviderMenu.style.maxHeight=(availableHeight/scale)+'px';
+  const renderedHeight=Math.min((el.articleProviderMenu.scrollHeight+2)*scale,availableHeight);
+  el.articleProviderMenu.style.top=(openAbove?Math.max(viewportMargin,rect.top-gap-renderedHeight):rect.bottom+gap)+'px';
   requestAnimationFrame(() => {
     const active = articleProviderActive === -1 ? el.articleProviderMenu.querySelector('[data-article-create]') : el.articleProviderMenu.querySelector(`[data-article-option="${articleProviderActive}"]`);
     if (active) el.articleProviderMenu.scrollTop = Math.max(0, active.offsetTop);
@@ -2025,8 +2055,9 @@ function setProvider(nextProvider, options = {}) {
   if(!options.skipRowDiscount)rowsData.forEach((row) => row.descuento = desc);
   saveRows();
   render();
-  loadProviderArticles().catch(error => stockIngresoMessage(error.message, 'error'));
-  stockRebuildArticleOptions(); stockRefreshRelations();
+  if(!options.skipProviderArticles)loadProviderArticles().catch(error => stockIngresoMessage(error.message, 'error'));
+  stockRebuildArticleOptions();
+  if(!options.skipProviderArticles)stockRefreshRelations();
   if(!stockWorkspaceSwitching&&!stockAdditionalSwitching&&!document.body.classList.contains('stock-additional-open'))stockSyncAdditionalProvider(provider).catch(error=>console.warn('No se pudo compartir el proveedor con Opciones adicionales',error));
 }
 function applyProvider() {
@@ -2878,6 +2909,10 @@ function handleRuleNavigation(event) {
   const target = event.target?.closest?.('#providerInput,#providerInvoiceDiscount,#providerFinalInvoiceDiscount,#providerPrintedInvoiceDiscount,#providerFreight,#providerIvaIncluded,#providerIva,#copyBtn,[data-field][data-row][data-col]');
   if (!target) return;
   const key = event.key;
+  if(key==='Tab' && !event.shiftKey && !event.ctrlKey && target.dataset.field==='descripcion' && stockCanOfferArticleImport(target)){
+    event.preventDefault();event.stopImmediatePropagation();
+    stockAskImportOnTab(target).catch(error=>stockIngresoMessage(error.message,'error'));return;
+  }
   if (event.ctrlKey) {
     if (target.matches('[data-field][data-row][data-col]') && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
       if (!canNavigateWithArrow(target, key)) return;
@@ -4635,6 +4670,7 @@ let STOCK_HEADER_KEY = 'corralon_stock_header_v1';
 let stockIngresoBusy = false, stockConfirmed = false, stockSqlMeta = null;
 let stockSqlArticles = [], stockSqlById = new Map(), stockSqlByCode = new Map();
 let stockSqlLoadSeq = 0, stockMovements = [], stockMovementIndex = -1;
+let stockSqlLoadedBranch=null;
 const stockField = id => document.getElementById(id);
 function stockIngresoMessage(message, type = '') {
   const target = stockField('stockIngresoMessage');
@@ -4675,7 +4711,7 @@ function stockBlankWorkspace() {
   return {rows: [], provider: null, providerText: '', costsOpen: false, pending: null,
     header: {stockIngresoSucursal: stockField('stockIngresoSucursal').value, stockTipoMovimiento: '23', stockFecha: stockToday(), stockArticleFilter: 'sql'}};
 }
-async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitching=false, fresh=false, nextSnapshot=null, restoring=false} = {}) {
+async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitching=false, fresh=false, nextSnapshot=null, restoring=false, reuseLoaded=false} = {}) {
   if ((number === stockActiveWorkspace && !discardCurrent) || stockIngresoBusy || stockPedidoBusy || (stockWorkspaceSwitching && !alreadySwitching) || !stockWorkspaceReady) return;
   document.activeElement?.blur();
   await Promise.resolve();
@@ -4708,7 +4744,11 @@ async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitch
     stockField('stockPrintBtn').dataset.receipt = next.pending?.idRecibo || '';
     stockField('stockNumero').value = next.pending?.numeroMovimiento || '';
     stockMovementFields();
-    await stockRefreshSql(); await stockRefreshRelations();
+    await Promise.all([
+      reuseLoaded && stockSqlLoadedBranch===Number(stockField('stockIngresoSucursal').value) ? Promise.resolve() : stockRefreshSql(),
+      reuseLoaded && stockAdditionalPopup.classList.contains('visible') ? Promise.resolve() : stockRefreshRelations({preferCache:reuseLoaded})
+    ]);
+    if(reuseLoaded)loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));
     stockField('stockCompra').value = next.header.stockCompra || '';
     stockField('stockRelacionado').value = next.header.stockRelacionado || '';
     render();
@@ -5150,10 +5190,12 @@ async function stockRefreshSql(options = {}) {
     return;
   }
   const seq = ++stockSqlLoadSeq;
+  const branch=Number(stockField('stockIngresoSucursal').value);
   stockIngresoMessage('Consultando stock de la sucursal…');
   try {
     const data = await stockSqlGet('articulos');
     if (seq !== stockSqlLoadSeq) return;
+    stockSqlLoadedBranch=branch;
     stockSqlArticles = data.articulos || []; stockSqlById = new Map(); stockSqlByCode = new Map();
     stockSqlArticles.forEach(article => {
       stockSqlById.set(String(article.idart), article);
@@ -5345,13 +5387,17 @@ function stockMovementFields() {
   stockRebuildArticleOptions();
 }
 let stockRelationsRequest=0;
-async function stockRefreshRelations() {
+const stockRelationsCache=new Map();
+async function stockRefreshRelations({preferCache=false}={}) {
   if(stockReloadRestoring)return;
   if(!stockSqlMeta) return;
   const request=++stockRelationsRequest,context=STOCK_WORKSPACE_KEY+':'+stockActiveWorkspace;
   try {
-    const [purchases,relations]=await Promise.all([stockSqlGet('compras'),stockSqlGet('relacionados')]);
+    const cacheKey=[stockField('stockIngresoSucursal').value,stockProviderId(),stockField('stockTipoMovimiento').value].join(':');
+    const cached=preferCache?stockRelationsCache.get(cacheKey):null;
+    const [purchases,relations]=cached || await Promise.all([stockSqlGet('compras'),stockSqlGet('relacionados')]);
     if(request!==stockRelationsRequest || context!==STOCK_WORKSPACE_KEY+':'+stockActiveWorkspace)return;
+    stockRelationsCache.set(cacheKey,[purchases,relations]);
     const old=stockField('stockCompra').value, oldRelated=stockField('stockRelacionado').value;
     stockField('stockCompra').innerHTML='<option value="">Sin asociar</option>'+(purchases.compras||[]).map(item=>`<option value="${item.id}" data-number="${escapeHtml(item.numero||'')}" data-date="${escapeHtml(item.fecha||'')}" data-total="${Number(item.total)||0}">${escapeHtml(item.numero)} · ${escapeHtml(item.fecha)}</option>`).join('');
     stockField('stockCompra').value=old;
@@ -5469,11 +5515,12 @@ function stockRenderConsult(preserveFilters=false) {
     if(!previousForm)stockConsultProviderCombo?.destroy();
     const providerOptions=[{value:'0',label:'Todos los proveedores'},...providers.map(item=>({value:String(CorralonSystem.providerIdentity.externalId(item)),label:providerLabel(item)}))];
     const providerText=providerOptions.find(item=>item.value===String(filters.proveedor))?.label||'';
-    panel.innerHTML='<div class="stock-consult-title" style="gap:12px;flex-wrap:wrap"><span>Movimientos confirmados</span><button type="button" id="stockCloseConsult">Cerrar</button></div><form class="stock-consult-filters"><label>Desde<input id="stockConsultFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.desde)+'"></label><label>Hasta<input id="stockConsultTo" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.hasta)+'"></label><label>Proveedor<input id="stockConsultProvider" type="text" autocomplete="off" placeholder="Todos los proveedores" value="'+escapeHtml(providerText)+'"></label><button type="submit">Consultar</button></form><div class="stock-consult-grid"><div class="stock-consult-columns"><span>Fecha</span><span>Sucursal</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||item.sucursal||'—')}</span><span>${escapeHtml(item.nombre||'Movimiento de stock')}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>'+`<div style="padding:10px;display:flex;gap:12px;align-items:center"><span>${stockMovements.length} de ${stockConsultTotal} movimientos · ${escapeHtml(Number(filters.sucursal)?stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(filters.sucursal))?.nombre||'Sucursal seleccionada':'Todas las sucursales')}</span>${stockConsultMore?'<button id="stockConsultMore" type="button">Cargar más movimientos</button>':''}</div>`;
+    panel.innerHTML='<div class="stock-consult-title" style="gap:12px;flex-wrap:wrap"><span>Movimientos confirmados</span><button type="button" id="stockCloseConsult">Cerrar</button></div><form class="stock-consult-filters"><label>Desde<input id="stockConsultFrom" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.desde)+'"></label><label>Hasta<input id="stockConsultTo" type="text" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" value="'+dateText(filters.hasta)+'"></label><label>Proveedor<input id="stockConsultProvider" type="text" autocomplete="off" placeholder="Todos los proveedores" value="'+escapeHtml(providerText)+'"></label><button type="submit">Consultar</button></form><div class="stock-consult-grid"><h2 class="stock-consult-results-title">Resultados de la consulta</h2><div class="stock-consult-columns"><span>Fecha</span><span>Sucursal</span><span>Tipo de movimiento</span><span>Nº movimiento</span><span>Proveedor</span><span>Nº factura</span><span>Nº remito</span><span>Total</span></div><div class="stock-consult-list">'+stockMovements.map((item,index)=>`<button type="button" data-stock-view="${index}"><span>${escapeHtml(item.fecha)}</span><span>${escapeHtml(stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(item.sucursal))?.nombre||item.sucursal||'—')}</span><span>${escapeHtml(item.nombre||'Movimiento de stock')}</span><span>${escapeHtml(item.numero)}</span><span>${escapeHtml(item.proveedorNombre||'—')}</span><span>${escapeHtml(item.factura||'—')}</span><span>${escapeHtml(item.remito||'—')}</span><span>${money(item.total)}</span></button>`).join('')+'</div></div>'+`<div class="stock-consult-result-count" style="padding:10px;display:flex;gap:12px;align-items:center"><span>${stockMovements.length} de ${stockConsultTotal} movimientos · ${escapeHtml(Number(filters.sucursal)?stockSqlMeta?.sucursales?.find(branch=>Number(branch.id)===Number(filters.sucursal))?.nombre||'Sucursal seleccionada':'Todas las sucursales')}</span>${stockConsultMore?'<button id="stockConsultMore" type="button">Cargar más movimientos</button>':''}</div>`;
     if(!stockMovements.length) panel.insertAdjacentHTML('beforeend','<p>No hay movimientos confirmados.</p>');
     stockField('stockCloseConsult').onclick=()=>{panel.hidden=true;stockConsultRequest++;stockConsultLoading=false;};
     panel.querySelectorAll('[data-stock-view]').forEach(button=>button.onclick=()=>stockOpenMovementPopup(Number(button.dataset.stockView)));
     panel.querySelector('#stockConsultMore')?.addEventListener('click',()=>stockLoadConsult(true));
+    panel.querySelector('.stock-consult-grid').append(panel.querySelector('.stock-consult-result-count'));
     // Keep the live inputs, focus and open type list while refreshing the results.
     if(previousForm){panel.querySelector('form').replaceWith(previousForm);previousFocus?.focus({preventScroll:true});if(previousSelection)previousFocus.setSelectionRange(...previousSelection);return;}
     const form=panel.querySelector('form');
@@ -5482,6 +5529,7 @@ function stockRenderConsult(preserveFilters=false) {
     const movementTypes=stockSqlMeta?.tiposMovimiento||[];
     form.querySelector('button[type="submit"]').insertAdjacentHTML('beforebegin',
       `<label>Tipo de comprobante<select id="stockConsultType"><option value="">Todos</option>${movementTypes.map(item=>`<option value="${Number(item.id)}" ${String(filters.tipos||'')===String(item.id)?'selected':''}>${escapeHtml(item.codigo||'')} · ${escapeHtml(item.nombre)}</option>`).join('')}</select></label><label>Nº factura o remito<input id="stockConsultNumber" type="text" list="stockConsultNumbers" autocomplete="off" placeholder="Número completo o parcial" value="${escapeHtml(filters.buscar||'')}"><datalist id="stockConsultNumbers"></datalist></label><label>Artículo<input id="stockConsultArticle" type="text" maxlength="100" autocomplete="off" placeholder="IDArt, cód. proveedor o descripción" value="${escapeHtml(filters.articulo||'')}"></label>`);
+    form.insertAdjacentHTML('afterbegin','<div class="stock-consult-filter-title"><strong>Filtros de consulta</strong><span>Completá los filtros para buscar movimientos confirmados.</span></div>');
     let numberTimer=null,numberRequest=0;
     const refreshNumbers=()=>{
       clearTimeout(numberTimer);const request=++numberRequest;
@@ -5582,7 +5630,7 @@ window.CorralonStockMovementViewer={async openPurchase(purchase){
 }};
 
 function stockPopupNavigation(index){
-  return `<div class="stock-popup-nav"><button type="button" data-stock-popup-prev ${index===0?'disabled':''} title="Movimiento anterior (RePág)" aria-label="Movimiento anterior">‹ Anterior</button><span>${index+1} de ${stockConsultTotal||stockMovements.length}</span><button type="button" data-stock-popup-next ${index===stockMovements.length-1&&!stockConsultMore?'disabled':''} title="Movimiento siguiente (AvPág)" aria-label="Movimiento siguiente">Siguiente ›</button><button type="button" data-close-stock-popup aria-label="Cerrar">✕</button></div>`;
+  return `<div class="stock-popup-nav"><button type="button" data-stock-popup-prev ${index===0?'disabled':''} title="Movimiento anterior (RePág)" aria-label="Movimiento anterior">‹ Anterior</button><span>${index+1} de ${stockConsultTotal||stockMovements.length}</span><button type="button" data-stock-popup-next ${index===stockMovements.length-1&&!stockConsultMore?'disabled':''} title="Movimiento siguiente (AvPág)" aria-label="Movimiento siguiente">Siguiente ›</button><button type="button" data-close-stock-popup aria-label="Volver a la consulta">‹ Volver</button></div>`;
 }
 async function stockPopupNext(index){
   const request=stockMovementPopupRequest;
@@ -5644,10 +5692,9 @@ async function stockOpenMovementPopup(index){
       </div>
       <div class="stock-popup-table"><table><thead><tr><th>IDArt</th><th>CodProv</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th><th>Stock actual</th></tr></thead><tbody>${lines.map((line,rowIndex)=>`<tr data-movement-row="${rowIndex}" class="${rowIndex===0?'selected':''}"><td>${escapeHtml(line.idart)}</td><td>${escapeHtml(line.codigo||'')}</td><td>${escapeHtml(line.descripcion)}</td><td class="num">${escapeHtml(Number(line.cantidad||0).toLocaleString('es-AR'))}</td><td class="num">${money(line.precioUnitario)}</td><td class="num">${money(line.importe)}</td><td class="num">${escapeHtml(Number(line.stock||0).toLocaleString('es-AR'))}</td></tr>`).join('')}</tbody></table></div>
       <div class="stock-movement-totals"><span>${lines.length} artículos · ${escapeHtml(units.toLocaleString('es-AR'))} unidades</span><span>Total movimiento: <output>${money(item.total)}</output></span></div>
-      <div class="stock-movement-bottom"><span><b>IDArt:</b> <output data-selected-movement-article>${escapeHtml(lines[0]?.idart||'—')}</output></span><span><b>Nº Factura:</b> ${escapeHtml(item.factura||'—')}</span><strong>Total: <output>${money(item.total)}</output></strong></div>
+      <div class="stock-movement-bottom"><div class="stock-movement-selection"><div><span><b>IDArt:</b> <output data-selected-movement-article>${escapeHtml(lines[0]?.idart||'—')}</output></span><span><b>Nº Factura:</b> ${escapeHtml(item.factura||'—')}</span></div><div class="stock-popup-footer"><span>${escapeHtml(note)}</span></div></div><strong>Total: <output>${money(item.total)}</output></strong></div>
       <div class="stock-movement-actions"><button type="button" data-copy-movement>Copiar contenido</button>${Number(item.tipo)===23&&!item.anulado&&FX.menuUserIsAdministrator('carga_stock')?'<button type="button" data-send-movement-order>Enviar a pedidos</button>':''}<button type="button" data-print-movement>Imprimir</button><button type="button" data-cancel-movement style="color:var(--corralon-red,#ed0012)">Anular carga</button></div>
-      <p data-movement-status role="status" style="margin:0"></p>
-      <div class="stock-popup-footer"><span>${escapeHtml(note)}</span></div>`;
+      <p data-movement-status role="status" style="margin:0"></p>`;
     popup.querySelectorAll('[data-movement-row]').forEach(row=>row.addEventListener('click',()=>{popup.querySelectorAll('[data-movement-row]').forEach(other=>other.classList.toggle('selected',other===row));popup.querySelector('[data-selected-movement-article]').textContent=lines[Number(row.dataset.movementRow)].idart;}));
     popup.querySelector('[data-copy-movement]').onclick=()=>{
       const clean=value=>String(value??'').replace(/[\t\r\n]+/g,' ');
@@ -5821,6 +5868,7 @@ function stockOpenHeaderOptions(select){
   if(select.disabled || stockConfirmed || stockIngresoBusy)return;
   closeProviderList();closeArticleProviderList();stockField('stockPurchaseList').hidden=true;
   stockHeaderSelect=select;
+  stockHeaderOptions.dataset.stockSelect=select.id;
   const options=[...select.options];
   stockHeaderOptionIndex=Math.max(0,options.findIndex(option=>option.selected));
   stockHeaderOptions.innerHTML=options.map((option,index)=>`<button type="button" role="option" aria-selected="${option.selected}" data-stock-header-option="${index}" ${option.disabled?'disabled':''}>${escapeHtml(option.textContent)}</button>`).join('');
@@ -6710,7 +6758,7 @@ el.rows.addEventListener('keydown', (event) => {
     event.preventDefault();
     event.stopPropagation();
     const direction = event.key === 'ArrowDown' ? 1 : -1;
-    articleProviderActive = Math.max(stockCanOfferArticleImport(cell) ? -1 : 0, Math.min(articleProviderOptions.length - 1, articleProviderActive + direction));
+    articleProviderActive = Math.max(0, Math.min(articleProviderOptions.length - 1, articleProviderActive + direction));
     renderArticleProviderList();
     el.articleProviderMenu.querySelector('.article-provider-option.active')?.scrollIntoView({ block: 'nearest' });
     return;
@@ -6780,19 +6828,7 @@ el.rows.addEventListener('blur', (event) => {
   const cell = event.target.closest('[data-field]');
   if (!cell) return;
   cell.classList.remove('text-caret-visible');
-  const importOnLeave=cell.dataset.stockDescriptionEdited==='1' && stockCanOfferArticleImport(cell)
-    && !stockTableRendering && !restoringUndo && document.hasFocus()
-    && !event.relatedTarget?.closest?.('#articleProviderMenu,#articleProviderToggle');
-  if (cell.dataset.field === 'descripcion') closeArticleProviderList();
-  if(importOnLeave){
-    const row=rowsData[Number(cell.dataset.row)];
-    cell.dataset.stockDescriptionEdited='0';
-    setTimeout(()=>{
-      if(rowsData[Number(cell.dataset.row)]!==row || stockIngresoBusy || stockWorkspaceSwitching || stockAdditionalSwitching)return;
-      const modal=topVisibleModalBackdrop();if(modal&&modal!==stockAdditionalPopup)return;
-      if(stockCanOfferArticleImport(cell))stockImportArticleFromCell(cell);
-    },0);
-  }
+  if (cell.dataset.field === 'descripcion') {cell.dataset.stockDescriptionEdited='0';closeArticleProviderList();}
   commitCellEditSnapshot(cell);
   if (cell.dataset.field === 'precio') finalizeStockNumberCell(cell);
   if (cell.dataset.field === 'descuento') {

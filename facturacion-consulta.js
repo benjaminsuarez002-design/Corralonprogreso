@@ -59,7 +59,7 @@
   paintSort();
   let cancellationBusy=false;
   function valuesUser(){return window.CorralonFunciones?.menuSessionUser?.()||{}}
-  function isAdministrator(){return window.CorralonFunciones.menuUserIsAdministrator('facturacion',valuesUser());}
+  function isAdministrator(){if(detailOptions.readOnly===true)return false;return window.CorralonFunciones.menuUserIsAdministrator('facturacion',valuesUser());}
   function refreshAnnulButton(){
     annulButton.hidden=!isAdministrator();
     annulButton.disabled=actionBusy||!detailData?.versionAnulacion||!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||Boolean(detailData?.bloqueoAnulacionFiscal)||Boolean(detailData?.valuesDirty);
@@ -91,7 +91,7 @@
       const field=[...detail.querySelectorAll('.receipt-field')].find(el=>el.firstChild.textContent===label)?.querySelector('span');if(field)field.textContent=money(value);
     }
   }
-  function canEditValues(){const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return (allowed || detailOptions.allowEditValues===true)&&Number(detailData?.comprobante?.confirmado)!==0&&!Number(detailData?.comprobante?.anulada)&&Boolean(detailData?.versionValores)}
+  function canEditValues(){if(detailOptions.readOnly===true)return false;const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return (allowed || detailOptions.allowEditValues===true)&&Number(detailData?.comprobante?.confirmado)!==0&&!Number(detailData?.comprobante?.anulada)&&Boolean(detailData?.versionValores)}
   function valueRules(){try{return window.CorralonMediosPago?.normalize(JSON.parse(localStorage.getItem('corralon_facturacion_medios_pago_v1')||'null'),historyConfig)}catch{return window.CorralonMediosPago?.normalize(null,historyConfig)}}
   function valueTypes(){const rules=valueRules();return(historyConfig?.tiposPago||[]).filter(p=>[1,3,5,6].includes(Number(p.clase))&&Number(p.id)!==14&&(!window.CorralonMediosPago||window.CorralonMediosPago.allowsVoucher(rules,p.id,detailData.comprobante.idComprobante)))}
   function valueCards(value){const rules=valueRules();return(historyConfig?.tarjetas||[]).filter(c=>!window.CorralonMediosPago||window.CorralonMediosPago.allowsCard(rules,value.idTipoPago,c.id))}
@@ -283,15 +283,30 @@
     if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<=80)loadMore();
   },{passive:true});
   get('[data-retry-more]').addEventListener('click',()=>{moreError=false;loadMore()});
+  function normalizeReceiptSearch(value){
+    const text=String(value??'').trim();
+    const parts=text.match(/^(\d{1,4})\s*[-–—]\s*(\d{1,8})$/);
+    return parts?parts[1].padStart(4,'0')+'-'+parts[2].padStart(8,'0'):text;
+  }
+  function completeReceiptSearch(){const field=get('[data-search]');field.value=normalizeReceiptSearch(field.value)}
+  get('[data-search]').addEventListener('blur',completeReceiptSearch);
+  get('[data-search]').addEventListener('keydown',event=>{if(event.key==='Enter')completeReceiptSearch()});
   async function load(targetPage=0){
     const append=targetPage>0;
     if(append&&(listLoading||!hasMore||!listQuery))return;
     let params;
     if(append){params=new URLSearchParams(listQuery);params.set('pagina',String(targetPage))}
     else{
-      clearTimeout(searchTimer);const from=dateInput(get('[data-from]')),to=dateInput(get('[data-to]'));if(!from||!to)return;
+      clearTimeout(searchTimer);
+      const search=normalizeReceiptSearch(get('[data-search]').value);
+      const specificReceipt=/^\d{4}-\d{8}$/.test(search);
+      // Una boleta completa se busca en todas las fechas y sucursales sin alterar los filtros visibles.
+      const from=specificReceipt?'1753-01-01':dateInput(get('[data-from]'));
+      const to=specificReceipt?'9998-12-31':dateInput(get('[data-to]'));
+      if(!from||!to)return;
       if(from>to){message('La fecha Desde debe ser anterior o igual a Hasta.',true);return}
-      params=new URLSearchParams({desde:from,hasta:to,sucursal:get('[data-branch]').value,puntoVenta:get('[data-point]').value,buscar:get('[data-search]').value.trim(),articulo:get('[data-article]').value.trim(),pagina:'0',orden:sortField,direccion:sortDirection});
+      if(specificReceipt)for(const selector of ['[data-from]','[data-to]'])get(selector).setCustomValidity('');
+      params=new URLSearchParams({desde:from,hasta:to,sucursal:specificReceipt?'0':get('[data-branch]').value,puntoVenta:specificReceipt?'0':get('[data-point]').value,buscar:search,articulo:specificReceipt?'':get('[data-article]').value.trim(),pagina:'0',orden:sortField,direccion:sortDirection});
       listQuery=params.toString();rows=[];page=0;hasMore=false;totalRecords=null;get('[data-rows]').innerHTML='';get('.invoice-history-scroll').scrollTop=0;
     }
     listController?.abort();const controller=listController=new AbortController(),request=++sequence;
@@ -423,7 +438,7 @@
       get('[data-branch]').value=String(branch);get('[data-point]').innerHTML='<option value="0">Todos los puntos de venta</option>'+(config.puntosVenta||[]).map(p=>`<option value="${Number(p.id)}">${escape(p.id)} · ${escape(p.nombre)}</option>`).join('');await load();
     }catch(error){if(!overlay.hidden)message('No se pudieron cargar las sucursales: '+error.message,true)}
   });
-  get('form').addEventListener('submit',event=>{event.preventDefault();load()});get('[data-close]').addEventListener('click',close);get('[data-branch]').addEventListener('change',()=>load());get('[data-point]').addEventListener('change',()=>load());
+  get('form').addEventListener('submit',event=>{event.preventDefault();completeReceiptSearch();load()});get('[data-close]').addEventListener('click',close);get('[data-branch]').addEventListener('change',()=>load());get('[data-point]').addEventListener('change',()=>load());
   for(const selector of ['[data-from]','[data-to]']){const field=get(selector);field.addEventListener('input',()=>field.setCustomValidity(''));field.addEventListener('change',()=>load())}
   for(const selector of ['[data-search]','[data-article]'])get(selector).addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>load(),350)});
   get('[data-rows]').addEventListener('click',event=>{const row=event.target.closest('[data-invoice]');if(row)openDetail(Number(row.dataset.invoice))});get('[data-rows]').addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.matches('tr[data-invoice]')){event.preventDefault();openDetail(Number(event.target.dataset.invoice))}});

@@ -1120,7 +1120,7 @@
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.27"></script>
+<script src="corralon-system.js?v=1.0.28"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -7868,6 +7868,43 @@ initializeCashHistory(true);
   </section><section><div class="caja-sql-box"><h2>Facturado con Tarjetas</h2><div class="caja-sql-grid caja-sql-short"><table><thead><tr><th>Tarjeta</th><th>Importe</th></tr></thead><tbody id="sqlCajaCards"></tbody></table></div></div><label>Total Tarjetas: <input id="sqlCajaCardsTotal" class="caja-sql-money" readonly style="width:120px"></label><div class="caja-sql-cobros"><label>Total cobros: <input id="sqlCajaReceiptsTotal" class="caja-sql-money" readonly style="width:125px"></label></div></section></div>
   <div id="sqlCajaStatus" class="caja-sql-status" role="status">Conectando con SQL…</div>`;
   document.body.prepend(main);
+  main.classList.add('caja-daily-reference');
+  const dailyLayout=main.querySelector('.caja-sql-layout');
+  dailyLayout.before(main.querySelector('.caja-sql-totals'));
+  dailyLayout.after(main.querySelector('.caja-sql-footer'));
+  const dailyHeader=main.querySelector('header');
+  dailyHeader.querySelector('h1').after($('sqlCajaAdditional'),$('sqlCajaCollections'));
+  const reports=$('sqlCajaReports');reports.classList.add('caja-daily-report-link');
+  const sections=[...dailyLayout.children];
+  const valuesBox=sections[0].querySelector('.caja-sql-box');valuesBox.classList.add('daily-values');
+  const diffBox=sections[0].querySelectorAll('.caja-sql-box')[1];diffBox.classList.add('daily-differences');
+  diffBox.querySelector('h2').textContent='Comprobantes con diferencias';
+  const cashBox=sections[1].querySelector('.caja-sql-box');cashBox.classList.add('daily-cash');
+  cashBox.querySelector('h2').textContent='Ingresos / Egresos · Efectivo';
+  const cashTotal=$('sqlCajaCashTotal').parentElement;cashTotal.classList.add('daily-card-total');cashTotal.firstChild.textContent='Total efectivo';cashBox.append(cashTotal);
+  const salesBox=sections[1].querySelector('.caja-sql-bottom');salesBox.classList.add('daily-sales');
+  const salesTotal=sections[1].querySelector('.caja-sql-actions');salesTotal.classList.add('daily-sales-total');
+  const margin=$('sqlCajaMargin').parentElement;margin.classList.add('daily-margin');salesBox.append(salesTotal,margin);
+  const cardsBox=sections[2].querySelector('.caja-sql-box');cardsBox.classList.add('daily-cards');
+  const cardsTotal=$('sqlCajaCardsTotal').parentElement;cardsTotal.classList.add('daily-card-total');cardsTotal.firstChild.textContent='Total';cardsBox.append(cardsTotal);
+  const receiptsBox=sections[2].querySelector('.caja-sql-cobros');receiptsBox.classList.add('caja-sql-box','daily-receipts');
+  const receiptsHeading=document.createElement('h2');receiptsHeading.textContent='Cobros';receiptsBox.prepend(receiptsHeading);
+  const record=valuesBox.querySelector('.caja-sql-record');record.append(reports);
+  $('sqlCajaRefresh').textContent='Actualizar saldo';$('sqlCajaComplete').textContent='Ver caja completa';
+  ['Saldo inicial','Total del día','Total I/E','Saldo final'].forEach((text,i)=>main.querySelector('.caja-sql-totals').children[i].firstChild.textContent=text);
+  valuesBox.querySelector('h2').textContent='Detalle de valores';
+  cardsBox.querySelector('h2').textContent='Facturado con tarjetas';
+  main.querySelector('.caja-sql-footer>label').firstChild.textContent='Nota';
+  salesBox.querySelectorAll('th')[1].textContent='Venta';salesBox.querySelectorAll('th')[2].textContent='Costo';
+  $('sqlCajaConfirm').textContent='Confirmar caja';
+  const fitDailyCaja=()=>{
+    const scale=Math.max(.1,Math.min(innerWidth/1672,innerHeight/941));
+    main.style.setProperty('--caja-daily-scale',scale);
+    main.style.setProperty('--caja-daily-width',innerWidth/scale+'px');
+    main.style.setProperty('--caja-daily-height','941px');
+  };
+  addEventListener('resize',fitDailyCaja);fitDailyCaja();
+
   let boot, current = null, busy = false, dirty = false, sequence = 0, toolsReady = null, cashDraftSequence=0,cashSavedDraftKey='';
   function cashDraftMarkup(key,amount='',note=''){return `<tr data-row="${esc(key)}" data-caja-draft class="caja-sql-new-row"><td><input data-caja-new data-field="Importe" data-number-format="currency" inputmode="decimal" placeholder="Importe" aria-label="Importe nuevo movimiento" value="${esc(amount)}"></td><td><input data-caja-new data-field="Nota" placeholder="Nota" aria-label="Nota nuevo movimiento" value="${esc(note)}"></td><td></td><td></td></tr>`;}
   function appendBlankCashRow(){ $('sqlCajaCash').insertAdjacentHTML('beforeend',cashDraftMarkup('nuevo-'+(++cashDraftSequence))); }
@@ -7937,10 +7974,11 @@ initializeCashHistory(true);
     for (const [id, field] of [['sqlCajaInitial','ImpAnt'],['sqlCajaDaily','Importe'],['sqlCajaIE','ImpRet'],['sqlCajaFinal','ImpAct']]) $(id).value = money(sum(rows, field));
     $('sqlCajaValueCount').textContent = `Registro: ${rows.length ? 1 : 0} de ${rows.length}`;
     const drafts=Array.from($('sqlCajaCash').rows).filter(row=>row.hasAttribute('data-caja-draft') && row.dataset.row!==cashSavedDraftKey).map(row=>({key:row.dataset.row,amount:row.querySelector('[data-field="Importe"]').value,note:row.querySelector('[data-field="Nota"]').value})).filter(row=>row.amount.trim() || row.note.trim());
-    $('sqlCajaCash').innerHTML = cash.map(r => `<tr data-row="${r.IDMov}" data-mov="${r.IDMov}"><td><input class="caja-sql-money" data-caja-cash="Importe" data-field="Importe" data-number-format="currency" inputmode="decimal" value="${esc(money(r.Importe))}"></td><td><input data-caja-cash="Nota" data-field="Nota" value="${esc(r.Nota || '')}"></td><td>${esc(new Date(/\/Date\(([-\d]+)/.exec(String(r.Hora))?.[1] * 1 || r.Hora).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' }))}</td><td><button data-caja-delete="${r.IDMov}" aria-label="Eliminar movimiento">×</button></td></tr>`).join('');
+    $('sqlCajaCash').innerHTML = cash.map(r => `<tr data-row="${r.IDMov}" data-mov="${r.IDMov}"><td><input class="caja-sql-money${Number(r.Importe)<0?' daily-negative':''}" data-caja-cash="Importe" data-field="Importe" data-number-format="currency" inputmode="decimal" value="${esc(money(r.Importe))}"></td><td><input data-caja-cash="Nota" data-field="Nota" value="${esc(r.Nota || '')}"></td><td>${esc(new Date(/\/Date\(([-\d]+)/.exec(String(r.Hora))?.[1] * 1 || r.Hora).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit', hour12:false }))}</td><td><button data-caja-delete="${r.IDMov}" aria-label="Eliminar movimiento">×</button></td></tr>`).join('');
     for(const draft of drafts)$('sqlCajaCash').insertAdjacentHTML('beforeend',cashDraftMarkup(draft.key,draft.amount,draft.note));
     appendBlankCashRow();
     $('sqlCajaCashTotal').value = money(sum(cash, 'Importe'));
+    $('sqlCajaIE').classList.toggle('daily-negative',sum(rows,'ImpRet')<0);$('sqlCajaCashTotal').classList.toggle('daily-negative',sum(cash,'Importe')<0);
     $('sqlCajaCards').innerHTML = (data.tarjetas || []).map(r => `<tr data-card="${r.IDTarjeta}" tabindex="-1"><td>${esc(r.Tarjeta)}</td><td class="numeric">${money(r.Importe)}</td></tr>`).join(''); $('sqlCajaCardsTotal').value = money(sum(data.tarjetas || [], 'Importe'));
     $('sqlCajaSales').innerHTML = (data.ventas || []).map(r => `<tr><td>${r.PV}</td><td class="numeric">${money(r.ImpVta)}</td><td class="numeric">${money(r.ImpCosto)}</td><td>${Number(r.Articulos || 0).toLocaleString('es-AR')}</td></tr>`).join('');
     const sales = sum(data.ventas || [], 'ImpVta'), cost = sum(data.ventas || [], 'ImpCosto'); $('sqlCajaSalesTotal').value = money(sales); $('sqlCajaCostTotal').value = money(cost); $('sqlCajaMargin').value = cost ? ((sales - cost) / cost * 100).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' %' : '—';
@@ -8186,6 +8224,7 @@ initializeCashHistory(true);
   let cajaFitFrame=0;
   function fitCajaForm(){
     cajaFitFrame=0;if(window.matchMedia('print').matches)return;
+    if(main.classList.contains('caja-daily-reference')){main.style.removeProperty('width');main.style.removeProperty('height');fitDailyCaja();closeValueMenu();closeDifferenceMenu();fitAdditionalTools();return;}
     const width=Math.max(1,window.innerWidth-4),height=Math.max(1,window.innerHeight-4);
     const scale=Math.max(.01,Math.floor(Math.min(width/1460,height/900)*1000)/1000);
     main.style.setProperty('--caja-form-scale',String(scale));
@@ -8245,7 +8284,7 @@ initializeCashHistory(true);
   $('cajaAdditionalClose').onclick = async () => { try { await CajaSQL.flush(); $('sqlCajaDate').value = selectedDateKey; popup.classList.remove('open'); await load(); $('sqlCajaAdditional').focus(); } catch(error) { showToast(error.message); } };
   $('sqlCajaReports').onclick = async () => { await openAdditional(); document.getElementById('cashTotalsBtn').click(); };
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && popup.classList.contains('open') && !document.querySelector('.modal-bg.open')) { popup.classList.remove('open'); $('sqlCajaAdditional').focus(); } });
-  $('sqlCajaClock').textContent = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const updateDailyClock=()=>{const now=new Date();$('sqlCajaClock').textContent=now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});$('sqlCajaClock').title=now.toLocaleDateString('es-AR',{dateStyle:'full'});};updateDailyClock();setInterval(updateDailyClock,60000);
   $('sqlCajaDate').value = TODAY_DATE_KEY;
   CajaSQL.bootstrap().then(async data => {
     boot = data;

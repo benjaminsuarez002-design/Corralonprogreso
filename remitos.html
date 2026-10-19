@@ -11,7 +11,7 @@
 <script src="funciones.js?v=20260610-menu-session"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.18"></script>
+<script src="corralon-system.js?v=1.0.19"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -181,7 +181,7 @@ input[type="checkbox"]{accent-color:#ef1015}
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="remitos"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-17">
 </head>
-<body data-page-theme="remitos">
+<body data-page-theme="remitos" class="remito-reference-design">
 <!-- Trampa para el autocompletado del browser -->
 <input type="text" style="display:none" autocomplete="username" tabindex="-1">
 <input type="password" style="display:none" autocomplete="current-password" tabindex="-1">
@@ -192,8 +192,10 @@ input[type="checkbox"]{accent-color:#ef1015}
     <div class="header-title">Corralón Progreso</div>
     <div class="header-sub">Remito de venta</div>
   </div>
+  <button type="button" class="remito-menu-button" data-nav-url="menu.html">Menú principal</button>
 </div>
 
+<main class="remito-reference-sheet">
 <div class="remito-datos">
   <div class="dato-field" style="grid-column:1/3">
     <div class="dato-label">Nombre de proveedor</div>
@@ -247,10 +249,12 @@ input[type="checkbox"]{accent-color:#ef1015}
 </div>
 
 <div class="franja-roja">
-  <button class="btn-f" onclick="limpiarTodo()">🗑 Nuevo</button>
-  <button class="btn-f" data-nav-url="historial.html">📋 Historial</button>
+  <button class="btn-f" onclick="limpiarTodo()">Nuevo</button>
+  <button class="btn-f" data-nav-url="historial.html">Historial</button>
   <button class="btn-f prim" onclick="confirmarRemitoFinal()">Confirmar</button>
 </div>
+
+</main>
 
 <!-- CONFIRM POPUP -->
 <div class="confirm-bg" id="confirmBg">
@@ -422,13 +426,25 @@ function showRemitoSuggestions(input) {
     remitoSuggestions.appendChild(option);
   });
   remitoSuggestions.hidden = false;
-  const rect = input.getBoundingClientRect();
-  remitoSuggestions.style.width = `${Math.min(Math.max(rect.width, 320), window.innerWidth - 16)}px`;
-  remitoSuggestions.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - remitoSuggestions.offsetWidth - 8))}px`;
-  remitoSuggestions.style.top = `${rect.bottom + 3}px`;
-  if(rect.bottom + 3 + remitoSuggestions.offsetHeight > window.innerHeight && rect.top > remitoSuggestions.offsetHeight) remitoSuggestions.style.top = `${rect.top - remitoSuggestions.offsetHeight - 3}px`;
+  positionRemitoSuggestions(input);
   paintRemitoSuggestion();
 }
+function positionRemitoSuggestions(input) {
+  const rect=input.getBoundingClientRect();
+  const scale=Number.parseFloat(getComputedStyle(document.body).zoom)||1;
+  const margin=8,gap=3;
+  const width=Math.min(Math.max(rect.width,320*scale),window.innerWidth-margin*2);
+  remitoSuggestions.style.width=(width/scale)+'px';
+  remitoSuggestions.style.left=(Math.max(margin,Math.min(rect.left,window.innerWidth-width-margin))/scale)+'px';
+  remitoSuggestions.style.maxHeight='260px';
+  const naturalHeight=Math.min(260,remitoSuggestions.scrollHeight+2)*scale;
+  const below=Math.max(0,window.innerHeight-rect.bottom-gap-margin),above=Math.max(0,rect.top-gap-margin);
+  const openAbove=below<naturalHeight&&above>below;
+  const height=Math.min(naturalHeight,openAbove?above:below);
+  remitoSuggestions.style.maxHeight=(height/scale)+'px';
+  remitoSuggestions.style.top=((openAbove?Math.max(margin,rect.top-gap-height):rect.bottom+gap)/scale)+'px';
+}
+window.addEventListener('resize',()=>{if(!remitoSuggestions.hidden&&remitoSuggestionInput)positionRemitoSuggestions(remitoSuggestionInput)});
 function paintRemitoSuggestion() {
   [...remitoSuggestions.children].forEach((option, index) => {
     option.classList.toggle('active', index === remitoSuggestionIndex);
@@ -1687,7 +1703,6 @@ document.addEventListener('pointerdown', e => {
   confirmarArticuloPendiente();
 }, true);
 </script>
-<a href="menu.html" style="position:fixed;right:14px;top:14px;z-index:9999;background:#111;color:#fff;border:1px solid #111;border-radius:999px;padding:8px 12px;font:700 12px Arial,sans-serif;text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.22);">Menú principal</a>
 <script src="recargar-deslizando.js" defer></script>
 </body>
 </html>

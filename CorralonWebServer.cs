@@ -937,6 +937,7 @@ internal sealed class ServerForm : Form
             || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso", "articulos-sql", "clientes", "revision-venta", "imprimir-revision", "comprobante-valores", "comprobante-anular" }, route) >= 0);
         allowed = allowed || ((method == "GET" || method == "POST") && route == "cargar-facturas");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "recibos-cobro");
+        allowed = allowed || ((method == "GET" || method == "POST") && route == "ventas-tarjeta");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "proveedores-sql");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "caja");
         if (!allowed) { WriteJson(context, 404, "{\"ok\":false,\"error\":\"Ruta de facturación no disponible.\"}"); return; }
