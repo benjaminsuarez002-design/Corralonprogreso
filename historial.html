@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.22"></script>
+<script src="corralon-system.js?v=1.0.23"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -967,6 +967,7 @@ function cerrarSesion() {
 function inicializarHistorial() {
   if(new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window){
     document.getElementById('appContent').style.display='none';
+    const embedStyle=document.createElement('style');embedStyle.textContent='html,body{background:transparent!important;margin:0;overflow:hidden}dialog.remito-sql-compact{max-height:calc(100dvh - 24px);overflow:auto}dialog.remito-sql-compact::backdrop{background:transparent!important;backdrop-filter:none!important}';document.head.append(embedStyle);
     window.addEventListener('message',async event=>{
       if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='corralon:remito-sql-open')return;
       if(!cargaSqlDisponible()||!window.CorralonFunciones.menuUserIsAdministrator('remitos'))return;
@@ -2160,7 +2161,7 @@ async function recuperarProveedorRemitoSql(remito) {
   const cached = _remitosCache.find(item => String(item.id) === String(remito.id));
   if(cached) cached.proveedor_sql_id = id;
 }
-function redondearRenglonesRemitoSql(payload){return {...payload,articulos:(payload.articulos||[]).map(item=>({...item,cantidad:Number(Number(item.cantidad).toFixed(4)),precio:Number(Number(item.precio).toFixed(4))}))};}
+function redondearRenglonesRemitoSql(payload){return {...payload,articulos:(payload.articulos||[]).map(item=>({...item,cantidad:Number(Number(item.cantidad).toFixed(4)),...(item.precio==null?{}:{precio:Number(Number(item.precio).toFixed(4))})}))};}
 function remitoSqlPayload(remito, pago) {
   const user = window.CorralonFunciones?.menuSessionUser?.();
   if(!user?.id) throw new Error('Ingresá con tu usuario del menú.');
@@ -2168,11 +2169,11 @@ function remitoSqlPayload(remito, pago) {
   const sucursal = branch === 'Suc. Progreso y Ruta' ? 1 : branch === 'Suc. Calle 5 y Espana' ? 2 : 0;
   if(!sucursal) throw new Error('El remito no tiene una sucursal válida.');
   if(!Number.isInteger(Number(remito.proveedor_sql_id)) || Number(remito.proveedor_sql_id) <= 0) throw new Error('Este remito no tiene ID de proveedor. Seleccioná un proveedor web al crear el remito.');
-  const articulos = (remito.items || []).map(item => ({ idart:String(item.idart || '').trim(), cantidad:Number(item.cant), precio:Number(item.precio) }));
-  if(!articulos.length || articulos.some(item => !item.idart || !(item.cantidad > 0) || !(item.precio > 0))) throw new Error('Cada artículo necesita IDArt, cantidad y precio. Los renglones de texto libre no se pueden cargar en SQL.');
+  const articulos = (remito.items || []).map(item => ({ idart:String(item.idart || '').trim(), cantidad:Number(item.cant) }));
+  if(!articulos.length || articulos.some(item => !item.idart || !(item.cantidad > 0))) throw new Error('Cada artículo necesita IDArt y cantidad. Los renglones de texto libre no se pueden cargar en SQL.');
   const parts = String(remito.fecha || '').split('/');
   const fecha = remito.fecha_iso || (parts.length === 3 ? `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}` : '');
-  return redondearRenglonesRemitoSql({ accion:'importar-remito', remitoId:remito.id, numero:remitoFull(remito.nro), proveedor:Number(remito.proveedor_sql_id), sucursal, fecha, pago:Number(pago), articulos, usuarioId:user.id, idOperador:Number(user.idOperador) || null });
+  return redondearRenglonesRemitoSql({ accion:'importar-remito', remitoId:remito.id, numero:remitoFull(remito.nro), proveedor:Number(remito.proveedor_sql_id), sucursal, fecha, pago:Number(pago), totalRemito:Number(remito.total), articulos, usuarioId:user.id, idOperador:Number(user.idOperador) || null });
 }
 async function abrirCargaRemitoSql() {
   if(!cargaSqlDisponible()) return;

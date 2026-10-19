@@ -8,7 +8,7 @@
 #receiptPrint{display:none}
 @page{size:A5 portrait;margin:10mm 12mm}
 @media print{
- body>main,body>dialog:not(#receiptModal),#receiptModal>.dialog-header,#receiptBody,#receiptActions{display:none!important}
+ body>main,body>dialog:not(#receiptModal),#receiptModal>.dialog-header,#receiptBody,#receiptActions,#receiptStatus{display:none!important}
  #receiptModal{position:static!important;margin:0!important;padding:0!important;width:100%!important;max-width:none!important;height:auto!important;max-height:none!important;overflow:visible!important;background:white!important;box-shadow:none!important}
  #receiptPrint{display:block!important;width:124mm;max-width:100%;margin:0 auto;color:#000;font:8pt Arial,sans-serif}
  #receiptPrint .receipt-brand{display:flex;align-items:center;gap:8mm;border-bottom:1px solid black;padding:0 0 2mm}
@@ -92,7 +92,7 @@
 </form><p id="status" role="status" aria-live="polite">Conectando con SQL…</p>
 </main>
 <dialog id="historyModal"><div class="dialog-header"><h2>Consultar Recibos de Cobro</h2><button type="button" data-close="historyModal">Cerrar</button></div><label>Cliente: <span id="historyCustomer">Todos</span></label><div id="historyBody"></div></dialog>
-<dialog id="receiptModal"><div class="dialog-header"><h2 id="receiptTitle">Recibo de Cobro</h2><button type="button" data-close="receiptModal">Cerrar</button></div><div id="receiptBody"></div><section id="receiptPrint" aria-label="Recibo para imprimir"></section><div id="receiptActions"><button type="button" id="printReceipt">Imprimir</button></div></dialog>
+<dialog id="receiptModal"><div class="dialog-header"><h2 id="receiptTitle">Recibo de Cobro</h2><button type="button" data-close="receiptModal">Cerrar</button></div><div id="receiptBody"></div><section id="receiptPrint" aria-label="Recibo para imprimir"></section><p id="receiptStatus" role="status"></p><div id="receiptActions"><button type="button" id="voidReceipt" style="color:#b00020;margin-right:8px" hidden>Anular recibo</button><button type="button" id="printReceipt">Imprimir</button></div></dialog>
 <dialog id="accountModal"><div class="dialog-header"><h2>Cuenta corriente del cliente</h2><button type="button" data-close="accountModal">Cerrar</button></div><div id="accountBody"></div></dialog>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -126,6 +126,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const isoDate = input => { const parsed=FX.parseFechaFlexible(input.value); if(!parsed)throw new Error('Revisá la fecha de vencimiento.'); input.value=parsed.text; const date=parsed.date; return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; };
   const uuid = () => globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,char=>{const random=Math.floor(Math.random()*16);return (char==='x'?random:random&3|8).toString(16);});
   let user, options, ready=false, busy=false, customer=0, invoices=[], invoiceChoices=[], values=[], selectedInvoice=-1, rowBindings=[], confirmed=null, pending=null, requestSequence=0;
+  let viewedReceipt=null, cancellingReceipt=false;
+  const receiptAdmin=()=>FX.menuUserIsAdministrator('recibos_cobro',user);
   const headerCombos={};
   const billingWorkstationKey='facturacion_puesto_v1';
   let billingPoint=new URLSearchParams(location.search).get('puntoVenta');
@@ -241,10 +243,33 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function showReceipt(id,result=null){
     result=result||await api({consulta:'detalle',id});const receipt=result.recibo;
+    viewedReceipt=result;
+    $('voidReceipt').hidden=!receiptAdmin()||Boolean(receipt.anulado);
+    $('voidReceipt').disabled=cancellingReceipt;
+    $('receiptStatus').textContent='';
     $('receiptPrint').innerHTML=renderReceiptPrint(result);
     $('receiptTitle').textContent=`Recibo de Cobro ${receipt.numero}${receipt.anulado?' · ANULADO':''}`;
-    $('receiptBody').innerHTML=`<div class="receipt-summary"><div>Cliente<strong>${esc(receipt.cliente)}</strong></div><div>Fecha<strong>${esc(receipt.fecha)}</strong></div><div>Punto de venta<strong>${esc(receipt.nombrePuntoVenta)}</strong></div></div><h2>Facturas cobradas</h2><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Factura</th><th>A Cobrar</th></tr></thead><tbody>${result.facturas.map(row=>`<tr><td>${esc(row.fecha)}</td><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td>${money(row.importe)}</td></tr>`).join('')}</tbody></table>${result.facturas.length?'':'<p>Pago a cuenta.</p>'}<h2>Valores recibidos</h2><table><thead><tr><th>Tipo</th><th>Valor Nº</th><th>Tarjeta</th><th>Cuotas</th><th>Vencimiento</th><th>Importe</th><th>Descripción</th></tr></thead><tbody>${result.valores.map(row=>`<tr><td>${esc(row.tipo)}</td><td>${esc(row.numero||'')}</td><td>${esc(row.tarjeta||'Ninguna')}</td><td>${Number(row.cuotas)||0}</td><td>${esc(row.vencimiento)}</td><td>${money(row.importe)}</td><td>${esc(row.descripcion)}</td></tr>`).join('')}</tbody></table><p class="receipt-note">${esc(receipt.nota)}</p><div class="invoice-total" style="width:100%">Total: <output class="total">${money(receipt.total)}</output></div>`;
+    $('receiptBody').innerHTML=`<div class="receipt-summary"><div>Cliente<strong>${esc(receipt.cliente)}</strong></div><div>Fecha<strong>${esc(receipt.fecha)}</strong></div><div>Punto de venta<strong>${esc(receipt.nombrePuntoVenta)}</strong></div></div><h2>Facturas cobradas</h2><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Factura</th><th>A Cobrar</th></tr></thead><tbody>${result.facturas.map(row=>`<tr><td>${esc(row.fecha)}</td><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td>${money(row.importe)}</td></tr>`).join('')}</tbody></table>${result.facturas.length?'':receipt.anulado?'<p>Sin boletas vinculadas.</p>':'<p>Pago a cuenta.</p>'}<h2>Valores recibidos</h2><table><thead><tr><th>Tipo</th><th>Valor Nº</th><th>Tarjeta</th><th>Cuotas</th><th>Vencimiento</th><th>Importe</th><th>Descripción</th></tr></thead><tbody>${result.valores.map(row=>`<tr><td>${esc(row.tipo)}</td><td>${esc(row.numero||'')}</td><td>${esc(row.tarjeta||'Ninguna')}</td><td>${Number(row.cuotas)||0}</td><td>${esc(row.vencimiento)}</td><td>${money(row.importe)}</td><td>${esc(row.descripcion)}</td></tr>`).join('')}</tbody></table><p class="receipt-note">${esc(receipt.nota)}</p><div class="invoice-total" style="width:100%">Total: <output class="total">${money(receipt.total)}</output></div>`;
     if(!$('receiptModal').open)$('receiptModal').showModal();
+  }
+  async function cancelViewedReceipt(){
+    if(cancellingReceipt||busy||!receiptAdmin()||!viewedReceipt||viewedReceipt.recibo.anulado)return;
+    const selected=viewedReceipt;
+    if(!confirm(`¿Anular el recibo ${selected.recibo.numero}? Se desvincularán sus boletas y el cobro dejará de aplicarse a la cuenta corriente y a la Caja.`))return;
+    cancellingReceipt=true;busy=true;lock();$('voidReceipt').disabled=true;
+    $('receiptStatus').textContent='Anulando recibo…';
+    try{
+      const result=await api({}, {accion:'anular',usuarioId:user.id,id:selected.recibo.id,version:selected.version});
+      if(confirmed&&Number(confirmed.id)===Number(result.recibo.id))confirmed=result.recibo;
+      await showReceipt(result.recibo.id,result);
+      $('receiptStatus').textContent='Recibo anulado.';
+      status(`Recibo ${result.recibo.numero} anulado.`);
+      try{
+        if($('historyModal').open)await history();
+        if(customer&&Number(customer)===Number(result.recibo.idCliente))await refreshBalance();
+      }catch(error){$('receiptStatus').textContent='Recibo anulado. No se pudo actualizar la consulta: '+error.message;}
+    }catch(error){$('receiptStatus').textContent=error.message;}
+    finally{cancellingReceipt=false;busy=false;lock();$('voidReceipt').disabled=false;}
   }
   async function confirmReceipt(){
     if(busy||confirmed)return;
@@ -263,12 +288,12 @@ document.addEventListener('DOMContentLoaded', () => {
       busy=true;lock();status('Confirmando recibo en SQL…');
       const result=await api({},pending);
       confirmed=result.recibo;pending=null;$('number').value=confirmed.numero;$('date').value=confirmed.fecha;localStorage.removeItem(key());
-      status(`Recibo ${confirmed.numero} confirmado. Usá Cancelar para iniciar otro recibo.`);await showReceipt(confirmed.id,result);
+      status(`Recibo ${confirmed.numero} confirmado. Al cerrar el detalle se iniciará un nuevo recibo.`);await showReceipt(confirmed.id,result);
     }catch(error){if(error.definitive)pending=null;status(error.message+(pending?' Reintentá la misma confirmación para verificar si quedó guardado.':''),true);}
     finally{busy=false;lock();if(!confirmed)save();}
   }
   async function history(){
-    try{status('Consultando recibos…');const data=await api({consulta:'recibos',cliente:customer});$('historyCustomer').textContent=customer?$('customer').value:'Todos';$('historyBody').innerHTML=`<table class="dialog-table"><thead><tr><th>Recibo</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>${data.recibos.map(row=>`<tr><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cliente)}</td><td>${money(row.total)}</td><td>${row.anulado?'Anulado':'Confirmado'}</td><td><button data-receipt="${Number(row.id)}" type="button">Ver</button></td></tr>`).join('')}</tbody></table>${data.recibos.length?'':'<p>No hay recibos.</p>'}`;$('historyModal').showModal();status('Recibos consultados.');}catch(error){status(error.message,true);}
+    try{status('Consultando recibos…');const data=await api({consulta:'recibos',cliente:customer});$('historyCustomer').textContent=customer?$('customer').value:'Todos';$('historyBody').innerHTML=`<table class="dialog-table"><thead><tr><th>Recibo</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>${data.recibos.map(row=>`<tr><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cliente)}</td><td>${money(row.total)}</td><td>${row.anulado?'Anulado':'Confirmado'}</td><td><button data-receipt="${Number(row.id)}" type="button">Ver</button></td></tr>`).join('')}</tbody></table>${data.recibos.length?'':'<p>No hay recibos.</p>'}`;if(!$('historyModal').open)$('historyModal').showModal();status('Recibos consultados.');}catch(error){status(error.message,true);}
   }
   async function account(){
     if(!customer){status('Seleccioná un cliente.',true);return;}
@@ -309,7 +334,14 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addValue').onclick=()=>{if(busy||pending||confirmed)return;values.push(blankValue());render();save();$('values').lastElementChild.querySelector('input').focus();};
   $('note').addEventListener('input',save);$('date').addEventListener('change',save);$('point').addEventListener('change',()=>{invoices=[];invoiceChoices=[];requestSequence++;selectedInvoice=-1;render();save();if(customer)refreshBalance().catch(()=>{});});
   $('loadInvoices').onclick=loadInvoices;$('confirm').onclick=confirmReceipt;$('consult').onclick=history;$('viewReceipts').onclick=history;$('account').onclick=account;$('billing').onclick=()=>window.open('facturacion.html','_blank');
-  $('cancel').onclick=()=>{if(busy||pending)return;if(!confirmed&&(invoices.length||values.some(row=>row.importe))&&!confirm('¿Descartar este recibo sin confirmar?'))return;confirmed=null;$('point').value=billingDefaultPoint();customer=0;invoices=[];invoiceChoices=[];requestSequence++;values=[blankValue()];selectedInvoice=-1;syncCustomer();$('number').value='';$('balance').value='';$('note').value='';$('date').value=dateText(today());localStorage.removeItem(key());render();save();status('Nuevo recibo listo.');};
+  function startNewReceipt(){
+    confirmed=null;pending=null;$('point').value=billingDefaultPoint();customer=0;invoices=[];invoiceChoices=[];requestSequence++;values=[blankValue()];selectedInvoice=-1;syncCustomer();$('number').value='';$('balance').value='';$('note').value='';$('date').value=dateText(today());localStorage.removeItem(key());render();save();status('Nuevo recibo listo.');
+  }
+  $('cancel').onclick=()=>{if(busy||pending)return;if(!confirmed&&(invoices.length||values.some(row=>row.importe))&&!confirm('¿Descartar este recibo sin confirmar?'))return;startNewReceipt();};
+  $('receiptModal').addEventListener('close',()=>{
+    if(confirmed&&viewedReceipt&&Number(confirmed.id)===Number(viewedReceipt.recibo.id))startNewReceipt();
+    viewedReceipt=null;
+  });
   $('historyBody').addEventListener('click',event=>{const button=event.target.closest('[data-receipt]');if(button)showReceipt(Number(button.dataset.receipt)).catch(error=>status(error.message,true));});
   $('viewInvoice').onclick=async()=>{
     const row=invoices[selectedInvoice];
@@ -321,6 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }catch(error){status(error.message,true);}
   };
 
+  $('voidReceipt').onclick=cancelViewedReceipt;
   $('printReceipt').onclick=()=>window.print();document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
   lock();
   window.addEventListener('menu-user-validated',event=>initialize(event.detail.user));

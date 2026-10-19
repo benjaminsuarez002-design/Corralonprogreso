@@ -1,7 +1,7 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia y ultimo corte de contexto: 16 de octubre de 2026.
+Fecha de referencia y ultimo corte de contexto: 19 de octubre de 2026.
 El cuerpo historico corresponde al 25/08/2026; las secciones 21 a 23 registran
 actualizaciones posteriores. Las secciones 24 a 27 registran cambios hasta el
 08/10/2026. La seccion 30 registra un plan futuro acordado el 10/10/2026,
@@ -9,9 +9,12 @@ todavia no implementado. Las secciones 31 a 35 registran el trabajo del otro
 chat del 14/10/2026, desde el diagnostico de remitos hasta la revision de
 trafico. La seccion 36 integra los cambios de este chat al mismo corte.
 La seccion 37 documenta la copia de respaldo Index SQL/Cloudflare (16/10/2026).
+La seccion 38 documenta Caja y Recibos de Cobro (17/10/2026).
+Las secciones 39 y 40 agregan la apariencia de Facturacion/Cargar facturas/
+Cargar stock y el diagnostico pendiente de dos ventas de Alexis (19/10/2026).
 La seccion mas reciente prevalece sobre las anteriores.
-Al proximo pedido de actualizar este archivo, revisar los cambios posteriores
-a este corte, incluso si ocurrieron mas tarde el 14 de octubre de 2026.
+Este corte incorpora los cambios de apariencia y el diagnostico de ventas
+realizados hasta el 19/10/2026; las comprobaciones pendientes estan en seccion 40.
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -2571,3 +2574,307 @@ la copia permite migrar todo el sistema cambiando una unica URL.
 
 PUNTO DE CORTE ACTUAL: 16 de octubre de 2026. Esta seccion prevalece para
 todo lo referido a la copia de respaldo Index SQL/Cloudflare.
+
+
+38. CAJA Y RECIBOS DE COBRO: POPUPS, IMPRESION Y ANULACION (17/10/2026)
+===================================================================
+
+RECIBOS DE COBRO
+---------------
+- Fuentes: recibos-cobro.html y facturacion-copia-api.cs. API existente
+  /api/facturacion/recibos-cobro; no migrar este flujo fuera de SQL.
+- El detalle tiene Anular recibo solo para administradores generales o del
+  modulo recibos_cobro (permiso + permisosEdicion), igual que el criterio
+  menuUserIsAdministrator. El servidor valida nuevamente ese permiso.
+- Anulacion POST accion=anular, usuarioId, id y version. CollectionReceiptCancel
+  usa transaccion Serializable, bloqueo de recibos y version del comprobante.
+  Bloquea recibos vinculados por IDCaja a una CajaDiaTP confirmada; primero
+  debe reabrirse esa Caja por el mecanismo autorizado existente.
+- ULTIMA DECISION: ademas de marcar RecibosXTP.Anulado=1, ELIMINA sus vinculos
+  de RecibosXTSFac. Conserva cabecera, valores recibidos y numero. No elimina
+  la boleta. Saldo y cobros ya excluyen recibos anulados. La eliminacion de
+  vinculos ocurre en la misma transaccion y tambien es segura al reintentar
+  un recibo ya anulado. No volver al comportamiento anterior que los conservaba.
+- Cambio puntual en SQL realizado a pedido del usuario: recibo 0010-00000120,
+  AGUILA SEGURIDAD PRIVADA SRL, $600.000, ya anulado: se elimino UNA vinculacion
+  y se verificaron CERO restantes. No se limpiaron masivamente anulaciones
+  historicas. No ejecutar una limpieza general por interpretar esta nota.
+- showReceipt muestra Sin boletas vinculadas para anulados sin vinculaciones;
+  no confundir con un pago a cuenta. No imprimir los mensajes de estado.
+- Confirmar abre el popup del recibo. Al cerrarlo (Cerrar o Escape), si es el
+  recibo recien emitido que sigue en confirmed, startNewReceipt limpia cliente,
+  facturas, valores, numero, nota y saldo; recupera fecha actual y punto de
+  venta por defecto del puesto. Queda preparado otro recibo sin emitirlo.
+- Cerrar una consulta historica no descarta un recibo en preparacion.
+- Anular pide confirmacion, evita doble solicitud, actualiza detalle/impresion,
+  historial y saldo del cliente. Error de SQL mantiene el detalle y permite
+  reintentar. No afirmar que se probo anulando nuevos recibos reales.
+
+CAJA DIARIA
+-----------
+- Fuente principal actual: script caja-sql de caja.html y caja-sql-api.cs.
+- Confirmar guarda y cierra en SQL; SOLO tras exito abre showDailyReport.
+  Popup con iframe del informe diario y formato de la foto de referencia:
+  cabecera, valores inicial/movimiento/IE/final, notas, IE con hora, tarjetas,
+  ventas, costo, intereses si disponibles y cobros de cuenta corriente.
+- Imprimir SOLO aparece en el popup de cajas cerradas. No existe boton
+  sqlCajaPrint en pantalla principal. Para una caja abierta esta oculto,
+  deshabilitado y el manejador tambien bloquea la impresion.
+- Consultar una caja abre reporte separado sin reemplazar current, fecha,
+  notas o borradores de la Caja principal; mantiene la lista debajo.
+- Cierre recien confirmado llama showDailyReport(closed,{resetOnClose:true}).
+  Al cerrar ese reporte clearClosedCajaForm vacia datos, notas, tablas y
+  totales del formulario; invalida lecturas pendientes y quita drafts visibles.
+  Mantiene fecha, sucursal/punto de venta y operador como contexto de trabajo.
+  NO crea ni elimina cajas, ni altera SQL al cerrar el popup.
+- Consultar usa resetOnClose=false: cerrar ese reporte NO limpia la caja actual.
+- SIGUE VIGENTE la validacion SQL de abrir: fecha de hoy y una sola Caja no
+  anulada por sucursal/dia (no una por cada punto de venta). Una caja cerrada
+  del mismo dia tambien bloquea otra. No debilitar esa regla por verse vacio
+  el formulario; limpiar interfaz no habilita otra caja en SQL.
+
+ACTIVACION Y VERIFICACION
+------------------------
+- La API de anulacion/desvinculacion fue compilada y activada con
+  iniciar-facturacion-copia.ps1 -SinAbrir; conexion SQL comprobada.
+- Ultimos cambios de vaciado son HTML: basta recargar con Ctrl+F5.
+- tests/recibos-anular.test.cjs: 7 pruebas pasadas (permisos, confirmacion,
+  fallo SQL, doble clic, estado y nuevo recibo al cerrar vs consulta).
+- tests/caja-reporte-diario.test.cjs: 5 pruebas pasadas (informe, consulta
+  aislada, cierre exitoso, impresion solo cerradas y vaciado al cerrar).
+- tests/caja-efectivo-usuario.cjs: paso sintaxis y reglas de estado/conteo.
+- docs/caja-sql.md describe el informe y la impresion exclusiva para cerradas.
+- No se realizaron cierres nuevos en SQL ni impresion fisica para probar UI.
+
+
+39. APARIENCIA ACTUAL Y DECISIONES DE ESCALADO (19/10/2026)
+=========================================================
+
+REGLAS Y ESTADO DEL TRABAJO
+-------------------------
+- El usuario quiere continuar la investigacion de ventas en OTRO chat y seguir
+  con la apariencia en ESTE chat. La investigacion NO esta resuelta.
+- Cuando dice theme.css se refiere al archivo real theme-corralon.css.
+- Paleta aprobada: cabecera azul degradada, paneles celestes, fondo claro,
+  bordes azul suave y botones blancos. Conservar rojo para errores/anulaciones
+  y los botones superiores rojos de Cargar stock que muestra su referencia.
+- Mantener IDs, permisos y manejadores existentes. Los cambios visuales no
+  autorizan confirmar compras/ventas, anular documentos ni mover stock real.
+- No reiniciar API por cambios HTML/CSS. Recargar la pagina para aplicarlos.
+- Los previews de .codex-staging contienen datos simulados. No confundir sus
+  ventas ni mensajes de conexion con verificaciones operativas en produccion.
+
+FACTURACION Y CONSULTAR COMPROBANTES
+---------------------------------
+- facturacion.html usa body.invoice-reference-design y theme-corralon.css.
+  Encabezado azul, controles celestes, grillas, panel de valores y totales.
+- Separaciones verticales compactas (2px) y filas de relleno adaptadas al alto
+  de la tabla. Conservar los controles de venta y los permisos existentes.
+- Lista de articulos: SIN barra de busqueda adicional; escribir en el campo
+  original. Tabla con IDArt, cod. proveedor, descripcion, precio, stock y fecha,
+  contador y boton Filtrar/Mostrar lista al pie. Encabezados mas resaltados.
+  Popup escalado segun formulario con factor adicional 1.1, pedido por usuario.
+- facturacion-consulta.js comparte detalle de boleta entre Facturacion y Caja.
+  decorateReceiptDetail agrupa Datos principales, Detalle de articulos, Valores
+  recibidos, Resumen de totales y Totales y otros datos. Los estilos estan en
+  theme-corralon.css, acotados a .invoice-receipt-detail.
+- El usuario NO quiso eliminar la tabla de valores. Solo se oculta la franja
+  inferior .receipt-values-difference; quedan tabla, contador y + Renglon.
+- Resumen de totales compacto en dos columnas para ganar alto de articulos.
+- Guardar valores esta en el pie, JUNTO a Vista previa/Reimprimir/Llamar a
+  facturar/Anular. Al redibujar se retira el boton anterior para no duplicarlo.
+- fitReceiptDetail escala el lienzo logico 1450x850 en escritorio; mantiene
+  distribucion entre monitores. Telefonos conservan su tratamiento separado.
+- La busqueda dentro del detalle de articulos es local (no consulta SQL),
+  ignora mayusculas/tildes y no cambia importes ni articulos del comprobante.
+- Ultima bateria ejecutada de consulta/valores: 22 pruebas aprobadas antes del
+  movimiento posterior de Guardar valores; luego las 8 de valores aprobadas.
+
+CARGAR FACTURAS: ESTADO FINAL, NO REINTRODUCIR CAMBIOS DESHECHOS
+------------------------------------------------------------
+- cargar-facturas.html: body.purchase-entry-reference, script separado
+  #purchase-entry-layout y estilos en theme-corralon.css. purchase-detail.css
+  sigue ocupandose del detalle consultado, no de la pantalla de carga.
+- Referencia visual: Datos del comprobante, Detalle de impuestos + Calculo de
+  IVA, Otros datos, botones Confirmar/Cancelar/Consultar y Opciones de carga.
+- DECISION FINAL: barra superior al 100% del ancho; formulario a la IZQUIERDA,
+  maximo 50% del ancho disponible. Mantener ampliacion del 40% (x1.4) de textos
+  y controles, acomodando los campos dentro de ese ancho.
+- Escala actual: max(.01,min(1,innerWidth/(2*1536),(innerHeight-74)/950))*1.4.
+  Se aplica por zoom SOLO a #purchaseForm y .form-status; no al encabezado.
+- Campos adaptados a un ancho logico 1070px; margen izquierdo 19/1.4 px.
+  Datos del comprobante y grilla se reacomodaron para mantener ese limite sin
+  achicar otra vez toda la ficha. Otros datos tiene alto 268px, Nota mas alta,
+  movimiento/check/descuento al centro y descuentos/Buscar a la derecha.
+- Los intentos de ocupar el alto completo, tanto agrandando la tabla como
+  escalando X/Y independientemente, fueron DESHECHOS a pedido del usuario.
+  Actualmente NO se fuerza el 100% del alto en Cargar facturas.
+- Buscar conserva #searchNumber fuera del fieldset deshabilitable. El nuevo
+  boton #entrySearchButton llama al #search existente (no duplica consultas).
+- #providerName sigue existiendo pero se oculta visualmente para mostrar una
+  sola fila de proveedor como en la referencia; no se elimino el dato.
+- Desplegables Tipo/Pago/Cuenta: mostrar TODA la lista, sin filtrar al escribir;
+  priorizar coincidencia exacta, luego prefijo y palabras. markPurchaseComboActive
+  ya NO agrega paddingBottom artificial: paddingBottom=0 y scroll centrado en
+  la coincidencia, limitado naturalmente por el contenido. Esto corrige la
+  gran zona blanca debajo del ultimo resultado.
+- tests/purchase-entry-layout.test.cjs: 2 aprobadas; prueba controles, escalado,
+  limite efectivo de media pantalla y que Buscar delegue al manejador existente.
+- La bateria antigua tests/cargar-facturas.test.cjs no esta validada: falla en
+  su simulador porque faltan nodos/metodos addEventListener. No modificar
+  permisos o logica real para hacer pasar un simulador viejo.
+
+CARGAR STOCK: ULTIMO CAMBIO DE APARIENCIA APLICADO
+-----------------------------------------------
+- cargastock.html: nueva clase body.stock-reference-design y script separado
+  #stock-reference-layout. Los estilos estan en theme-corralon.css; las reglas
+  antiguas cargastock-sql.css siguen cargadas pero se sobreescriben puntualmente.
+- El usuario pidio la referencia azul de Carga Stock ocupando el 100% del ALTO
+  Y ANCHO disponibles. No aplicar el limite del 50% de Cargar facturas aqui.
+- Escala uniforme min(innerWidth/1536,innerHeight/1024); el ancho y alto logicos
+  de .app son viewport/escala. Asi llena ambos ejes y la tabla usa el sobrante.
+- Las reglas nuevas se limitan a body.stock-reference-design que NO tenga
+  .stock-additional-open ni .stock-movement-embedded. Conservar asi el importador,
+  Opciones adicionales y el visor incrustado del movimiento.
+- Se agregaron titulos Datos del movimiento y Detalle de articulos. Nota y
+  Totales tienen tarjetas; unidades y monto siguen siendo los mismos IDs.
+  Encabezado azul con cubo, botones superiores rojos y Menu blanco; Confirmar
+  azul en pie. Se conservan Copiar, Cargar en Pedidos, Consultar, Cancelar,
+  Nuevo, navegacion y stockWorkspaceIndicator en el orden existente.
+- .stock-reference-title esta oculto fuera de la vista principal. El bloque
+  .stock-reference-totals agrupa los dos outputs sin modificar sus manejadores.
+- Revisado visualmente con datos de muestra en 1280x720, 1536x1024 y 1920x1080:
+  .app y el pie alcanzan exactamente los bordes del viewport sin scroll de pagina.
+- tests/cargastock-reference-layout.test.cjs: 1 aprobada; campos/acciones unicos,
+  enlace al tema y calculo de ancho/alto completos en cinco resoluciones.
+- tests/cargastock-workspaces.test.cjs: 2 aprobadas, 5 fallidas por simulador
+  antiguo (stockPedidoBusy no definido y dependencias de cambio de carga).
+  NO afirmar que toda la bateria funcional ni confirmaciones reales pasaron.
+- Captura final de muestra: .codex-staging/stock-reference-final.png.
+
+
+40. INVESTIGACION ABIERTA: DOS VENTAS DE MORFIL EN PC 6 (19/10/2026)
+================================================================
+
+PEDIDO Y LIMITE ACTUAL
+---------------------
+- Secuencia ACLARADA por el usuario: Alexis, PC 6, emitio Factura B
+  0006-00017639, recibio error de impresora, apreto F5 y DESPUES de recargar
+  desaparecio lo que tenia en pantalla y aparecio PRES. ESPECIAL 0006-00045859
+  confirmado para el mismo cliente. No asumir aparicion antes de F5.
+- No sabe todavia si cable canal/aguarras/esmalte estaban en otro borrador abierto.
+- Se hicieron consultas SQL y diagnostico de red/impresoras SOLO DE LECTURA.
+  NO se modificaron, anularon, emitieron ni reimprimieron esas boletas.
+  NO se borraron trabajos de impresion, borradores ni cache del navegador.
+- El usuario pidio actualizar este contexto para seguir esta investigacion en
+  OTRO chat, y continuar apariencia aqui. Aun no hay causa raiz demostrada.
+
+DATOS VERIFICADOS DIRECTAMENTE EN SQL
+-----------------------------------
+- Factura B, IDRecibo 499708, IDComprob 2, numero 0006-00017639:
+  FechaYHora 2026-10-19 08:32:43; cliente MORFIL, IDCliente 1;
+  Total $65.500,40; Confirmado=-1; Anulada=0; IDVend=5; IDOper=5; Impresa=-1.
+  NroOTrab: WEB-BHHWd7JcoES4I_l4ek4tsA.
+  Articulos: 000004 HIERRO 8 MM (1), 000005 HIERRO 6 MM (2),
+  000010 CEMENTO LOMA NEGRA X25KG (3), 010322 MAESTRO X25KG (4).
+- PRES. ESPECIAL, IDRecibo 499710, IDComprob 13, numero 0006-00045859:
+  FechaYHora 2026-10-19 08:33:41; cliente MORFIL, IDCliente 1;
+  Total $17.252,71; Confirmado=-1; Anulada=0; IDVend=5; IDOper=5; Impresa=-1.
+  NroOTrab: WEB-V80uNm58jkWimDTkGzD5ag.
+  Articulos: 000056 CABLE CANAL 20X10 X2MTS (1),
+  010721 AGUA RAS FLEMING 900CC (1), 007794 ESMALTE DECO BLANCO 500CC (1).
+- Son DOS emisiones reales distintas, 58 segundos aparte, con otros articulos
+  y marcas de borrador distintas. No es simplemente un ticket duplicado.
+- ATENCION al consultar solo por numero: existe ademas PRES. ESPECIAL historico
+  0006-00017639, IDRecibo 186613, TEJADA, del 06/07/2023, $4.503.
+  Usar IDRecibo y tipo para no confundirlo con la Factura B de MORFIL.
+
+CONSOLA E IMPRESION
+------------------
+- Consola que paso el usuario:
+  127.0.0.1:8082/impresoras -> net::ERR_CONNECTION_REFUSED.
+  api/facturacion/imprimir -> 409 Conflict.
+  Error: Windows no pudo crear el trabajo de impresion.
+  printReceiptDirect facturacion.html:3036, llamado desde issue :2893; catch :2907.
+- Ese 409 corresponde al error de Windows al intentar StartDocPrinter, NO es
+  evidencia de una colision/duplicacion de venta en SQL.
+- facturacion-copia-api.cs /imprimir valida comprobante confirmado, genera ticket
+  con PrintRawTicket y no llama a Emit ni crea FacturasATP.
+- issue confirma /emitir, relee /comprobante, assertReceiptMatches, marca y guarda
+  issuedReceipt y DESPUES intenta imprimir. Al fallar impresion, su catch actual
+  conserva la emision y avisa usar Reimprimir comprobante, no volver a emitir.
+- Impresa=-1 en SQL no demuestra salida fisica en papel; hay un fallo Winspool
+  y no se realizo prueba de impresion fisica.
+
+REINTENTO AUTOMATICO: SIGUE ACTIVO Y NO SE MODIFICO
+------------------------------------------------
+- El usuario pregunto expresamente que se hizo con el reintento: respuesta dada
+  fue que NO se cambio ni se desactivo. Sigue cada 15 segundos.
+- facturacion.html: retryPendingOnReconnect se llama en online y setInterval
+  de 15000ms. Sale si recoveryPollBusy, issueInProgress o saleSwitchBusy.
+- Para la venta ACTIVA, si recoveryPending y no revisionPendiente, verifica
+  estado; si queda recoveryCanRetry y no issueInProgress, llama issue().
+- verifyRecovery: si /estado-emision devuelve reintentable para tipo no fiscal,
+  habilita recoveryCanRetry. Si ya esta emitido, consulta y compara la boleta,
+  recupera issuedReceipt y quita recoveryPending; no la vuelve a emitir.
+- reconcileBackgroundPending consulta otros borradores pendientes. Solo llama
+  POST /emitir con recuperarSolo=true si el estado es recuperable; no manda
+  incondicionalmente todos los borradores a emitir.
+- API /estado-emision devuelve reintentable para tipos 13/29/43 sin marca en SQL.
+  Estados fiscales dependen de archivos locales de recuperacion/CAE.
+- Emit usa DraftMarker(GUID) en NroOTrab, con transaccion y consulta existente;
+  AssertStoredInvoice comprueba cabecera, articulos, valores y total antes de
+  devolver una emision anterior. El frontend tambien usa assertReceiptMatches.
+- El reintento de otro borrador es UNA HIPOTESIS, no una causa demostrada.
+  No afirmar que el error de impresion creo automaticamente el segundo pedido.
+
+HALLAZGO REPRODUCIDO TRAS ACLARACION DE F5
+----------------------------------------
+- restoreInitialDraft() en facturacion.html excluye emision/estado emitido
+  antes de buscar activeDraftId(); si no encuentra el activo usa candidates[0].
+- Reproduccion aislada ejecutando la funcion actual en Node/VM: venta activa
+  emitida + otro borrador pendiente de la misma estacion => aplica el otro
+  borrador. Sin red, impresion ni escrituras SQL. Fallo de seleccion demostrado.
+- Esto explica como F5 puede cambiar la venta visible; NO demuestra todavia
+  por que el segundo comprobante fue emitido en SQL ni que se hayan borrado
+  fisicamente los datos de la primera venta. Revisar PC 6 y recuperacion.
+- No se cambio codigo productivo ni el reintento automatico en esta revision.
+
+PC 6 Y ESTADO DE ACCESO OBSERVADO (NO ASUMIR QUE PERMANECE IGUAL)
+-------------------------------------------------------------
+- Host local de este chat: PROGRESO-SVR. Alexis estaba en PC 6 segun el usuario.
+- Tailscale encontro NUEVAPC-6, nuevapc-6.tailb0de73.ts.net, 100.77.233.19, online.
+- Prueba puntual al 19/10: SMB 445 responde; 22,5985,9222 y8082 no responden.
+- net view sobre esa IP da error de sistema 5, Acceso denegado. No hay acceso
+  demostrado al perfil ni a IndexedDB/localStorage de su navegador.
+- No se habilito depuracion remota, no se instalaron agentes y no se cambiaron
+  permisos ni configuracion de seguridad para acceder.
+- Get-Printer en PROGRESO-SVR: POS-80-Series, puerto POS Printer PORT:, Error,
+  14 trabajos pendientes. Otra cola POS-80 en PROGRESO-SVR con puerto UNC
+  192.168.100.60/POS-80 figuraba Normal y sin trabajos (son colas diferentes).
+- Consulta puntual 08:30-08:37 encontro trabajo 20, documento
+  Corralon Progreso 0006-00017640, enviado 08:35:42, estado Normal.
+  No se encontraron trabajos de las dos boletas bajo investigacion en esa
+  consulta; no inferir por eso que nunca se imprimieron o no se enviaron.
+- CorralonWebServer.log local tenia ultima escritura del 17/10, sin evidencia
+  util encontrada para el incidente del 19/10. No hay traza HTTP que identifique
+  el origen exacto de cada POST en los datos inspeccionados.
+
+PENDIENTE PARA CERRAR EL DIAGNOSTICO EN OTRO CHAT
+----------------------------------------------
+1. Revisar, con acceso autorizado a PC 6, el navegador/perfil utilizado, ventas
+   abiertas, Pendientes y copias locales de esos dos GUIDs. NO limpiar cache,
+   IndexedDB ni almacenamiento: podrian contener la evidencia.
+2. Determinar si habia otra pestana/venta pendiente, que articulos tenia y si
+   hubo recuperacion/reintento automatico. Registrar secuencia y horas.
+3. Comprobar version realmente cargada en PC 6 y correlacionar requests si hay
+   logs disponibles. El codigo actual revisado no demuestra la secuencia real.
+4. Revisar la impresora seleccionada de ese navegador y su servicio local;
+   separar esta averia de la investigacion de la segunda emision.
+5. Solo con causa demostrada o alcance acordado, corregir y probar con datos
+   simulados el fallo de cambio de vista/reintento. No emitir ventas reales de
+   prueba, no desactivar reintentos fiscales a ciegas ni anular ninguna de estas
+   dos boletas sin instruccion explicita del usuario.
+
+PUNTO DE CORTE: 19/10/2026. La segunda emision sigue sin causa raiz demostrada;
+el reintento automatico NO fue modificado. Este chat continua con apariencia.

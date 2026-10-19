@@ -1706,9 +1706,29 @@ internal static partial class FacturacionCopiaApi
         foreach (var row in rows) row["version"] = ArticuloVersion(row);
         return rows;
     }
+    private static object ArticuloFichaVendedor(SqlConnection c,SqlTransaction tx,string id) {
+        var rows=RowsTx(c,tx,"SELECT IDArt id,IDArtProv codigoProveedor,Suspendido suspendido,[Descripción] descripcion FROM dbo.[Artículos] WHERE IDArt=@p0",id);
+        if(rows.Count!=1)throw new InvalidOperationException("El artículo ya no existe.");
+        var row=rows[0];row["version"]=ProviderVersion(row);return new {ok=true,articulo=row};
+    }
+    private static object ArticuloGuardarVendedor(SqlConnection c,Dictionary<string,object> input) {
+        AssertPurchasePermission(Text(Value(input,"usuarioId")),"facturacion");
+        var data=Object(Value(input,"articulo"));
+        foreach(string key in data.Keys)if(key!="id" && key!="codigoProveedor" && key!="descripcion" && key!="suspendido")throw new InvalidOperationException("Campo no permitido en la ficha reducida.");
+        string id=Limited(Value(data,"id"),20,"ID artículo"),description=Limited(Value(data,"descripcion"),100,"Descripción"),code=Limited(Value(data,"codigoProveedor"),30,"Código proveedor");
+        if(id.Length==0 || description.Trim().Length==0 || !(Value(data,"suspendido") is bool))throw new InvalidOperationException("Completá la descripción y el estado del artículo.");
+        int oper=UserOperator(c,Text(Value(input,"usuarioId")));
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)) {
+            var rows=RowsTx(c,tx,"SELECT IDArt id,IDArtProv codigoProveedor,Suspendido suspendido,[Descripción] descripcion FROM dbo.[Artículos] WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0",id);
+            if(rows.Count!=1 || ProviderVersion(rows[0])!=Text(Value(input,"version")))throw new InvalidOperationException("El artículo cambió en otra PC. Volvé a abrir la ficha.");
+            Execute(c,tx,"UPDATE dbo.[Artículos] SET IDArtProv=@p1,[Descripción]=@p2,Suspendido=@p3,IDOperModif=@p4,HoraModif=GETDATE() WHERE IDArt=@p0",id,code,description,Value(data,"suspendido"),oper);
+            var result=ArticuloFichaVendedor(c,tx,id);tx.Commit();return result;
+        }
+    }
     private static object ArticulosSql(SqlConnection connection, HttpListenerRequest request)
     {
         string id = request.QueryString["id"];
+        if(request.QueryString["modo"]=="vendedor") {AssertPurchasePermission(request.QueryString["usuarioId"],"facturacion");return ArticuloFichaVendedor(connection,null,Limited(id,20,"ID artículo"));}
         if (!String.IsNullOrEmpty(id)) {
             var rows = ArticuloRows(connection, null, Limited(id,20,"ID artículo"));
             if (rows.Count != 1) throw new InvalidOperationException("El artículo ya no existe. Actualizá el listado.");
@@ -1867,7 +1887,7 @@ internal static partial class FacturacionCopiaApi
         if (level == "administrador") return;
         if (strictAdministrator) {
             if (UserHasModuleEditPermission(fields, permission)) return;
-            throw new InvalidOperationException("Solo los administradores de Facturación pueden anular boletas.");
+            throw new InvalidOperationException(permission == "recibos_cobro" ? "Solo los administradores de Recibos de Cobro pueden anular recibos." : "Solo los administradores de Facturación pueden anular boletas.");
         }
         if (administratorOnly)
         {
@@ -2137,7 +2157,7 @@ internal static partial class FacturacionCopiaApi
     private static object PurchaseResult(SqlConnection c, SqlTransaction tx, int id)
     {
         return new { ok = true,
-            factura = RowsTx(c, tx, "SELECT p.*,t.Abreviatura AS tipo,t.Descripcion AS tipoNombre,t.Discrimina,t.EnLibroIVA,t.IDTipoAcred,ISNULL(d.IDSucAsoc,p.IDSuc) AS sucursalReal,d.[Descripción] AS puntoVentaNombre,c.Cuenta,fp.TipoPago AS pago,b.TipoBien,r.IDRecibo AS stockId,r.NroMov AS stockNumero FROM dbo.ComprasTP p JOIN dbo.TipoComprobantes t ON t.IDComprob=p.IDTipoComp LEFT JOIN dbo.[Depósitos] d ON d.IDDepósito=p.IDDepósito LEFT JOIN dbo.Cuentas c ON c.CodCuenta=p.CodCuentaCpra LEFT JOIN dbo.TiposPagos fp ON fp.IDTipoPago=p.IDFormaPago LEFT JOIN dbo.TiposBienCpra b ON b.IDTipoBien=p.IDTipoBien OUTER APPLY (SELECT TOP 1 IDRecibo,NroMov FROM dbo.RecibosTP WHERE IDFactura=p.IDRecibo AND Confirmado=1 AND Anulado=0 ORDER BY IDRecibo DESC) r WHERE p.IDRecibo=@p0 AND p.Confirmado=1", id),
+            factura = RowsTx(c, tx, "SELECT p.*,(SELECT e.Nombre FROM dbo.Empleados e WHERE e.IDEmpleado=p.IDOper) AS operadorNombre,t.Abreviatura AS tipo,t.Descripcion AS tipoNombre,t.Discrimina,t.EnLibroIVA,t.IDTipoAcred,ISNULL(d.IDSucAsoc,p.IDSuc) AS sucursalReal,d.[Descripción] AS puntoVentaNombre,c.Cuenta,fp.TipoPago AS pago,b.TipoBien,r.IDRecibo AS stockId,r.NroMov AS stockNumero FROM dbo.ComprasTP p JOIN dbo.TipoComprobantes t ON t.IDComprob=p.IDTipoComp LEFT JOIN dbo.[Depósitos] d ON d.IDDepósito=p.IDDepósito LEFT JOIN dbo.Cuentas c ON c.CodCuenta=p.CodCuentaCpra LEFT JOIN dbo.TiposPagos fp ON fp.IDTipoPago=p.IDFormaPago LEFT JOIN dbo.TiposBienCpra b ON b.IDTipoBien=p.IDTipoBien OUTER APPLY (SELECT TOP 1 IDRecibo,NroMov FROM dbo.RecibosTP WHERE IDFactura=p.IDRecibo AND Confirmado=1 AND Anulado=0 ORDER BY IDRecibo DESC) r WHERE p.IDRecibo=@p0 AND p.Confirmado=1", id),
             impuestos = RowsTx(c, tx, "SELECT d.IDImpuesto AS impuesto,d.NroNeto AS neto,d.Importe AS importe,d.PorcImp AS porcentaje,d.[Descripción] AS descripcion,i.Impuesto AS nombre FROM dbo.ComprasTS d JOIN dbo.Impuestos i ON i.IDImpuesto=d.IDImpuesto WHERE d.IDRecibo=@p0 ORDER BY d.NroNeto,d.IDImpuesto", id),
             pagos = RowsTx(c, tx, "SELECT o.NroOrden,o.NroOP,o.Fecha,o.TotalPagos,o.Nota,tp.TipoPago,v.Importe FROM dbo.OrdPagosTSFac f JOIN dbo.OrdPagosTP o ON o.NroOrden=f.NroOrden LEFT JOIN dbo.OrdPagosTSPag v ON v.NroOrden=o.NroOrden LEFT JOIN dbo.TiposPagos tp ON tp.IDTipoPago=v.IDTipoPago WHERE f.IDFactura=@p0 AND o.Confirmado=1 AND o.Anulado=0 ORDER BY o.Fecha,o.NroOrden", id),
             credito = RowsTx(c, tx, "SELECT c.IDRecibo,c.NroFactura,c.Total FROM dbo.ComprasTP p JOIN dbo.ComprasTP c ON c.IDRecibo=p.IDRecImp AND c.Confirmado=1 WHERE p.IDRecibo=@p0", id) };
@@ -2400,6 +2420,12 @@ internal static partial class FacturacionCopiaApi
             if (movements.Count != 1) throw new InvalidOperationException("El movimiento ya no está disponible para este proveedor y sucursal.");
             return new { ok = true, articulos = Rows(c,"SELECT d.IDArt AS idart,a.IDArtProv AS codigo,a.[Descripción] AS descripcion,d.Cantidad AS cantidad,d.PrecioUni AS precioUnitario,d.Importe AS importe FROM dbo.RecibosTS d LEFT JOIN dbo.[Artículos] a ON a.IDArt=d.IDArt WHERE d.IDRecibo=@p0 ORDER BY d.IDOrden",id) };
         }
+        if(query=="stock-factura") {
+            int purchase=RequiredId(id,"la factura");
+            var headers=Rows(c,"SELECT TOP 1 r.IDRecibo id,r.NroMov numero,r.IDSuc sucursal,r.IDTipoMov tipo,r.IDProveedor proveedor,r.IDDepósito puntoVenta,r.IDVend vendedor,r.IDOper operador,r.Anulado anulado,r.IDDepDes destino,r.IDFactura compra,r.IDRemito relacionado,r.NroFactura factura,r.NroRemito remito,CONVERT(varchar(10),r.Fecha,103) fecha,t.Descripcion nombre,(SELECT pr.[RazónSocial] FROM dbo.Proveedores pr WHERE pr.IDProveedor=r.IDProveedor) proveedorNombre,r.Total total,r.Nota nota FROM dbo.ComprasTP p JOIN dbo.RecibosTP r ON r.IDFactura=p.IDRecibo OR (r.IDTipoMov=23 AND r.NroMov=p.IDMovStk AND r.IDProveedor=p.IDProveedor AND r.IDSuc=ISNULL((SELECT d.IDSucAsoc FROM dbo.[Depósitos] d WHERE d.IDDepósito=p.IDDepósito),p.IDSuc)) LEFT JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDTipoMov LEFT JOIN dbo.Sucursales s ON s.IDSuc=r.IDSuc WHERE p.IDRecibo=@p0 AND p.Confirmado=1 AND r.Confirmado=1 AND r.Anulado=0 ORDER BY CASE WHEN r.IDFactura=p.IDRecibo THEN 0 ELSE 1 END,r.IDRecibo DESC",purchase);
+            if(headers.Count!=1)throw new InvalidOperationException("La factura no tiene una carga de stock vigente vinculada.");
+            return new {ok=true,movimiento=headers[0],articulos=Rows(c,"SELECT x.IDArt idart,a.IDArtProv codigo,a.[Descripción] descripcion,x.Cantidad cantidad,x.PrecioUni precio,x.Importe importe FROM dbo.RecibosTS x LEFT JOIN dbo.[Artículos] a ON a.IDArt=x.IDArt WHERE x.IDRecibo=@p0 ORDER BY x.IDOrden",headers[0]["id"])};
+        }
         if (query == "detalle") return PurchaseResult(c, null, RequiredId(id, "la factura"));
         if (query == "numero")
         {
@@ -2469,10 +2495,13 @@ internal static partial class FacturacionCopiaApi
         foreach (object raw in rows)
         {
             var item = Object(raw);
-            decimal qty = Number(Value(item,"cantidad")), price = Number(Value(item,"precio"));
-            if (qty <= 0 || qty > 100000 || price <= 0 || price > 100000000 || qty != Math.Round(qty,4) || price != Math.Round(price,4) || Text(Value(item,"idart")).Trim().Length == 0) throw new InvalidOperationException("Cada renglón necesita IDArt, cantidad y precio positivos, con hasta cuatro decimales.");
-            total += PurchaseMoney(qty * price);
+            decimal qty = Number(Value(item,"cantidad"));
+            if (qty <= 0 || qty > 100000 || qty != Math.Round(qty,4) || Text(Value(item,"idart")).Trim().Length == 0) throw new InvalidOperationException("Cada renglón necesita IDArt y cantidad positiva, con hasta cuatro decimales.");
+            // Legacy queued requests retain their purchase amount; stock never uses their price.
+            if(!source.ContainsKey("totalRemito")) total += PurchaseMoney(qty * Number(Value(item,"precio")));
         }
+        if(source.ContainsKey("totalRemito"))total=PurchaseMoney(Number(Value(source,"totalRemito")));
+        if(total<=0 || total>1000000000m)throw new InvalidOperationException("El total del remito no es válido.");
         Guid identity=RemitoPurchaseIdentity(c,webId);
         var input = new Dictionary<string,object> {
             {"id",identity.ToString()}, {"usuarioId",Value(source,"usuarioId")},
@@ -2481,7 +2510,7 @@ internal static partial class FacturacionCopiaApi
             {"numero",number}, {"remito",number}, {"fecha",date.ToString("yyyy-MM-dd")}, {"periodo",date.ToString("yyyy-MM-01")},
             {"vencimiento",date.ToString("yyyy-MM-dd")}, {"concepto",accounts[0]["Cuenta"]}, {"nota","[WEBREMITO:"+webId+"]"},
             {"descuento",0}, {"movimiento",0}, {"enStock",true}, {"webRemito",source},
-            {"impuestos",new object[]{new Dictionary<string,object>{{"impuesto",0},{"neto",1},{"importe",total},{"porcentaje",0},{"descripcion","Total remito (IVA incluido)"}}}}
+            {"impuestos",new object[]{new Dictionary<string,object>{{"impuesto",0},{"neto",1},{"importe",total},{"porcentaje",0},{"descripcion","Neto"}}}}
         };
         return PurchaseConfirm(c,input,dryRun);
     }
@@ -2495,9 +2524,10 @@ internal static partial class FacturacionCopiaApi
         foreach(object raw in PurchaseArray(Value(source,"articulos")))
         {
             var row=Object(raw); string id=Limited(Value(row,"idart"),30,"IDArt").Trim();
-            var article=RowsTx(c,tx,"SELECT a.IDArt,a.UniMed,ISNULL(s.StockAct,0) AS stock FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s WITH(UPDLOCK,HOLDLOCK) ON s.IDArt=a.IDArt AND s.IDSuc=@p1 WHERE a.IDArt=@p0 AND a.Suspendido=0",id,branch);
+            var article=RowsTx(c,tx,"SELECT a.IDArt,a.UniMed,ISNULL(a.PrecioCpraSI,0) AS precioCosto,ISNULL(s.StockAct,0) AS stock FROM dbo.[Artículos] a LEFT JOIN dbo.ArtsStock s WITH(UPDLOCK,HOLDLOCK) ON s.IDArt=a.IDArt AND s.IDSuc=@p1 WHERE a.IDArt=@p0 AND a.Suspendido=0",id,branch);
             if(article.Count!=1) throw new InvalidOperationException("El artículo "+id+" no existe, está suspendido o tiene stock duplicado en SQL.");
-            decimal qty=Number(Value(row,"cantidad")),price=Number(Value(row,"precio"));
+            decimal qty=Number(Value(row,"cantidad")),price=Math.Round(Convert.ToDecimal(article[0]["precioCosto"]),4,MidpointRounding.AwayFromZero);
+            if(qty<=0 || qty>100000 || qty!=Math.Round(qty,4) || price<0 || price>100000000)throw new InvalidOperationException("Cantidad o costo SQL fuera de rango para "+id);
             decimal amount=PurchaseMoney(qty*price); total+=amount;
             if(grouped.ContainsKey(id)) {
                 var previous=grouped[id];
@@ -2832,12 +2862,43 @@ internal static partial class FacturacionCopiaApi
     {
         return Number(Scalar(c, tx, "SELECT ISNULL(SaldoCC,0)+ISNULL((SELECT SUM(v.ImpEnt*t.ImpPor) FROM dbo.FacturasATP h JOIN dbo.FacturasTSVal v ON v.IDRecibo=h.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob WHERE h.IDCliente=c.IDCliente AND h.IDEmp=@p1 AND h.Confirmado=-1 AND h.Anulada=0 AND v.IDTipoPago=3 AND t.IDTipoAcred>0),0)-ISNULL((SELECT SUM(r.Total) FROM dbo.RecibosXTP r WHERE r.IDCliente=c.IDCliente AND r.IDEmp=@p1 AND r.Confirmado=1 AND r.Anulado=0),0) FROM dbo.Clientes c WHERE c.IDCliente=@p0", customer, company));
     }
+    private static string CollectionReceiptVersion(SqlConnection c, SqlTransaction tx, int receipt)
+    {
+        return ProviderVersion(new Dictionary<string, object> {
+            {"cabecera", RowsTx(c,tx,"SELECT * FROM dbo.RecibosXTP WITH(HOLDLOCK) WHERE IDRecibo=@p0",receipt)},
+            {"facturas", RowsTx(c,tx,"SELECT * FROM dbo.RecibosXTSFac WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY IDFactura",receipt)},
+            {"valores", RowsTx(c,tx,"SELECT * FROM dbo.RecibosXTS WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY IDOrden",receipt)} });
+    }
+    private static object CollectionReceiptCancel(SqlConnection c, Dictionary<string, object> input)
+    {
+        int receipt=RequiredId(Value(input,"id"),"el recibo");
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable))
+        {
+            try
+            {
+                if(Number(Scalar(c,tx,"DECLARE @r int; EXEC @r=sp_getapplock @Resource=@p0,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=10000; SELECT @r","CorralonWeb.RecibosCobro"))<0)throw new InvalidOperationException("Hay otro recibo en proceso. Reintentá.");
+                var headers=RowsTx(c,tx,"SELECT Confirmado,Anulado,IDCaja FROM dbo.RecibosXTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0",receipt);
+                if(headers.Count!=1 || !Convert.ToBoolean(headers[0]["Confirmado"]))throw new InvalidOperationException("No se encontró el recibo confirmado.");
+                if(!Convert.ToBoolean(headers[0]["Anulado"]))
+                {
+                    if(String.IsNullOrWhiteSpace(Text(Value(input,"version"))) || Text(Value(input,"version"))!=CollectionReceiptVersion(c,tx,receipt))throw new InvalidOperationException("El recibo cambió en otro equipo. Cerrá y volvé a consultarlo antes de anular.");
+                    int cash=Convert.ToInt32(InvoiceValueNumber(headers[0]["IDCaja"]));
+                    if(cash>0 && Scalar(c,tx,"SELECT IDRecibo FROM dbo.CajaDiaTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado<>0",cash)!=null)throw new InvalidOperationException("El recibo pertenece a una Caja cerrada. Reabrí la Caja antes de anularlo.");
+                    // Keep the cancelled receipt and its received values, but unlink the invoices below.
+                    if(Execute(c,tx,"UPDATE dbo.RecibosXTP SET Anulado=1 WHERE IDRecibo=@p0 AND Confirmado=1 AND Anulado=0",receipt)!=1)throw new InvalidOperationException("No se pudo anular el recibo.");
+                }
+                Execute(c,tx,"DELETE d FROM dbo.RecibosXTSFac d JOIN dbo.RecibosXTP r ON r.IDRecibo=d.IDRecibo WHERE r.IDRecibo=@p0 AND r.Confirmado=1 AND r.Anulado=1",receipt);
+                var result=CollectionReceiptResult(c,tx,receipt);tx.Commit();return result;
+            }
+            catch {try {tx.Rollback();}catch{}throw;}
+        }
+    }
     private static object CollectionReceiptResult(SqlConnection c, SqlTransaction tx, int receipt)
     {
         var headers = RowsTx(c, tx, "SELECT r.IDRecibo AS id,r.NroFactura AS numero,CONVERT(varchar(10),r.Fecha,103) AS fecha,r.IDCliente AS idCliente,r.Cliente AS cliente,r.Total AS total,r.Nota AS nota,r.Concepto AS concepto,c.CUIT AS documento,r.IDEmp AS empresa,r.Anulado AS anulado,r.IDDepósito AS puntoVenta,p.[Descripción] AS nombrePuntoVenta FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] p ON p.IDDepósito=r.IDDepósito LEFT JOIN dbo.Clientes c ON c.IDCliente=r.IDCliente WHERE r.IDRecibo=@p0 AND r.Confirmado=1", receipt);
         if (headers.Count != 1) throw new InvalidOperationException("No se encontró el recibo confirmado.");
         headers[0]["saldo"] = CollectionBalance(c, tx, Convert.ToInt32(headers[0]["idCliente"]), Convert.ToInt32(headers[0]["empresa"]));
-        return new { ok = true, recibo = headers[0], facturas = RowsTx(c, tx, "SELECT d.IDFactura AS id,h.NroFactura AS numero,CONVERT(varchar(10),h.Fecha,103) AS fecha,t.Abreviatura AS tipo,d.CuotaPaga AS cuota,h.Total AS importeFactura,d.ImpPagado AS importe FROM dbo.RecibosXTSFac d JOIN dbo.FacturasATP h ON h.IDRecibo=d.IDFactura JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob WHERE d.IDRecibo=@p0 ORDER BY h.Fecha,h.NroFactura", receipt),
+        return new { ok = true, version = CollectionReceiptVersion(c,tx,receipt), recibo = headers[0], facturas = RowsTx(c, tx, "SELECT d.IDFactura AS id,h.NroFactura AS numero,CONVERT(varchar(10),h.Fecha,103) AS fecha,t.Abreviatura AS tipo,d.CuotaPaga AS cuota,h.Total AS importeFactura,d.ImpPagado AS importe FROM dbo.RecibosXTSFac d JOIN dbo.FacturasATP h ON h.IDRecibo=d.IDFactura JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob WHERE d.IDRecibo=@p0 ORDER BY h.Fecha,h.NroFactura", receipt),
             valores = RowsTx(c, tx, "SELECT v.IDTipoPago AS idTipoPago,p.TipoPago AS tipo,v.IDTarjeta AS idTarjeta,t.[Descripción] AS tarjeta,v.Cuotas AS cuotas,CONVERT(varchar(10),v.FechaVto,103) AS vencimiento,v.Importe AS importe,v.Concepto AS descripcion,m.NroMovExt AS numero,b.Banco AS banco FROM dbo.RecibosXTS v JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta LEFT JOIN dbo.MovCheques m ON m.NroMovInt=v.IDMovBco LEFT JOIN dbo.Bancos b ON b.IDBanco=COALESCE(NULLIF(v.IDBanco,0),m.IDBanco) WHERE v.IDRecibo=@p0 ORDER BY v.IDOrden", receipt) };
     }
     private static object CollectionReceiptQuery(SqlConnection c, HttpListenerRequest request)
@@ -3221,6 +3282,11 @@ internal static partial class FacturacionCopiaApi
                         string body; using (var reader = new StreamReader(request.InputStream, Encoding.UTF8)) body = reader.ReadToEnd();
                         if (body.Length > 250000) throw new InvalidOperationException("El recibo es demasiado grande.");
                         var input = Object(Json.DeserializeObject(body)); AssertPurchasePermission(Text(Value(input, "usuarioId")), "recibos_cobro");
+                        if(Text(Value(input,"accion"))=="anular")
+                        {
+                            AssertPurchasePermission(Text(Value(input,"usuarioId")),"recibos_cobro",false,true);
+                            Reply(context,200,CollectionReceiptCancel(connection,input));return;
+                        }
                         Reply(context, 200, CollectionReceiptConfirm(connection, input)); return;
                     }
                 }
@@ -3269,6 +3335,7 @@ internal static partial class FacturacionCopiaApi
                     string body; using(var reader=new StreamReader(request.InputStream,Encoding.UTF8))body=reader.ReadToEnd();
                     if(body.Length>100000)throw new InvalidOperationException("El artículo es demasiado grande.");
                     var articleInput=Object(Json.DeserializeObject(body));
+                    if(Text(Value(articleInput,"accion"))=="ficha-vendedor") {Reply(context,200,ArticuloGuardarVendedor(connection,articleInput));return;}
                     Reply(context,200,Text(Value(articleInput,"accion"))=="presupuestar-aridos" ? ArticulosPresupuestarAridos(connection,articleInput) : ArticuloGuardar(connection,articleInput,false)); return;
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/articulos-sql")

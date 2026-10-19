@@ -1120,7 +1120,7 @@
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.26"></script>
+<script src="corralon-system.js?v=1.0.27"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -1184,7 +1184,6 @@
 #sqlCajaValueMenu[hidden]{display:none}
 #sqlCajaValueMenu button{padding:10px 14px;border:0;border-radius:5px;background:transparent;font:700 14px 'Barlow',Arial;cursor:pointer}
 #sqlCajaValueMenu button:hover{background:var(--corralon-soft-2)}
-#cajaSqlMain #sqlCajaPrint[hidden]{display:none}
 #cajaSqlMain tr.caja-value-origin td{background:var(--corralon-selection-strong)}
 .caja-sql-dialog td.numeric{text-align:right;font-variant-numeric:tabular-nums}
 /* Ajuste integral de las herramientas a la ventana; las tablas conservan su scroll. */
@@ -7859,7 +7858,7 @@ initializeCashHistory(true);
   <div class="caja-sql-layout"><section>
     <div class="caja-sql-box"><h2>Detalle de Valores</h2><div class="caja-sql-grid"><table><thead><tr><th>Tipo Valor</th><th>Caja Inicial</th><th>Movs. Día</th><th>Imp. I/E</th><th>Imp. Final</th><th>Nota</th></tr></thead><tbody id="sqlCajaValues"></tbody></table></div><div class="caja-sql-record"><span id="sqlCajaValueCount">Registro: 0 de 0</span><span>Sin filtro</span><span>Buscar</span></div></div>
     <div class="caja-sql-totals"><label>Saldo Inicial:<input id="sqlCajaInitial" class="caja-sql-money" readonly></label><label>Total del Día:<input id="sqlCajaDaily" class="caja-sql-money" readonly></label><label>Total I/E:<input id="sqlCajaIE" class="caja-sql-money" readonly></label><label>Saldo Final:<input id="sqlCajaFinal" class="caja-sql-money" readonly></label></div>
-    <div class="caja-sql-footer"><label>Nota:<textarea id="sqlCajaNote"></textarea></label><button id="sqlCajaConfirm">Confirmar</button><button id="sqlCajaCancel">Cancelar</button><button id="sqlCajaConsult">Consultar</button><button id="sqlCajaPrint" hidden>Imprimir</button></div>
+    <div class="caja-sql-footer"><label>Nota:<textarea id="sqlCajaNote"></textarea></label><button id="sqlCajaConfirm">Confirmar</button><button id="sqlCajaCancel">Cancelar</button><button id="sqlCajaConsult">Consultar</button></div>
     <div class="caja-sql-box"><h2>Comprob. c/Dif.</h2><div class="caja-sql-grid caja-sql-short"><table><thead><tr><th>Tipo</th><th>Nº comprobante</th><th>Total valores</th><th>Total</th><th>Diferencia</th></tr></thead><tbody id="sqlCajaDifferences"></tbody></table></div></div>
   </section><section>
     <div class="caja-sql-box"><h2>Ingresos/Egresos (Efectivo)</h2><div class="caja-sql-grid"><table><thead><tr><th>Importe</th><th>Nota</th><th>Hora</th><th></th></tr></thead><tbody id="sqlCajaCash"></tbody></table></div></div>
@@ -7902,18 +7901,22 @@ initializeCashHistory(true);
   reportDialog.style.cssText='padding:0;width:min(1000px,96vw);max-height:94dvh;overflow:hidden';
   reportDialog.innerHTML='<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #bbb"><strong id="sqlCajaReportTitle" style="flex:1">Caja Diaria</strong><button id="sqlCajaReportPrint" type="button" disabled>Imprimir</button><button id="sqlCajaReportClose" type="button" aria-label="Cerrar reporte" style="min-width:30px">×</button></div><iframe id="sqlCajaReportFrame" title="Reporte de Caja Diaria" style="display:block;width:100%;height:min(78dvh,800px);border:0;background:white"></iframe>';
   document.body.append(reportDialog);
+  let reportPrintable=false,clearAfterReport=false;
   $('sqlCajaReportClose').onclick=()=>reportDialog.close();
+  reportDialog.addEventListener('close',()=>{reportPrintable=false;$('sqlCajaReportPrint').hidden=true;$('sqlCajaReportPrint').disabled=true;if(clearAfterReport){clearAfterReport=false;clearClosedCajaForm();}});
   reportDialog.addEventListener('keydown',event=>event.stopPropagation());
   reportDialog.addEventListener('click',event=>{if(event.target===reportDialog)reportDialog.close();});
-  $('sqlCajaReportFrame').onload=()=>{$('sqlCajaReportPrint').disabled=false;};
-  $('sqlCajaReportPrint').onclick=()=>{const page=$('sqlCajaReportFrame').contentWindow;page.focus();page.print();};
-  function showDailyReport(data){
+  $('sqlCajaReportFrame').onload=()=>{$('sqlCajaReportPrint').disabled=!reportPrintable;};
+  $('sqlCajaReportPrint').onclick=()=>{if(!reportPrintable||!reportDialog.open)return;const page=$('sqlCajaReportFrame').contentWindow;page.focus();page.print();};
+  function showDailyReport(data,{resetOnClose=false}={}){
     if(!data?.cabecera?.IDRecibo)throw new Error('No hay una Caja para imprimir.');
+    clearAfterReport=resetOnClose;
+    reportPrintable=data.cabecera.Confirmado===true||data.cabecera.Confirmado===1;
+    $('sqlCajaReportPrint').hidden=!reportPrintable;
     $('sqlCajaReportTitle').textContent='Caja Diaria · '+data.cabecera.NroFactura;
     $('sqlCajaReportPrint').disabled=true;$('sqlCajaReportFrame').srcdoc=cajaDailyReportHtml(data);
     if(!reportDialog.open)reportDialog.showModal();
   }
-  $('sqlCajaPrint').onclick=()=>{try{showDailyReport(current);}catch(error){status(error.message,'error');}};
   function synchronizeDate() { selectedDateKey = $('sqlCajaDate').value; updateDateLabel(); }
   function lockControls() {
     const closed = Boolean(current?.cabecera?.Confirmado), editable = boot?.editar && !closed && current?.cabecera;
@@ -7922,13 +7925,13 @@ initializeCashHistory(true);
     for (const id of ['sqlCajaDeposit','sqlCajaDate','sqlCajaGlobal','sqlCajaOperator']) $(id).disabled = busy || (id === 'sqlCajaDate' ? boot?.restringido : id === 'sqlCajaDeposit' ? boot?.restringido : id === 'sqlCajaGlobal' ? true : Boolean(current?.cabecera));
     $('sqlCajaNote').disabled = busy || !editable;
     main.querySelectorAll('[data-caja-detail],[data-caja-cash],[data-caja-new],[data-caja-delete]').forEach(input => { input.disabled = busy || !editable; });
-    for (const id of ['sqlCajaConsult','sqlCajaCancel','sqlCajaPrint','sqlCajaAdditional','sqlCajaCollections']) $(id).disabled = busy;
+    for (const id of ['sqlCajaConsult','sqlCajaCancel','sqlCajaAdditional','sqlCajaCollections']) $(id).disabled = busy;
     $('sqlCajaRefresh').classList.toggle('caja-sql-busy', busy);
   }
   function render(data) {
     current = data; dirty = false; const h = data.cabecera || {}, rows = data.detalle || [], cash = data.efectivo || [];
     if (h.IDRecibo) { $('sqlCajaDate').value = dateOf(h.Fecha); synchronizeDate(); $('sqlCajaDeposit').value = h['IDDepósito']; $('sqlCajaGlobal').checked = true; $('sqlCajaOperator').value = h.IDOper; }
-    $('sqlCajaNumber').value = h.NroFactura || ''; $('sqlCajaNote').value = h.Nota || ''; $('sqlCajaPrint').hidden=!h.IDRecibo;
+    $('sqlCajaNumber').value = h.NroFactura || ''; $('sqlCajaNote').value = h.Nota || '';
     $('sqlCajaValues').innerHTML = rows.map(r => `<tr data-pay="${r.IDTipoPago}"><td>${esc(r.TipoPago)}</td><td><input class="caja-sql-money" data-caja-detail="ImpAnt" value="${esc(money(r.ImpAnt))}" aria-label="Caja inicial ${esc(r.TipoPago)}"></td><td class="numeric">${money(r.Importe)}</td><td class="numeric">${money(r.ImpRet)}</td><td class="numeric">${money(r.ImpAct)}</td><td><input data-caja-detail="Nota" value="${esc(r.Nota || '')}" aria-label="Nota ${esc(r.TipoPago)}"></td></tr>`).join('');
     const sum = (values, field) => values.reduce((n, r) => n + Number(r[field] || 0), 0);
     for (const [id, field] of [['sqlCajaInitial','ImpAnt'],['sqlCajaDaily','Importe'],['sqlCajaIE','ImpRet'],['sqlCajaFinal','ImpAct']]) $(id).value = money(sum(rows, field));
@@ -7944,6 +7947,15 @@ initializeCashHistory(true);
     $('sqlCajaReceiptsTotal').value = money(sum(data.cobros || [], 'TotCob'));
     $('sqlCajaDifferences').innerHTML = (data.diferencias || []).map(r => `<tr data-difference-invoice="${Number(r.IDRecibo)}" tabindex="0"><td>${esc(r.Abreviatura)}</td><td>${esc(r.NroFactura)}</td><td class="numeric">${money(r.TotImp)}</td><td class="numeric">${money(r.Total)}</td><td class="numeric" title="Detalle de valores: ${esc(money(r.ImpDif))} · Totales por tipo: ${esc(money(r.ImpDifVal))}">${money(Math.abs(Number(r.ImpDif)) > .01 ? r.ImpDif : r.ImpDifVal)}</td></tr>`).join('');
     status(data.eliminada ? 'Caja eliminada. Para volver a trabajar, abrí una nueva Caja.' : h.Confirmado ? 'Caja cerrada en SQL.' : h.IDRecibo ? 'Caja abierta en SQL.' : 'No hay Caja para este punto de venta y fecha.'); lockControls();
+  }
+  function clearClosedCajaForm(){
+    // Clear only the displayed form. Opening a Caja still uses the existing SQL validation.
+    ++sequence;cashSavedDraftKey='';$('sqlCajaCash').innerHTML='';
+    render({});
+    for(const id of ['sqlCajaValues','sqlCajaCash','sqlCajaCards','sqlCajaSales','sqlCajaDifferences'])$(id).innerHTML='';
+    for(const id of ['sqlCajaNumber','sqlCajaNote','sqlCajaInitial','sqlCajaDaily','sqlCajaIE','sqlCajaFinal','sqlCajaCashTotal','sqlCajaCardsTotal','sqlCajaSalesTotal','sqlCajaCostTotal','sqlCajaMargin','sqlCajaReceiptsTotal'])$(id).value='';
+    $('sqlCajaValueCount').textContent='Registro: 0 de 0';
+    status('Caja cerrada. Formulario vacío; para verla, usá Consultar.');lockControls();
   }
   async function load(id = 0) {
     const ticket = ++sequence; synchronizeDate(); status('Consultando Caja en SQL…');
@@ -7974,7 +7986,7 @@ initializeCashHistory(true);
   $('sqlCajaValues').addEventListener('input', () => { dirty = true; }); $('sqlCajaNote').addEventListener('input', () => { dirty = true; });
   $('sqlCajaRefresh').onclick = () => run(refresh);
   $('sqlCajaOpen').onclick = () => run(async () => { synchronizeDate(); render(await CajaSQL.request('abrir', {}, { deposito:Number($('sqlCajaDeposit').value), operador:Number($('sqlCajaOperator').value), global:$('sqlCajaGlobal').checked, nota:$('sqlCajaNote').value })); });
-  $('sqlCajaConfirm').onclick = () => run(async () => { if (!confirm('¿Estás seguro de confirmar el cierre de esta Caja en SQL?')) return; await saveDetail(); const closed=await CajaSQL.request('cerrar', {}, { id:current.cabecera.IDRecibo, version:current.version, nota:$('sqlCajaNote').value }); render(closed); try {localStorage.setItem('corralon_caja_estado_aviso',String(Date.now()));} catch {} showDailyReport(closed); });
+  $('sqlCajaConfirm').onclick = () => run(async () => { if (!confirm('¿Estás seguro de confirmar el cierre de esta Caja en SQL?')) return; await saveDetail(); const closed=await CajaSQL.request('cerrar', {}, { id:current.cabecera.IDRecibo, version:current.version, nota:$('sqlCajaNote').value }); render(closed); try {localStorage.setItem('corralon_caja_estado_aviso',String(Date.now()));} catch {} showDailyReport(closed,{resetOnClose:true}); });
   const cancelDialog=document.createElement('dialog');cancelDialog.className='caja-sql-dialog';cancelDialog.style.maxWidth='440px';
   cancelDialog.innerHTML='<h2>Eliminar Caja</h2><p>Ingresá la contraseña de un administrador.</p><label for="sqlCajaAdmin">Usuario</label><select id="sqlCajaAdmin" style="display:block;width:100%;margin:6px 0 14px"></select><label for="sqlCajaAdminPassword">Contraseña</label><input id="sqlCajaAdminPassword" type="password" autocomplete="current-password" style="display:block;width:100%;margin:6px 0 14px"><p>Se eliminará la caja abierta de hoy y su detalle de valores e ingresos/egresos. Esta acción no se puede deshacer.</p><p id="sqlCajaAdminError" role="alert" style="color:#b60000"></p><button id="sqlCajaAdminBack">Volver</button> <button id="sqlCajaAdminDelete">Eliminar Caja</button>';document.body.append(cancelDialog);
   $('sqlCajaAdminBack').onclick=()=>cancelDialog.close();

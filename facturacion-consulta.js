@@ -68,7 +68,7 @@
   function valueNumber(value){if(typeof value==='number')return value;const text=String(value??'').replace(/[^\d,.-]/g,'');return Number(text.includes(',')?text.replace(/\./g,'').replace(',','.'):text)||0;}
   function blankValue(){const type=valueTypes().find(p=>Number(p.clase)===1)||valueTypes()[0],remaining=Math.max(0,Math.round((Math.abs(Number(detailData.comprobante.total))-detailData.valores.reduce((sum,v)=>sum+Number(v.total||0),0))*100)/100);return{orden:null,idTipoPago:type?.id||0,tipo:type?.nombre||'',clase:type?.clase||0,idTarjeta:0,tarjeta:'Ninguna',importe:remaining,coef:0,impRec:0,total:remaining,cuotas:0,descripcion:''};}
   function valueInput(v,i,key,text){return `<input data-value-index="${i}" data-value-key="${key}" ${key==='descripcion'?'maxlength="30"':'inputmode="decimal" class="money"'} value="${escape(text)}" style="width:100%;height:26px;border:0;background:transparent;padding:2px 5px;font:inherit;${key==='descripcion'?'':'text-align:right'}">`;}
-  function editableValuesTable(values){return `<div class="receipt-grid" style="width:835px"><div class="receipt-values-scroll"><table class="invoice-history-table" data-edit-values><colgroup>${[15,15,14,7,15,10,10,11,3].map(w=>`<col style="width:${w}%">`).join('')}</colgroup><thead><tr>${['Tipo de valor','Importe','Tarjeta / cuenta','Cuotas','Descripción','% Dto./Rec.','$ Dto./Rec.','Total',''].map(t=>`<th>${t}</th>`).join('')}</tr></thead><tbody>${values.map((v,i)=>{const cells=valueCells(v,i);return `<tr data-value-row="${i}"><td>${cells[0]}</td><td>${valueInput(v,i,'importe',money(v.importe))}</td><td>${cells[1]}</td><td>${cells[2]}</td><td>${valueInput(v,i,'descripcion',v.descripcion||'')}</td><td>${valueInput(v,i,'coef',number(Number(v.coef||0)*100)+' %')}</td><td>${valueInput(v,i,'impRec',money(v.impRec))}</td><td>${valueInput(v,i,'total',money(v.total))}</td><td><button type="button" data-remove-value="${i}" aria-label="Quitar valor" style="border:0;padding:0;color:#d00008;background:transparent">×</button></td></tr>`;}).join('')}</tbody></table></div><div class="receipt-records" style="display:flex;justify-content:space-between"><span>${values.length} valores</span><button type="button" data-add-value style="padding:0 5px;font-size:11px">+ Renglón</button></div><div style="padding:4px 5px;text-align:right">Diferencia: <strong data-values-difference></strong></div></div>`;}
+  function editableValuesTable(values){return `<div class="receipt-grid" style="width:835px"><div class="receipt-values-scroll"><table class="invoice-history-table" data-edit-values><colgroup>${[15,15,14,7,15,10,10,11,3].map(w=>`<col style="width:${w}%">`).join('')}</colgroup><thead><tr>${['Tipo de valor','Importe','Tarjeta / cuenta','Cuotas','Descripción','% Dto./Rec.','$ Dto./Rec.','Total',''].map(t=>`<th>${t}</th>`).join('')}</tr></thead><tbody>${values.map((v,i)=>{const cells=valueCells(v,i);return `<tr data-value-row="${i}"><td>${cells[0]}</td><td>${valueInput(v,i,'importe',money(v.importe))}</td><td>${cells[1]}</td><td>${cells[2]}</td><td>${valueInput(v,i,'descripcion',v.descripcion||'')}</td><td>${valueInput(v,i,'coef',number(Number(v.coef||0)*100)+' %')}</td><td>${valueInput(v,i,'impRec',money(v.impRec))}</td><td>${valueInput(v,i,'total',money(v.total))}</td><td><button type="button" data-remove-value="${i}" aria-label="Quitar valor" style="border:0;padding:0;color:#d00008;background:transparent">×</button></td></tr>`;}).join('')}</tbody></table></div><div class="receipt-records" style="display:flex;justify-content:space-between"><span>${values.length} valores</span><button type="button" data-add-value style="padding:0 5px;font-size:11px">+ Renglón</button></div><div class="receipt-values-difference" style="padding:4px 5px;text-align:right">Diferencia: <strong data-values-difference></strong></div></div>`;}
   function updateValueTotals(){
     const h=detailData.comprobante,sign=Number(h.total)<0?-1:1;h.efectivo=0;h.tarjeta=0;h.cuentaCorriente=0;h.cheque=0;
     for(const v of detailData.valores){const kind=Number((historyConfig.tiposPago||[]).find(p=>Number(p.id)===Number(v.idTipoPago))?.clase||v.clase);const bucket=({1:'efectivo',2:'cheque',3:'cheque',5:'tarjeta',6:'cuentaCorriente'})[kind];if(bucket)h[bucket]+=Number(v.total||0)*sign;}
@@ -103,7 +103,42 @@
     if(value.idTarjeta&&!cards.some(c=>Number(c.id)===Number(value.idTarjeta)))cards.push({id:value.idTarjeta,nombre:value.tarjeta});
     return [valueSelect(value,index,'idTipoPago',types),[3,5].includes(cls)?valueSelect(value,index,'idTarjeta',cards):escape(value.tarjeta||'Ninguna'),cls===5?valueSelect(value,index,'cuotas',plans):escape(value.cuotas??0)];
   }
-  function redrawValues(){const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.innerHTML=receiptLayout(detailData,rows[detailIndex]);body.querySelector('.receipt-actions').appendChild(footer);footer.style.display='';refreshValueOutputs();}
+  function fitReceiptDetail(){
+    const card=detail.querySelector('.invoice-history-card');
+    const desktop=window.innerWidth>700;detail.classList.toggle('receipt-scaled-desktop',desktop);
+    if(!desktop){card.style.removeProperty('--receipt-scale');return;}
+    const width=detail.clientWidth||window.innerWidth,height=detail.clientHeight||window.innerHeight;
+    card.style.setProperty('--receipt-scale',String(Math.max(.01,Math.min((width-28)/1450,(height-28)/850))));
+  }
+  window.addEventListener('resize',()=>{if(!detail.hidden)fitReceiptDetail();});
+  function decorateReceiptDetail(body){
+    const layout=body.querySelector('.receipt-layout');if(!layout)return;fitReceiptDetail();
+    const heading=(label)=>{const h=document.createElement('h3');h.className='receipt-section-title';h.textContent=label;return h;};
+    const card=(label)=>{const section=document.createElement('section');section.className='receipt-section';section.append(heading(label));return section;};
+    const main=card('Datos principales');main.classList.add('receipt-main-data');
+    const mainRows=[...layout.children].filter(el=>el.classList.contains('receipt-row')&&!el.classList.contains('receipt-totals'));
+    if(mainRows.length){layout.insertBefore(main,mainRows[0]);main.append(...mainRows);}
+    const articles=layout.querySelector('.receipt-articles');articles.classList.add('receipt-section');
+    const articleTitle=heading('Detalle de artículos'),search=document.createElement('input');search.type='search';search.dataset.receiptArticleSearch='';search.placeholder='Buscar artículo…';search.setAttribute('aria-label','Buscar en los artículos del comprobante');articleTitle.append(search);articles.prepend(articleTitle);
+    const area=layout.querySelector('.receipt-values-area'),values=area?.querySelector('.receipt-grid'),tax=area?.querySelector('.receipt-tax-summary');
+    if(values){values.classList.add('receipt-section','receipt-values-card');values.prepend(heading('Valores recibidos'));}
+    if(tax){tax.classList.add('receipt-section');tax.prepend(heading('Resumen de totales'));}
+    const totals=card('Totales y otros datos');totals.classList.add('receipt-other-data');
+    const totalsRows=[...layout.children].filter(el=>el.classList.contains('receipt-totals'));
+    if(totalsRows.length){layout.insertBefore(totals,totalsRows[0]);totals.append(...totalsRows);}
+    const footerButtons=detail.querySelector('.invoice-history-footer>div');
+    footerButtons.querySelector('[data-save-values]')?.remove();
+    const save=layout.querySelector('[data-save-values]');if(save)footerButtons.prepend(save);
+  }
+  detail.addEventListener('input',event=>{
+    if(!event.target.matches('[data-receipt-article-search]'))return;
+    const query=event.target.value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+    const panel=event.target.closest('.receipt-articles');let visible=0;
+    panel.querySelectorAll('tbody tr[data-warranty-article]').forEach(row=>{row.hidden=!row.textContent.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().includes(query);if(!row.hidden)visible++;});
+    panel.querySelectorAll('tr.receipt-empty').forEach(row=>row.hidden=Boolean(query));
+    panel.querySelector('.receipt-records').textContent=query?`${visible} de ${detailData?.articulos?.length||0} artículos`: `Registro: ${visible?'1':'0'} de ${visible}`;
+  });
+  function redrawValues(){const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.innerHTML=receiptLayout(detailData,rows[detailIndex]);decorateReceiptDetail(body);body.querySelector('.receipt-actions').appendChild(footer);footer.style.display='';refreshValueOutputs();}
   detail.addEventListener('input',event=>{
     const input=event.target.closest('input[data-value-key]');if(!input||!canEditValues()||actionBusy)return;
     const row=detailData.valores[Number(input.dataset.valueIndex)],key=input.dataset.valueKey;
@@ -294,7 +329,7 @@
     const paidCash=()=>money(values.filter(v=>/^efectivo$/i.test(v.tipo||'')).reduce((sum,v)=>sum+Number(v.total||0),0));
     const blank=(count,cols)=>Array.from({length:Math.max(0,count)},()=>`<tr class="receipt-empty">${'<td></td>'.repeat(cols)}</tr>`).join('');
     return `<div class="receipt-layout">
-      <div class="receipt-row">${field('P. Vta.:',point?.nombre||h.idPuntoVenta,130)}${field('P.V.:',h.idPuntoVenta,32)}${field('Tipo Comp.:',type?.codigo||row.tipo,65)}${field('Nº:',h.numero,115,'receipt-number')}${field('Fecha:',date(h.fechaComprobante),86)}${field('Vend.:',seller?.nombre||h.vendedor,105)}${field('',h.vendedor,32)}${field('IDOper:',h.operador,40)}${field('IDCaja:',h.IDCaja,55)}${check('Completo:',h.Completo??h.confirmado)}</div>
+      <div class="receipt-row">${field('P. Vta.:',point?.nombre||h.idPuntoVenta,130)}${field('P.V.:',h.idPuntoVenta,32)}${field('Tipo Comp.:',type?.codigo||row.tipo,65)}${field('Nº:',h.numero,115,'receipt-number')}${field('Fecha:',date(h.fechaComprobante),86)}${field('Vend.:',seller?.nombre||h.vendedor,105)}${field('IDOper:',h.operador,40)}${field('IDCaja:',h.IDCaja,55)}${check('Completo:',h.Completo??h.confirmado)}</div>
       <div class="receipt-row">${field('Cliente:',h.idCliente,55)}${field('',String(h.cliente||'').toUpperCase(),245,'receipt-highlight')}${field('Tel.:',h.telefono||'',95)}${field('IVA:',taxName,120)}${field('Email:',h.email||h.Email||'',160)}${check('Anulada:',h.anulada)}${check('Actualiza Stock:',h.stockActualizado)}${check('En Inf. Vtas.:',h.EnInfVtas)}</div>
       <div class="receipt-row">${field('Tipo Doc.:',Number(h.idTipoDoc)===80?'CUIT':Number(h.idTipoDoc)===96?'DNI':h.idTipoDoc,50)}${field('Nº:',h.documento||'',120)}${field('Moneda:',Number(h.IDMoneda)===1?'Pesos':h.IDMoneda,75)}${field('Cotización:',h.ImpCotiz==null?'—':money(h.ImpCotiz),70)}${field('Nº Fac. N.C.:',h.facturaAsociada||'',105)}${field('Nº Ord. Cpra.:',h.NroOrdCpra||'',90)}${field('Nº Rem./Fac.:',h.IDRemito||'',90)}${field('1er. Vto.:',date(h.vencimiento),86)}</div>
       <div class="receipt-grid receipt-articles"><div class="receipt-articles-scroll"><table class="invoice-history-table"><colgroup><col style="width:38%"><col style="width:7%"><col style="width:7%"><col style="width:10%"><col style="width:10%"><col style="width:7%"><col style="width:7%"><col style="width:14%"></colgroup><thead><tr><th>Descripción</th><th>IDArt</th><th class="money">Cantidad</th><th class="money">PrecioUni</th><th class="money">ImpIVA1</th><th class="money">% IVA</th><th class="money">% Dto.</th><th class="money">Importe</th></tr></thead><tbody>${items.map((a,i)=>`<tr data-warranty-article="${i}"><td title="${escape(a.descripcion)}">${escape(a.descripcion)}</td><td>${escape(a.idart)}</td><td class="money">${number(a.cantidad)}</td><td class="money">${money(a.precio)}</td><td class="money">${a.iva==null?'—':money(Number(a.importe)-Number(a.importe)/(1+Number(a.iva)/100))}</td><td class="money">${a.iva==null?'—':number(a.iva)+'%'}</td><td class="money">${a.descuento==null?'—':number(a.descuento)+'%'}</td><td class="money">${money(a.importe)}</td></tr>`).join('')}${blank(7-items.length,8)}</tbody></table></div><div class="receipt-records">Registro: ${items.length?'1':'0'} de ${items.length}</div></div>
@@ -314,7 +349,7 @@
       detail.querySelector('[data-title]').textContent='Boleta '+h.numero+(typeName?' · '+typeName:'');
       detail.querySelector('[data-preview]').hidden=!adapters.preview;detail.querySelector('[data-reprint]').hidden=!adapters.reprint;detail.querySelector('[data-recall]').hidden=!adapters.recall;
       detail.querySelector('.invoice-history-footer').style.display=adapters.preview||adapters.reprint||adapters.recall||canEditValues()||isAdministrator()?'':'none';
-      body.innerHTML=receiptLayout(result,row);
+      body.innerHTML=receiptLayout(result,row);decorateReceiptDetail(body);
       body.querySelector('.receipt-actions').appendChild(detail.querySelector('.invoice-history-footer'));refreshValueOutputs();
     }catch(error){if(request===detailSequence&&!detail.hidden)body.textContent=controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a abrir la boleta.':error.message}
   }
