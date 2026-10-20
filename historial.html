@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.24"></script>
+<script src="corralon-system.js?v=1.0.25"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -807,18 +807,19 @@ document.addEventListener('click', async event => {
   finally { historialEstadosGuardando.delete(key); pintarEstadosHistorial(); historialEstadosCache?.refresh(key).catch(error => console.warn('No se pudo actualizar la caché del estado', error)); }
 }, true);
 
-async function resolverRemitoCargadoSql(remito) {
-  const key = historialNotifId('remito', remito.id), previous = historialEstados.get(key);
+async function resolverRemitoCargadoSql(remito,tipo='remito') {
+  const key = historialNotifId(tipo, tipo==='presupuesto'?(remito.numero||remito.id):remito.id), previous = historialEstados.get(key);
   historialEstados.set(key, true);
   historialEstadosGuardando.add(key); pintarEstadosHistorial();
   try {
     await histDb.collection(HISTORIAL_NOTIFS_COLLECTION).doc(key).set({
-      tipo:'remito', id:String(remito.id), titulo:'Remito', detalle:remito.cliente || '', fecha:remito.fecha || '',
+      tipo, id:String(tipo==='presupuesto'?(remito.numero||remito.id):remito.id), titulo:tipo==='presupuesto'?'Presupuesto':'Remito', detalle:remito.cliente || '', fecha:remito.fecha || '',
       resuelta:true, resueltaAt:firebase.firestore.FieldValue.serverTimestamp(), updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     }, {merge:true});
   } catch(error) {
     if(previous === undefined) historialEstados.delete(key); else historialEstados.set(key, previous);
     toast('SQL quedó cargado, pero no se pudo marcar como resuelto. Volvé a tocar el chip.');
+    throw new Error('SQL quedó confirmado, pero falta marcar como resuelto. Reintentá esta misma operación.');
   } finally { historialEstadosGuardando.delete(key); pintarEstadosHistorial(); historialEstadosCache?.refresh(key).catch(error => console.warn('No se pudo actualizar la caché del estado', error)); }
 }
 
@@ -965,6 +966,26 @@ function cerrarSesion() {
 
 // ── HISTORIAL ──
 function inicializarHistorial() {
+  if(new URLSearchParams(location.search).get('embed')==='presupuesto-sql'&&window.parent!==window&&location.hostname==='localhost'){
+    document.getElementById('appContent').style.display='none';
+    const style=document.createElement('style');style.textContent='html,body{background:transparent!important;margin:0;overflow:hidden}[data-budget-transfer-dialog]{max-height:calc(100dvh - 24px);overflow:auto}[data-budget-transfer-dialog]::backdrop{background:transparent!important}';document.head.append(style);
+    let opening=false;
+    window.addEventListener('message',async event=>{
+      if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='corralon:presupuesto-sql-open'||opening)return;
+      opening=true;
+      try{
+        if(!cargaSqlDisponible())throw new Error('La carga SQL no está disponible.');
+        const numero=String(event.data.numero||'').trim();if(!numero)throw new Error('Falta el número del presupuesto confirmado.');
+        const response=await fetch(`${SUPABASE_URL}/rest/v1/${PRESUPUESTOS_TABLE}?numero=eq.${encodeURIComponent(numero)}&limit=1`,{headers:CorralonSystem.headers(),cache:'no-store'});
+        if(!response.ok)throw new Error('No se pudo consultar el presupuesto guardado.');
+        const records=await response.json();if(!records[0]?.id)throw new Error('No se encontró el presupuesto guardado.');
+        _presupuestoDetalleActual=records[0];_detalleTipoActual='presupuesto';
+        await abrirTransferenciaPresupuestoSql();
+        if(!document.querySelector('[data-budget-transfer-dialog]'))throw new Error('No se pudo abrir la transferencia. Revisá los permisos y el estado del presupuesto.');
+      }catch(error){window.parent.postMessage({type:'corralon:presupuesto-sql-error',message:error.message},location.origin);}
+    });
+    window.parent.postMessage({type:'corralon:presupuesto-sql-ready'},location.origin);return;
+  }
   if(new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window){
     document.getElementById('appContent').style.display='none';
     const embedStyle=document.createElement('style');embedStyle.textContent='html,body{background:transparent!important;margin:0;overflow:hidden}dialog.remito-sql-compact{max-height:calc(100dvh - 24px);overflow:auto}dialog.remito-sql-compact::backdrop{background:transparent!important;backdrop-filter:none!important}';document.head.append(embedStyle);
@@ -2105,14 +2126,15 @@ async function abrirTransferenciaPresupuestoSql() {
     origin.disabled=type.disabled=true;save.disabled=true;close.textContent='Cerrar';
     status.textContent=`Transferencia Nº ${pending.result.numeroMovimiento} confirmada en SQL. La salida y la entrada de stock quedaron registradas.`;
   };
-  if(pending?.result)showResult();
+  if(pending?.result){showResult();save.disabled=false;save.textContent='Marcar como resuelto';}
   else if(pending){origin.disabled=type.disabled=true;save.textContent='Reintentar transferencia';status.textContent='Hay una transferencia pendiente de comprobar. Reintentar recupera la misma operación.';}
   close.onclick=()=>{if(!busy)dialog.close()};
   dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault()});
-  dialog.addEventListener('close',()=>dialog.remove());
+  dialog.addEventListener('close',()=>{dialog.remove();if(new URLSearchParams(location.search).get('embed')==='presupuesto-sql'&&window.parent!==window)window.parent.postMessage({type:'corralon:presupuesto-sql-close'},location.origin);});
   save.onclick=async()=>{
-    if(busy||pending?.result)return;
+    if(busy)return;
     busy=true;save.disabled=close.disabled=origin.disabled=type.disabled=true;
+    window.historySqlBusy=true;window.CorralonFunciones?.animacionCarga?.('syncing','Confirmando transferencia de stock…');
     try{
       if(!pending){
         const branch=Number(origin.value),point=meta.puntosVenta.find(item=>Number(item.idSucursal)===branch),date=new Date();
@@ -2122,15 +2144,19 @@ async function abrirTransferenciaPresupuestoSql() {
       // Persistir antes de enviar: un corte no autoriza emitir otra transferencia.
       localStorage.setItem(key,JSON.stringify(pending));
       status.textContent='Registrando salida y entrada de stock…';
+      if(!pending.result){
       const response=await fetch('/api/facturacion/stock-ingreso',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...pending.payload,accion:'transferir-presupuesto'})});
       const result=await response.json();
       if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo confirmar la transferencia.');
       if(!result.idRecibo)throw new Error('No se recibió el movimiento confirmado. Reintentá para comprobarlo.');
       pending.result={idRecibo:result.idRecibo,numeroMovimiento:result.numeroMovimiento};
       try{localStorage.setItem(key,JSON.stringify(pending))}catch(error){console.warn('La transferencia está guardada en SQL; no se pudo guardar su copia local.',error)}
-      showResult();toast(`Transferencia Nº ${result.numeroMovimiento} confirmada`);
-    }catch(error){status.textContent=error.message;save.textContent='Reintentar transferencia';}
-    finally{busy=false;close.disabled=false;save.disabled=Boolean(pending?.result);}
+      }
+      await resolverRemitoCargadoSql(presupuesto,'presupuesto');
+      showResult();toast(`Transferencia Nº ${pending.result.numeroMovimiento} confirmada`);
+      dialog.close();window.CorralonFunciones?.animacionCarga?.('success','Transferencia confirmada · Presupuesto resuelto.');
+    }catch(error){status.textContent=error.message;save.textContent='Reintentar transferencia';window.CorralonFunciones?.animacionCarga?.('error',error.message);}
+    finally{busy=false;window.historySqlBusy=false;close.disabled=false;save.disabled=false;}
   };
   dialog.showModal();(pending?.result?close:origin.disabled?save:origin).focus();
 }
@@ -2266,6 +2292,7 @@ async function abrirCargaRemitoSql() {
   save.onclick = async () => {
     if(busy) return;
     busy = true; save.disabled = close.disabled = select.disabled = account.disabled = goods.disabled = true;
+    window.historySqlBusy=true;window.CorralonFunciones?.animacionCarga?.('syncing','Cargando remito en SQL…');
     try {
       if(!pending?.result && (!select.value || !account.value || !goods.value)) throw new Error('Seleccioná el pago y la cuenta y revisá el tipo de bien en Proveedores SQL.');
       if(!pending) {
@@ -2299,21 +2326,23 @@ async function abrirCargaRemitoSql() {
       if(new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window)window.parent.postMessage({type:'corralon:remito-sql-saved',resultado:remito.sql_resultado},location.origin);
       const cached = _remitosCache.find(item => String(item.id) === String(remito.id));
       if(cached) cached.sql_resultado = remito.sql_resultado;
-      resolverRemitoCargadoSql(remito);
+      await resolverRemitoCargadoSql(remito);
       localStorage.removeItem(remitoSqlPendingKey(remito.id));
       if(_remitoDetalleActual?.id === remito.id) setAccionesDetalleModo('remito');
       status.textContent = `Compra ${pending.result.numero} y stock Nº ${pending.result.stockNumero} cargados.`;
       save.hidden = true; close.textContent = 'Cerrar';
       attemptDetails.hidden = true;
+      dialog.close();window.CorralonFunciones?.animacionCarga?.('success','Remito cargado en SQL y resuelto.');
     } catch(error) {
       status.textContent = error.message;
+      window.CorralonFunciones?.animacionCarga?.('error',error.message);
       if(pending) {
         pending.error = error.message;
         try { localStorage.setItem(remitoSqlPendingKey(remito.id),JSON.stringify(pending)); } catch(_) {}
         showAttemptDetails();
       }
     }
-    finally { busy = false; close.disabled = false; save.disabled = false; select.disabled = Boolean(pending?.result); account.disabled = Boolean(pending?.result); goods.disabled = true; }
+    finally { busy = false;window.historySqlBusy=false; close.disabled = false; save.disabled = false; select.disabled = Boolean(pending?.result); account.disabled = Boolean(pending?.result); goods.disabled = true; }
   };
   dialog.showModal();
 }
@@ -2486,7 +2515,7 @@ async function cargarHistorial(append = false) {
   try {
     const {from,to}=historyDateRangeIso();
     const offset = append ? _remitosRemoteOffset : 0;
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=*&fecha_iso=gte.${encodeURIComponent(from)}&fecha_iso=lte.${encodeURIComponent(to)}&order=fecha_iso.desc,id.desc&limit=100&offset=${offset}`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/remitos?select=*&fecha_iso=gte.${encodeURIComponent(from)}&fecha_iso=lte.${encodeURIComponent(to)}&order=id.desc&limit=100&offset=${offset}`, {
       headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY }
     });
     if (!res.ok) throw new Error(await res.text() || 'No se pudieron cargar los remitos');
@@ -2544,8 +2573,8 @@ async function buscarRemitosConfirmado() {
   }
 }
 
-const historySortState={remito:{key:'fecha',direction:-1,dateMode:'fecha'},presupuesto:{key:'fecha',direction:-1,dateMode:'fecha'}};
-try{const saved=JSON.parse(localStorage.getItem('corralon_history_sort_v1')||'null');for(const type of Object.keys(historySortState)){const value=saved?.[type];if(value&&['numero','cliente','proveedor','fecha','total','resultado'].includes(value.key)&&[1,-1].includes(value.direction))historySortState[type]={...value,dateMode:value.dateMode==='emision'?'emision':'fecha'};}}catch{}
+const historySortState={remito:{key:'',direction:-1,dateMode:'fecha'},presupuesto:{key:'',direction:-1,dateMode:'fecha'}};
+try{const saved=JSON.parse(localStorage.getItem('corralon_history_sort_v2')||'null');for(const type of Object.keys(historySortState)){const value=saved?.[type];if(value&&['','numero','cliente','proveedor','fecha','total','resultado'].includes(value.key)&&[1,-1].includes(value.direction))historySortState[type]={...value,dateMode:value.dateMode==='emision'?'emision':'fecha'};}}catch{}
 for(const state of Object.values(historySortState))if(state.key==='cliente')state.key='proveedor';
 let historyDateContextType='remito';
 function historySortValue(record,type,key){
@@ -2557,7 +2586,7 @@ function historySortValue(record,type,key){
   if(key==='resultado'){const id=type==='remito'?record.id:record.numero||record.id;const state=historialEstados.get(historialNotifId(type,String(id||'')));return state===undefined?'':state===false?'No resuelto':'Resuelto';}
   return '';
 }
-function sortedHistoryRows(records,type){const state=historySortState[type];return records.map((record,index)=>({record,index})).sort((a,b)=>{const left=historySortValue(a.record,type,state.key),right=historySortValue(b.record,type,state.key);const compared=typeof left==='number'?left-right:String(left).localeCompare(String(right),'es',{numeric:true,sensitivity:'base'});return compared*state.direction||a.index-b.index;});}
+function sortedHistoryRows(records,type){const state=historySortState[type];if(!state.key)return records.map((record,index)=>({record,index})).sort((a,b)=>{if(type==='remito')return Number(b.record.id)-Number(a.record.id)||a.index-b.index;return (Date.parse(b.record.created_at||'')||0)-(Date.parse(a.record.created_at||'')||0)||String(b.record.id||'').localeCompare(String(a.record.id||''),'es',{numeric:true})||a.index-b.index;});return records.map((record,index)=>({record,index})).sort((a,b)=>{const left=historySortValue(a.record,type,state.key),right=historySortValue(b.record,type,state.key);const compared=typeof left==='number'?left-right:String(left).localeCompare(String(right),'es',{numeric:true,sensitivity:'base'});return compared*state.direction||a.index-b.index;});}
 function historyHeaders(type){const state=historySortState[type];return `<div class="history-grid-head">${[['numero','Número de boleta'],['proveedor','Proveedor'],['fecha',state.dateMode==='emision'?'Fecha de emisión':'Fecha'],['total','Total'],['resultado','Resultado']].map(([key,label])=>`<button type="button" data-history-sort="${key}" data-history-sort-type="${type}" class="${state.key===key?'is-sorted ':''}${key==='fecha'?'history-date-head':''}" aria-label="Ordenar por ${label}"${key==='fecha'?' title="Clic derecho: elegir fecha del comprobante o de emisión"':''}>${label}${state.key===key?(state.direction===1?' ▲':' ▼'):''}</button>`).join('')}<span></span></div>`;}
 function historyDateText(record,type){if(historySortState[type].dateMode!=='emision')return record.fecha||'';const date=new Date(record.created_at||'');return Number.isNaN(date.getTime())?'—':date.toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short'});}
 function renderPresupuestosHistorial(){
@@ -2565,10 +2594,24 @@ function renderPresupuestosHistorial(){
  if(!_presupuestosCache.length){body.innerHTML='<div class="h-empty">Sin presupuestos todavía</div>';return;}
  body.innerHTML='<div class="history-table-scroll">'+historyHeaders('presupuesto')+sortedHistoryRows(_presupuestosCache,'presupuesto').map(({record:p,index:idx})=>`<div class="h-item history-grid-row" onclick="abrirDetallePresupuesto(${idx})"><div class="h-nro">${esc(p.numero||'—')}</div><div class="h-info"><div class="h-cliente">${esc(tituloPresupuestoHistorial(p))}</div><div class="h-meta">${Array.isArray(p.items)?p.items.length:0} item(s)</div>${metaExtraPresupuestoHtml(p)}</div><div class="history-date">${esc(historyDateText(p,'presupuesto'))}</div><div class="h-total">${fmt(p.total||0)}</div><div class="history-result">${chipEstadoHistorial('presupuesto',p)}</div><div class="h-actions"><button class="h-mini-btn danger" type="button" onclick="event.stopPropagation();confirmarEliminarPresupuesto(${idx})">Eliminar</button></div></div>`).join('')+'</div>'+(_presupuestosHasMore?'<div class="history-more-wrap"><button class="history-more-btn" type="button" onclick="cargarPresupuestos(true)">Cargar anteriores</button></div>':'');
 }
-function refreshHistorySort(type){try{localStorage.setItem('corralon_history_sort_v1',JSON.stringify(historySortState));}catch{}if(type==='remito')renderRemitosHistorial();else renderPresupuestosHistorial();}
+function refreshHistorySort(type){try{localStorage.setItem('corralon_history_sort_v2',JSON.stringify(historySortState));}catch{}if(type==='remito')renderRemitosHistorial();else renderPresupuestosHistorial();}
+
+let historyDetailNavigating=false;
+async function navegarDetalleHistorial(event){
+ if(!['PageUp','PageDown'].includes(event.key)||event.ctrlKey||event.altKey||event.metaKey)return;
+ if(!document.getElementById('detalleBg')?.classList.contains('open'))return;
+ if(window.historySqlBusy||document.querySelector('dialog[open],#editBg.open,#confirmBg.open,#pdfActionsBg.open'))return;
+ event.preventDefault();if(historyDetailNavigating)return;
+ const type=_detalleTipoActual;if(!['remito','presupuesto'].includes(type))return;
+ const current=type==='remito'?_remitoDetalleActual:_presupuestoDetalleActual,cache=type==='remito'?_remitosCache:_presupuestosCache;
+ if(!current)return;const ordered=sortedHistoryRows(cache,type),index=ordered.findIndex(row=>String(row.record.id)===String(current.id));
+ if(index<0)return;const next=ordered[index+(event.key==='PageDown'?1:-1)];if(!next)return;
+ historyDetailNavigating=true;try{if(type==='remito')await abrirDetalle(next.record.id);else abrirDetallePresupuesto(next.index);}finally{historyDetailNavigating=false;}
+}
+document.addEventListener('keydown',navegarDetalleHistorial);
 document.addEventListener('click',event=>{
  const sort=event.target.closest('[data-history-sort]');
- if(sort){const type=sort.dataset.historySortType,state=historySortState[type],key=sort.dataset.historySort;state.direction=state.key===key?-state.direction:1;state.key=key;refreshHistorySort(type);return;}
+ if(sort){const type=sort.dataset.historySortType,state=historySortState[type],key=sort.dataset.historySort;if(state.key!==key){state.key=key;state.direction=1;}else if(state.direction===1){state.direction=-1;}else{state.key='';state.direction=-1;}refreshHistorySort(type);return;}
  const mode=event.target.closest('[data-history-date-mode]');
  if(mode){historySortState[historyDateContextType].dateMode=mode.dataset.historyDateMode;historySortState[historyDateContextType].key='fecha';refreshHistorySort(historyDateContextType);}
  document.getElementById('historyDateContext').classList.remove('open');
@@ -3775,3 +3818,5 @@ document.addEventListener('keydown', (event) => {
 <script src="recargar-deslizando.js" defer></script>
 </body>
 </html>
+
+

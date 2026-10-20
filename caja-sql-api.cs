@@ -154,6 +154,15 @@ internal static partial class FacturacionCopiaApi
         }
         return new {ok=true,filas=rows};
     }
+    private static object CajaDayValueInvoices(SqlConnection c,DateTime date,int branch,int pay,CajaSession session) {
+        if(branch<0||branch>2||pay<=0)throw new InvalidOperationException("Revisá la sucursal y el tipo de valor.");
+        if(session.Restricted)branch=session.Branch;
+        var rows=Rows(c,"SELECT f.IDRecibo idRecibo,f.NroFactura numero,t.Abreviatura comprobante,f.ApeYNom cliente,p.TipoPago tipoValor,SUM(v.ImpEnt*t.ImpPor) total,COALESCE(NULLIF(a.[Descripción],''),'Ninguna') cuenta FROM dbo.FacturasATP f JOIN dbo.FacturasTSVal v ON v.IDRecibo=f.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas a ON a.IDTarjeta=v.IDTarjeta WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND (@p2=0 OR d.IDSucAsoc=@p2) AND f.Confirmado<>0 AND f.Anulada=0 AND t.IDTipoAcred>0 AND t.EnCaja<>0 AND f.EnInfVtas<>0 AND (@p3=0 OR v.IDTipoPago=@p3) GROUP BY f.IDRecibo,f.NroFactura,t.Abreviatura,f.ApeYNom,p.TipoPago,a.[Descripción] ORDER BY f.IDRecibo DESC",date,date.AddDays(1),branch,pay);
+        if(pay>0) {
+            rows.AddRange(Rows(c,"SELECT r.IDRecibo idRecibo,r.NroFactura numero,t.Abreviatura comprobante,r.Cliente cliente,p.TipoPago tipoValor,SUM(v.Importe) total,COALESCE(NULLIF(a.[Descripción],''),'Ninguna') cuenta,'recibo-cobro' origen FROM dbo.RecibosXTP r JOIN dbo.RecibosXTS v ON v.IDRecibo=r.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=r.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=r.[IDDepósito] AND d.IDEmp=r.IDEmp JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas a ON a.IDTarjeta=v.IDTarjeta WHERE r.IDEmp=1 AND r.Fecha>=@p0 AND r.Fecha<@p1 AND (@p2=0 OR d.IDSucAsoc=@p2) AND r.Confirmado<>0 AND r.Anulado=0 AND t.EnCaja<>0 AND v.IDTipoPago=@p3 GROUP BY r.IDRecibo,r.NroFactura,t.Abreviatura,r.Cliente,p.TipoPago,a.[Descripción] ORDER BY r.IDRecibo DESC",date,date.AddDays(1),branch,pay));
+        }
+        return new {ok=true,filas=rows};
+    }
     private static object CajaCollectionReceipts(SqlConnection c,int id,int receipt,CajaSession session) {
         var h=CajaHeader(c,null,id,false,session);DateTime date=Convert.ToDateTime(h["Fecha"]).Date;int branch=Convert.ToInt32(h["IDSucAsoc"]);
         // Same scope as Total cobros: confirmed, non-annulled receipts of this branch and day.
@@ -222,6 +231,12 @@ internal static partial class FacturacionCopiaApi
         DateTime date=CajaDate(request.HttpMethod=="GET"?request.QueryString["fecha"]:Value(input,"fecha"));CajaCheckDate(session,date);
         int id=request.HttpMethod=="GET"?Convert.ToInt32(request.QueryString["id"]??"0"):CajaInputId(input);
         if(request.HttpMethod=="GET") {
+            if(action=="comprobantes-dia")return CajaDayValueInvoices(c,date,Convert.ToInt32(request.QueryString["sucursal"]??"0"),Convert.ToInt32(request.QueryString["tipoValor"]??"0"),session);
+            if(action=="recibo-dia"){
+                int branch=session.Restricted?session.Branch:Convert.ToInt32(request.QueryString["sucursal"]??"0"),receipt=RequiredId(request.QueryString["recibo"],"el recibo");
+                if(Scalar(c,null,"SELECT r.IDRecibo FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] d ON d.IDDepósito=r.IDDepósito AND d.IDEmp=r.IDEmp WHERE r.IDRecibo=@p0 AND r.IDEmp=1 AND r.Confirmado=1 AND r.Anulado=0 AND r.Fecha>=@p1 AND r.Fecha<@p2 AND (@p3=0 OR d.IDSucAsoc=@p3)",receipt,date,date.AddDays(1),branch)==null)throw new InvalidOperationException("El recibo no pertenece a esta sucursal y fecha.");
+                return CollectionReceiptResult(c,null,receipt);
+            }
             if(action=="cobranzas")return new {ok=true,fecha=DateTime.Today.ToString("yyyy-MM-dd"),filas=Rows(c,"SELECT f.IDRecibo id,f.NroFactura numero,f.ApeYNom cliente,t.Descripcion tipo,f.Total total,CONVERT(varchar(8),f.FechaYHora,108) hora,d.IDSucAsoc sucursal"+CajaPendingFrom+" ORDER BY f.IDRecibo DESC,f.FechaYHora DESC",DateTime.Today,DateTime.Today.AddDays(1),session.Restricted?session.Branch:Convert.ToInt32(request.QueryString["sucursal"]??"0"))};
             if(action=="cobranza-detalle") {using(var readTx=c.BeginTransaction(IsolationLevel.Serializable)){var detail=CajaPendingDetail(c,readTx,id,session);readTx.Commit();return detail;}}
             if(action=="formulario") {
@@ -247,6 +262,17 @@ internal static partial class FacturacionCopiaApi
         else if(action!="valores-boleta" && !session.Edit)throw new InvalidOperationException("Tu usuario no tiene permiso de edición de Caja.");
         using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
             try {
+                if(action=="cobranza-anular") {
+                    if(!session.Admin)throw new InvalidOperationException("Solo los administradores pueden anular boletas.");
+                    int receipt=RequiredId(Value(input,"idRecibo"),"el comprobante");
+                    Scalar(c,tx,"SELECT IDRecibo FROM dbo.FacturasATP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0",receipt);
+                    var pending=CajaPendingHeader(c,tx,receipt,session);
+                    int cash=pending["IDCaja"]==DBNull.Value?0:Convert.ToInt32(pending["IDCaja"]);
+                    if(cash>0)CajaHeader(c,tx,cash,true,session);
+                    var result=InvoiceCancelTx(c,tx,input);
+                    if(cash>0)CajaRecalculate(c,tx,CajaHeader(c,tx,cash,true,session));
+                    tx.Commit();return result;
+                }
                 if(action=="cobranza-pagada" || action=="cobranza-valores") {var result=CajaPendingWrite(c,tx,input,session,action=="cobranza-valores");tx.Commit();return result;}
                 if(action=="valores-boleta") {var updatedCaja=CajaCorrectInvoiceValues(c,tx,input,session);tx.Commit();return new {ok=true,caja=updatedCaja};}
                 if(action=="actualizar-dia") {
@@ -334,4 +360,5 @@ internal static partial class FacturacionCopiaApi
         return new{ok=true,publicaciones=publications};
     }
 }
+
 

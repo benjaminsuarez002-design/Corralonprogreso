@@ -3033,13 +3033,36 @@ internal static partial class FacturacionCopiaApi
             catch {try {tx.Rollback();}catch{}throw;}
         }
     }
+    private static object CollectionReceiptEditPayment(SqlConnection c,Dictionary<string,object> input)
+    {
+        AssertPurchasePermission(Text(Value(input,"usuarioId")),"recibos_cobro",false,true);
+        int receipt=RequiredId(Value(input,"id"),"el recibo"),order=RequiredId(Value(input,"orden"),"el valor recibido"),kind=RequiredId(Value(input,"tipo"),"el tipo de pago");
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
+            var h=RowsTx(c,tx,"SELECT IDCaja FROM dbo.RecibosXTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado=1 AND Anulado=0",receipt);
+            if(h.Count!=1)throw new InvalidOperationException("El recibo no está confirmado o fue anulado.");
+            if(Text(Value(input,"version"))!=CollectionReceiptVersion(c,tx,receipt))throw new InvalidOperationException("El recibo cambió. Cerrá y volvé a consultarlo.");
+            int cash=(int)InvoiceValueNumber(h[0]["IDCaja"]);
+            if(cash>0&&Scalar(c,tx,"SELECT IDRecibo FROM dbo.CajaDiaTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado<>0",cash)!=null)throw new InvalidOperationException("El recibo pertenece a una Caja cerrada. Reabrí la Caja antes de modificar el pago.");
+            var rows=RowsTx(c,tx,"SELECT v.*,p.IDClasePago clase FROM dbo.RecibosXTS v WITH(UPDLOCK,HOLDLOCK) JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago WHERE v.IDRecibo=@p0 AND v.IDOrden=@p1",receipt,order);
+            var kinds=RowsTx(c,tx,"SELECT IDClasePago clase FROM dbo.TiposPagos WHERE IDTipoPago=@p0 AND IDTipoPago NOT IN(3,4)",kind);
+            if(rows.Count!=1||kinds.Count!=1)throw new InvalidOperationException("Valor o tipo de pago inválido.");
+            int cls=(int)Number(kinds[0]["clase"]),oldClass=(int)Number(rows[0]["clase"]),card=(int)InvoiceValueNumber(Value(input,"tarjeta")),installments=(int)InvoiceValueNumber(Value(input,"cuotas"));
+            if(cls==2||oldClass==2||InvoiceValueNumber(rows[0]["IDMovBco"])>0)throw new InvalidOperationException("Los cheques vinculados requieren su gestión bancaria; no se cambian desde este editor.");
+            if(cls!=1&&cls!=3&&cls!=5)throw new InvalidOperationException("Tipo de pago no admitido para esta corrección.");
+            if(cls==1){card=0;installments=0;}else if(card<=0||Scalar(c,tx,"SELECT IDTarjeta FROM dbo.Tarjetas WHERE IDTarjeta=@p0 AND Susp=0",card)==null)throw new InvalidOperationException("Seleccioná una tarjeta o cuenta vigente.");
+            if(cls==3)installments=0;
+            if(installments<0||installments>120||(cls==5&&installments<1))throw new InvalidOperationException("Revisá las cuotas de la tarjeta.");
+            if(Execute(c,tx,"UPDATE dbo.RecibosXTS SET IDTipoPago=@p0,IDTarjeta=@p1,Cuotas=@p2 WHERE IDRecibo=@p3 AND IDOrden=@p4",kind,card,installments,receipt,order)!=1)throw new InvalidOperationException("No se pudo actualizar el valor.");
+            var result=CollectionReceiptResult(c,tx,receipt);tx.Commit();return result;
+        }
+    }
     private static object CollectionReceiptResult(SqlConnection c, SqlTransaction tx, int receipt)
     {
         var headers = RowsTx(c, tx, "SELECT r.IDRecibo AS id,r.NroFactura AS numero,CONVERT(varchar(10),r.Fecha,103) AS fecha,r.IDCliente AS idCliente,r.Cliente AS cliente,r.Total AS total,r.Nota AS nota,r.Concepto AS concepto,c.CUIT AS documento,r.IDEmp AS empresa,r.Anulado AS anulado,r.IDDepósito AS puntoVenta,p.[Descripción] AS nombrePuntoVenta FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] p ON p.IDDepósito=r.IDDepósito LEFT JOIN dbo.Clientes c ON c.IDCliente=r.IDCliente WHERE r.IDRecibo=@p0 AND r.Confirmado=1", receipt);
         if (headers.Count != 1) throw new InvalidOperationException("No se encontró el recibo confirmado.");
         headers[0]["saldo"] = CollectionBalance(c, tx, Convert.ToInt32(headers[0]["idCliente"]), Convert.ToInt32(headers[0]["empresa"]));
         return new { ok = true, version = CollectionReceiptVersion(c,tx,receipt), recibo = headers[0], facturas = RowsTx(c, tx, "SELECT d.IDFactura AS id,h.NroFactura AS numero,CONVERT(varchar(10),h.Fecha,103) AS fecha,t.Abreviatura AS tipo,d.CuotaPaga AS cuota,h.Total AS importeFactura,d.ImpPagado AS importe FROM dbo.RecibosXTSFac d JOIN dbo.FacturasATP h ON h.IDRecibo=d.IDFactura JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob WHERE d.IDRecibo=@p0 ORDER BY h.Fecha,h.NroFactura", receipt),
-            valores = RowsTx(c, tx, "SELECT v.IDTipoPago AS idTipoPago,p.TipoPago AS tipo,v.IDTarjeta AS idTarjeta,t.[Descripción] AS tarjeta,v.Cuotas AS cuotas,CONVERT(varchar(10),v.FechaVto,103) AS vencimiento,v.Importe AS importe,v.Concepto AS descripcion,m.NroMovExt AS numero,b.Banco AS banco FROM dbo.RecibosXTS v JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta LEFT JOIN dbo.MovCheques m ON m.NroMovInt=v.IDMovBco LEFT JOIN dbo.Bancos b ON b.IDBanco=COALESCE(NULLIF(v.IDBanco,0),m.IDBanco) WHERE v.IDRecibo=@p0 ORDER BY v.IDOrden", receipt) };
+            valores = RowsTx(c, tx, "SELECT v.IDOrden AS orden,v.IDTipoPago AS idTipoPago,p.IDClasePago AS clase,p.TipoPago AS tipo,v.IDTarjeta AS idTarjeta,t.[Descripción] AS tarjeta,v.Cuotas AS cuotas,CONVERT(varchar(10),v.FechaVto,103) AS vencimiento,v.Importe AS importe,v.Concepto AS descripcion,m.NroMovExt AS numero,b.Banco AS banco FROM dbo.RecibosXTS v JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta LEFT JOIN dbo.MovCheques m ON m.NroMovInt=v.IDMovBco LEFT JOIN dbo.Bancos b ON b.IDBanco=COALESCE(NULLIF(v.IDBanco,0),m.IDBanco) WHERE v.IDRecibo=@p0 ORDER BY v.IDOrden", receipt) };
     }
     private static object CollectionReceiptQuery(SqlConnection c, HttpListenerRequest request)
     {
@@ -3437,6 +3460,7 @@ internal static partial class FacturacionCopiaApi
                             AssertPurchasePermission(Text(Value(input,"usuarioId")),"recibos_cobro",false,true);
                             Reply(context,200,CollectionReceiptCancel(connection,input));return;
                         }
+                        if(Text(Value(input,"accion"))=="editar-pago"){Reply(context,200,CollectionReceiptEditPayment(connection,input));return;}
                         Reply(context, 200, CollectionReceiptConfirm(connection, input)); return;
                     }
                 }
@@ -4050,4 +4074,5 @@ internal static partial class FacturacionCopiaApi
         }
     }
 }
+
 

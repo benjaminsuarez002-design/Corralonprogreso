@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.17"></script>
+<script src="corralon-system.js?v=1.0.18"></script>
   <script src="funciones.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -2287,7 +2287,9 @@
       const SUPPLIER_BALANCES_CONFIG_DOC = "saldosProveedores";
       const SUPPLIER_BALANCES_CACHE_DB = "comprobantes_saldos_proveedores_v1";
       const SUPPLIER_BALANCES_CACHE_STORE = "data";
-      const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1";
+      const COBRANZA_EMBED=new URLSearchParams(location.search).get('embed')==='cobranza'&&window.parent!==window;
+      const COBRANZA_ID=new URLSearchParams(location.search).get('cobranzaId')||'';
+      const DRAFT_STORAGE_KEY = "corralon_comprobantes_draft_v1"+(COBRANZA_EMBED?':cobranza:'+COBRANZA_ID:'');
       const ALIASES_CACHE_KEY = "corralon_comprobantes_aliases_cache_v1";
       const RECORDS_CACHE_KEY = "corralon_comprobantes_records_cache_v1";
       const RECORDS_CURSOR_KEY = "corralon_comprobantes_records_cursor_v1";
@@ -3263,6 +3265,27 @@
         return item?.prioritario === true;
       }
 
+      // Entrada desde Cobranzas: preparar el formulario, nunca guardar automaticamente.
+      let cobranzaPrefilled=false,cobranzaAliasesReady=false;
+      function preselectCobranzaAlias(){
+        if(!COBRANZA_EMBED||!cobranzaPrefilled||!cobranzaAliasesReady||state.draft.transfer)return;
+        const alias=sortedAliases().find(isPriorityAlias);
+        if(alias){state.draft.transfer={id:alias.id,nombre:alias.nombre,alias:alias.alias||'',cuit:alias.cuit||''};syncDraftToInputs();}
+      }
+      function receiveCobranzaInvoice(event){
+        if(!COBRANZA_EMBED||event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='corralon:comprobantes-prefill'||cobranzaPrefilled)return;
+        const invoice=event.data.factura;
+        if(!invoice||String(invoice.idRecibo)!==COBRANZA_ID||!String(invoice.cliente||'').trim()||!String(invoice.numero||'').trim()||!Number.isFinite(Number(invoice.total))||Number(invoice.total)<=0)return;
+        if(!hasDraftData()){
+          state.draft=createDraft();state.editingId=null;state.draft.client=String(invoice.cliente);state.draft.machine=formatMachine(invoice.numero);state.draft.amountNumber=Number(invoice.total);state.draft.amountInput=formatAmount(invoice.total,true);
+        }
+        cobranzaPrefilled=true;preselectCobranzaAlias();syncDraftToInputs();el.draftClient.focus();
+      }
+      if(COBRANZA_EMBED){
+        document.body.classList.add('cobranza-embed');const style=document.createElement('style');style.textContent='body.cobranza-embed .topbar,body.cobranza-embed #saved-records,body.cobranza-embed .footer-bar,body.cobranza-embed>a[href="menu.html"]{display:none!important}body.cobranza-embed .page{padding:0;min-height:0}body.cobranza-embed .content{padding:12px}body.cobranza-embed #draft-card{margin:0;width:100%}';document.head.append(style);
+        window.addEventListener('message',receiveCobranzaInvoice);
+      }
+
       function aliasSort(a, b) {
         const priorityDiff = Number(isPriorityAlias(b)) - Number(isPriorityAlias(a));
         if (priorityDiff) return priorityDiff;
@@ -3373,6 +3396,7 @@
 
       function setDraftSaving(isSaving) {
         state.isSavingDraft = !!isSaving;
+        if(COBRANZA_EMBED)window.parent.postMessage({type:'corralon:comprobantes-saving',saving:!!isSaving},location.origin);
         el.draftAdd.disabled = !!isSaving;
         el.saveNew.disabled = !!isSaving;
         el.draftClear.disabled = !!isSaving;
@@ -4828,6 +4852,7 @@
           resetDraft();
           activateTab("comp");
           showToast("Comprobante guardado");
+          if(COBRANZA_EMBED)window.parent.postMessage({type:'corralon:comprobantes-saved'},location.origin);
           setTimeout(() => el.draftClient.focus(), 0);
         } finally {
           setDraftSaving(false);
@@ -5106,6 +5131,7 @@
             objetivoDiario: Number(doc.data().objetivoDiario || 0)
           }));
           writeJsonCache(ALIASES_CACHE_KEY, state.aliases);
+          cobranzaAliasesReady=true;preselectCobranzaAlias();
           renderAliases();
           syncDraftToInputs();
           renderTodayRecords();
@@ -5789,6 +5815,7 @@
         bindFileInput();
         bindPasteAndDrop();
         loadDolarCards();
+        if(COBRANZA_EMBED)window.parent.postMessage({type:'corralon:comprobantes-ready'},location.origin);
       }
 
       function formatDolarValue(value) {

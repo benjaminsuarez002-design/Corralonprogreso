@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.55"></script>
+<script src="corralon-system.js?v=1.0.56"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1876,10 +1876,16 @@ function filteredProviderArticles(cell) {
     linkedArticleMatch = matchingArticles.length > 0;
   }
   articleProviderHasSearchMatch = terms.length ? ordered.some(descriptionMatches) : matchingArticles.length > 0;
+  const suggestionRank = item => {
+    if (cell?.dataset?.field !== 'descripcion' || !terms.length) return exactRank(item);
+    const firstWord = norm(item.descripcion || '').split(' ').filter(Boolean)[0] || '';
+    const wordRank = firstWord === terms[0] ? 0 : firstWord.startsWith(terms[0]) ? 1 : 2;
+    return wordRank * 20 + exactRank(item);
+  };
   articleProviderPage = CorralonSystem.articleOptionPager.create(cell?.dataset?.field === 'descripcion' && !stockDescriptionMatchesOnly() ? ordered : matchingArticles, {
     preordered: true,
     isMatch: item => linkedArticleMatch || matches(item),
-    rank: exactRank,
+    rank: suggestionRank,
     hasSearch: Boolean(typedCode || terms.length),
     beforeCount: 20,
     afterCount: 40,
@@ -7344,8 +7350,11 @@ async function open(options) {
     const ranks = new Map();
     const filterRank = article => {
       if (ranks.has(article)) return ranks.get(article);
-      const value = rowCode && article.searchCode === rowCode ? -2 : article.searchCode === query ? -1 :
+      const base = rowCode && article.searchCode === rowCode ? -2 : article.searchCode === query ? -1 :
         indexDescriptionFilterRank(article.descripcion, queryText, { ...queryFilter, text:article.searchDescription, compactText:article.searchCompact, words:article.searchWords });
+      const firstWord = (article.searchWords || normalizeIndexFilter(article.descripcion).split(' '))[0] || '';
+      const firstTerm = queryFilter.terms[0] || '';
+      const value = Number.isFinite(base) && firstTerm ? (firstWord === firstTerm ? 0 : firstWord.startsWith(firstTerm) ? 1 : 2) * 20 + base : base;
       ranks.set(article,value);
       return value;
     };
@@ -7771,3 +7780,4 @@ window.CorralonLocalArticleImporter = {open, hasDraft, resumeQueue};
 <script src="recargar-deslizando.js" defer></script>
 </body>
 </html>
+

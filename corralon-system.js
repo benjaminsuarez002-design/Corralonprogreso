@@ -768,6 +768,43 @@
     return updated;
   }
 
+  function prepareArticleEditorReference(host) {
+    if(!document.querySelector('link[href*="theme-corralon.css"]')){
+      const theme=document.createElement('link');theme.rel='stylesheet';theme.href='theme-corralon.css';document.head.append(theme);
+    }
+    host.classList.add('article-editor-reference');
+    const card=host.querySelector('.corralon-article-editor-card');
+    const fitEditor=()=>{const viewport=window.visualViewport;const width=viewport?.width||window.innerWidth,height=viewport?.height||window.innerHeight;const scale=Math.min(1,Math.max(1,width-32)/1140,Math.max(1,height-32)/800);host.style.setProperty('--article-editor-scale',String(scale));};
+    fitEditor();window.addEventListener('resize',fitEditor);window.visualViewport?.addEventListener('resize',fitEditor);
+    const info=card.querySelector('.corralon-article-editor-info');
+    const make=(tag,cls,text)=>{const node=document.createElement(tag);node.className=cls;if(text)node.textContent=text;return node;};
+    const code=make('div','article-editor-reference-code');
+    code.append(make('span','article-editor-reference-label','IDArt'),info.querySelector('[data-editor-info="codigo"]'),make('span','article-editor-reference-label','Cód. proveedor'),info.querySelector('[data-editor-info="codigoProveedor"]'));
+    const description=make('div','article-editor-reference-description');
+    description.append(make('span','article-editor-reference-label','Descripción'),info.querySelector('[data-editor-info="nombre"]'),make('span','article-editor-reference-label','Rubro'),info.querySelector('[data-editor-info="rubro"]'));
+    const price=info.querySelector('.corralon-article-editor-info-price');
+    info.replaceChildren(code,description,price);
+    const columns=make('div','article-editor-reference-columns'),left=make('section','article-editor-reference-details'),right=make('section','article-editor-reference-images');
+    const mainGrid=card.querySelector('.corralon-article-editor-main-grid');
+    const labelField=mainGrid.nextElementSibling;
+    const chips=card.querySelector('.corralon-article-editor-chips');
+    left.append(make('h2','article-editor-reference-heading article-editor-reference-notes','Información adicional'),mainGrid);
+    const tagHelp=make('small','article-editor-reference-help','Palabras para facilitar la búsqueda');
+    mainGrid.querySelector('[data-editor-field="tags"]').parentElement.append(tagHelp);
+    mainGrid.querySelector('[data-editor-field="detalle"]').placeholder='Descripción complementaria del artículo…';
+    labelField.classList.add('article-editor-reference-label-heading');
+    left.append(labelField,chips);
+    card.querySelectorAll(':scope>.corralon-article-editor-extras').forEach(node=>left.append(node));
+    const photoHead=card.querySelector('.corralon-article-editor-photo-head');
+    const photoActions=photoHead.querySelector('div');photoActions.classList.add('article-editor-reference-photo-actions');
+    const photo=card.querySelector('.corralon-article-editor-photo');
+    right.append(make('h2','article-editor-reference-heading article-editor-reference-photo-heading','Foto del artículo'),photo,make('small','article-editor-reference-help article-editor-reference-photo-help','Tocá para ampliar · Arrastrá para cambiar'),photoActions);
+    photoHead.remove();columns.append(left,right);info.after(columns);
+    const close=card.querySelector('.corralon-article-editor-close');close.textContent='Cerrar';close.setAttribute('aria-label','Cerrar editor de artículo');
+    const remove=photo.querySelector('[data-editor-photo-remove]');remove.textContent='';remove.setAttribute('aria-label','Quitar foto');
+    photo.querySelector('[data-editor-photo-prev]').setAttribute('aria-label','Foto anterior');photo.querySelector('[data-editor-photo-next]').setAttribute('aria-label','Foto siguiente');
+  }
+
   function ensureArticleEditorHost() {
     if (articleEditorHost?.isConnected) return articleEditorHost;
     const style = document.createElement('style');
@@ -1014,6 +1051,7 @@
         <textarea class="corralon-editor-paste-area" data-editor-arid-paste-area placeholder="Pegá acá la tabla de precios..."></textarea>
         <div class="corralon-editor-subactions"><button type="button" data-editor-arid-paste-close>Cancelar</button><button type="button" data-editor-arid-paste-confirm>Pegar valores</button></div>
       </div></div>`;
+    prepareArticleEditorReference(articleEditorHost);
     document.body.appendChild(articleEditorHost);
     articleEditorHost.addEventListener('click', (event) => {
       if (event.target === articleEditorHost) closeArticleEditor();

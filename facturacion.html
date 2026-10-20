@@ -5,6 +5,7 @@
   <title>Facturación — Corralón Progreso</title>
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="theme-corralon.css">
+  <script>const REPRINT_CAJA_ID=Number(new URLSearchParams(location.search).get('reimprimirCaja'))||0;</script>
   <script src="menu-auth-guard.js" data-menu-guard="facturacion" data-menu-login="menu.html"></script>
   <script src="facturacion-medios-pago.js"></script>
   <style>
@@ -176,6 +177,7 @@
     .ticket-item-main span:last-child{font-size:10px;line-height:1.2}
     .ticket-payment-head,.ticket-payment-row{font-size:10px;line-height:1.15;padding:1px 3px}.ticket-total{font-size:15px;padding:2px 3px}.ticket-fiscal,.ticket-extra,.ticket-tax-lines{font-size:10px;line-height:1.15;padding:2px 3px}.ticket-legal{font-size:9.5px;line-height:1.15;padding:2px 3px}
     .ticket-qr{border:1px solid #000;border-top:0;padding:3px;text-align:center}.ticket-qr img{display:block;width:27mm;height:27mm;margin:0 auto;image-rendering:pixelated}.ticket-qr small{display:block;margin-top:2px;font-size:8px}.ticket-tax-lines{border:1px solid #000;border-top:0;padding:3px;font-size:11px}.ticket-tax-lines>div{display:flex;justify-content:space-between}
+    .ticket-stamp-space{height:15mm;min-height:15mm;flex-shrink:0;break-inside:avoid;border:1px solid #000;position:relative}.ticket-stamp-space span{position:absolute;top:1px;left:3px;font:12px Arial,sans-serif}
     .trial-ticket,.ticket-company>div{overflow-wrap:anywhere}.ticket-facts strong,.ticket-item-price span:last-child{min-width:0;white-space:normal;text-align:right}.ticket-client-bottom>*{min-width:0}.ticket-total span:last-child{min-width:0;text-align:right}
     @media print{@page{size:80mm 297mm;margin:0}html,body{width:80mm!important;min-height:0!important;margin:0!important;padding:0!important;background:#fff!important}body>.app,body>#suggestions,body>#draftModal,body>script{display:none!important}#trialModal{position:static!important;display:block!important;width:80mm!important;min-height:0!important;margin:0!important;padding:0!important;background:#fff!important}#trialModal .trial-modal{display:block!important;width:80mm!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important}#trialModal .modal-head,#trialModal .trial-actions,#trialModal .preview-printer{display:none!important}#trialModal .trial-preview{overflow:visible!important;width:80mm!important;padding:0!important;background:#fff!important}#trialTicket{width:70mm!important;max-width:none!important;margin:0 0 0 1mm!important;padding:0!important;box-shadow:none!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}#trialTicket *{color:#000!important;opacity:1!important;text-shadow:none!important;filter:none!important}.trial-ticket .trial-item{break-inside:avoid}}
     /* Mantener la distribución de escritorio y reducir el formulario completo. */
@@ -222,7 +224,7 @@
 <div class="modal-wrap" id="printerSetupModal" role="dialog" aria-modal="true" aria-label="Seleccionar ticketera"><section class="modal printer-setup"><header class="modal-head"><h2>Seleccionar ticketera</h2><button id="closePrinterSetup" type="button">Cerrar</button></header><div class="printer-setup-body"><label for="printerSetupChoice">Impresoras de esta PC y del servidor</label><select id="printerSetupChoice"><option value="">Buscando impresoras…</option></select><small id="printerSetupError" role="alert"></small><small id="localPrinterHelp">Para imprimir directo en otra PC, instalá una vez el <a href="ImpresoraLocal.exe" download="ImpresoraLocal.exe">conector de impresora de esta PC</a> y elegí una ticketera ESC/POS. Para otras impresoras podés usar “Esta PC · abrir selector de impresión” sin instalarlo.</small></div><footer class="printer-setup-actions"><button id="reloadPrinterSetup" type="button">Actualizar lista</button><button id="savePrinterSetup" class="primary" type="button">Guardar impresora</button></footer></section></div>
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.49"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.50"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 const DB_NAME='corralon_facturacion_v1',STORE='borradores',ACTIVE_DRAFT_KEY='corralon_facturacion_borrador_activo_v1';
 let draftViewRevision=0,restoreDraftPromise=null,saleSwitchBusy=false,creditCheckInProgress=false;
 const SALE_LIST_KEY='corralon_facturacion_ventas_abiertas_v1';
@@ -1529,9 +1531,9 @@ function putDraft(data){
   return task;
 }
 async function allDrafts(){const database=await openDB();return new Promise((resolve,reject)=>{const req=database.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>{database.close();resolve(mergeInterruptedSales(req.result))};req.onerror=()=>reject(req.error)})}async function deleteDraft(id){const database=await openDB();return new Promise((resolve,reject)=>{const tx=database.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>{database.close();resolve()};tx.onerror=()=>reject(tx.error)})}
-async function saveDraft(silent=false){if(billingCajaBlocked)return;const data={...formData(),uiArticulos:structuredClone(articles),uiValores:structuredClone(payments)};draftId=data.id;rememberActiveDraft(data.id);const stored=await putDraft(data);if(draftId!==data.id)return;
+async function saveDraft(silent=false){if(REPRINT_CAJA_ID||billingCajaBlocked)return;const data={...formData(),uiArticulos:structuredClone(articles),uiValores:structuredClone(payments)};draftId=data.id;rememberActiveDraft(data.id);const stored=await putDraft(data);if(draftId!==data.id)return;
 if(stored?.emision&&!issuedReceipt){recoveryPending=true;lockIssued();setRecoveryAlert('Esta venta ya figura emitida en la copia local. Verificando SQL antes de habilitarla.');await verifyRecovery();return}
-lastSaved=structuredClone(stored||data);if(!silent)setMsg('Borrador guardado localmente.','ok')}function scheduleDraft(){if(issuedReceipt)return;draftViewRevision++;clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft(true).catch(console.warn),700)}async function showDrafts(){const list=await allDrafts(),box=$('#draftList');box.innerHTML=list.length?list.map(d=>`<div class="draft"><div><strong>${esc(d.emision?.numero||d.tipoComprobante)} · ${esc(customerUpper(d.cliente?.nombre||'Sin cliente'))}</strong><small>${d.emision?'EMITIDO · ':''}${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)}</small></div><button data-open-draft="${d.id}">Abrir</button><button data-delete-draft="${d.id}">${d.emision?'Quitar de esta PC':'Eliminar borrador'}</button></div>`).join(''):'<div class="empty">No hay borradores.</div>';$('#draftModal').classList.add('open');$$('[data-open-draft]').forEach(b=>b.addEventListener('click',async()=>{const d=list.find(x=>x.id===b.dataset.openDraft);applyData(d);closeDraftModal()}));$$('[data-delete-draft]').forEach(b=>b.addEventListener('click',async()=>{if(b.dataset.deleteDraft===draftId)applyData(null);await deleteDraft(b.dataset.deleteDraft);showDrafts()}))}
+lastSaved=structuredClone(stored||data);if(!silent)setMsg('Borrador guardado localmente.','ok')}function scheduleDraft(){if(REPRINT_CAJA_ID||issuedReceipt)return;draftViewRevision++;clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft(true).catch(console.warn),700)}async function showDrafts(){const list=await allDrafts(),box=$('#draftList');box.innerHTML=list.length?list.map(d=>`<div class="draft"><div><strong>${esc(d.emision?.numero||d.tipoComprobante)} · ${esc(customerUpper(d.cliente?.nombre||'Sin cliente'))}</strong><small>${d.emision?'EMITIDO · ':''}${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)}</small></div><button data-open-draft="${d.id}">Abrir</button><button data-delete-draft="${d.id}">${d.emision?'Quitar de esta PC':'Eliminar borrador'}</button></div>`).join(''):'<div class="empty">No hay borradores.</div>';$('#draftModal').classList.add('open');$$('[data-open-draft]').forEach(b=>b.addEventListener('click',async()=>{const d=list.find(x=>x.id===b.dataset.openDraft);applyData(d);closeDraftModal()}));$$('[data-delete-draft]').forEach(b=>b.addEventListener('click',async()=>{if(b.dataset.deleteDraft===draftId)applyData(null);await deleteDraft(b.dataset.deleteDraft);showDrafts()}))}
 showDrafts=async function(){
   const drafts=(await allDrafts()).filter(pendingLocalSale);
   $('#draftList').innerHTML=drafts.length?drafts.map(d=>`<div class="draft"><div><strong>${esc(d.tipoComprobante||'Comprobante')} · ${esc(customerUpper(d.cliente?.nombre||'Sin cliente'))}</strong><small>${new Date(d.updatedAt).toLocaleString('es-AR')} · ${money(d.totales?.total)} · ${d.recoveryPending?'Pendiente de verificar':'Venta interrumpida · lista para retomar'}</small></div><button data-open-draft="${d.id}" type="button">Abrir</button></div>`).join(''):'<div class="empty">No hay ventas pendientes.</div>';
@@ -2621,10 +2623,19 @@ async function openBudgetPreview(data,receipt,popup=null){
 }
 let aridosEntrega=null;
 function saleNeedsAridosDelivery(data){return ![5,6,29,43].includes(Number(data.idComprobante));}
-async function chooseAridosDelivery(data){
+async function chooseAridosDelivery(data,deliveryType=null){
   if(!saleNeedsAridosDelivery(data))return null;
   const cache=await CorralonSystem.aridos.loadCachedConfig();
   if(!cache.available)await CorralonSystem.aridos.refresh();
+  if(!deliveryType){
+    const groups=['arido','ladrillones'].map(tipo=>({tipo,articulos:data.articulos.filter(row=>{const config=CorralonSystem.aridos.getConfig(row.idart);return (config.activo||config.tipo==='ladrillones')&&(config.tipo==='ladrillones'?'ladrillones':'arido')===tipo;})})).filter(group=>group.articulos.length);
+    if(groups.length>1){
+      const deliveries=[];
+      for(const group of groups){const selected=await chooseAridosDelivery({...data,articulos:group.articulos},group.tipo);if(selected===false)return false;deliveries.push(selected);}
+      return {groups:deliveries,complete:false};
+    }
+    deliveryType=groups[0]?.tipo||null;
+  }
   const lines=data.articulos.filter(row=>{const config=CorralonSystem.aridos.getConfig(row.idart);return config.activo||config.tipo==='ladrillones';}).map(row=>({idart:String(row.idart),cant:n(row.cantidad),desc:row.descripcion,precio:n(row.costoFinal)}));
   if(!lines.length)return null;
   if(lines.some(row=>row.cant<=0||row.precio<=0))throw new Error('Falta el costo SQL de un árido. Actualizá los precios antes de confirmar.');
@@ -2634,13 +2645,14 @@ async function chooseAridosDelivery(data){
   const dialog=document.createElement('dialog');
   dialog.className='aridos-delivery-dialog';
   dialog.style.cssText='width:min(460px,92vw);box-sizing:border-box;padding:20px;border:1px solid #ccc;border-radius:12px;overflow:visible';
-  dialog.innerHTML=`<h3 style="margin:0 0 14px">¿Qué proveedor entrega los materiales?</h3><label for="aridosDeliveryProvider">Proveedor</label><div style="position:relative;margin:6px 0 12px"><div data-delivery-combo style="display:flex;border:1px solid #ccc;border-radius:7px;overflow:hidden"><input id="aridosDeliveryProvider" data-delivery-provider role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="aridosDeliveryProviders" autocomplete="off" placeholder="Buscar por nombre o ID…" style="flex:1;min-width:0;padding:9px;border:0;outline:none"><button type="button" data-delivery-toggle aria-label="Mostrar proveedores" style="border:0;border-left:1px solid #ddd;padding:0 10px;background:#f5f5f5">▾</button></div><div id="aridosDeliveryProviders" data-delivery-list role="listbox" hidden style="position:absolute;top:100%;left:0;right:0;z-index:1;max-height:180px;overflow:auto;background:white;border:1px solid #ccc;border-radius:7px;box-shadow:0 4px 12px #0002"></div></div><p class="delivery-note">Se generará un remito web con las cantidades vendidas y el precio de costo con IVA.</p><div class="delivery-actions" style="display:flex;gap:8px;justify-content:flex-end"><button data-delivery-cancel>Cancelar</button><button data-delivery-confirm>Confirmar venta</button></div>`;
+  dialog.innerHTML=`<h3 style="margin:0 0 14px">¿Qué proveedor entrega ${deliveryType==='ladrillones'?'los ladrillones':'los áridos'}?</h3><p>${lines.map(row=>`${esc(row.desc)} · ${row.cant}`).join('<br>')}</p><label for="aridosDeliveryProvider">Proveedor</label><div style="position:relative;margin:6px 0 12px"><div data-delivery-combo style="display:flex;border:1px solid #ccc;border-radius:7px;overflow:hidden"><input id="aridosDeliveryProvider" data-delivery-provider role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="aridosDeliveryProviders" autocomplete="off" placeholder="Buscar por nombre o ID…" style="flex:1;min-width:0;padding:9px;border:0;outline:none"><button type="button" data-delivery-toggle aria-label="Mostrar proveedores" style="border:0;border-left:1px solid #ddd;padding:0 10px;background:#f5f5f5">▾</button></div><div id="aridosDeliveryProviders" data-delivery-list role="listbox" hidden style="position:absolute;top:100%;left:0;right:0;z-index:1;max-height:180px;overflow:auto;background:white;border:1px solid #ccc;border-radius:7px;box-shadow:0 4px 12px #0002"></div></div><p class="delivery-note">Se generará un remito web con estas cantidades y el precio de costo con IVA.</p><div class="delivery-actions" style="display:flex;gap:8px;justify-content:flex-end"><button data-delivery-cancel>Cancelar</button><button data-delivery-confirm>Confirmar entrega</button></div>`;
   document.body.appendChild(dialog);
   const field=dialog.querySelector('[data-delivery-provider]');
   const list=dialog.querySelector('[data-delivery-list]');
   const label=provider=>`${provider.proveedor} · ${CorralonSystem.providerIdentity.externalId(provider)}`;
   const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
-  const previous=valid.find(provider=>String(provider.id_proveedor)===String(aridosEntrega?.provider?.id_proveedor));
+  const previousDelivery=aridosEntrega?.groups?.find(group=>group.tipo===deliveryType)||(!aridosEntrega?.tipo||aridosEntrega.tipo===deliveryType?aridosEntrega:null);
+  const previous=valid.find(provider=>String(provider.id_proveedor)===String(previousDelivery?.provider?.id_proveedor));
   const deliveryTypes=new Set(lines.map(row=>CorralonSystem.aridos.getConfig(row.idart).tipo==='ladrillones'?'ladrillones':'arido'));
   const defaultMatches=deliveryTypes.size===1?valid.filter(provider=>{
     const name=normalize(provider.proveedor);
@@ -2682,7 +2694,7 @@ async function chooseAridosDelivery(data){
       const exact=valid.filter(provider=>normalize(label(provider))===normalize(field.value)||normalize(provider.proveedor)===normalize(field.value)||CorralonSystem.providerIdentity.externalId(provider)===field.value.trim());
       const provider=selected||(exact.length===1?exact[0]:null);
       if(!provider){field.setCustomValidity('Seleccioná un proveedor de la lista.');field.reportValidity();field.focus();return;}
-      finish({provider:{id_proveedor:provider.id_proveedor,nombre:provider.proveedor,sqlId:Number(CorralonSystem.providerIdentity.externalId(provider))},items:lines,complete:false});
+      finish({tipo:deliveryType,provider:{id_proveedor:provider.id_proveedor,nombre:provider.proveedor,sqlId:Number(CorralonSystem.providerIdentity.externalId(provider))},items:lines,complete:false});
     };
     dialog.showModal();field.focus();
   });
@@ -2708,9 +2720,14 @@ async function syncAridosDelivery(data){
   aridosDeliverySyncs.set(data.id,promise);
   try{return await promise;}finally{aridosDeliverySyncs.delete(data.id);}
 }
-async function performAridosDeliverySync(data){
+async function performAridosDeliverySync(data,parentDelivery=null){
   const delivery=data.aridosEntrega;
   if(!delivery||delivery.complete||!data.emision?.idRecibo||!saleNeedsAridosDelivery(data))return;
+  if(delivery.groups){
+    for(const group of delivery.groups)await performAridosDeliverySync({...data,aridosEntrega:group},delivery);
+    delivery.complete=delivery.groups.every(group=>group.complete);delete delivery.error;
+    await saveAridosDeliveryState(data);if(draftId===data.id)aridosEntrega=delivery;await refreshPendingButton();return;
+  }
   const root=CorralonSystem.SUPABASE_URL+'/rest/v1/';
   const request=async(path,method='GET',body)=>{
     const response=await fetch(root+path,{method,headers:CorralonSystem.headers({'Content-Type':'application/json',Prefer:'return=representation'}),...(body===undefined?{}:{body:JSON.stringify(body)})});
@@ -2718,7 +2735,7 @@ async function performAridosDeliverySync(data){
     if(!response.ok)throw new Error(result?.message||'No se pudo guardar el remito web.');return result;
   };
   const saleId=String(data.emision.idRecibo);
-  let found=await request('remitos?sql_resultado->>venta_aridos_id=eq.'+encodeURIComponent(saleId)+'&select=*&limit=2');
+  let found=await request('remitos?sql_resultado->>venta_aridos_id=eq.'+encodeURIComponent(saleId)+(delivery.tipo?'&sql_resultado->>venta_entrega_tipo=eq.'+encodeURIComponent(delivery.tipo):'')+'&select=*&limit=2');
   if(found.length>1)throw new Error('Hay más de un remito vinculado a esta venta. Revisalo en Historial.');
   let header=found[0];
   if(!header){
@@ -2735,11 +2752,11 @@ async function performAridosDeliverySync(data){
     const total=roundMoney(delivery.items.reduce((sum,row)=>sum+row.cant*row.precio,0));
     const result=await request('remitos','POST',{nro:'0001-'+String(next).padStart(8,'0'),numero_manual:false,cliente:delivery.provider.nombre,
       proveedor_web_id:delivery.provider.id_proveedor,proveedor_sql_id:delivery.provider.sqlId,fecha:date,fecha_iso:data.fecha,total,sucursal:branch,
-      usuario_id:data.usuarioId,usuario_nombre:data.usuario,sql_resultado:{venta_aridos_id:saleId,venta_numero:data.emision.numero}});
+      usuario_id:data.usuarioId,usuario_nombre:data.usuario,sql_resultado:{venta_aridos_id:saleId,venta_numero:data.emision.numero,...(delivery.tipo?{venta_entrega_tipo:delivery.tipo}:{})}});
     header=result?.[0];if(!header?.id)throw new Error('No se recibió el remito web guardado.');
   }
   delivery.remitoId=header.id;delivery.numero=header.nro;
-  await saveAridosDeliveryState({...data,aridosEntrega:delivery});
+  await saveAridosDeliveryState({...data,aridosEntrega:parentDelivery||delivery});
   const existing=await request('items_remito?remito_id=eq.'+encodeURIComponent(header.id)+'&select=idart,cant,precio,descripcion');
   if(!existing.length){
     await request('items_remito','POST',delivery.items.map(row=>({remito_id:header.id,idart:row.idart,cant:row.cant,precio:row.precio,descripcion:row.desc})));
@@ -2756,8 +2773,8 @@ async function performAridosDeliverySync(data){
     sucursal:header.sucursal,usuario_id:data.usuarioId,usuario_nombre:data.usuario,total:header.total,resuelta:false,
     createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
   delivery.complete=true;delete delivery.error;
-  await saveAridosDeliveryState({...data,aridosEntrega:delivery});
-  if(draftId===data.id)aridosEntrega=delivery;
+  await saveAridosDeliveryState({...data,aridosEntrega:parentDelivery||delivery});
+  if(draftId===data.id)aridosEntrega=parentDelivery||delivery;
   await refreshPendingButton();
 }
 const aridosRetryButton=document.createElement('button');
@@ -2985,7 +3002,7 @@ async function showTrial(openPreview=true,saveUnissuedDraft=true,source=null){
     (company.email||branchInfo.email)&&`<div>${esc(company.email||branchInfo.email)}</div>`,
     `<div class="ticket-pair"><span>IVA: ${esc(company.ivaEmpresa||'')}</span><span>IIBB: ${esc(company.ingresosBrutos||'')}</span></div>`
   ].filter(Boolean).join('');
-  $('#trialTicket').innerHTML=`<div class="ticket-company"><h2>${esc(company.nombre||'CORRALÓN PROGRESO')}</h2>${companyRows}</div><div class="ticket-type"><strong>${esc((data.tipoComprobante||'').split(' · ').slice(1).join(' · ')||data.tipoComprobante)}${receipt?'':' · PRUEBA'}</strong><span>${receipt?'':'NO EMITIDO'}</span></div><div class="ticket-facts"><div class="ticket-pair"><span class="ticket-number">N° ${esc(receipt?.numero||'Sin asignar')}</span><span>Fecha: ${esc(dateText)}</span></div></div><div class="ticket-client"><div><strong>R.S.: ${esc(customerUpper(data.cliente.nombre||'Sin nombre'))}</strong></div><div>Dom.: ${esc(data.cliente.direccion||'')}</div><div class="ticket-client-bottom"><span>IVA: ${esc(ivaClient||'Cons. Final')}</span><span>CUIT/DNI N°: ${esc(clientDocument||'')}</span></div></div><div class="ticket-items"><div class="ticket-items-head"><span>Cant.</span><span>Artículo</span></div>${items}</div><div class="ticket-payment-head"><span>Tipo de Pago</span><span>Importe</span></div>${payments}<div class="ticket-total"><span>Total:</span><span>${esc(money(ticketTotal))}</span></div>${receiptData?.cae?`<div class="ticket-fiscal"><div>CAE Nº ${esc(receiptData.cae)}</div></div>`:''}${ticketNote?`<div class="ticket-extra">${esc(ticketNote)}</div>`:''}${company.notaFactura?`<div class="ticket-legal">${esc(company.notaFactura)}</div>`:''}${receipt?'':'<div class="ticket-legal">PRUEBA · No guardado en SQL. No modifica caja ni stock.</div>'}`;
+  $('#trialTicket').innerHTML=`<div class="ticket-company"><h2>${esc(company.nombre||'CORRALÓN PROGRESO')}</h2>${companyRows}</div><div class="ticket-type"><strong>${esc((data.tipoComprobante||'').split(' · ').slice(1).join(' · ')||data.tipoComprobante)}${receipt?'':' · PRUEBA'}</strong><span>${receipt?'':'NO EMITIDO'}</span></div><div class="ticket-facts"><div class="ticket-pair"><span class="ticket-number">N° ${esc(receipt?.numero||'Sin asignar')}</span><span>Fecha: ${esc(dateText)}</span></div></div><div class="ticket-client"><div><strong>R.S.: ${esc(customerUpper(data.cliente.nombre||'Sin nombre'))}</strong></div><div>Dom.: ${esc(data.cliente.direccion||'')}</div><div class="ticket-client-bottom"><span>IVA: ${esc(ivaClient||'Cons. Final')}</span><span>CUIT/DNI N°: ${esc(clientDocument||'')}</span></div></div><div class="ticket-items"><div class="ticket-items-head"><span>Cant.</span><span>Artículo</span></div>${items}</div><div class="ticket-payment-head"><span>Tipo de Pago</span><span>Importe</span></div>${payments}<div class="ticket-total"><span>Total:</span><span>${esc(money(ticketTotal))}</span></div><div class="ticket-stamp-space"><span>Sellos</span></div>${receiptData?.cae?`<div class="ticket-fiscal"><div>CAE Nº ${esc(receiptData.cae)}</div></div>`:''}${ticketNote?`<div class="ticket-extra">${esc(ticketNote)}</div>`:''}${company.notaFactura?`<div class="ticket-legal">${esc(company.notaFactura)}</div>`:''}${receipt?'':'<div class="ticket-legal">PRUEBA · No guardado en SQL. No modifica caja ni stock.</div>'}`;
   const selectedType=(sqlConfig?.comprobantes||[]).find(x=>Number(x.id)===Number(data.idComprobante));
   if(data.facturaAsociada||receiptData?.facturaAsociada)
     $('#trialTicket .ticket-facts').insertAdjacentHTML('beforeend',`<div><span>Asociado</span><strong>${esc(receiptData?.facturaAsociada||data.facturaAsociada)}</strong></div>`);
@@ -3034,6 +3051,7 @@ async function printReceiptDirect(printer=$('#ticketPrinter').value,source=null)
   const canvas=await html2canvas($('#trialTicket'),{
     backgroundColor:'#fff',scale:2.15,logging:false,useCORS:false,
     onclone:documentCopy=>{
+      documentCopy.getElementById('cajaPrinterOnlyStyle')?.remove();
       const modal=documentCopy.getElementById('trialModal');
       modal.classList.add('open');
       modal.style.cssText='display:block;position:static;padding:0;background:#fff;transform:none';
@@ -3065,7 +3083,14 @@ async function showPendingCopy(){
   $('#trialModal .modal-head h2').textContent=fiscal?'Detalle provisional · no fiscal':'Detalle sin confirmar';
   $('#trialModal').setAttribute('aria-label',fiscal?'Detalle provisional no fiscal':'Detalle sin confirmar');
 }
+function notifyCajaPrint(type,extra={}){
+  if(REPRINT_CAJA_ID&&window.parent!==window&&new URLSearchParams(location.search).get('embed')==='caja-impresion'){
+    window.parent.postMessage({type,...extra},location.origin);return true;
+  }
+  return false;
+}
 function closeTrial(){
+  if(REPRINT_CAJA_ID){if(!notifyCajaPrint('corralon:caja-print-close'))window.close();return;}
   $('#trialModal').classList.remove('open');
   if(previewDraft){previewDraft=null;printerSelectionPending=false;$('#cancelEdit').focus();return}
   if(printerSelectionPending&&issuedReceipt){printerSelectionPending=false;$('#reprintReceipt').focus();return}
@@ -3178,7 +3203,7 @@ $('#doPrintTrial').addEventListener('click',async()=>{
   if(!receipt){window.print();return}
   const printer=$('#previewPrinter').value;
   if(!printer){$('#previewPrinterError').textContent='Elegí una ticketera antes de imprimir.';return}
-  $('#doPrintTrial').disabled=true;
+  $('#doPrintTrial').disabled=true;notifyCajaPrint('corralon:caja-print-busy',{busy:true});
   try{
     const printed=await printReceiptDirect(printer,source),number=receipt.numero;
     $('#ticketPrinter').value=printed;
@@ -3188,7 +3213,7 @@ $('#doPrintTrial').addEventListener('click',async()=>{
     closeTrial();
     setMsg(`Comprobante ${number} enviado a ${printed}. Esta ticketera quedó guardada para las próximas impresiones.`,'ok');
   }catch(error){if(error.saleReview){await window.CorralonSaleReviews.handle(source||formData(),error);return;}$('#previewPrinterError').textContent=`No se pudo imprimir: ${error.message}`;setMsg(`La boleta ya está emitida en SQL. ${error.message}`,'error')}
-  finally{$('#doPrintTrial').disabled=Boolean(receipt&&!$('#previewPrinter').value)}
+  finally{notifyCajaPrint('corralon:caja-print-busy',{busy:false});$('#doPrintTrial').disabled=Boolean(receipt&&!$('#previewPrinter').value)}
 });
 window.addEventListener('afterprint',()=>{if(reviewBrowserPrintPending){reviewBrowserPrintPending=false;$('#trialModal').classList.remove('open');previewDraft=null;return;}if(browserPrintPending){const number=previewDraft?.emision?.numero||issuedReceipt?.numero||'';browserPrintPending=false;printerSelectionPending=false;closeTrial();setMsg(`Comprobante ${number} enviado al selector de impresión. Si no salió en papel, usá “Reimprimir últ. fact.”`,'ok');loadSqlCatalog().catch(console.warn);return}if((previewDraft||issuedReceipt)&&$('#trialModal').classList.contains('open'))closeTrial()});
 $('#closeTrial').addEventListener('click',closeTrial);
@@ -3503,6 +3528,7 @@ async function discardDraftForClosedCaja(){
   finally{billingCajaDiscarding=false;}
 }
 async function checkBillingCaja(){
+  if(REPRINT_CAJA_ID)return true;
   const point=$('#pos').value;
   if(!point){setBillingCajaBlocked(false);billingCajaPoint='';return false}
   if(billingCajaRequest&&billingCajaPoint===point)return billingCajaRequest;
@@ -3537,11 +3563,26 @@ window.addEventListener('focus',()=>{if(sqlConfig)checkBillingCaja()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sqlConfig)checkBillingCaja()});
 setInterval(()=>{if(!document.hidden&&sqlConfig)checkBillingCaja()},15000);
 loadConfig().then(async ready=>{
+  if(REPRINT_CAJA_ID){
+    document.querySelector('main.app').hidden=true;document.querySelector('main.app').style.display='none';
+    if(!ready)throw new Error('No se pudo preparar la reimpresión. Volvé a intentarlo.');
+    await loadTicketPrinters();
+    await window.CorralonInvoiceHistoryActions.preview(REPRINT_CAJA_ID);
+    if(new URLSearchParams(location.search).get('soloImpresora')==='1'){
+      const style=document.createElement('style');
+      style.id='cajaPrinterOnlyStyle';style.textContent='@media screen{#trialModal .trial-preview,#trialModal .modal-head,#closeTrialBottom,#refreshPrinters{display:none!important}#trialModal{padding:16px;align-items:center}#trialModal .trial-modal{width:min(460px,100%);max-height:calc(100dvh - 32px)}#trialModal .trial-actions{justify-content:flex-end}}';
+      document.head.append(style);
+      $('#doPrintTrial').textContent='Imprimir';$('#previewPrinter').focus();
+    }
+
+    for(const id of ['closeTrial','closeTrialBottom'])document.getElementById(id).addEventListener('click',()=>{if(!notifyCajaPrint('corralon:caja-print-close'))window.close()});
+    return;
+  }
   await restoreLastLocalState();
   if(ready)await checkBillingCaja();
   if(ready)await Promise.allSettled([loadSqlCatalog(),loadSqlCustomers()]);
   else setMsg(`${SQL_CONNECTION_MESSAGE} Los borradores siguen guardados en esta PC.`,'error');
-}).catch(error=>{console.warn(error);localDraftStoreReady=false;updateTrialButton();setMsg('No se pudieron leer los borradores guardados en esta PC. No se habilita la emisión hasta recuperarlos.','error')});
+}).catch(error=>{if(REPRINT_CAJA_ID){alert(error.message);return;}console.warn(error);localDraftStoreReady=false;updateTrialButton();setMsg('No se pudieron leer los borradores guardados en esta PC. No se habilita la emisión hasta recuperarlos.','error')});
 </script><script src="recargar-deslizando.js" defer></script>
 <script src="facturacion-consulta.js" defer></script><script>
 (() => {

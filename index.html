@@ -4419,6 +4419,7 @@ body.index-sin-stock .home-card-meta{gap:0}
       <button class="budget-action-btn" id="btnDescargarPdf" type="button">Descargar PDF</button>
       <button class="budget-action-btn print" id="btnImprimirPdf" type="button">Imprimir</button>
       <button class="budget-action-btn whatsapp" id="waEnviar" type="button">WhatsApp</button>
+      <button class="budget-action-btn" id="budgetTransferStock" type="button" style="display:none">Transferir stock</button>
     </div>
   </div>
 </div>
@@ -4441,7 +4442,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
 <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.48"></script>
+<script src="corralon-system.js?v=1.0.49"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -11497,6 +11498,9 @@ async function crearPresupuesto() {
     <strong>Total:</strong> ${fmtPrecio(total)}
   `;
   document.getElementById('waModal').classList.remove('hidden');
+  const transferButton=document.getElementById('budgetTransferStock');
+  transferButton.style.display=location.hostname==='localhost'?'':'none';
+  transferButton.onclick=()=>abrirTransferenciaPresupuestoConfirmado(numeroPedido);
   document.getElementById('waEnviar').onclick = () => {
     window.open('https://wa.me/2645802404?text=' + encodeURIComponent(mensaje), '_blank');
   };
@@ -11517,6 +11521,24 @@ async function crearPresupuesto() {
   };
   document.getElementById('waCloseBtn').onclick = () => { document.getElementById('waModal').classList.add('hidden'); };
   document.body.removeChild(overlay);
+}
+
+function abrirTransferenciaPresupuestoConfirmado(numero) {
+  if(location.hostname!=='localhost'||document.querySelector('[data-index-budget-transfer]'))return;
+  const popup=document.createElement('dialog');popup.dataset.indexBudgetTransfer='';
+  popup.style.cssText='position:fixed;inset:0;margin:auto;width:min(680px,98vw);height:90dvh;max-width:none;max-height:none;padding:0;border:0;background:transparent;overflow:hidden';
+  const frame=document.createElement('iframe');frame.title='Transferir stock del presupuesto';frame.style.cssText='width:100%;height:100%;border:0';
+  frame.src='historial.html?embed=presupuesto-sql';popup.append(frame);
+  const receive=event=>{
+    if(event.origin!==location.origin||event.source!==frame.contentWindow)return;
+    if(event.data?.type==='corralon:presupuesto-sql-ready')frame.contentWindow.postMessage({type:'corralon:presupuesto-sql-open',numero},location.origin);
+    if(event.data?.type==='corralon:presupuesto-sql-error'){alert(event.data.message||'No se pudo abrir la transferencia de stock.');popup.close();}
+    if(event.data?.type==='corralon:presupuesto-sql-close')popup.close();
+  };
+  window.addEventListener('message',receive);
+  popup.addEventListener('cancel',event=>{event.preventDefault();const dialog=frame.contentDocument?.querySelector('[data-budget-transfer-dialog]');if(dialog){if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();}else popup.close();});
+  popup.addEventListener('close',()=>{window.removeEventListener('message',receive);popup.remove();});
+  document.body.append(popup);popup.showModal();
 }
 
 document.getElementById('buyButton').addEventListener('click', crearPresupuesto);

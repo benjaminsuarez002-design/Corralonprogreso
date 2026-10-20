@@ -287,8 +287,11 @@ export async function open(options) {
     const ranks = new Map();
     const filterRank = article => {
       if (ranks.has(article)) return ranks.get(article);
-      const value = rowCode && article.searchCode === rowCode ? -2 : article.searchCode === query ? -1 :
+      const base = rowCode && article.searchCode === rowCode ? -2 : article.searchCode === query ? -1 :
         indexDescriptionFilterRank(article.descripcion, queryText, { ...queryFilter, text:article.searchDescription, compactText:article.searchCompact, words:article.searchWords });
+      const firstWord = (article.searchWords || normalizeIndexFilter(article.descripcion).split(' '))[0] || '';
+      const firstTerm = queryFilter.terms[0] || '';
+      const value = Number.isFinite(base) && firstTerm ? (firstWord === firstTerm ? 0 : firstWord.startsWith(firstTerm) ? 1 : 2) * 20 + base : base;
       ranks.set(article,value);
       return value;
     };
@@ -683,3 +686,4 @@ export async function open(options) {
   reconnect.addEventListener('click', refreshConnection);
   await refreshConnection();
 }
+

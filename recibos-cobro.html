@@ -68,7 +68,7 @@
 <script src="funciones.js" defer></script><script src="menu-auth-guard.js" data-menu-guard="recibos_cobro" defer></script><script src="facturacion-medios-pago.js" defer></script><script src="facturacion-consulta.js" defer></script>
 </head>
 <body data-page-theme="recibos-cobro">
-<main>
+<main id="receiptEmission">
 <header><h1>Emitir Recibos de Cobro</h1><label>Punto de Venta:<select id="point" data-flow></select></label><span id="today"></span><a href="menu.html">Menú</a></header>
 <form id="receiptForm">
 <div class="header-fields">
@@ -91,8 +91,12 @@
 <div class="bottom"><label>Nota:<textarea id="note" maxlength="100" data-flow></textarea></label><div class="actions"><button id="confirm" class="primary" type="button" data-flow>Confirmar</button><button id="cancel" type="button" data-flow>Cancelar</button><button id="consult" type="button" data-flow>Consultar</button></div><div class="actions"><button id="billing" type="button">Facturación</button><button id="account" type="button">Ctas. Ctes.</button></div></div>
 </form><p id="status" role="status" aria-live="polite">Conectando con SQL…</p>
 </main>
-<dialog id="historyModal"><div class="dialog-header"><h2>Consultar Recibos de Cobro</h2><button type="button" data-close="historyModal">Cerrar</button></div><label>Cliente: <span id="historyCustomer">Todos</span></label><div id="historyBody"></div></dialog>
+<section id="historyModal" class="receipt-screen receipt-history-screen" hidden aria-label="Consultar recibos"><div class="dialog-header"><img src="logo-corralon.png" alt="Corralón Progreso"><h2>Consultar recibos de cobro</h2><button type="button" data-close="historyModal">Volver a emitir</button></div><label>Cliente: <span id="historyCustomer">Todos</span></label><div class="receipt-history-search"><input id="receiptHistoryQuery" type="search" placeholder="Buscar cliente o número de recibo…" aria-label="Buscar en recibos cargados"><button type="button" id="receiptHistoryVoided" aria-pressed="false">Filtrar anulados</button></div><div id="historyBody"></div></section>
 <dialog id="receiptModal"><div class="dialog-header"><h2 id="receiptTitle">Recibo de Cobro</h2><button type="button" data-close="receiptModal">Cerrar</button></div><div id="receiptBody"></div><section id="receiptPrint" aria-label="Recibo para imprimir"></section><p id="receiptStatus" role="status"></p><div id="receiptActions"><button type="button" id="voidReceipt" style="color:#b00020;margin-right:8px" hidden>Anular recibo</button><button type="button" id="printReceipt">Imprimir</button></div></dialog>
+<section id="receiptConsultSection" class="receipt-screen receipt-consult-screen" hidden data-active="false" aria-label="Detalle del recibo consultado">
+<header class="receipt-consult-header"><img src="logo-corralon.png" alt="Corralón Progreso"><h1>Consultar recibos de cobro</h1><nav><button type="button" id="receiptConsultSearch">Buscar recibo</button><button type="button" id="receiptConsultVoided">Filtrar anulados</button><button type="button" id="receiptConsultBack">Volver a emitir</button><a href="menu.html">☰ Menú</a></nav></header>
+<div id="receiptConsultContent"></div><footer class="receipt-consult-footer"><button type="button" id="receiptConsultValue">Ver valor</button><button type="button" data-consult-invoice>Ver factura</button><div id="receiptConsultActions"></div><button type="button" id="receiptConsultLoad" class="receipt-consult-primary" title="Volver al borrador de emisión">＋ Cargar</button><div class="receipt-consult-navigation"><button id="receiptConsultPrevious" type="button">‹ Anterior</button><span id="receiptConsultPosition"></span><button id="receiptConsultNext" type="button">Siguiente ›</button></div></footer><div id="receiptConsultStatusSlot"></div>
+</section>
 <dialog id="accountModal"><div class="dialog-header"><h2>Cuenta corriente del cliente</h2><button type="button" data-close="accountModal">Cerrar</button></div><div id="accountBody"></div></dialog>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -127,7 +131,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const uuid = () => globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,char=>{const random=Math.floor(Math.random()*16);return (char==='x'?random:random&3|8).toString(16);});
   let user, options, ready=false, busy=false, customer=0, invoices=[], invoiceChoices=[], values=[], selectedInvoice=-1, rowBindings=[], confirmed=null, pending=null, requestSequence=0;
   let viewedReceipt=null, cancellingReceipt=false;
-  const receiptAdmin=()=>FX.menuUserIsAdministrator('recibos_cobro',user);
+  const receiptEntry=new URLSearchParams(location.search),receiptFromCaja=receiptEntry.get('origen')==='caja';
+  let receiptCajaSession=null;
+  const receiptAdmin=()=>!receiptFromCaja&&FX.menuUserIsAdministrator('recibos_cobro',user);
   const headerCombos={};
   const billingWorkstationKey='facturacion_puesto_v1';
   let billingPoint=new URLSearchParams(location.search).get('puntoVenta');
@@ -140,10 +146,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const key = () => `corralon_recibos_cobro_v1:${user.id}`;
   function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
   async function api(params={},payload=null){
+    if(receiptFromCaja)return receiptCajaApi(params,payload);
     const url='/api/facturacion/recibos-cobro?'+new URLSearchParams({...params,usuarioId:user.id});
     const response=await fetch(url,{cache:'no-store',...(payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{})});
     let data; try{data=await response.json();}catch(_){throw new Error('Activá la API nueva con iniciar sistema.bat para usar Recibos de Cobro.');}
     if(!response.ok||!data.ok){const error=new Error(data.error||'No se pudo consultar SQL.');error.definitive=response.status>=400&&response.status<500;throw error;}return data;
+  }
+  async function receiptCajaApi(params,payload=null,renewed=false){
+    if(payload)throw new Error('Esta consulta de Caja es de solo lectura.');
+    const endpoint='/api/facturacion/caja';
+    if(!receiptCajaSession){const response=await fetch(endpoint+'?'+new URLSearchParams({accion:'bootstrap',usuarioId:user.id}),{cache:'no-store'});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'No se pudo abrir la consulta de Caja.');receiptCajaSession=data;}
+    const day=receiptEntry.get('fecha')||today(),caja=receiptEntry.get('caja'),detail=params.consulta==='detalle';
+    const query={accion:caja?(detail?'recibo-caja':'recibos-caja'):(detail?'recibo-dia':'comprobantes-dia'),fecha:day,token:receiptCajaSession.token};
+    if(caja)query.id=caja;else{query.sucursal=receiptEntry.get('sucursal')||'0';query.tipoValor=receiptEntry.get('tipoValor')||'0';}
+    if(detail)query.recibo=params.id;
+    const response=await fetch(endpoint+'?'+new URLSearchParams(query),{cache:'no-store'}),data=await response.json();
+    if((!response.ok||!data.ok)&&!renewed&&/sesión de Caja venció/i.test(data.error||'')){receiptCajaSession=null;return receiptCajaApi(params,null,true);}
+    if(!response.ok||!data.ok)throw new Error(data.error||'No se pudo consultar el recibo de Caja.');
+    if(detail)return data;
+    return {ok:true,recibos:(data.filas||[]).filter(row=>caja||row.origen==='recibo-cobro').map(row=>({...row,id:row.idRecibo,fecha:day.split('-').reverse().join('/'),anulado:false}))};
   }
   function save(){if(!ready||busy)return;localStorage.setItem(key(),JSON.stringify({customer,point:$('point').value,date:$('date').value,invoices,values,note:$('note').value,pending}));}
   function lock(){
@@ -250,7 +271,30 @@ document.addEventListener('DOMContentLoaded', () => {
     $('receiptPrint').innerHTML=renderReceiptPrint(result);
     $('receiptTitle').textContent=`Recibo de Cobro ${receipt.numero}${receipt.anulado?' · ANULADO':''}`;
     $('receiptBody').innerHTML=`<div class="receipt-summary"><div>Cliente<strong>${esc(receipt.cliente)}</strong></div><div>Fecha<strong>${esc(receipt.fecha)}</strong></div><div>Punto de venta<strong>${esc(receipt.nombrePuntoVenta)}</strong></div></div><h2>Facturas cobradas</h2><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Factura</th><th>A Cobrar</th></tr></thead><tbody>${result.facturas.map(row=>`<tr><td>${esc(row.fecha)}</td><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td>${money(row.importe)}</td></tr>`).join('')}</tbody></table>${result.facturas.length?'':receipt.anulado?'<p>Sin boletas vinculadas.</p>':'<p>Pago a cuenta.</p>'}<h2>Valores recibidos</h2><table><thead><tr><th>Tipo</th><th>Valor Nº</th><th>Tarjeta</th><th>Cuotas</th><th>Vencimiento</th><th>Importe</th><th>Descripción</th></tr></thead><tbody>${result.valores.map(row=>`<tr><td>${esc(row.tipo)}</td><td>${esc(row.numero||'')}</td><td>${esc(row.tarjeta||'Ninguna')}</td><td>${Number(row.cuotas)||0}</td><td>${esc(row.vencimiento)}</td><td>${money(row.importe)}</td><td>${esc(row.descripcion)}</td></tr>`).join('')}</tbody></table><p class="receipt-note">${esc(receipt.nota)}</p><div class="invoice-total" style="width:100%">Total: <output class="total">${money(receipt.total)}</output></div>`;
+    if(receiptAdmin()&&!receipt.anulado){
+      const edit=document.createElement('button');edit.type='button';edit.textContent='Cambiar tipo de pago';edit.onclick=editViewedReceiptPayment;$('receiptBody').append(edit);
+    }
+    if($('receiptConsultSection')?.dataset.active==='true'){renderReceiptConsult(result);return;}
+    $('printReceipt').textContent='Imprimir';
     if(!$('receiptModal').open)$('receiptModal').showModal();
+  }
+  function editViewedReceiptPayment(){
+    if(!receiptAdmin()||busy||!viewedReceipt||viewedReceipt.recibo.anulado)return;
+    const target=$('receiptBody');if(target.querySelector('[data-payment-editor]'))return;
+    const editor=document.createElement('div');editor.dataset.paymentEditor='';
+    editor.innerHTML=`<h2>Cambiar tipo de pago</h2><p>Se conserva el importe y las facturas vinculadas.</p><label>Valor recibido: <select data-edit-order>${viewedReceipt.valores.filter(v=>Number(v.clase)!==2).map(v=>`<option value="${Number(v.orden)}">${esc(v.tipo)} · ${money(v.importe)}</option>`).join('')}</select></label> <label>Tipo: <select data-edit-type>${options.pagos.filter(p=>[1,3,5].includes(Number(p.clase))).map(p=>`<option value="${Number(p.id)}">${esc(p.nombre)}</option>`).join('')}</select></label> <label>Tarjeta / cuenta: <select data-edit-card><option value="0">Ninguna</option>${options.tarjetas.map(c=>`<option value="${Number(c.id)}">${esc(c.nombre)}</option>`).join('')}</select></label> <label>Cuotas: <input data-edit-installments type="number" min="0" max="120" style="width:65px"></label> <button type="button" data-save-payment>Guardar tipo de pago</button> <button type="button" data-cancel-payment>Cancelar</button>`;
+    target.append(editor);const q=selector=>editor.querySelector(selector);
+    function controls(){const cls=Number(options.pagos.find(p=>Number(p.id)===Number(q('[data-edit-type]').value))?.clase);q('[data-edit-card]').disabled=cls===1;q('[data-edit-installments]').disabled=cls!==5;if(cls===1)q('[data-edit-card]').value='0';if(cls!==5)q('[data-edit-installments]').value='0';}
+    function choose(){const row=viewedReceipt.valores.find(v=>Number(v.orden)===Number(q('[data-edit-order]').value));if(!row)return;q('[data-edit-type]').value=String(row.idTipoPago);q('[data-edit-card]').value=String(row.idTarjeta||0);q('[data-edit-installments]').value=Number(row.cuotas)||0;controls();}
+    q('[data-edit-order]').onchange=choose;q('[data-edit-type]').onchange=controls;q('[data-cancel-payment]').onclick=()=>editor.remove();choose();
+    q('[data-save-payment]').onclick=async()=>{
+      if(busy||!receiptAdmin())return;if(!confirm('¿Guardar el cambio de tipo de pago de este recibo? El importe no cambiará.'))return;
+      const selected=viewedReceipt,body={accion:'editar-pago',usuarioId:user.id,id:selected.recibo.id,version:selected.version,orden:Number(q('[data-edit-order]').value),tipo:Number(q('[data-edit-type]').value),tarjeta:Number(q('[data-edit-card]').value),cuotas:Number(q('[data-edit-installments]').value)};
+      busy=true;lock();editor.querySelectorAll('input,select,button').forEach(e=>e.disabled=true);$('voidReceipt').disabled=true;$('receiptStatus').textContent='Guardando tipo de pago…';
+      try{const result=await api({},body);await showReceipt(result.recibo.id,result);$('receiptStatus').textContent='Tipo de pago actualizado.';}
+      catch(error){$('receiptStatus').textContent=error.message;editor.querySelectorAll('input,select,button').forEach(e=>e.disabled=false);controls();}
+      finally{busy=false;lock();$('voidReceipt').disabled=false;}
+    };
   }
   async function cancelViewedReceipt(){
     if(cancellingReceipt||busy||!receiptAdmin()||!viewedReceipt||viewedReceipt.recibo.anulado)return;
@@ -292,8 +336,105 @@ document.addEventListener('DOMContentLoaded', () => {
     }catch(error){if(error.definitive)pending=null;status(error.message+(pending?' Reintentá la misma confirmación para verificar si quedó guardado.':''),true);}
     finally{busy=false;lock();if(!confirmed)save();}
   }
-  async function history(){
-    try{status('Consultando recibos…');const data=await api({consulta:'recibos',cliente:customer});$('historyCustomer').textContent=customer?$('customer').value:'Todos';$('historyBody').innerHTML=`<table class="dialog-table"><thead><tr><th>Recibo</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>${data.recibos.map(row=>`<tr><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cliente)}</td><td>${money(row.total)}</td><td>${row.anulado?'Anulado':'Confirmado'}</td><td><button data-receipt="${Number(row.id)}" type="button">Ver</button></td></tr>`).join('')}</tbody></table>${data.recibos.length?'':'<p>No hay recibos.</p>'}`;if(!$('historyModal').open)$('historyModal').showModal();status('Recibos consultados.');}catch(error){status(error.message,true);}
+  let receiptHistoryRows=[],receiptHistoryVoided=false,consultInvoiceIndex=0,consultValueIndex=0;
+  let receiptNavigationEpoch=0;
+  function receiptRoute(){
+    const hash=window.location.hash;
+    if(/^#recibo=\d+$/.test(hash))return {view:'detalle',id:Number(hash.slice(8))};
+    return {view:hash==='#consultar'||receiptFromCaja?'consulta':'emision'};
+  }
+  function receiptRememberView(){
+    const state={...(window.history.state||{}),receiptFilters:{query:$('receiptHistoryQuery').value,voided:receiptHistoryVoided,scroll:$('historyBody').querySelector('.receipt-history-grid')?.scrollTop||0}};
+    window.history.replaceState(state,'');
+  }
+  function receiptRecordView(view,id){
+    const hash=view==='detalle'?'#recibo='+id:view==='consulta'?'#consultar':'#emitir';
+    if(window.location.hash!==hash)window.history.pushState({receiptFilters:{query:$('receiptHistoryQuery').value,voided:receiptHistoryVoided}},'',hash);
+  }
+  async function restoreReceiptRoute(){
+    const route=receiptRoute(),filters=window.history.state?.receiptFilters;
+    if(filters){$('receiptHistoryQuery').value=filters.query||'';receiptHistoryVoided=Boolean(filters.voided);}
+    if(route.view==='emision'){receiptReturnToEmission(false);return;}
+    if(route.view==='detalle'){
+      if(!receiptHistoryRows.length)await history(false);
+      if(receiptRoute().view!=='detalle'||receiptRoute().id!==route.id)return;
+      await openReceiptConsult(route.id,false);
+    }else{await history(false);const grid=$('historyBody').querySelector('.receipt-history-grid');if(grid&&filters)grid.scrollTop=filters.scroll||0;}
+  }
+  async function initializeReceiptRoute(){
+    const route=receiptRoute();
+    if(route.view==='detalle'){
+      await history(false);
+      window.history.replaceState(window.history.state,'','#consultar');
+      await openReceiptConsult(route.id);
+    }else await restoreReceiptRoute();
+  }
+  function receiptConsultError(error){
+    status(error.message,true);
+    if(!$('receiptConsultSection').hidden)$('receiptStatus').textContent=error.message;
+    else if(!$('historyModal').hidden){let message=$('receiptHistoryError');if(!message){message=document.createElement('p');message.id='receiptHistoryError';message.setAttribute('role','alert');$('historyModal').append(message);}message.textContent=error.message;}
+  }
+  function fitReceiptSections(){
+    const scale=Math.max(.1,Math.min(innerWidth/1672,innerHeight/941));
+    for(const node of document.querySelectorAll('.receipt-screen')){node.style.setProperty('--receipt-consult-scale',scale);node.style.setProperty('--receipt-consult-width',innerWidth/scale+'px');node.style.setProperty('--receipt-consult-height',innerHeight/scale+'px');}
+  }
+  function moveReceiptDetail(inline){
+    const section=$('receiptConsultSection');section.dataset.active=String(inline);
+    if(inline){$('receiptConsultContent').append($('receiptBody'));$('receiptConsultActions').append($('receiptActions'));$('receiptConsultStatusSlot').append($('receiptStatus'));}
+    else{const modal=$('receiptModal');modal.insertBefore($('receiptBody'),$('receiptPrint'));modal.append($('receiptStatus'),$('receiptActions'));}
+  }
+  function receiptReturnToEmission(record=true){
+    if(busy||cancellingReceipt)return;
+    if(receiptFromCaja){window.location.href='caja.html';return;}
+    receiptNavigationEpoch++;if(record){receiptRememberView();receiptRecordView('emision');}
+    moveReceiptDetail(false);$('receiptConsultSection').hidden=true;$('historyModal').hidden=true;$('historyModal').open=false;$('receiptEmission').hidden=false;viewedReceipt=null;fitReceiptForm();
+  }
+  function filteredReceiptHistory(){
+    const q=String($('receiptHistoryQuery').value||'').toLocaleLowerCase('es');
+    return receiptHistoryRows.filter(row=>(!receiptHistoryVoided||row.anulado)&&(!q||[row.numero,row.cliente,row.fecha].join(' ').toLocaleLowerCase('es').includes(q)));
+  }
+  function renderReceiptHistory(){
+    const rows=filteredReceiptHistory();
+    $('receiptHistoryVoided').setAttribute('aria-pressed',String(receiptHistoryVoided));
+    $('historyBody').innerHTML='<div class="receipt-history-grid"><table class="dialog-table"><thead><tr><th>Recibo</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>'+rows.map(row=>`<tr data-receipt-row="${Number(row.id)}"><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cliente)}</td><td class="receipt-num">${money(row.total)}</td><td><span class="receipt-state ${row.anulado?'is-voided':''}">${row.anulado?'Anulado':'Vigente'}</span></td><td><button data-receipt="${Number(row.id)}" type="button">Ver recibo</button></td></tr>`).join('')+'</tbody></table></div><p class="receipt-history-count">'+rows.length+' recibos'+(rows.length?'':' · No hay recibos para esta consulta')+'</p>';
+  }
+  async function history(record=true){
+    if(busy||cancellingReceipt)return;
+    const navigation=++receiptNavigationEpoch;if(record)receiptRememberView();
+    $('receiptHistoryError')?.remove();
+    try{status('Consultando recibos…');const data=await api({consulta:'recibos',cliente:receiptFromCaja?0:customer});if(navigation!==receiptNavigationEpoch)return;receiptHistoryRows=data.recibos||[];$('historyCustomer').textContent=receiptFromCaja?'Recibos de Caja':customer?$('customer').value:'Todos';renderReceiptHistory();moveReceiptDetail(false);$('receiptConsultSection').hidden=true;$('receiptEmission').hidden=true;$('historyModal').hidden=false;$('historyModal').open=true;fitReceiptSections();status('Recibos consultados.');if(record)receiptRecordView('consulta');}
+    catch(error){receiptConsultError(error);}
+  }
+  async function openReceiptConsult(id,record=true){
+    if(busy||cancellingReceipt)return;
+    const navigation=++receiptNavigationEpoch;if(record)receiptRememberView();
+    const result=await api({consulta:'detalle',id});
+    if(navigation!==receiptNavigationEpoch)return;
+    moveReceiptDetail(true);$('receiptEmission').hidden=true;$('historyModal').hidden=true;$('historyModal').open=false;$('receiptConsultSection').hidden=false;
+    consultInvoiceIndex=0;consultValueIndex=0;
+    await showReceipt(id,result);fitReceiptSections();if(record)receiptRecordView('detalle',id);
+  }
+  function renderReceiptConsult(result){
+    const h=result.recibo,lines=result.facturas||[],payments=result.valores||[],sum=(rows,field)=>rows.reduce((n,r)=>n+(Number(r[field])||0),0);
+    const applied=sum(lines,'importe'),received=sum(payments,'importe'),difference=lines.length?received-applied:0;
+    const field=(label,value,cls='')=>`<div class="receipt-consult-field ${cls}"><span>${label}</span><strong>${esc(value??'—')}</strong></div>`;
+    const concept=String(h.concepto||'').replace(/\[(?:WEBRECIBO|HASH):[^\]]*\]/g,'').trim();
+    $('receiptBody').innerHTML=`<section class="receipt-consult-info"><div class="receipt-consult-info-title"><h2>Recibo de cobro X</h2><span class="receipt-state ${h.anulado?'is-voided':''}">${h.anulado?'Anulado':'Vigente'}</span><label>Punto de venta <select aria-label="Punto de venta del recibo" disabled><option>${esc(h.puntoVenta||'')} · ${esc(h.nombrePuntoVenta||'—')}</option></select></label></div><div class="receipt-consult-fields">${field('P.V.',h.puntoVenta)}${field('Nº recibo',h.numero,'receipt-consult-number')}${field('Fecha',h.fecha)}${field('Operador',h.operador??h.idOperador)}${field('ID Caja',h.idCaja)}<label class="receipt-consult-field receipt-consult-annulled"><span>Anulado</span><input type="checkbox" disabled ${h.anulado?'checked':''}></label>${field('Cliente',h.cliente,'receipt-consult-client')}${field('ID cliente',h.idCliente)}${field('Concepto',concept||'—','receipt-consult-concept')}</div></section>
+    <section class="receipt-consult-card receipt-consult-invoices"><div class="receipt-consult-card-title"><h2>Facturas cobradas</h2><button type="button" data-consult-invoice ${lines.length?'':'disabled'}>Ver factura</button></div><div class="receipt-consult-table"><table><colgroup><col style="width:9%"><col style="width:16%"><col style="width:14%"><col style="width:12%"><col style="width:15%"><col style="width:9%"><col style="width:17%"><col style="width:8%"></colgroup><thead><tr><th>Tipo</th><th>Nº factura</th><th>Pagado</th><th>Fecha</th><th>Total</th><th>Anulada</th><th>Factura asociada</th><th>Cuotas</th></tr></thead><tbody>${lines.map((row,i)=>`<tr data-consult-invoice-row="${i}" class="${i===consultInvoiceIndex?'selected':''}" tabindex="0"><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td class="receipt-num">${money(row.importe)}</td><td>${esc(row.fecha)}</td><td class="receipt-num">${row.importeFactura==null?'—':money(row.importeFactura)}</td><td class="receipt-check">${row.anulado==null?'—':row.anulado?'Sí':'No'}</td><td>${esc(row.facturaAsociada||'—')}</td><td class="receipt-check">${esc(row.cuota??0)}</td></tr>`).join('')}</tbody></table>${lines.length?'':'<p class="receipt-empty">'+(h.anulado?'Sin boletas vinculadas.':'Pago a cuenta.')+'</p>'}</div><div class="receipt-consult-card-total"><span>${lines.length} facturas</span><label>Total cobros <output>${money(applied)}</output></label><label>Diferencia <output class="${Math.abs(difference)<.01?'balanced':''}">${money(difference)}</output></label></div></section>
+    <section class="receipt-consult-card receipt-consult-values"><div class="receipt-consult-card-title"><h2>Valores recibidos</h2>${receiptAdmin()&&!h.anulado?'<button type="button" data-consult-edit-payment>Cambiar tipo de pago</button>':''}</div><div class="receipt-consult-table"><table><colgroup><col style="width:15%"><col style="width:11%"><col style="width:13%"><col style="width:14%"><col style="width:22%"><col style="width:18%"><col style="width:7%"></colgroup><thead><tr><th>Tipo de valor</th><th>Valor Nº</th><th>Fecha de vto.</th><th>Importe</th><th>Descripción</th><th>Tarjeta</th><th>Cuotas</th></tr></thead><tbody>${payments.map((row,i)=>`<tr data-consult-value-row="${i}" class="${i===consultValueIndex?'selected':''}" tabindex="0"><td>${esc(row.tipo)}</td><td>${esc(row.numero||'—')}</td><td>${esc(row.vencimiento||'—')}</td><td class="receipt-num">${money(row.importe)}</td><td>${esc(row.descripcion||'—')}</td><td>${esc(row.tarjeta||'—')}</td><td class="receipt-check">${Number(row.cuotas)||0}</td></tr>`).join('')}</tbody></table></div><div class="receipt-consult-card-total"><span>${payments.length} ${payments.length===1?'valor':'valores'}</span><label>Total valores <output>${money(received)}</output></label></div></section><div id="receiptConsultValueDetail" hidden></div>${h.nota?`<p class="receipt-consult-note"><strong>Nota:</strong> ${esc(h.nota)}</p>`:''}`;
+    const list=filteredReceiptHistory(),index=list.findIndex(row=>Number(row.id)===Number(h.id));
+    $('receiptConsultPosition').textContent=index<0?'Recibo consultado':(index+1)+' de '+list.length;
+    $('receiptConsultPrevious').disabled=index<=0;$('receiptConsultNext').disabled=index<0||index>=list.length-1;
+    $('receiptConsultValue').disabled=!payments.length;
+    document.querySelectorAll('[data-consult-invoice]').forEach(button=>button.disabled=!lines.length);
+    $('printReceipt').textContent='Reimprimir';$('receiptStatus').textContent=h.anulado?'Recibo anulado.':'Recibo consultado.';
+  }
+  async function viewConsultInvoice(){
+    const row=viewedReceipt?.facturas?.[consultInvoiceIndex];if(!row)return;
+    try{await window.CorralonInvoiceHistory.openInvoice(Number(row.id),viewedReceipt.facturas,{readOnly:true});}catch(error){$('receiptStatus').textContent=error.message;}
+  }
+  async function navigateConsultReceipt(delta){
+    const list=filteredReceiptHistory(),index=list.findIndex(row=>Number(row.id)===Number(viewedReceipt?.recibo.id));const next=list[index+delta];if(next)await openReceiptConsult(next.id);
   }
   async function account(){
     if(!customer){status('Seleccioná un cliente.',true);return;}
@@ -302,6 +443,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function initialize(validatedUser){
     if(ready||!validatedUser)return;user=validatedUser;
     try{
+      if(receiptFromCaja){ready=true;options={pagos:[],tarjetas:[],puntosVenta:[]};document.querySelectorAll('[data-close="historyModal"],#receiptConsultBack').forEach(button=>button.textContent='Volver a Caja');$('receiptConsultLoad').hidden=true;$('receiptConsultVoided').hidden=true;$('receiptHistoryVoided').hidden=true;$('receiptEmission').hidden=true;$('historyModal').hidden=false;await initializeReceiptRoute();return;}
       options=await api({consulta:'opciones'});
       $('point').innerHTML=options.puntosVenta.map(item=>`<option value="${Number(item.id)}">${item.id} · ${esc(item.nombre)}</option>`).join('');
       $('point').value=billingDefaultPoint();
@@ -313,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const binding=FX.bindTextDropdown({input:$(field),minWidth:0,selectedValue:customer,items:options.clientes.filter(item=>item[property]).map(item=>({value:String(item.id),label:String(item[property])})),emptyValue:'0'});headerCombos[field]=binding;
         $(field).addEventListener('change',()=>{const id=binding.getValue();if(id===null){$(field).setCustomValidity('Seleccioná un cliente de la lista.');return;}pickCustomer(id).catch(error=>status(error.message,true));});
       }
-      ready=true;render();status(pending?'Hay un recibo pendiente de verificar. Reintentá la misma confirmación.':'Listo para emitir recibos de cobro.');if(customer)refreshBalance().catch(()=>{});
+      ready=true;render();status(pending?'Hay un recibo pendiente de verificar. Reintentá la misma confirmación.':'Listo para emitir recibos de cobro.');if(customer)refreshBalance().catch(()=>{});await initializeReceiptRoute();
     }catch(error){status(error.message,true);}
   }
   $('today').textContent=new Intl.DateTimeFormat('es-AR',{dateStyle:'full'}).format(new Date());
@@ -342,7 +484,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(confirmed&&viewedReceipt&&Number(confirmed.id)===Number(viewedReceipt.recibo.id))startNewReceipt();
     viewedReceipt=null;
   });
-  $('historyBody').addEventListener('click',event=>{const button=event.target.closest('[data-receipt]');if(button)showReceipt(Number(button.dataset.receipt)).catch(error=>status(error.message,true));});
+  $('historyBody').addEventListener('click',event=>{const button=event.target.closest('[data-receipt]');if(button)openReceiptConsult(Number(button.dataset.receipt)).catch(receiptConsultError);});
   $('viewInvoice').onclick=async()=>{
     const row=invoices[selectedInvoice];
     if(!row){status('Seleccioná una factura de la grilla.',true);return;}
@@ -354,10 +496,28 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   $('voidReceipt').onclick=cancelViewedReceipt;
-  $('printReceipt').onclick=()=>window.print();document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
+  $('printReceipt').onclick=()=>window.print();document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>{if(button.dataset.close==='historyModal')receiptReturnToEmission();else $(button.dataset.close).close();});
+  $('receiptHistoryQuery').oninput=renderReceiptHistory;
+  $('receiptHistoryVoided').onclick=()=>{receiptHistoryVoided=!receiptHistoryVoided;renderReceiptHistory();};
+  $('historyBody').ondblclick=event=>{const row=event.target.closest('[data-receipt-row]');if(row&&!event.target.closest('button'))openReceiptConsult(Number(row.dataset.receiptRow)).catch(receiptConsultError);};
+  $('receiptConsultBack').onclick=receiptReturnToEmission;$('receiptConsultLoad').onclick=receiptReturnToEmission;
+  $('receiptConsultSearch').onclick=history;$('receiptConsultVoided').onclick=()=>{receiptHistoryVoided=true;history();};
+  $('receiptConsultPrevious').onclick=()=>navigateConsultReceipt(-1).catch(error=>$('receiptStatus').textContent=error.message);
+  $('receiptConsultNext').onclick=()=>navigateConsultReceipt(1).catch(error=>$('receiptStatus').textContent=error.message);
+  $('receiptConsultSection').addEventListener('click',event=>{
+    const invoice=event.target.closest('[data-consult-invoice-row]'),value=event.target.closest('[data-consult-value-row]');
+    if(invoice){consultInvoiceIndex=Number(invoice.dataset.consultInvoiceRow);$('receiptBody').querySelectorAll('[data-consult-invoice-row]').forEach(row=>row.classList.toggle('selected',row===invoice));}
+    if(value){consultValueIndex=Number(value.dataset.consultValueRow);$('receiptBody').querySelectorAll('[data-consult-value-row]').forEach(row=>row.classList.toggle('selected',row===value));}
+    if(event.target.closest('[data-consult-invoice]'))viewConsultInvoice();
+    if(event.target.closest('[data-consult-edit-payment]'))editViewedReceiptPayment();
+  });
+  $('receiptConsultSection').addEventListener('dblclick',event=>{if(event.target.closest('[data-consult-invoice-row]'))viewConsultInvoice();});
+  $('receiptConsultValue').onclick=()=>{const row=viewedReceipt?.valores?.[consultValueIndex];if(!row)return;const box=$('receiptConsultValueDetail');box.hidden=!box.hidden;box.innerHTML='<strong>'+esc(row.tipo)+'</strong> · '+esc(row.numero||'Sin número')+' · '+money(row.importe)+'<br>Banco: '+esc(row.banco||'—')+' · '+esc(row.descripcion||'Sin descripción');};
+  window.addEventListener('resize',fitReceiptSections);fitReceiptSections();
   lock();
   window.addEventListener('menu-user-validated',event=>initialize(event.detail.user));
-  if(document.documentElement.style.visibility!=='hidden'){const current=FX.menuSessionUser();if(current&&FX.menuUserHasAccess('recibos_cobro'))initialize(current);}
+  window.addEventListener('popstate',()=>{if(ready)restoreReceiptRoute().catch(receiptConsultError);});
+  if(document.documentElement.style.visibility!=='hidden'){const current=FX.menuSessionUser();if(current&&FX.menuUserHasAccess(receiptFromCaja?'caja':'recibos_cobro'))initialize(current);}
 })();
 
 }, { once: true });

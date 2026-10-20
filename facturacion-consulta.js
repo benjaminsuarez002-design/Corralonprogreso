@@ -59,7 +59,8 @@
   paintSort();
   let cancellationBusy=false;
   function valuesUser(){return window.CorralonFunciones?.menuSessionUser?.()||{}}
-  function isAdministrator(){if(detailOptions.readOnly===true)return false;return window.CorralonFunciones.menuUserIsAdministrator('facturacion',valuesUser());}
+  function isAdministrator(){if(detailOptions.readOnly===true)return false;return typeof detailOptions.allowAnnul==='boolean'?detailOptions.allowAnnul:window.CorralonFunciones.menuUserIsAdministrator('facturacion',valuesUser());}
+  function historyActions(){return detailOptions.actions||window.CorralonInvoiceHistoryActions||{}}
   function refreshAnnulButton(){
     annulButton.hidden=!isAdministrator();
     annulButton.disabled=actionBusy||!detailData?.versionAnulacion||!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||Boolean(detailData?.bloqueoAnulacionFiscal)||Boolean(detailData?.valuesDirty);
@@ -164,10 +165,9 @@
     const value=detailData.valores[Number(input.dataset.valueIndex)],key=input.dataset.valueKey;value[key]=Number(input.value);
     value.autoDifference=false;
     const type=(historyConfig.tiposPago||[]).find(p=>Number(p.id)===Number(value.idTipoPago)),cls=Number(type?.clase||value.clase);
-    if(key==='idTipoPago'){value.tipo=type.nombre;value.clase=cls;value.idTarjeta=0;value.tarjeta='Ninguna';value.cuotas=0;value.coef=Number(type.recargoInicial)||0;}
+    if(key==='idTipoPago'){value.tipo=type.nombre;value.clase=cls;value.idTarjeta=0;value.tarjeta='Ninguna';value.cuotas=0;}
     if(key==='idTarjeta'){value.tarjeta=(historyConfig.tarjetas||[]).find(c=>Number(c.id)===value.idTarjeta)?.nombre||'Ninguna';value.cuotas=cls===5?Number((historyConfig.tarjetasCuotas||[]).find(p=>Number(p.idTarjeta)===value.idTarjeta)?.cuotas)||0:0;}
-    if(cls===5 && ['idTarjeta','cuotas'].includes(key))value.coef=Number((historyConfig.tarjetasCuotas||[]).find(p=>Number(p.idTarjeta)===value.idTarjeta&&Number(p.cuotas)===value.cuotas)?.coeficiente)||0;
-    window.CorralonMediosPago.adjustValue(value,'coef',valueNumber);
+    // Cambiar la clasificacion del pago conserva el descuento/recargo y total emitidos.
     reconcileCashDifference();redrawValues();detail.querySelector('[data-action-status]').textContent='Cambios sin guardar.';
   });
   detail.addEventListener('click',async event=>{
@@ -182,7 +182,7 @@
       else {const response=await fetch('/api/facturacion/comprobante-valores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudieron guardar los valores.');}
       actionBusy=false;await openDetail(detailIndex);detail.querySelector('[data-action-status]').textContent='Valores actualizados.';}
     catch(error){status.textContent=error.message;detail.querySelectorAll('button,select,input[data-value-key]').forEach(c=>c.disabled=false);}
-    finally{actionBusy=false;detail.querySelector('[data-detail-close]').disabled=false;detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;detail.querySelector('[data-preview]').disabled=!window.CorralonInvoiceHistoryActions?.preview||detailData?.valuesDirty;detail.querySelector('[data-reprint]').disabled=!window.CorralonInvoiceHistoryActions?.reprint||detailData?.valuesDirty;detail.querySelector('[data-recall]').disabled=!window.CorralonInvoiceHistoryActions?.recall||detailData?.valuesDirty;}
+    finally{actionBusy=false;detail.querySelector('[data-detail-close]').disabled=false;detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;detail.querySelector('[data-preview]').disabled=!historyActions().preview||detailData?.valuesDirty;detail.querySelector('[data-reprint]').disabled=!historyActions().reprint||detailData?.valuesDirty;detail.querySelector('[data-recall]').disabled=!historyActions().recall||detailData?.valuesDirty;}
   });
   const warrantyMenu=document.createElement('div');warrantyMenu.hidden=true;
   warrantyMenu.style.cssText='position:fixed;z-index:98;padding:4px;background:var(--corralon-white,#fff);border:1px solid var(--corralon-line-strong,#bbb);border-radius:7px;box-shadow:0 5px 18px #0003';
@@ -258,7 +258,7 @@
     finally{
       clearTimeout(generationTimer);
       actionBusy=false;
-      if(!detail.hidden){const unavailable=!Number(header.confirmado)||Boolean(Number(header.anulada));detail.querySelector('[data-preview]').disabled=unavailable||!window.CorralonInvoiceHistoryActions?.preview;detail.querySelector('[data-reprint]').disabled=unavailable;detail.querySelector('[data-recall]').disabled=!Number((detailData?.comprobante)?.confirmado);detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;}
+      if(!detail.hidden){const unavailable=!Number(header.confirmado)||Boolean(Number(header.anulada));detail.querySelector('[data-preview]').disabled=unavailable||!historyActions().preview;detail.querySelector('[data-reprint]').disabled=unavailable;detail.querySelector('[data-recall]').disabled=!Number((detailData?.comprobante)?.confirmado);detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;}
     }
   });
   document.addEventListener('pointerdown',event=>{if(!warrantyMenu.contains(event.target))warrantyMenu.hidden=true;});
@@ -359,7 +359,7 @@
     const row=rows[index];if(!row||actionBusy)return;warrantyMenu.hidden=true;detailData=null;detailIndex=index;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;detail.querySelector('[data-action-status]').textContent='';detail.hidden=false;detailController?.abort();const controller=detailController=new AbortController(),request=++detailSequence;
     detail.querySelector('[data-title]').textContent='Boleta '+row.numero+(row.tipo?' · '+row.tipo:'');detail.querySelector('[data-detail-position]').textContent=`${index+1} de ${rows.length}`;detail.querySelector('[data-detail-prev]').disabled=index===0;detail.querySelector('[data-detail-next]').disabled=index===rows.length-1;
     const body=detail.querySelector('[data-detail-body]');const footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='Consultando detalle…';
-    try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;detailData=result;const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=window.CorralonInvoiceHistoryActions||{};detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
+    try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;detailData=result;const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
       const typeName=h.tipo||(historyConfig?.comprobantes||[]).find(t=>Number(t.id)===Number(h.idComprobante))?.nombre||row.tipo;
       detail.querySelector('[data-title]').textContent='Boleta '+h.numero+(typeName?' · '+typeName:'');
       detail.querySelector('[data-preview]').hidden=!adapters.preview;detail.querySelector('[data-reprint]').hidden=!adapters.reprint;detail.querySelector('[data-recall]').hidden=!adapters.recall;
@@ -369,13 +369,13 @@
     }catch(error){if(request===detailSequence&&!detail.hidden)body.textContent=controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a abrir la boleta.':error.message}
   }
   async function detailAction(action){
-    const row=rows[detailIndex];if(!row||actionBusy)return;const adapter=window.CorralonInvoiceHistoryActions?.[action],status=detail.querySelector('[data-action-status]');
+    const row=rows[detailIndex];if(!row||actionBusy)return;const adapter=historyActions()[action],status=detail.querySelector('[data-action-status]');
     if(detailData?.valuesDirty){status.textContent='Guardá los valores antes de ver, reimprimir o llamar la boleta.';return;}
     if(!adapter){status.textContent='Facturación todavía está cargando. Reintentá en unos segundos.';return}
     actionBusy=true;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;status.textContent=action==='preview'?'Preparando vista previa…':action==='reprint'?'Preparando reimpresión…':'Cargando boleta en Facturación…';
     try{const result=await adapter(Number(row.idRecibo));if(result?.cancelled){status.textContent='Carga cancelada.';}else if(action==='recall'||result?.preview)close();else status.textContent='Ticket enviado a la impresora.'}
     catch(error){status.textContent=error.message}
-    finally{actionBusy=false;if(!detail.hidden){detail.querySelector('[data-preview]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!window.CorralonInvoiceHistoryActions?.preview;detail.querySelector('[data-reprint]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!window.CorralonInvoiceHistoryActions?.reprint;detail.querySelector('[data-recall]').disabled=!Number(detailData?.comprobante?.confirmado)||!window.CorralonInvoiceHistoryActions?.recall}}
+    finally{actionBusy=false;if(!detail.hidden){detail.querySelector('[data-preview]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().preview;detail.querySelector('[data-reprint]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().reprint;detail.querySelector('[data-recall]').disabled=!Number(detailData?.comprobante?.confirmado)||!historyActions().recall}}
   }
   detail.querySelector('[data-preview]').addEventListener('click',()=>detailAction('preview'));
   detail.querySelector('[data-reprint]').addEventListener('click',()=>detailAction('reprint'));
@@ -391,8 +391,12 @@
     const notice=detail.querySelector('[data-action-status]');notice.textContent='Anulando boleta y revirtiendo el stock…';
     window.CorralonSystem?.articleSync?.set('syncing','Anulando boleta y revirtiendo el stock…');
     try{
-      const response=await fetch('/api/facturacion/comprobante-anular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarioId:valuesUser().id,idRecibo:row.idRecibo,version})});
-      const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo confirmar la anulación. Volvé a consultar la boleta antes de reintentar.');
+      const payload={usuarioId:valuesUser().id,idRecibo:row.idRecibo,version};
+      if(detailOptions.cancelInvoice)await detailOptions.cancelInvoice(payload);
+      else {
+        const response=await fetch('/api/facturacion/comprobante-anular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo confirmar la anulación. Volvé a consultar la boleta antes de reintentar.');
+      }
       row.anulada=-1;row.total=0;
       const listRow=get('[data-rows]').querySelector(`[data-invoice="${index}"]`);
       if(listRow){listRow.children[5].textContent=money(0);listRow.children[6].textContent='Anulada';listRow.children[6].classList.add('cancelled');}
@@ -404,8 +408,8 @@
     finally{
       actionBusy=false;cancellationBusy=false;states.forEach(([control,disabled])=>control.disabled=disabled);refreshAnnulButton();
       const unavailable=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||Boolean(detailData?.valuesDirty);
-      detail.querySelector('[data-preview]').disabled=unavailable||!window.CorralonInvoiceHistoryActions?.preview;
-      detail.querySelector('[data-reprint]').disabled=unavailable||!window.CorralonInvoiceHistoryActions?.reprint;
+      detail.querySelector('[data-preview]').disabled=unavailable||!historyActions().preview;
+      detail.querySelector('[data-reprint]').disabled=unavailable||!historyActions().reprint;
     }
   });
   function closeDetail(){if(cancellationBusy)return;const wasOpen=!detail.hidden;warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;detailController?.abort();const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='';if(overlay.hidden)returnFocus?.focus();else get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus();if(wasOpen)detailOptions.onClose?.();}
@@ -467,3 +471,4 @@
   },true);
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!warrantyMenu.hidden){event.preventDefault();warrantyMenu.hidden=true;}else if(event.key==='Escape'&&!detail.hidden){event.preventDefault();closeDetail()}else if(event.key==='Escape'&&!overlay.hidden){event.preventDefault();close()}});
 })();
+
