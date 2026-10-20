@@ -1371,6 +1371,10 @@
     const article = list.find((item) => articleCode(item) === articleCodeValue);
     if (!article) return false;
     const host = ensureArticleEditorHost();
+    // Un importador puede haber dejado este host existente como fondo inert.
+    // El editor pasa a ser el popup activo y debe recuperar la interacción.
+    host.inert = false;
+    host.removeAttribute('inert');
     articleEditorOperation = options.operation || null;
     host.querySelector('[data-editor-apply-open]').hidden = Boolean(articleEditorOperation);
     articleEditorOriginalCode = articleCodeValue;

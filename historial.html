@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.23"></script>
+<script src="corralon-system.js?v=1.0.24"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -2007,14 +2007,17 @@ function centroTouches(touches) {
 
 function setAccionesDetalleModo(modo) {
   const esRemito = modo === 'remito';
+  document.getElementById('detalleBg').classList.add('budget-reference-detail');
+  document.getElementById('detalleNro').dataset.detailLabel=esRemito?'Remito':'Presupuesto';
+  const close=document.querySelector('.detalle-head>button');close.textContent='Cerrar';
   const btnPdf = document.getElementById('btnDetallePdf');
   const btnCopy = document.getElementById('btnDetalleCopy');
   const btnEdit = document.getElementById('btnDetalleEdit');
   const btnDel = document.getElementById('btnDetalleDel');
   const btnCopyBoleta = document.getElementById('btnCopyBoleta');
-  if (btnPdf) btnPdf.textContent = esRemito ? 'PDF' : 'Ver PDF';
+  if (btnPdf) btnPdf.textContent = 'Ver PDF';
   if (btnCopy) btnCopy.style.display = esRemito ? 'none' : '';
-  if (btnEdit) btnEdit.style.display = esRemito ? '' : 'none';
+  if (btnEdit) {btnEdit.style.display = esRemito ? '' : 'none';btnEdit.textContent='Editar';}
   const btnSql = document.getElementById('btnDetalleSql');
   if(btnSql) {
     btnSql.style.display = esRemito && cargaSqlDisponible() ? '' : 'none';
@@ -2025,7 +2028,7 @@ function setAccionesDetalleModo(modo) {
   if(btnTransferStock) btnTransferStock.style.display = !esRemito && cargaSqlDisponible() ? '' : 'none';
   if (btnDel) {
     btnDel.style.display = '';
-    btnDel.textContent = esRemito ? '🗑 Eliminar remito' : '🗑 Eliminar presupuesto';
+    btnDel.textContent = esRemito ? 'Eliminar remito' : 'Eliminar presupuesto';
   }
   if (btnCopyBoleta) btnCopyBoleta.style.display = esRemito ? 'none' : '';
 }
@@ -2383,13 +2386,14 @@ function abrirDetallePresupuesto(index) {
   ) || 0;
   const fechaTxt = p.fecha || (p.fecha_iso ? new Date(p.fecha_iso).toLocaleDateString('es-AR') : '-');
   const titulo = tituloPresupuestoHistorial(p);
+  const datos=datosExtraPresupuesto(p);
 
   document.getElementById('detalleNro').textContent = p.numero || '-';
   mostrarEstadoDetalle('presupuesto', p);
   const body = document.getElementById('detalleBody');
   body.innerHTML = `
     <div class="detalle-info">
-      <div class="detalle-campo" style="grid-column:1/3">
+      <div class="detalle-campo budget-type">
         <div class="detalle-lbl">Tipo</div>
         <div class="detalle-val detalle-tipo-editable">
           <span>${esc(titulo)}</span>
@@ -2404,11 +2408,13 @@ function abrirDetallePresupuesto(index) {
         <div class="detalle-lbl">N° Presupuesto</div>
         <div class="detalle-val">${esc(p.numero || '-')}</div>
       </div>
+      ${datos.usuario ? `<div class="detalle-campo budget-user"><div class="detalle-lbl">Usuario</div><div class="detalle-val">${esc(datos.usuario)}</div></div>` : ''}
       ${detalleExtraPresupuestoHtml(p)}
     </div>
+    <h3 class="budget-items-title">Detalle de artículos</h3>
     <div class="detalle-tabla-head">
       <div class="detalle-th" style="text-align:center">Cant.</div>
-      <div class="detalle-th">Descripcion</div>
+      <div class="detalle-th">Descripción</div>
       <div class="detalle-th" style="text-align:right">Precio</div>
       <div class="detalle-th" style="text-align:right">Subtotal</div>
     </div>
@@ -2424,12 +2430,14 @@ function abrirDetallePresupuesto(index) {
           <div class="detalle-td num bold">$${subtotal.toLocaleString('es-AR')}</div>
         </div>`;
     }).join('') : '<div style="padding:12px 8px;color:#bbb;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;">Sin articulos registrados</div>'}
-    <div class="detalle-total">
+    <div class="detalle-total"><span class="budget-items-count">${items.length} artículos · ${fmtCantidad(items.reduce((n,it)=>n+(Number(it.cantidad)||0),0))} unidades</span>
       <div class="detalle-total-lbl">Total</div>
       <div class="detalle-total-val">$${Number(total).toLocaleString('es-AR')}</div>
     </div>
     `;
 
+  const fields=[...body.querySelectorAll('.detalle-info>.detalle-campo')];
+  fields.forEach(field=>{const label=field.querySelector('.detalle-lbl')?.textContent.trim();if(label==='Usuario'&&!field.classList.contains('budget-user'))field.remove();if(label==='Nombre'){field.classList.add('budget-name');const edit=body.querySelector('.detalle-pencil-btn');if(edit)field.querySelector('.detalle-val').append(edit);}});
   document.getElementById('detalleBg').classList.add('open');
 }
 
@@ -2604,7 +2612,7 @@ function renderDetalleRemito(remito) {
   const body = document.getElementById('detalleBody');
   body.innerHTML = `
     <div class="detalle-info">
-      <div class="detalle-campo" style="grid-column:1/3">
+      <div class="detalle-campo budget-name">
         <div class="detalle-lbl">Cliente</div>
         <div class="detalle-val">${esc(remito.cliente||'—')}</div>
       </div>
@@ -2625,6 +2633,7 @@ function renderDetalleRemito(remito) {
         <div class="detalle-val">${esc(remito.nro ? remitoFull(remito.nro) : '—')}</div>
       </div>
     </div>
+    <h3 class="budget-items-title">Detalle de artículos</h3>
     <div class="detalle-tabla-head">
       <div class="detalle-th" style="text-align:center">Cant.</div>
       <div class="detalle-th">Descripción</div>
@@ -2642,7 +2651,7 @@ function renderDetalleRemito(remito) {
           <div class="detalle-td num bold">$${Number(cant*precio).toLocaleString('es-AR')}</div>
         </div>`;
     }).join('') : '<div style="padding:12px 8px;color:#bbb;font-family:\'Barlow Condensed\',sans-serif;font-size:13px;">Sin ítems registrados</div>'}
-    <div class="detalle-total">
+    <div class="detalle-total"><span class="budget-items-count">${items.length} artículos · ${fmtCantidad(items.reduce((n,it)=>n+(Number(it.cant)||0),0))} unidades</span>
       <div class="detalle-total-lbl">Total</div>
       <div class="detalle-total-val">$${total.toLocaleString('es-AR')}</div>
     </div>`;

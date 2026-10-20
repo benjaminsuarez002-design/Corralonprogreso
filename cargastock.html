@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.54"></script>
+<script src="corralon-system.js?v=1.0.55"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -1898,6 +1898,18 @@ function renderArticleProviderList() {
   }
 
 }
+function scrollArticleProviderActiveIntoView(alignTop = false) {
+  const menu=el.articleProviderMenu;
+  const active=menu.querySelector('.article-provider-option.active');
+  if(!active)return;
+  const bounds=menu.getBoundingClientRect();
+  const top=(menu.querySelector('.stock-article-list-head')?.getBoundingClientRect().bottom || bounds.top)+4;
+  const footer=menu.querySelector('.stock-article-list-footer');
+  const bottom=Math.min(bounds.bottom,footer?.getBoundingClientRect().top ?? bounds.bottom)-4;
+  const row=active.getBoundingClientRect();
+  if(alignTop || row.top<top)menu.scrollTop=Math.max(0,menu.scrollTop+row.top-top);
+  else if(row.bottom>bottom)menu.scrollTop+=row.bottom-bottom;
+}
 function stockCanOfferArticleImport(cell) {
   const description=norm(cell?.textContent||'');
   return cell?.dataset.field==='descripcion' && Boolean(description)
@@ -1959,10 +1971,7 @@ function openArticleProviderList(cell) {
   el.articleProviderMenu.style.maxHeight=(availableHeight/scale)+'px';
   const renderedHeight=Math.min((el.articleProviderMenu.scrollHeight+2)*scale,availableHeight);
   el.articleProviderMenu.style.top=(openAbove?Math.max(viewportMargin,rect.top-gap-renderedHeight):rect.bottom+gap)+'px';
-  requestAnimationFrame(() => {
-    const active = articleProviderActive === -1 ? el.articleProviderMenu.querySelector('[data-article-create]') : el.articleProviderMenu.querySelector(`[data-article-option="${articleProviderActive}"]`);
-    if (active) el.articleProviderMenu.scrollTop = Math.max(0, active.offsetTop);
-  });
+  requestAnimationFrame(() => scrollArticleProviderActiveIntoView(true));
 }
 function scheduleArticleProviderList(cell) {
   clearTimeout(articleProviderInputTimer);
@@ -6760,7 +6769,7 @@ el.rows.addEventListener('keydown', (event) => {
     const direction = event.key === 'ArrowDown' ? 1 : -1;
     articleProviderActive = Math.max(0, Math.min(articleProviderOptions.length - 1, articleProviderActive + direction));
     renderArticleProviderList();
-    el.articleProviderMenu.querySelector('.article-provider-option.active')?.scrollIntoView({ block: 'nearest' });
+    scrollArticleProviderActiveIntoView();
     return;
   }
   if (event.key === 'Enter') {

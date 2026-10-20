@@ -2978,7 +2978,14 @@ internal static partial class FacturacionCopiaApi
             object result;
             if(report)result=new {ok=true,filas=RowsTx(c,tx,"SELECT d.IDDepósito puntoVenta,d.[Descripción] deposito,v.IDTarjeta tarjetaId,a.[Descripción] tarjeta,SUM(ISNULL(v.Importe,0)-ISNULL(v.ImpRec,0)) total"+CardSalesFrom+" AND h.EnInfVtas<>0 GROUP BY d.IDDepósito,d.[Descripción],v.IDTarjeta,a.[Descripción] ORDER BY d.IDDepósito,a.[Descripción]",from,to.AddDays(1),card)};
             else {
-                var rows=RowsTx(c,tx,"SELECT h.IDRecibo idRecibo,h.IDComprob idComprobante,v.Orden orden,CONVERT(varchar(10),h.Fecha,23) fecha,CASE WHEN h.IDComprob=13 AND EXISTS(SELECT 1 FROM dbo.FacturasATP f WHERE f.IDEmp=h.IDEmp AND f.IDComprob IN(1,2) AND f.Confirmado=-1 AND f.Anulada=0 AND f.NroFacNC=h.NroFactura) THEN RTRIM(t.Abreviatura)+' - F' ELSE t.Abreviatura END tipo,h.NroFactura numero,v.Cuotas cuotas,h.ApeYNom cliente,v.Concepto numeroTarjeta,v.ImpEnt*t.ImpPor total,h.Pagada cobrada,p.TipoPago tipoPago,v.IDTarjeta tarjetaId,a.[Descripción] tarjeta,d.[Descripción] puntoVenta"+CardSalesFrom+" ORDER BY h.Fecha,t.Abreviatura,h.NroFactura,h.IDRecibo,v.Orden",from,to.AddDays(1),card);
+                var rows=RowsTx(c,tx,"SELECT h.IDRecibo idRecibo,h.IDComprob idComprobante,v.Orden orden,CONVERT(varchar(10),h.Fecha,23) fecha,t.Abreviatura tipo,h.NroFactura numero,v.Cuotas cuotas,h.ApeYNom cliente,v.Concepto numeroTarjeta,v.ImpEnt*t.ImpPor total,h.Pagada cobrada,p.TipoPago tipoPago,v.IDTarjeta tarjetaId,a.[Descripción] tarjeta,d.[Descripción] puntoVenta"+CardSalesFrom+" ORDER BY h.Fecha,t.Abreviatura,h.NroFactura,h.IDRecibo,v.Orden",from,to.AddDays(1),card);
+                // Leer los vinculos una sola vez: el EXISTS correlacionado por fila
+                // hacia FacturasATP sin indice por NroFacNC agotaba el tiempo de SQL.
+                if(rows.Exists(row=>Number(row["idComprobante"])==13)) {
+                    var invoiced=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach(var link in RowsTx(c,tx,"SELECT DISTINCT NroFacNC FROM dbo.FacturasATP WHERE IDEmp=1 AND IDComprob IN(1,2) AND Confirmado=-1 AND Anulada=0 AND NroFacNC<>''"))invoiced.Add(Text(link["NroFacNC"]));
+                    foreach(var row in rows)if(Number(row["idComprobante"])==13&&invoiced.Contains(Text(row["numero"])))row["tipo"]=Text(row["tipo"])+" - F";
+                }
                 var versions=new Dictionary<int,string>();
                 foreach(var row in rows){int id=Convert.ToInt32(row["idRecibo"]);if(!versions.ContainsKey(id))versions[id]=CardSalesVersion(c,tx,id);row["version"]=versions[id];}
                 result=new {ok=true,filas=rows};
