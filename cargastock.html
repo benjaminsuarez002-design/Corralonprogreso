@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.56"></script>
+<script src="corralon-system.js?v=1.0.57"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -642,6 +642,7 @@ let stockSqlCodeMatchCounts = new Map();
 let stockSqlCodeDescriptions = new Map();
 let stockSqlCatalogRows = [];
 let compareSystemRows = [];
+let compareSqlMode=false,compareSqlSequence=0;
 let comparePairs = [];
 const compareSelections = { left: new Set(), right: new Set() };
 const compareColumnSelections = { left: new Set(), right: new Set() };
@@ -917,7 +918,7 @@ function stockWorkspaceSnapshot() {
     rows: rowsData.map(row => ({ ...row })), header,
     provider: provider ? { ...provider } : null,
     providerText: el.providerInput.value,
-    costsOpen: stockCostOptionsActive(),
+    costsOpen: stockCostOptionsActive(), confirmed:stockConfirmed,
     pending: JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY) || 'null')
   };
 }
@@ -954,13 +955,20 @@ function stockSaveReloadSnapshot(){
     meta:stockSqlMeta,articles:stockSqlArticles,providerArticles:stockProviderListArticles,providers,
     options:[...document.querySelectorAll('[data-stock-header]')].filter(node=>node.tagName==='SELECT').map(node=>({id:node.id,html:node.innerHTML})),
     fields:[...document.querySelectorAll('[data-stock-header],#stockNumero,#stockOperador')].map(node=>({id:node.id,value:node.value})),
-    receipt:stockField('stockPrintBtn').dataset.receipt||''});
+    confirmed:stockConfirmed,receipt:stockField('stockPrintBtn').hidden?'':stockField('stockPrintBtn').dataset.receipt||''});
   stockReloadWrite=stockReloadWrite.catch(()=>{}).then(()=>window.CorralonCacheDB.set(stockReloadKey,state));
   return stockReloadWrite;
 }
 function stockScheduleReloadSnapshot(){
   clearTimeout(stockReloadTimer);
   stockReloadTimer=setTimeout(()=>stockSaveReloadSnapshot().catch(console.warn),250);
+}
+function stockDraftForRestore(workspace,{confirmed=false,pending=null}={}){
+  if(workspace?.pending?.status==='uncertain')return workspace;
+  const sameConfirmed=pending?.status==='confirmed'&&workspace?.pending?.id&&workspace.pending.id===pending.id;
+  if(!confirmed&&!workspace?.confirmed&&workspace?.pending?.status!=='confirmed'&&!sameConfirmed)return workspace;
+  return {rows:[],provider:null,providerText:'',costsOpen:false,pending:null,confirmed:false,
+    header:{stockIngresoSucursal:workspace?.header?.stockIngresoSucursal||'1',stockTipoMovimiento:'23',stockFecha:stockToday(),stockArticleFilter:'sql'}};
 }
 async function stockRestoreReloadView(){
   const invoiceTransfer=JSON.parse(localStorage.getItem(`corralon_stock_factura_${FX.menuSessionUser()?.id||''}`)||'null');
@@ -976,6 +984,15 @@ async function stockRestoreReloadView(){
       document.querySelector('#stockCostOptions .toolbar').prepend(stockAdditionalProvider,stockAdditionalFilter);
       document.querySelector('.header-actions').append(stockField('stockAdditionalClose'));
       stockAdditionalPopup.classList.add('visible');document.body.classList.add('stock-additional-open');
+    }
+    const recoveredWorkspace=stockDraftForRestore(state.workspace,{confirmed:state.confirmed||Boolean(Number(state.fields.find(item=>item.id==='stockNumero')?.value)),pending:JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null')});
+    const discardedConfirmed=recoveredWorkspace!==state.workspace;
+    if(discardedConfirmed){
+      state.workspace=recoveredWorkspace;state.receipt='';
+      state.fields=state.fields.map(item=>({...item,value:item.id==='stockOperador'?item.value:(recoveredWorkspace.header[item.id]||'')}));
+      localStorage.removeItem(STOCK_INGRESO_DRAFT_KEY);localStorage.removeItem(PROVIDER_KEY);
+      localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(recoveredWorkspace.header));
+      await window.CorralonCacheDB.set(STOCK_WORKSPACE_KEY+'_'+state.active,recoveredWorkspace);
     }
     stockActiveWorkspace=state.active;stockWorkspaceCount=state.count;
     stockSqlMeta=state.meta;providers=state.providers;stockSqlArticles=state.articles;stockProviderListArticles=state.providerArticles||[];
@@ -999,7 +1016,7 @@ async function stockRestoreReloadView(){
       for(const item of view.scrolls||[]){const node=item.id?document.getElementById(item.id):[...document.querySelectorAll('.rows,.stock-additional-content,.table-wrap,.app')].find(node=>node.className===item.cls);if(node){node.scrollTop=item.top;node.scrollLeft=item.left;}}
       window.scrollTo(view.windowX||0,view.windowY||0);
     });
-    stockIngresoMessage('Vista recuperada desde el almacenamiento local.','ok');
+    stockIngresoMessage(discardedConfirmed?'El movimiento ya estaba confirmado. Nueva carga vacía.':'Vista recuperada desde el almacenamiento local.','ok');
     return true;
   }finally{stockReloadRestoring=false;}
 }
@@ -1044,6 +1061,9 @@ async function loadRows() {
   try {
     stockWorkspaceRestored = await window.CorralonCacheDB.get(STOCK_WORKSPACE_KEY + '_' + stockActiveWorkspace);
     if (stockWorkspaceRestored) {
+      const activePending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
+      const recovered=stockDraftForRestore(stockWorkspaceRestored,{pending:activePending,confirmed:activePending?.status==='confirmed'});
+      if(recovered!==stockWorkspaceRestored){stockWorkspaceRestored=recovered;localStorage.removeItem(STOCK_INGRESO_DRAFT_KEY);await window.CorralonCacheDB.set(STOCK_WORKSPACE_KEY+'_'+stockActiveWorkspace,recovered);}
       rowsData = stockWorkspaceRestored.rows || [];
       localStorage.setItem(STOCK_HEADER_KEY, JSON.stringify(stockWorkspaceRestored.header || {}));
       // La confirmación activa se escribe inmediatamente en localStorage.
@@ -1051,6 +1071,13 @@ async function loadRows() {
       if (stockWorkspaceRestored.provider) localStorage.setItem(PROVIDER_KEY, String(stockWorkspaceRestored.provider.id_proveedor));
       else localStorage.removeItem(PROVIDER_KEY);
       return;
+    }
+    const pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
+    if(pending?.status==='confirmed'){
+      stockWorkspaceRestored=stockDraftForRestore(null,{confirmed:true});rowsData=[];
+      localStorage.removeItem(STOCK_INGRESO_DRAFT_KEY);localStorage.removeItem(PROVIDER_KEY);
+      localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(stockWorkspaceRestored.header));
+      await window.CorralonCacheDB.set(STOCK_WORKSPACE_KEY+'_'+stockActiveWorkspace,stockWorkspaceRestored);return;
     }
     const parsed = await window.CorralonCacheDB.migrateLocalStorage(CACHE_KEY);
     rowsData = Array.isArray(parsed) ? parsed : [];
@@ -2882,7 +2909,8 @@ function toolbarFieldPointerDown(event) {
   scheduleFullSelect(field);
 }
 function placeCaretOnMouseClick(target, event) {
-  if (!target || (!isTextFullySelected(target) && mouseEditTarget !== target)) return false;
+  const pricePointerEdit=stockCostOptionsActive()&&target?.matches?.('[contenteditable="true"][data-field="precio"]');
+  if (!target || (!pricePointerEdit && !isTextFullySelected(target) && mouseEditTarget !== target)) return false;
   target.dataset.fullSelected = '0';
   suppressFullSelectTarget = target;
   mouseEditTarget = target;
@@ -3306,7 +3334,7 @@ function renderCompareSide(side, comparisonActive) {
   const table = document.getElementById(side === 'left' ? 'compareStockLeftTable' : 'compareStockRightTable');
   const labels = side === 'left'
     ? ['Código', 'Descripción', 'Cantidad', 'Precio final', 'Final x cantidad']
-    : ['CodProv', 'Descripción', 'Cantidad', 'PrecioUni', 'Importe'];
+    : ['CodProv', 'Descripción', 'Cantidad', compareSqlMode?'Costo sin IVA':'PrecioUni', 'Importe'];
   const types = ['text', 'text', 'quantity', 'money', 'money'];
   const fields = ['codigo', 'descripcion', 'cantidad', 'precioFinal', 'precioFinalCantidad'];
   const head = `<div class="compare-stock-row head">
@@ -3354,8 +3382,8 @@ function renderStockComparison() {
     }
   });
   status.textContent = comparisonActive
-    ? `${leftCount} de Cargar Stock · ${rightCount} de Sistema · ${differences} con diferencias`
-    : `${leftCount} filas de Cargar Stock · Pegá la tabla de Sistema para comparar.`;
+    ? `${leftCount} de Cargar Stock · ${rightCount} de ${compareSqlMode?'SQL (costos sin IVA)':'Sistema'} · ${differences} con diferencias`
+    : compareSqlMode?`${leftCount} filas de Cargar Stock · Sin artículos coincidentes en SQL.`:`${leftCount} filas de Cargar Stock · Pegá la tabla de Sistema para comparar.`;
 }
 function compareSideSequences() {
   return {
@@ -3732,17 +3760,37 @@ function openCompareContextMenu(event, target) {
   menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))}px`;
 }
-function openStockComparison() {
+function compareSqlMatchingRows(sourceRows,articles,providerId) {
+  return sourceRows.filter(row=>!isBlankStockRow(row)).flatMap(row=>{
+    const code=codeKey(row.codigo);
+    const matches=articles.filter(article=>(!providerId||Number(article.proveedor)===providerId)&&((row.idart&&String(article.idart)===String(row.idart)&&(!code||codeKey(article.codProv)===code))||(!row.idart&&code&&codeKey(article.codProv)===code)));
+    if(matches.length!==1)return [];
+    const article=matches[0],cost=Number(article.precioCosto),quantity=moneyNumber(row.cantidad);
+    if(article.precioCosto==null||!Number.isFinite(cost))return [];
+    return [{codigo:row.codigo,descripcion:article.descripcion,cantidad:quantity,precioFinal:cost,precioFinalCantidad:cost*quantity}];
+  });
+}
+async function openStockComparison() {
   compareReturnFocus = document.activeElement;
   clearCompareSelections();
   compareActiveCell = null;
   compareRowSelectionAnchor.left = compareRowSelectionAnchor.right = null;
   compareColumnSelectionAnchor.left = compareColumnSelectionAnchor.right = null;
-  comparePairs = buildCompareStockPairs();
+  const ticket=++compareSqlSequence,sourceRows=rowsData.map(row=>({...row})),providerId=stockProviderId(),leftRows=currentCompareLeftRows();
+  compareSqlMode=true;compareSystemRows=[];
+  comparePairs = buildCompareStockPairs(leftRows,[]);
   renderStockComparison();
   document.getElementById('compareStockBackdrop').classList.add('visible');
+  const status=document.getElementById('compareStockStatus');status.textContent='Consultando artículos y costos sin IVA en SQL…';
+  try{
+    const result=await stockSqlGet('articulos');
+    if(ticket!==compareSqlSequence)return;
+    compareSystemRows=compareSqlMatchingRows(sourceRows,result.articulos||[],providerId);
+    comparePairs=buildCompareStockPairs(leftRows,compareSystemRows);renderStockComparison();
+  }catch(error){if(ticket===compareSqlSequence)status.textContent='No se pudo comparar con SQL: '+error.message;}
 }
 function closeStockComparison() {
+  ++compareSqlSequence;
   closeCompareContextMenu();
   closeComparePositionPopup();
   document.getElementById('compareStockBackdrop').classList.remove('visible');
@@ -3754,7 +3802,7 @@ function applyStockComparisonPaste(text) {
     show('No encontré filas de Sistema para comparar');
     return;
   }
-  compareSystemRows = parsed;
+  ++compareSqlSequence;compareSqlMode=false;compareSystemRows = parsed;
   clearCompareSelections();
   compareActiveCell = null;
   compareRowSelectionAnchor.left = compareRowSelectionAnchor.right = null;

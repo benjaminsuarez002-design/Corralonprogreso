@@ -65,29 +65,6 @@
   }
   window.fetch=connection;
   window.IndexCloudflare={fetch:connection};
-  const system=window.CorralonSystem,openEditor=system.articleEditor.open,watched=new WeakSet();
-  let savingEditor=null;
-  system.articleEditor.open=function(...args){
-    if(savingEditor)return false;
-    const opened=openEditor.apply(this,args),host=document.querySelector('.corralon-article-editor-host');
-    if(opened&&host&&!watched.has(host)){
-      watched.add(host);
-      new MutationObserver(()=>{
-        const button=host.querySelector('[data-editor-save]');
-        if(button?.disabled&&!savingEditor&&host.classList.contains('is-open')){
-          savingEditor={host,display:host.style.getPropertyValue('display'),priority:host.style.getPropertyPriority('display')};
-          host.style.setProperty('display','none','important');host.setAttribute('aria-hidden','true');
-          system.articleSync.set('syncing','Guardando cambios…');
-        }else if(savingEditor?.host===host&&!button?.disabled){
-          const previous=savingEditor;savingEditor=null;
-          if(previous.display)host.style.setProperty('display',previous.display,previous.priority);else host.style.removeProperty('display');
-          if(host.classList.contains('is-open')){
-            host.setAttribute('aria-hidden','false');
-            system.articleSync.set('error','No se pudo guardar. Revisá el artículo e intentá nuevamente.');
-          }
-        }
-      }).observe(host,{subtree:true,attributes:true,attributeFilter:['disabled','class']});
-    }
-    return opened;
-  };
+  // El editor compartido oculta el popup y administra la animación de guardado.
+
 })();

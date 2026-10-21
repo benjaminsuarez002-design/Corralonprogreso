@@ -91,6 +91,7 @@ th{position:sticky;top:0;background:var(--corralon-soft-2);z-index:1;white-space
 .calculator label{position:static;grid-template-columns:44px 110px;height:22px;margin-bottom:15px}
 .calculator input,.calculator select{text-align:right;font-weight:700}
 #calculatorRate{width:85px;margin-left:3px}
+body.purchase-entry-reference .calculator #importCalculator{position:absolute;left:50%;right:auto;transform:translateX(-50%);bottom:30px;min-width:150px;height:36px}
 .bottom-fields{top:318px;height:90px}
 .bottom-fields .remito{left:12px;top:0;width:251px;--label-width:129px}
 .bottom-fields .grand-total{left:284px;top:0;width:208px;--label-width:50px;font-size:19px}
@@ -193,6 +194,7 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
             <label>% IVA<select id="calculatorRate" data-flow></select></label>
             <label>$ IVA:<input id="calculatorIva" inputmode="decimal" data-flow data-number-format="currency"></label>
             <label>Neto:<input id="calculatorNet" inputmode="decimal" data-flow data-number-format="currency"></label>
+            <button id="importCalculator" type="button" class="secondary"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span>Importar</span></button>
           </aside>
         </div>
         <div class="fields bottom-fields">
@@ -894,7 +896,32 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     remove.innerHTML=icon('delete')+'<span>Eliminar</span>';
 
   }
+  function openPurchaseDiscount(result) {
+    if(document.querySelector('[data-purchase-discount-dialog]'))return;
+    const purchase=result.factura[0],total=Number(purchase.Total||0);
+    const popup=document.createElement('dialog');popup.dataset.purchaseDiscountDialog='';
+    popup.style.cssText='position:fixed;inset:0;margin:auto;width:min(440px,94vw);padding:20px;border:1px solid #bad1e8;border-radius:12px;background:#f8fbff;color:#17375a;box-sizing:border-box';
+    popup.innerHTML=`<h3 style="margin:0 0 12px">Generar descuento</h3><p>${esc(purchase.Proveedor)}<br>Compra ${esc(purchase.NroFactura)} · ${money(total)}</p><label style="display:block">Porcentaje de descuento<input data-discount-percent inputmode="decimal" autocomplete="off" placeholder="Ej.: 14,5" style="display:block;width:100%;box-sizing:border-box;padding:10px;margin-top:6px;border:1px solid #bad1e8;border-radius:6px"></label><p data-discount-preview aria-live="polite"></p><p data-discount-error role="alert" style="color:#b00020;white-space:pre-line"></p><div style="display:flex;justify-content:flex-end;gap:8px"><button type="button" data-discount-cancel>Cancelar</button><button type="button" data-discount-save>Generar crédito interno</button></div>`;
+    document.body.append(popup);
+    const percent=popup.querySelector('[data-discount-percent]'),save=popup.querySelector('[data-discount-save]'),cancel=popup.querySelector('[data-discount-cancel]'),error=popup.querySelector('[data-discount-error]');let busy=false;
+    const values=()=>{const rate=FX.parseLocaleNumber(percent.value)/100;return{rate,amount:Math.round((total*rate+Number.EPSILON)*100)/100}};
+    const preview=()=>{const {rate,amount}=values();save.disabled=!(rate>0&&rate<1&&amount>0);popup.querySelector('[data-discount-preview]').textContent=save.disabled?'Ingresá un porcentaje mayor a 0 y menor a 100.':`Crédito interno: ${money(amount)} · Total con descuento: ${money(total-amount)}`;};
+    percent.addEventListener('input',preview);cancel.onclick=()=>{if(!busy)popup.close()};
+    popup.addEventListener('cancel',event=>{if(busy)event.preventDefault()});popup.addEventListener('close',()=>popup.remove());
+    save.onclick=async()=>{
+      const {rate,amount}=values();if(busy||!(rate>0&&rate<1&&amount>0))return;
+      busy=true;save.disabled=cancel.disabled=percent.disabled=true;error.textContent='';FX.animacionCarga?.('syncing','Generando crédito interno…');
+      try{
+        const updated=await api({}, {accion:'generar-descuento',id:Number(purchase.IDRecibo),descuento:rate,version:result.versionDescuento});
+        popup.close();showInvoice(updated);message('Descuento y crédito interno generados en SQL.');FX.animacionCarga?.('success','Crédito interno generado.');
+        if($('reportDialog').open)await loadReport();
+      }catch(failure){error.textContent=failure.message;FX.animacionCarga?.('error',failure.message);}
+      finally{busy=false;cancel.disabled=percent.disabled=false;preview();}
+    };
+    popup.showModal();preview();percent.focus();
+  }
   function showInvoice(result) {
+    $('detailDialog').querySelector('[data-generate-purchase-discount]')?.remove();
     const p = result.factura[0];
     if (!p) throw new Error('Factura no encontrada.');
     const total = Number(p.Total || 0);
@@ -963,6 +990,12 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       };
     }
     groupPurchaseDetail();
+    if(canEdit&&total>0&&Number(p.IDTipoComp)!==51&&Number(p.IDTipoAcred)!==2){
+      const generate=document.createElement('button');generate.type='button';generate.dataset.generatePurchaseDiscount='1';generate.textContent='Generar descuento';
+      generate.disabled=Boolean(Number(p.IDRecImp))||Number(p.ImpDto||0)!==0||Boolean(result.credito?.length);
+      generate.title=generate.disabled?'Esta compra ya tiene un descuento o crédito vinculado.':'';
+      generate.onclick=()=>openPurchaseDiscount(result);$('deleteInvoice').before(generate);
+    }
   }
   async function previewInvoiceRemoval() {
     if (!detailInvoiceId || removingInvoice) return;
@@ -1187,7 +1220,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     target?.focus();
     if (target?.tagName === 'INPUT') target.select();
   }, true);
-  FX.bindLinearNavigation({ root: $('purchaseForm'), selector: '[data-flow]', selectOnAnyFocus: true, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
+  FX.bindLinearNavigation({ root: $('purchaseForm'), selector: '[data-flow]', selectOnAnyFocus: false, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
   FX.bindLinearNavigation({ root: $('reportFilters'), selector: 'input,button[type="submit"]', selectOnAnyFocus: true, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
   FX.bindFieldRestore({ root: $('reportFilters') });
   FX.bindLiveCurrency({ root: $('purchaseForm') });
@@ -1354,6 +1387,21 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   $('quickTotal').addEventListener('input', () => loadQuickTotal());
   $('quickTotal').addEventListener('change', () => loadQuickTotal(true));
   $('splitTotal').addEventListener('click', () => loadQuickTotal(true));
+  function importCalculatorTaxes() {
+    if(!options||!draft||draft.pending||busy)return;
+    const tax=options.impuestos.find(item=>Number(item.id)===Number($('calculatorRate').value)&&item.codigoIva);
+    const net=Math.round(currencyNumber($('calculatorNet').value)*100)/100;
+    const vat=Math.round(currencyNumber($('calculatorIva').value)*100)/100;
+    if(!tax||!Number.isFinite(net)||net<=0||!Number.isFinite(vat)||vat<0){message('Ingresá un neto y un IVA válidos en la calculadora.',true);return;}
+    const current=rows.filter(row=>!row.empty);
+    const netNumber=Math.max(0,...current.map(row=>Number(row.neto)||0))+1;
+    if(netNumber>32767){message('Se alcanzó el límite de números de neto.',true);return;}
+    rows=[...current,
+      {key:rowId(),impuesto:0,neto:netNumber,importe:net,porcentaje:Number(tax.porcentaje)||0,descripcion:'COMPRA NETA'},
+      {key:rowId(),impuesto:Number(tax.id),neto:netNumber,importe:vat,porcentaje:Number(tax.porcentaje)||0,descripcion:tax.nombre}];
+    renderRows();saveDraft();message(`Neto ${netNumber} e IVA ${netNumber} importados al detalle.`);
+  }
+  $('importCalculator').addEventListener('click',importCalculatorTaxes);
   function updateCalculator(source) {
     const rate = Number(options.impuestos.find(item => item.id === Number($('calculatorRate').value))?.porcentaje || 0);
     if (source === 'calculatorIva') $('calculatorNet').value = money(rate ? currencyNumber($('calculatorIva').value) / rate : 0);

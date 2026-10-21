@@ -1120,7 +1120,7 @@
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.29"></script>
+<script src="corralon-system.js?v=1.0.30"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -8414,11 +8414,11 @@ initializeCashHistory(true);
     }catch(error){if(ticket===sequence)status(error.message,true);}
   }
   function render(){
-    $('[data-cc-queue]').innerHTML=rows.map(r=>`<tr data-cc-id="${Number(r.id)}" tabindex="0" aria-selected="${Number(r.id)===selected}"><td>${esc(r.tipo)}</td><td>${esc(r.numero)}</td><td>${esc(r.cliente)}</td><td data-cc-paid-cell><input type="checkbox" data-cc-paid aria-label="Marcar ${esc(r.numero)} como pagada" ${boot.editar?'':'disabled'}></td><td class="num">${money(r.total)}</td><td><input data-cc-tender inputmode="decimal" aria-label="Paga con" value="${esc(tenders.get(Number(r.id))||'')}"></td><td class="num" data-cc-change></td><td>${esc(r.hora)}</td></tr>`).join('');
+    $('[data-cc-queue]').innerHTML=rows.map(r=>`<tr data-cc-id="${Number(r.id)}" tabindex="0" aria-selected="${Number(r.id)===selected}"><td>${esc(r.tipo)}</td><td>${esc(r.numero)}</td><td>${esc(r.cliente)}</td><td data-cc-paid-cell><input type="checkbox" data-cc-paid aria-label="Marcar ${esc(r.numero)} como pagada" ${boot.editar?'':'disabled'}></td><td class="num">${money(r.total)}</td><td><input data-cc-tender data-number-format="currency" inputmode="decimal" aria-label="Paga con" value="${esc(tenders.get(Number(r.id))||'')}"></td><td class="num" data-cc-change></td><td>${esc(r.hora)}</td></tr>`).join('');
     $('[data-cc-count]').textContent=`${rows.length} comprobantes pendientes`;$('[data-cc-pending]').textContent=rows.length+' pendientes';$('[data-cc-total-pending]').textContent=money(rows.reduce((sum,row)=>sum+Number(row.total||0),0));
     section.querySelectorAll('[data-cc-tender]').forEach(calculate);controls();
   }
-  function calculate(input){const tr=input.closest('[data-cc-id]'),row=rows.find(r=>Number(r.id)===Number(tr.dataset.ccId));const text=input.value.trim();const value=Number(text.includes(',')?text.replace(/\./g,'').replace(',','.'):text);tr.querySelector('[data-cc-change]').textContent=text&&Number.isFinite(value)?money(value-Number(row.total)):'';}
+  function calculate(input){const tr=input.closest('[data-cc-id]'),row=rows.find(r=>Number(r.id)===Number(tr.dataset.ccId));const text=input.value.trim();const value=window.CorralonFunciones.parseLocaleNumber(text);tr.querySelector('[data-cc-change]').textContent=text&&Number.isFinite(value)?money(value-Number(row.total)):'';}
   async function refresh(silent=false){
     if(busy||editing||section.hidden)return;const branch=Number($('[data-cc-branch]').value);busy=true;backgroundRefresh=silent;controls();if(!silent)status('Consultando pendientes de hoy…');
     try{const data=await request('cobranzas',{sucursal:branch});if(section.hidden||branch!==Number($('[data-cc-branch]').value))return;
@@ -8443,6 +8443,15 @@ initializeCashHistory(true);
   }catch(error){editing=false;controls();status(error.message,true);}}
   $('[data-cc-queue]').addEventListener('click',e=>{const tr=e.target.closest('[data-cc-id]');if(!tr||busy||editing)return;const id=Number(tr.dataset.ccId);if(e.target.closest('[data-cc-paid-cell]')){paid(id,tr.querySelector('[data-cc-paid]'));return;}if(e.target.matches('input'))return;select(id);});
   $('[data-cc-queue]').addEventListener('keydown',e=>{if(e.target.matches('input')||busy||editing)return;const tr=e.target.closest('[data-cc-id]');if(!tr)return;const index=rows.findIndex(r=>Number(r.id)===Number(tr.dataset.ccId));if(e.key==='Enter'){e.preventDefault();select(Number(tr.dataset.ccId));}if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const next=rows[index+(e.key==='ArrowDown'?1:-1)];if(next){select(Number(next.id));section.querySelector(`[data-cc-id="${Number(next.id)}"]`).focus();}}});
+  window.CorralonFunciones.bindLiveCurrency({root:$('[data-cc-queue]'),selector:'[data-cc-tender]',preserveCaret:true,fixedOnBlur:true});
+  $('[data-cc-queue]').addEventListener('focusout',event=>{if(event.target.matches('[data-cc-tender]')){tenders.set(Number(event.target.closest('[data-cc-id]').dataset.ccId),event.target.value);calculate(event.target);}});
+  $('[data-cc-queue]').addEventListener('keydown',event=>{
+    if(!event.target.matches('[data-cc-tender]')||!['Enter','Tab'].includes(event.key)||!boot.editar)return;
+    event.preventDefault();event.stopPropagation();if(event.repeat||busy||editing)return;
+    const input=event.target,tr=input.closest('[data-cc-id]'),id=Number(tr.dataset.ccId);
+    if(input.value.trim())input.value=money(window.CorralonFunciones.parseLocaleNumber(input.value));
+    tenders.set(id,input.value);calculate(input);paid(id,tr.querySelector('[data-cc-paid]'));
+  });
   $('[data-cc-queue]').addEventListener('input',e=>{if(e.target.matches('[data-cc-tender]')){tenders.set(Number(e.target.closest('[data-cc-id]').dataset.ccId),e.target.value);calculate(e.target);}});
   $('[data-cc-branch]').onchange=()=>{selected=0;refresh();};$('[data-cc-refresh]').onclick=()=>refresh();$('[data-cc-open]').onclick=()=>openInvoice();
   $('[data-cc-back]').onclick=async()=>{if(busy||editing)return;section.hidden=true;++sequence;options.main.hidden=false;await options.onBack();};

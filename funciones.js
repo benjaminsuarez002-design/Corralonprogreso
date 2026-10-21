@@ -1617,10 +1617,22 @@
     const root = options.root || document, selector = options.selector || '[data-number-format="currency"]';
     root.addEventListener('input', event => {
       const input = event.target.closest?.(selector); if (!input || input.disabled || input.readOnly) return;
+      const original=input.value,caret=input.selectionStart;
+      const tokensBeforeCaret=(original.slice(0,caret??original.length).match(/[\d,-]/g)||[]).length;
       const text = input.value.replace(/[^\d,-]/g, ''), negative = text.startsWith('-') ? '-' : '';
       const parts = text.replace(/-/g, '').split(','), integer = parts[0].replace(/^0+(?=\d)/, '');
       input.value = integer || parts.length > 1 ? `$ ${negative}${(integer || '0').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${parts.length > 1 ? ',' + parts[1].slice(0, 2) : ''}` : negative;
+      if(options.preserveCaret&&caret!=null){
+        let position=0,tokens=0;
+        while(position<input.value.length&&tokens<tokensBeforeCaret){if(/[\d,-]/.test(input.value[position]))tokens++;position++;}
+        input.setSelectionRange(position,position);
+      }
+
     });
+    if(options.fixedOnBlur)root.addEventListener('blur',event=>{
+      const input=event.target.closest?.(selector);
+      if(input&&!input.disabled&&!input.readOnly&&input.value.trim())input.value=new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'}).format(parseLocaleNumber(input.value));
+    },true);
     root.addEventListener('keydown', event => {
       const input = event.target.closest?.(selector);
       if (input && event.code === 'NumpadDecimal') {

@@ -4442,7 +4442,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
 <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.49"></script>
+<script src="corralon-system.js?v=1.0.50"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -5793,8 +5793,10 @@ function obtenerArticulosPortada(key, fallbackPredicate, fallbackType = 'general
   if (key === 'masVendido' && rankingVentasCargado) {
     return ordenarPorRankingVentas((todosArticulos || []).filter((articulo) => !!articulo.masVendido)).slice(0, 8);
   }
-  const manuales = resolverArticulosPortadaManual(key);
+  const seleccionManual = resolverArticulosPortadaManual(key);
+  const manuales = key === 'oferta' ? seleccionManual.filter(fallbackPredicate) : seleccionManual;
   if (homeLandingConfig.mode === 'manual' && manuales.length) return manuales;
+  if (key === 'oferta') return ordenarArticulosHome((todosArticulos || []).filter(fallbackPredicate), fallbackType).slice(0, 8);
   return tomarArticulosHome(fallbackPredicate, 8, fallbackType);
 }
 
@@ -5998,6 +6000,13 @@ function renderHomeLanding() {
     </div>
     <div class="home-sections">
       ${renderHomeSection({
+        kicker: 'Precio activo',
+        title: 'En oferta',
+        subtitle: 'Descubrí los artículos con precio especial.',
+        chip: 'oferta',
+        items: ofertas
+      })}
+      ${renderHomeSection({
         kicker: 'Selección del mostrador',
         title: 'Destacados',
         subtitle: 'Artículos seleccionados para tu próximo proyecto.',
@@ -6010,13 +6019,6 @@ function renderHomeLanding() {
         subtitle: 'Los favoritos de nuestros clientes.',
         chip: 'masVendido',
         items: masVendidos
-      })}
-      ${renderHomeSection({
-        kicker: 'Precio activo',
-        title: 'En oferta',
-        subtitle: 'Descubrí los artículos con precio especial.',
-        chip: 'oferta',
-        items: ofertas
       })}
     </div>
   </div>`;

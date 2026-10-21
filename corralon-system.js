@@ -1404,6 +1404,7 @@
   }
 
   function openArticleEditor(code, options = {}) {
+    if(articleEditorHost?.querySelector('[data-editor-save]')?.disabled)return false;
     const articleCodeValue = String(code || '').trim();
     const list = options.articles || articleEditorAdapter.getArticles?.() || [];
     const article = list.find((item) => articleCode(item) === articleCodeValue);
@@ -1474,7 +1475,7 @@
     return true;
   }
 
-  function closeArticleEditor() {
+  function closeArticleEditor({restoreFocus=true} = {}) {
     if (!articleEditorHost) return;
     if (articleEditorHost.querySelector('[data-editor-save]')?.disabled) return;
     const operation = articleEditorOperation;
@@ -1490,7 +1491,7 @@
     articleEditorAridEligible = false;
     updateArticleEditorTargetCount();
     articleEditorHost.querySelectorAll('.corralon-editor-subdialog').forEach((dialog) => dialog.classList.remove('is-open'));
-    articleEditorReturnFocus?.focus?.();
+    if(restoreFocus)articleEditorReturnFocus?.focus?.();
     articleEditorReturnFocus = null;
     operation?.onClose?.();
   }
@@ -1529,6 +1530,7 @@
   }
 
   async function saveArticleEditor() {
+    if(articleEditorHost?.querySelector('[data-editor-save]')?.disabled)return;
     const operation = articleEditorOperation;
     const list = operation?.articles || articleEditorAdapter.getArticles?.() || [];
     let original = list.find((item) => articleCode(item) === articleEditorOriginalCode);
@@ -1547,6 +1549,9 @@
     const saveButton = articleEditorHost.querySelector('[data-editor-save]');
     saveButton.disabled = true;
     saveButton.textContent = 'Guardando...';
+    articleEditorHost.style.setProperty('display','none','important');
+    articleEditorHost.setAttribute('aria-hidden','true');
+    setArticleSyncIndicator('syncing','Guardando artículo…');
     try {
       if (operation?.beforeSave) {
         original = await operation.beforeSave(original);
@@ -1655,8 +1660,13 @@
         detail: { article: updated, articles: [updated, ...appliedTargets], previousCode: articleEditorOriginalCode }
       }));
       saveButton.disabled = false;
-      closeArticleEditor();
+      closeArticleEditor({restoreFocus:false});
+      articleEditorHost.style.removeProperty('display');
+      setArticleSyncIndicator('success','Artículo guardado.');
     } catch (error) {
+      articleEditorHost.style.removeProperty('display');
+      articleEditorHost.setAttribute('aria-hidden','false');
+      setArticleSyncIndicator('error',error.message || 'No se pudo guardar el artículo');
       console.error(error);
       alert(error.message || 'No se pudo guardar el artículo');
     } finally {

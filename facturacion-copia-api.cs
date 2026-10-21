@@ -2186,9 +2186,68 @@ internal static partial class FacturacionCopiaApi
         return digits[10] - '0' == check;
     }
 
+    private static string PurchaseDiscountVersion(SqlConnection c,SqlTransaction tx,int id)
+    {
+        var data=RowsTx(c,tx,"SELECT * FROM dbo.ComprasTP WHERE IDRecibo=@p0",id);
+        using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(data)))).Replace("-","");
+    }
+    private static decimal PurchaseDiscountAmount(decimal total,decimal discount)
+    {
+        if(discount<=0 || discount>=1)throw new InvalidOperationException("Ingresá un descuento mayor a cero y menor al 100%.");
+        decimal amount=-PurchaseMoney(total*discount);
+        if(amount==0)throw new InvalidOperationException("El descuento es demasiado pequeño para generar un crédito.");
+        return amount;
+    }
+    private static void PurchaseCreateDiscount(SqlConnection c,SqlTransaction tx,int receipt,decimal discount,int operatorId)
+    {
+        var records=RowsTx(c,tx,"SELECT * FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado=1",receipt);
+        if(records.Count!=1)throw new InvalidOperationException("La compra no existe o no está confirmada.");
+        var p=records[0];
+        int point=Convert.ToInt32(p["IDDepósito"]),provider=Convert.ToInt32(p["IDProveedor"]),payment=Convert.ToInt32(p["IDFormaPago"]),branch=Convert.ToInt32(p["IDSuc"]),company=Convert.ToInt32(p["IDEmp"]);
+        DateTime date=Convert.ToDateTime(p["Fecha"]),period=Convert.ToDateTime(p["FechaIVA"]),due=Convert.ToDateTime(p["FechaVto"]);
+        string number=Text(p["NroFactura"]),account=Text(p["CodCuentaCpra"]),cuit=Text(p["CUIT"]);
+        decimal signed=Number(p["Total"]);
+
+        decimal creditAmount = PurchaseDiscountAmount(signed,discount);
+        int credit = Convert.ToInt32(Scalar(c, tx, "INSERT dbo.ComprasTP(IDTipoComp,IDDepósito,Fecha,FechaIVA,IDProveedor,Proveedor,Concepto,CUIT,IDFormaPago,NroFactura,CodCuentaCpra,Nota,Confirmado,Total,FechaVto,IDSuc,IDOper,IDEmp,IDTipoBien) OUTPUT INSERTED.IDRecibo VALUES(51,@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,1,@p11,@p12,@p13,@p14,@p15,2)", point, date, new DateTime(period.Year, period.Month, 1), provider, p["Proveedor"], "Credito Factura N° " + number, cuit, payment, number, account, "Descuento de compra " + receipt, creditAmount, due, branch, operatorId, company));
+        Execute(c, tx, "INSERT dbo.ComprasTS(IDRecibo,IDImpuesto,[Descripción],Importe,PorcImp,NroNeto) VALUES(@p0,0,'Neto 1',@p1,0,1)", credit, Math.Abs(creditAmount));
+        Execute(c, tx, "UPDATE dbo.ComprasTP SET IDRecImp=@p0,ImpDto=@p2 WHERE IDRecibo=@p1", credit, receipt,discount);
+        var lastPayment = RowsTx(c, tx, "SELECT TOP 1 NroOrden FROM dbo.OrdPagosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDProveedor=@p0 AND IDEmp=@p1 AND Confirmado=1 AND ISNULL(Anulado,0)=0 ORDER BY NroOrden DESC", provider, company);
+        if (lastPayment.Count == 0) throw new InvalidOperationException("El proveedor no tiene un pago confirmado y no anulado para aplicar el descuento.");
+        int discountOrder = Convert.ToInt32(lastPayment[0]["NroOrden"]);
+        Execute(c, tx, "INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", discountOrder, credit, creditAmount);
+        Execute(c, tx, "UPDATE dbo.OrdPagosTSFac SET Importe=Importe+@p2 WHERE NroOrden=@p0 AND IDFactura=@p1; IF @@ROWCOUNT=0 INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", discountOrder, receipt, -creditAmount);
+                
+    }
+    private static object PurchaseGenerateDiscount(SqlConnection c,Dictionary<string,object> input)
+    {
+        int id=RequiredId(Value(input,"id"),"la compra");
+        decimal discount=Number(Value(input,"descuento"));
+        int operatorId=UserOperator(c,Text(Value(input,"usuarioId")));
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
+            try{
+                var records=RowsTx(c,tx,"SELECT p.*,t.IDTipoAcred FROM dbo.ComprasTP p WITH(UPDLOCK,HOLDLOCK) JOIN dbo.TipoComprobantes t ON t.IDComprob=p.IDTipoComp WHERE p.IDRecibo=@p0 AND p.Confirmado=1",id);
+                if(records.Count!=1)throw new InvalidOperationException("La compra no existe o ya no está confirmada.");
+                var p=records[0];decimal total=Number(p["Total"]);
+                if(total<=0 || Number(p["IDTipoAcred"])==2 || Number(p["IDTipoComp"])==51)throw new InvalidOperationException("Solo se puede generar descuento sobre una compra positiva.");
+                decimal amount=PurchaseDiscountAmount(total,discount);
+                int credit=Convert.ToInt32(InvoiceValueNumber(Value(p,"IDRecImp")));
+                if(credit>0){
+                    var linked=RowsTx(c,tx,"SELECT IDRecibo FROM dbo.ComprasTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND IDTipoComp=51 AND Confirmado=1 AND IDProveedor=@p1 AND Total=@p2",credit,p["IDProveedor"],amount);
+                    if(Math.Abs(InvoiceValueNumber(p["ImpDto"])-discount)<0.000000001m && linked.Count==1){var previous=PurchaseResult(c,tx,id);tx.Rollback();return previous;}
+                    throw new InvalidOperationException("Esta compra ya tiene un crédito o descuento vinculado. Consultalo antes de generar otro.");
+                }
+                if(InvoiceValueNumber(p["ImpDto"])!=0)throw new InvalidOperationException("La compra ya tiene un porcentaje de descuento. Revisá su crédito antes de continuar.");
+                string version=Text(Value(input,"version"));
+                if(version.Length==0 || version!=PurchaseDiscountVersion(c,tx,id))throw new InvalidOperationException("La compra cambió en otra PC. Cerrá y volvé a consultar antes de generar el descuento.");
+                PurchaseCreateDiscount(c,tx,id,discount,operatorId);
+                var result=PurchaseResult(c,tx,id);tx.Commit();return result;
+            }catch{try{tx.Rollback();}catch{}throw;}
+        }
+    }
     private static object PurchaseResult(SqlConnection c, SqlTransaction tx, int id)
     {
-        return new { ok = true,
+        return new { ok = true,versionDescuento=PurchaseDiscountVersion(c,tx,id),
             factura = RowsTx(c, tx, "SELECT p.*,(SELECT e.Nombre FROM dbo.Empleados e WHERE e.IDEmpleado=p.IDOper) AS operadorNombre,t.Abreviatura AS tipo,t.Descripcion AS tipoNombre,t.Discrimina,t.EnLibroIVA,t.IDTipoAcred,ISNULL(d.IDSucAsoc,p.IDSuc) AS sucursalReal,d.[Descripción] AS puntoVentaNombre,c.Cuenta,fp.TipoPago AS pago,b.TipoBien,r.IDRecibo AS stockId,r.NroMov AS stockNumero FROM dbo.ComprasTP p JOIN dbo.TipoComprobantes t ON t.IDComprob=p.IDTipoComp LEFT JOIN dbo.[Depósitos] d ON d.IDDepósito=p.IDDepósito LEFT JOIN dbo.Cuentas c ON c.CodCuenta=p.CodCuentaCpra LEFT JOIN dbo.TiposPagos fp ON fp.IDTipoPago=p.IDFormaPago LEFT JOIN dbo.TiposBienCpra b ON b.IDTipoBien=p.IDTipoBien OUTER APPLY (SELECT TOP 1 IDRecibo,NroMov FROM dbo.RecibosTP WHERE IDFactura=p.IDRecibo AND Confirmado=1 AND Anulado=0 ORDER BY IDRecibo DESC) r WHERE p.IDRecibo=@p0 AND p.Confirmado=1", id),
             impuestos = RowsTx(c, tx, "SELECT d.IDImpuesto AS impuesto,d.NroNeto AS neto,d.Importe AS importe,d.PorcImp AS porcentaje,d.[Descripción] AS descripcion,i.Impuesto AS nombre FROM dbo.ComprasTS d JOIN dbo.Impuestos i ON i.IDImpuesto=d.IDImpuesto WHERE d.IDRecibo=@p0 ORDER BY d.NroNeto,d.IDImpuesto", id),
             pagos = RowsTx(c, tx, "SELECT o.NroOrden,o.NroOP,o.Fecha,o.TotalPagos,o.Nota,tp.TipoPago,v.Importe FROM dbo.OrdPagosTSFac f JOIN dbo.OrdPagosTP o ON o.NroOrden=f.NroOrden LEFT JOIN dbo.OrdPagosTSPag v ON v.NroOrden=o.NroOrden LEFT JOIN dbo.TiposPagos tp ON tp.IDTipoPago=v.IDTipoPago WHERE f.IDFactura=@p0 AND o.Confirmado=1 AND o.Anulado=0 ORDER BY o.Fecha,o.NroOrden", id),
@@ -2483,7 +2542,7 @@ internal static partial class FacturacionCopiaApi
             "SELECT CONVERT(varchar(10),p.Fecha,103) AS fecha,CONVERT(varchar(7),p.FechaIVA,120) AS periodo,p.IDRecibo AS id,t.Abreviatura AS tipo,p.NroFactura AS numero,p.Proveedor AS proveedor,p.CUIT,p.Total AS total,SUM(CASE WHEN d.IDImpuesto=0 THEN d.Importe ELSE 0 END)*t.ImpPor AS neto,SUM(CASE WHEN NULLIF(i.CodIVAAFIP,'') IS NOT NULL THEN d.Importe ELSE 0 END)*t.ImpPor AS iva,SUM(CASE WHEN d.IDImpuesto NOT IN(0,1,8,10) THEN d.Importe ELSE 0 END)*t.ImpPor AS otros FROM dbo.ComprasTP p JOIN dbo.TipoComprobantes t ON t.IDComprob=p.IDTipoComp JOIN dbo.ComprasTS d ON d.IDRecibo=p.IDRecibo JOIN dbo.Impuestos i ON i.IDImpuesto=d.IDImpuesto WHERE p.Confirmado=1 AND t.EnLibroIVA=1 AND p.FechaIVA>=@p0 AND p.FechaIVA<@p1 AND (@p2=0 OR p.IDProveedor=@p2) GROUP BY p.Fecha,p.FechaIVA,p.IDRecibo,t.Abreviatura,t.ImpPor,p.NroFactura,p.Proveedor,p.CUIT,p.Total ORDER BY p.Fecha,p.IDRecibo", from, to.AddDays(1), provider) };
         if (query == "buscar")
         {
-            var records = Rows(c, "SELECT TOP 201 p.IDRecibo AS id,CONVERT(varchar(10),p.Fecha,103) AS fecha,t.Abreviatura AS tipo,p.NroFactura AS numero,p.Proveedor AS proveedor,p.Total AS total,p.IDMovStk AS movimiento,p.EnMovStk AS enStock,p.IDProveedor AS idProveedor FROM dbo.ComprasTP p JOIN dbo.TipoComprobantes t ON t.IDComprob=p.IDTipoComp WHERE p.Confirmado=1 AND (@p0=0 OR p.IDProveedor=@p0) AND (@p1=0 OR p.IDRecibo<@p1) AND ((@p2='' AND p.Fecha>=@p3 AND p.Fecha<@p4) OR (@p2<>'' AND (p.NroFactura LIKE @p5 OR p.Proveedor LIKE @p5 OR CONVERT(varchar(20),p.IDRecibo)=@p2))) ORDER BY p.IDRecibo DESC", provider, before, filter, from, to.AddDays(1), "%" + filter + "%");
+            var records = Rows(c, "DECLARE @cursorDate datetime=(SELECT Fecha FROM dbo.ComprasTP WHERE IDRecibo=@p1); SELECT TOP 201 p.IDRecibo AS id,CONVERT(varchar(10),p.Fecha,103) AS fecha,t.Abreviatura AS tipo,p.NroFactura AS numero,p.Proveedor AS proveedor,p.Total AS total,p.IDMovStk AS movimiento,p.EnMovStk AS enStock,p.IDProveedor AS idProveedor FROM dbo.ComprasTP p JOIN dbo.TipoComprobantes t ON t.IDComprob=p.IDTipoComp WHERE p.Confirmado=1 AND (@p0=0 OR p.IDProveedor=@p0) AND (@p1=0 OR p.Fecha<@cursorDate OR (p.Fecha=@cursorDate AND p.IDRecibo<@p1)) AND ((@p2='' AND p.Fecha>=@p3 AND p.Fecha<@p4) OR (@p2<>'' AND (p.NroFactura LIKE @p5 OR p.Proveedor LIKE @p5 OR CONVERT(varchar(20),p.IDRecibo)=@p2))) ORDER BY p.Fecha DESC,p.IDRecibo DESC", provider, before, filter, from, to.AddDays(1), "%" + filter + "%");
             bool more = records.Count > 200; if (more) records.RemoveAt(200);
             return new { ok = true, facturas = records, hayMas = more };
         }
@@ -2714,18 +2773,7 @@ internal static partial class FacturacionCopiaApi
                     // Access une los valores con Bancos incluso para efectivo: 0 es sin banco.
                     Execute(c, tx, "INSERT dbo.OrdPagosTSPag(NroOrden,IDTipoPago,Importe,FechaVto,IDBanco,IDMovBco) VALUES(@p0,@p1,@p2,@p3,0,NULL)", order, payment, cashAmount, DateTime.Today);
                 }
-                if (discount > 0)
-                {
-                    decimal creditAmount = -PurchaseMoney(signed * discount);
-                    int credit = Convert.ToInt32(Scalar(c, tx, "INSERT dbo.ComprasTP(IDTipoComp,IDDepósito,Fecha,FechaIVA,IDProveedor,Proveedor,Concepto,CUIT,IDFormaPago,NroFactura,CodCuentaCpra,Nota,Confirmado,Total,FechaVto,IDSuc,IDOper,IDEmp,IDTipoBien) OUTPUT INSERTED.IDRecibo VALUES(51,@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,1,@p11,@p12,@p13,@p14,@p15,2)", point, date, new DateTime(period.Year, period.Month, 1), provider, providers[0]["nombre"], "Credito Factura N° " + number, cuit, payment, number, account, "Descuento de compra " + receipt, creditAmount, due, branch, operatorId, company));
-                    Execute(c, tx, "INSERT dbo.ComprasTS(IDRecibo,IDImpuesto,[Descripción],Importe,PorcImp,NroNeto) VALUES(@p0,0,'Neto 1',@p1,0,1)", credit, Math.Abs(creditAmount));
-                    Execute(c, tx, "UPDATE dbo.ComprasTP SET IDRecImp=@p0 WHERE IDRecibo=@p1", credit, receipt);
-                    var lastPayment = RowsTx(c, tx, "SELECT TOP 1 NroOrden FROM dbo.OrdPagosTP WITH(UPDLOCK,HOLDLOCK) WHERE IDProveedor=@p0 AND IDEmp=@p1 AND Confirmado=1 AND ISNULL(Anulado,0)=0 ORDER BY NroOrden DESC", provider, company);
-                    if (lastPayment.Count == 0) throw new InvalidOperationException("El proveedor no tiene un pago confirmado y no anulado para aplicar el descuento.");
-                    int discountOrder = Convert.ToInt32(lastPayment[0]["NroOrden"]);
-                    Execute(c, tx, "INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", discountOrder, credit, creditAmount);
-                    Execute(c, tx, "UPDATE dbo.OrdPagosTSFac SET Importe=Importe+@p2 WHERE NroOrden=@p0 AND IDFactura=@p1; IF @@ROWCOUNT=0 INSERT dbo.OrdPagosTSFac(NroOrden,IDFactura,Importe) VALUES(@p0,@p1,@p2)", discountOrder, receipt, -creditAmount);
-                }
+                if (discount > 0) PurchaseCreateDiscount(c,tx,receipt,discount,operatorId);
                 var result = PurchaseResult(c, tx, receipt);
                 if (dryRun) tx.Rollback(); else tx.Commit();
                 return result;
@@ -3497,6 +3545,7 @@ internal static partial class FacturacionCopiaApi
                         AssertPurchasePermission(Text(Value(data,"usuarioId")),"carga_stock");
                         Reply(context,200,RemitoPurchaseConfirm(connection,data,false)); return;
                     }
+                    if (Text(Value(data,"accion")) == "generar-descuento") {Reply(context,200,PurchaseGenerateDiscount(connection,data));return;}
                     if (Text(Value(data, "accion")) == "editar-cabecera") { Reply(context, 200, PurchaseEditHeader(connection, data)); return; }
                     if (Text(Value(data, "accion")) == "editar-stock") { Reply(context, 200, PurchaseEditStock(connection, data)); return; }
                     if (Text(Value(data, "accion")) == "eliminar") { Reply(context, 200, PurchaseDelete(connection, data)); return; }
