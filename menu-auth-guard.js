@@ -54,7 +54,9 @@
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const declaredPageId = (rawFile==='historial.html'&&new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window)?'remitos':(document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile]);
-  const pageId = rawFile==='facturacion.html'&&Number(new URLSearchParams(location.search).get('reimprimirCaja'))>0?'caja':rawFile==='recibos-cobro.html'&&new URLSearchParams(location.search).get('origen')==='caja'?'caja':declaredPageId === 'calculadoras' && new URLSearchParams(location.search).get('embed') === 'flete' ? 'cargar_facturas' : declaredPageId;
+  const integratedPermissions={compras:'cargar_facturas',stock:'carga_stock',proveedores:'proveedores_sql',articulos:'articulos_sql',tarjetas:'ventas_tarjeta'};
+  const integratedPermission=rawFile==='facturacion.html'?(location.hash.startsWith('#sql/')?integratedPermissions[location.hash.split('/')[1]]:location.hash.startsWith('#caja/')?'caja':location.hash.startsWith('#recibos/')?'recibos_cobro':null):null;
+  const pageId = integratedPermission || (rawFile==='facturacion.html'&&Number(new URLSearchParams(location.search).get('reimprimirCaja'))>0?'caja':rawFile==='recibos-cobro.html'&&new URLSearchParams(location.search).get('origen')==='caja'?'caja':declaredPageId === 'calculadoras' && new URLSearchParams(location.search).get('embed') === 'flete' ? 'cargar_facturas' : declaredPageId);
   const loginPage = document.currentScript?.dataset?.menuLogin || (['caja', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'ventas_tarjeta', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html');
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));

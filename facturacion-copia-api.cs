@@ -1766,7 +1766,7 @@ internal static partial class FacturacionCopiaApi
             if (rows.Count != 1) throw new InvalidOperationException("El artículo ya no existe. Actualizá el listado.");
             return new { ok = true, articulo = rows[0], stock = Rows(connection, ArticuloStockSelect, id) };
         }
-        return new { ok = true, articulos = ArticuloRows(connection,null,null),
+        return new { ok = true, articulos = request.QueryString["catalogos"] == "1" ? new List<Dictionary<string, object>>() : ArticuloRows(connection,null,null),
             proveedores = Rows(connection,"SELECT IDProveedor AS id,[RazónSocial] AS nombre FROM dbo.Proveedores ORDER BY [RazónSocial]"),
             rubros = Rows(connection,"SELECT IDRubro AS id,[Descripción] AS nombre FROM dbo.Rubros ORDER BY [Descripción]"),
             secciones = Rows(connection,"SELECT IDSeccion AS id,Seccion AS nombre FROM dbo.Secciones ORDER BY Seccion"),

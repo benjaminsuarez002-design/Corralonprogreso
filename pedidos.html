@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.45"></script>
+<script src="corralon-system.js?v=1.0.46"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -231,7 +231,85 @@
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="pedidos"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
-  <link rel="stylesheet" href="pedidos-ranking.css">
+<style id="pedidos-ranking-styles">
+body[data-page-theme="pedidos"] .ranking-overlay{position:fixed;inset:0;z-index:130;display:none;align-items:center;justify-content:center;padding:12px;background:rgba(20,20,20,.45);backdrop-filter:blur(3px)}
+body[data-page-theme="pedidos"] #rankingPanel{z-index:130}
+body[data-page-theme="pedidos"] #rankingConsultModal{z-index:132}
+body[data-page-theme="pedidos"] .ranking-overlay.visible{display:flex}
+body[data-page-theme="pedidos"] .ranking-dialog{display:flex;flex-direction:column;width:min(1120px,96vw);max-height:min(790px,94dvh);overflow:hidden;border:1px solid var(--corralon-line-strong,#bbb);border-radius:14px;background:var(--corralon-panel,#fff);color:var(--corralon-black,#111);box-shadow:var(--corralon-shadow,0 18px 55px #0004)}
+body[data-page-theme="pedidos"] .ranking-dialog>header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:66px;padding:11px 16px;border-bottom:1px solid var(--corralon-line,#ddd);background:var(--corralon-soft,#f5f5f3)}
+body[data-page-theme="pedidos"] .ranking-dialog h2{margin:0;font:900 27px 'Barlow Condensed',Barlow,Arial;color:var(--corralon-red,#e10d1a)}
+body[data-page-theme="pedidos"] .ranking-dialog small{display:block;font-size:12px;color:var(--corralon-muted,#666)}
+body[data-page-theme="pedidos"] .ranking-dialog button{cursor:pointer}
+body[data-page-theme="pedidos"] .ranking-consult-body{position:relative;display:grid;gap:9px;padding:14px;overflow:auto}
+body[data-page-theme="pedidos"] .ranking-consult-body>label{display:grid;gap:5px;font-weight:800}
+body[data-page-theme="pedidos"] .ranking-dialog input,body[data-page-theme="pedidos"] .ranking-dialog select{width:100%;min-width:0;height:36px;padding:5px 9px;border:1px solid var(--corralon-line-strong,#bbb);border-radius:8px;background:var(--corralon-white,#fff);color:var(--corralon-black,#111);font:700 15px Barlow,Arial}
+body[data-page-theme="pedidos"] .ranking-suggestions{position:relative;z-index:3;max-height:265px;overflow:auto;border:1px solid var(--corralon-line,#ddd);border-radius:8px;background:var(--corralon-white,#fff);box-shadow:0 10px 24px rgba(0,0,0,.12)}
+body[data-page-theme="pedidos"] .ranking-suggestions[hidden]{display:none}
+body[data-page-theme="pedidos"] .ranking-suggestions button{display:grid;grid-template-columns:74px 110px minmax(0,1fr) 95px 95px 120px;gap:7px;align-items:center;width:100%;height:auto;min-height:31px;margin:0;padding:5px 9px;border:0;border-bottom:1px solid var(--corralon-line,#ddd);border-radius:0;background:var(--corralon-white,#fff);color:var(--corralon-black,#111);text-align:left;box-shadow:none;font:700 13px Barlow,Arial}
+body[data-page-theme="pedidos"] .ranking-suggestions button:hover,body[data-page-theme="pedidos"] .ranking-suggestions button:focus{background:var(--corralon-selection,#eee)}
+body[data-page-theme="pedidos"] .ranking-suggestions button span{overflow:hidden;text-overflow:ellipsis;color:var(--corralon-muted,#666)}
+body[data-page-theme="pedidos"] .ranking-suggestions button strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-stock{display:flex;justify-content:space-between;gap:4px;white-space:nowrap;color:var(--corralon-black,#111);font-size:11px}
+body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-stock b{font-size:13px}
+body[data-page-theme="pedidos"] .ranking-result{min-height:85px;padding:10px;border:1px solid var(--corralon-line,#ddd);border-radius:9px}
+body[data-page-theme="pedidos"] .ranking-article-title{font:900 19px 'Barlow Condensed',Barlow,Arial}
+body[data-page-theme="pedidos"] .ranking-date{margin-top:9px}
+body[data-page-theme="pedidos"] .ranking-controls{position:relative;z-index:4;display:grid;grid-template-columns:minmax(140px,2fr) repeat(4,minmax(110px,1fr)) auto;gap:8px;align-items:end;padding:11px 14px;border-bottom:1px solid var(--corralon-line,#ddd)}
+body[data-page-theme="pedidos"] .ranking-controls label{display:grid;gap:3px;min-width:0;font:800 13px 'Barlow Condensed',Barlow,Arial}
+body[data-page-theme="pedidos"] .ranking-filter-combo{position:relative;min-width:0}
+body[data-page-theme="pedidos"] .ranking-filter-combo>input{padding-right:32px}
+body[data-page-theme="pedidos"] .ranking-filter-combo>[data-ranking-filter-drop]{position:absolute;top:1px;right:1px;width:32px;height:34px;padding:0;border:0;background:transparent;color:var(--corralon-muted,#666);box-shadow:none}
+body[data-page-theme="pedidos"] .ranking-filter-combo>[data-ranking-filter-drop]:hover{background:var(--corralon-selection,#eee)}
+body[data-page-theme="pedidos"] .ranking-filter-menu{position:absolute;z-index:8;top:calc(100% + 4px);left:0;right:0;display:none;max-height:280px;overflow:auto;padding:4px;border:1px solid var(--corralon-line-strong,#bbb);border-radius:9px;background:var(--corralon-white,#fff);box-shadow:0 14px 34px rgba(0,0,0,.22)}
+body[data-page-theme="pedidos"] .ranking-filter-menu.visible{display:block}
+body[data-page-theme="pedidos"] .ranking-filter-menu button{display:block;width:100%;min-height:31px;height:auto;margin:0;padding:5px 8px;border:0;border-radius:6px;background:transparent;color:var(--corralon-black,#111);box-shadow:none;text-align:left;font:700 14px Barlow,Arial}
+body[data-page-theme="pedidos"] .ranking-filter-menu button:hover,body[data-page-theme="pedidos"] .ranking-filter-menu button.active{background:var(--corralon-selection,#eee)}
+body[data-page-theme="pedidos"] .ranking-filter-menu p{margin:0;padding:8px;color:var(--corralon-muted,#666);text-align:center}
+body[data-page-theme="pedidos"] .ranking-controls .ranking-zero{display:flex;align-items:center;gap:5px;white-space:nowrap;padding-bottom:8px}
+body[data-page-theme="pedidos"] .ranking-zero input{width:17px;height:17px}
+body[data-page-theme="pedidos"] .ranking-table-wrap{overflow:auto;min-height:0;flex:1}
+body[data-page-theme="pedidos"] .ranking-dialog table{width:100%;border-collapse:collapse;font:700 14px Barlow,Arial}
+body[data-page-theme="pedidos"] .ranking-dialog th{position:sticky;top:0;z-index:1;background:var(--corralon-soft,#f5f5f3);text-align:left;font:900 16px 'Barlow Condensed',Barlow,Arial}
+body[data-page-theme="pedidos"] .ranking-dialog th,body[data-page-theme="pedidos"] .ranking-dialog td{padding:8px 10px;border-right:1px solid var(--corralon-line,#ddd);border-bottom:1px solid var(--corralon-line,#ddd)}
+body[data-page-theme="pedidos"] .ranking-dialog td:last-child,body[data-page-theme="pedidos"] .ranking-dialog th:last-child{border-right:0}
+body[data-page-theme="pedidos"] .ranking-panel-dialog tbody tr{cursor:pointer}
+body[data-page-theme="pedidos"] .ranking-panel-dialog tbody tr:hover{background:var(--corralon-selection,#eee)}
+body[data-page-theme="pedidos"] .ranking-panel-dialog tbody tr:focus-visible{outline:2px solid var(--corralon-red,#e10d1a);outline-offset:-2px;background:var(--corralon-selection,#eee)}
+body[data-page-theme="pedidos"] .ranking-dialog td small{display:block;margin-top:2px}
+body[data-page-theme="pedidos"] .ranking-panel-dialog>footer{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:48px;padding:6px 13px;border-top:1px solid var(--corralon-line,#ddd);font-weight:800}
+body[data-page-theme="pedidos"] .ranking-panel-dialog>footer button[hidden]{display:none}
+@media(max-width:700px){
+  body[data-page-theme="pedidos"] .ranking-overlay{padding:4px}
+  body[data-page-theme="pedidos"] .ranking-dialog{width:100%;max-height:96dvh}
+  body[data-page-theme="pedidos"] .ranking-dialog>header{min-height:55px;padding:7px 9px}
+  body[data-page-theme="pedidos"] .ranking-dialog h2{font-size:22px}
+  body[data-page-theme="pedidos"] .ranking-controls{grid-template-columns:repeat(2,minmax(0,1fr));padding:8px}
+  body[data-page-theme="pedidos"] .ranking-controls label:first-child{grid-column:1/-1}
+  body[data-page-theme="pedidos"] .ranking-suggestions button{grid-template-columns:58px 77px minmax(0,1fr) 72px 72px 105px;gap:4px;font-size:11px}
+  body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-stock{display:grid;gap:0;font-size:10px}
+  body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-stock b{font-size:11px}
+  body[data-page-theme="pedidos"] .ranking-dialog th,body[data-page-theme="pedidos"] .ranking-dialog td{padding:6px;font-size:12px}
+  body[data-page-theme="pedidos"] .ranking-consult-dialog table{min-width:780px}
+  body[data-page-theme="pedidos"] .ranking-panel-dialog table{min-width:620px}
+}
+@media(max-width:550px){
+  body[data-page-theme="pedidos"] .ranking-suggestions button{grid-template-columns:58px 77px minmax(0,1fr)}
+  body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-stock[title="Stock Progreso"]{grid-column:2}
+  body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-stock[title="Stock Calle 5"]{grid-column:3}
+}
+
+body[data-page-theme="pedidos"] .ranking-dialog td.ranking-score{text-align:right;white-space:nowrap;font-weight:900;min-width:100px}
+body[data-page-theme="pedidos"] .ranking-panel-dialog table{min-width:1050px}
+body[data-page-theme="pedidos"] .ranking-panel-dialog td:nth-child(n+5){text-align:right;min-width:95px}
+body[data-page-theme="pedidos"] .ranking-result h3{margin:12px 0 6px;font-size:16px}
+body[data-page-theme="pedidos"] .ranking-replenishment input{max-width:120px;text-align:right}
+
+body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-suggestion-score{display:flex;justify-content:space-between;align-items:center;gap:5px;white-space:nowrap;color:var(--corralon-heading,#17375a);font-size:12px}
+body[data-page-theme="pedidos"] .ranking-suggestion-score small{margin:0;font-size:10px}
+@media(max-width:550px){body[data-page-theme="pedidos"] .ranking-suggestions button .ranking-suggestion-score{grid-column:2/-1;justify-content:flex-end}}
+
+</style>
   <style id="pedidos-mobile-final">
     @media(max-width:600px){
       body[data-page-theme="pedidos"] .app{
@@ -2516,7 +2594,506 @@ async function init(){
 }
 init();
 </script>
-<script src="pedidos-ranking.js"></script>
+<script id="pedidos-ranking-script">
+(function () {
+  'use strict';
+
+  const core = window.CorralonSystem;
+  const cacheDb = window.CorralonCacheDB;
+  if (!core || !cacheDb) return;
+  const CACHE_KEY = 'pedidos_ranking_articulos_4m_v2';
+  const PENDING_KEY = 'pedidos_ranking_pendiente_recibir_v1';
+  const FIELDS = 'idart,ventas_progreso,unidades_progreso,ventas_calle5,unidades_calle5,importe_progreso,importe_calle5,puntaje,ultima_venta,sync_version';
+  const PAGE_SIZE = 1000;
+  let state = { version: 0, rows: [], meta: null };
+  let byId = new Map();
+  let articles = [];
+  let articlePromise = null;
+  let syncPromise = null;
+  let selectedArticle = null;
+  let rankPage = 1;
+  let supplierNames = new Map();
+  let pendingReceipts = {};
+  const pendingReady = cacheDb.get(PENDING_KEY).then(value => { pendingReceipts = value || {}; })
+    .catch(error => console.warn('No se pudo leer pendiente de recibir', error));
+
+  const html = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+  const norm = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+  const fmt = (value) => Number(value || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+  const stockText = (value) => value === '' || value == null ? '—' : fmt(value);
+  const idOf = (article) => String(article?.codigo ?? article?.idart ?? '').trim();
+  const statsFor = (id) => byId.get(String(id || '').trim()) || null;
+  const saleCount = (row, branch) => branch === '1' ? Number(row?.ventas_progreso || 0)
+    : branch === '2' ? Number(row?.ventas_calle5 || 0)
+      : Number(row?.ventas_progreso || 0) + Number(row?.ventas_calle5 || 0);
+  const units = (row, branch) => branch === '1' ? Number(row?.unidades_progreso || 0)
+    : branch === '2' ? Number(row?.unidades_calle5 || 0)
+      : Number(row?.unidades_progreso || 0) + Number(row?.unidades_calle5 || 0);
+  // Puntaje histórico ya calculado por el publicador; nunca usa el precio actual.
+  const score = row => saleCount(row, '') > 0 ? Math.max(0, Number(row?.puntaje) || 0) : 0;
+  const scoreText = (row,article) => score(row,article).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pendingFor = (article, branch) => Math.max(0, Number(pendingReceipts[`${idOf(article)}:${branch}`]) || 0);
+  function replenishment(article, branch) {
+    if (!branch) {
+      const one = replenishment(article, '1'), two = replenishment(article, '2');
+      return { monthly: one.monthly + two.monthly, suggested: one.suggested == null || two.suggested == null ? null : one.suggested + two.suggested,
+        maximum: one.maximum == null || two.maximum == null ? null : one.maximum + two.maximum, pending: one.pending + two.pending };
+    }
+    const data = statsFor(idOf(article));
+    const sold = saleCount(data, branch) > 0 ? Math.max(0, units(data, branch)) : 0;
+    const rawStock = branch === '1' ? article.stockSucursalProgresoRuta : article.stockSucursalCalle5Espana;
+    // Stock desconocido no equivale a cero. Evita recomendar compras sin ese dato.
+    const knownStock = rawStock !== '' && rawStock != null && Number.isFinite(Number(rawStock));
+    const stock = Math.max(0, Number(rawStock) || 0), pending = pendingFor(article, branch);
+    const available = stock + pending;
+    const precision = [sold, stock, pending].some(value => !Number.isInteger(value)) ? 100 : 1;
+    const needed = target => Math.ceil(Math.max(0, target - available) * precision - 1e-8) / precision;
+    return { monthly: sold / 4, suggested: knownStock ? needed(sold / 2) : null,
+      maximum: knownStock ? needed(sold) : null, pending };
+  }
+  const quantityText = value => value == null ? 'Sin stock informado' : fmt(value);
+  const rankingBoxIcon='<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10M7.5 4.5l9 5"/></svg>';
+  function updateConsultPeriod(){
+    const date=value=>String(value||'—').replace(/(\d{4})-(\d{2})-(\d{2})/g,'$3/$2/$1');
+    consult.querySelector('[data-ranking-period]').textContent='Período: '+date(state.meta?.ranking_desde)+' al '+date(state.meta?.ranking_hasta);
+    consult.querySelector('[data-ranking-updated]').textContent='Actualizado: '+date(String(state.meta?.ranking_actualizado_at||'').slice(0,10));
+  }
+  const headers = () => core.headers();
+
+  const consult = document.createElement('div');
+  consult.id = 'rankingConsultModal';
+  consult.className = 'ranking-overlay';
+  consult.innerHTML = `<section class="ranking-dialog ranking-consult-dialog" role="dialog" aria-modal="true" aria-labelledby="rankingConsultTitle">
+    <header>${rankingBoxIcon}<div><h2 id="rankingConsultTitle">Consultar artículo</h2><small id="rankingOrigin"></small></div><button type="button" data-ranking-close="consult"><span aria-hidden="true">×</span>Cerrar</button></header>
+    <div class="ranking-consult-body">
+      <label>Buscar artículo de Index<div class="ranking-consult-search"><input id="rankingArticleSearch" autocomplete="off" placeholder="Código o descripción"><button type="button" data-ranking-clear aria-label="Limpiar búsqueda">×</button></div></label>
+      <div class="ranking-suggestions" id="rankingSuggestions"></div>
+      <div class="ranking-result" id="rankingConsultResult">Elegí un artículo de Index.</div>
+    </div><footer class="ranking-consult-footer"><span data-ranking-period></span><span data-ranking-updated></span></footer>
+  </section>`;
+  document.body.appendChild(consult);
+  function fitRankingConsult(){consult.style.setProperty('--ranking-consult-scale',String(Math.max(.1,Math.min(1,(innerWidth-32)/1224,(innerHeight-32)/834))));}
+  window.addEventListener('resize',fitRankingConsult);fitRankingConsult();
+
+  const panel = document.createElement('div');
+  panel.id = 'rankingPanel';
+  panel.className = 'ranking-overlay';
+  panel.innerHTML = `<section class="ranking-dialog ranking-panel-dialog" role="dialog" aria-modal="true" aria-labelledby="rankingTitle">
+    <header><svg class="ranking-title-icon" aria-hidden="true" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m24 12 11 6v13l-11 6-11-6V18zM13 18l11 6 11-6M24 24v13M6 18A19 19 0 0 1 38 9l4 5M42 6v8h-8M42 30A19 19 0 0 1 10 39l-4-5M6 42v-8h8"/></svg><div><h2 id="rankingTitle">Rotación de artículos</h2><small id="rankingPeriod">Cargando...</small></div><button type="button" data-ranking-close="panel"><span aria-hidden="true">×</span>Cerrar</button></header>
+    <div class="ranking-controls">
+      <label>Buscar<input id="rankingFilter" autocomplete="off" placeholder="Código o artículo"></label>
+      <label>Sucursal<select id="rankingBranch"><option value="">Ambas</option><option value="1">Progreso</option><option value="2">Calle 5</option></select></label>
+      <label>Proveedor<div class="ranking-filter-combo" data-ranking-filter-combo="provider"><input id="rankingProvider" data-ranking-filter-input="provider" data-value="" autocomplete="off" value="Todos"><button type="button" data-ranking-filter-drop="provider" tabindex="-1" aria-label="Desplegar proveedores">▼</button><div class="ranking-filter-menu" data-ranking-filter-menu="provider"></div></div></label>
+      <label>Rubro<div class="ranking-filter-combo" data-ranking-filter-combo="rubro"><input id="rankingRubro" data-ranking-filter-input="rubro" data-value="" autocomplete="off" value="Todos"><button type="button" data-ranking-filter-drop="rubro" tabindex="-1" aria-label="Desplegar rubros">▼</button><div class="ranking-filter-menu" data-ranking-filter-menu="rubro"></div></div></label>
+      <label>Ordenar<select id="rankingSort"><option value="ventas">Más ventas</option><option value="unidades">Más unidades</option><option value="puntaje">Puntaje: mayor a menor</option><option value="puntaje-asc">Puntaje: menor a mayor</option></select></label>
+      <label class="ranking-zero"><input id="rankingNoSales" type="checkbox"> Sin ventas</label>
+    </div>
+    <div class="ranking-table-wrap"><table><colgroup><col style="width:38%"><col span="6" style="width:8%"><col style="width:14%"><col span="3" hidden></colgroup><thead><tr><th rowspan="2" scope="col">Artículo</th><th colspan="3" scope="colgroup">Progreso</th><th colspan="3" scope="colgroup">Calle 5</th><th scope="colgroup">Estimaciones</th></tr><tr><th scope="col">Ventas</th><th scope="col">Unidades</th><th scope="col">Stock</th><th scope="col">Ventas</th><th scope="col">Unidades</th><th scope="col">Stock</th><th scope="col" title="Ventas totales × importe histórico vendido ÷ 100.000">Puntaje</th><th scope="col" hidden>Venta 30 días</th><th scope="col" hidden>Sugerido 2 meses</th><th scope="col" hidden>Cobertura 4 meses</th></tr></thead><tbody id="rankingTableBody"></tbody></table></div>
+    <footer><span id="rankingCount"></span><small class="ranking-legend"><span aria-hidden="true">ⓘ</span> Ventas: cantidad de operaciones · Unidades: cantidad vendida</small><button id="rankingMore" type="button">Ver más</button></footer>
+  </section>`;
+  document.body.appendChild(panel);
+  function fitRankingPanel(){const scale=Math.max(.1,Math.min(1,(innerWidth-32)/1536,(innerHeight-32)/874));panel.style.setProperty('--ranking-scale',String(scale));}
+  window.addEventListener('resize',fitRankingPanel);fitRankingPanel();
+
+  const filterOptions = { provider: [], rubro: [] };
+  const filterMenus = { provider: { active: 0, visible: [] }, rubro: { active: 0, visible: [] } };
+
+  function periodText() {
+    const meta = state.meta;
+    if (!meta?.ranking_version) return 'Ranking todavía no publicado';
+    const date = String(meta.ranking_actualizado_at || '').slice(0, 10);
+    return `${meta.ranking_desde || ''} al ${meta.ranking_hasta || ''} · actualizado ${date || 'sin fecha'}`;
+  }
+
+  function catalogue() {
+    if (articlePromise) return articlePromise;
+    articlePromise = core.catalog.load().then((rows) => {
+      articles = (Array.isArray(rows) ? rows : []).filter((row) => idOf(row));
+      populateFilters();
+      return articles;
+    }).catch((error) => { articlePromise = null; throw error; });
+    return articlePromise;
+  }
+
+  function populateFilters() {
+    const rubroInput = panel.querySelector('#rankingRubro');
+    const providerInput = panel.querySelector('#rankingProvider');
+    const rubros = [...new Set(articles.map((a) => String(a.rubro || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const providers = [...new Set(articles.map((a) => String(a.id_proveedor || a.idProveedor || '').trim()).filter(Boolean))]
+      .filter((id) => String(supplierNames.get(id) || '').trim())
+      .sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+    filterOptions.rubro = [{ value: '', label: 'Todos' }, ...rubros.map((rubro) => ({ value: rubro, label: rubro }))];
+    filterOptions.provider = [{ value: '', label: 'Todos' }, ...providers.map((id) => ({ value: id, label: supplierNames.get(id) }))];
+    for (const [kind, input] of [['provider', providerInput], ['rubro', rubroInput]]) {
+      const selected = filterOptions[kind].find((option) => option.value === input.dataset.value) || filterOptions[kind][0];
+      input.dataset.value = selected.value;
+      input.value = selected.label;
+    }
+  }
+
+  async function loadSupplierNames() {
+    try {
+      const rows = await core.faltantes.loadProviderNames();
+      const names = new Map();
+      for (const row of rows) {
+        const internal = String(core.providerIdentity.internalId(row) || '').trim();
+        if (!internal || names.has(internal)) continue;
+        const name = String(row.proveedor || '').trim();
+        if (name) names.set(internal, name);
+      }
+      supplierNames = names;
+      if (articles.length) populateFilters();
+    } catch (error) { console.warn('No se pudieron cargar nombres de proveedores para el ranking', error); }
+  }
+
+  function closeFilterMenus(except = '') {
+    for (const kind of ['provider', 'rubro']) {
+      if (kind === except) continue;
+      panel.querySelector(`[data-ranking-filter-menu="${kind}"]`)?.classList.remove('visible');
+    }
+  }
+
+  function renderFilterMenu(kind, showAll = false) {
+    const input = panel.querySelector(`[data-ranking-filter-input="${kind}"]`);
+    const menu = panel.querySelector(`[data-ranking-filter-menu="${kind}"]`);
+    if (!input || !menu) return;
+    const query = showAll ? '' : norm(input.value === 'Todos' ? '' : input.value);
+    const visible = filterOptions[kind].filter((option) => !query || norm(option.label).includes(query));
+    const selectedIndex = visible.findIndex((option) => option.value === input.dataset.value);
+    filterMenus[kind].visible = visible;
+    filterMenus[kind].active = Math.max(0, selectedIndex);
+    menu.innerHTML = visible.length ? visible.map((option, index) => `<button type="button" data-ranking-filter-option="${kind}" data-index="${index}" class="${index === filterMenus[kind].active ? 'active' : ''}">${html(option.label)}</button>`).join('')
+      : '<p>Sin coincidencias.</p>';
+    closeFilterMenus(kind);
+    menu.classList.add('visible');
+    menu.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function chooseFilter(kind, index) {
+    const option = filterMenus[kind].visible[index];
+    const input = panel.querySelector(`[data-ranking-filter-input="${kind}"]`);
+    if (!option || !input) return;
+    input.dataset.value = option.value;
+    input.value = option.label;
+    closeFilterMenus();
+    rankPage = 1;
+    renderRanking();
+  }
+
+  function restoreFilterText(kind) {
+    const input = panel.querySelector(`[data-ranking-filter-input="${kind}"]`);
+    if (!input) return;
+    const exact = filterOptions[kind].find((option) => norm(option.label) === norm(input.value));
+    if (exact) {
+      input.dataset.value = exact.value;
+      input.value = exact.label;
+      rankPage = 1;
+      renderRanking();
+      return;
+    }
+    const selected = filterOptions[kind].find((option) => option.value === input.dataset.value) || filterOptions[kind][0];
+    input.value = selected?.label || 'Todos';
+  }
+
+  async function fetchMeta() {
+    return core.catalogRealtime.getMeta();
+  }
+
+  async function fetchChanges(after, target) {
+    const result = [];
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      const where = after > 0 ? `&sync_version=gt.${after}` : '';
+      const url = `${core.SUPABASE_URL}/rest/v1/ranking_articulos_4m?select=${FIELDS}${where}&sync_version=lte.${target}&order=sync_version.asc,idart.asc`;
+      const response = await fetch(url, { cache: 'no-store',
+        // El orden es estable; sólo descarga el resumen y los cambios de versión.
+        headers: core.headers({ Range: `${offset}-${offset + PAGE_SIZE - 1}` }) });
+      if (!response.ok) throw new Error(`Ranking: HTTP ${response.status}`);
+      const rows = await response.json();
+      if (!Array.isArray(rows)) throw new Error('Respuesta de ranking invalida');
+      result.push(...rows);
+      if (rows.length < PAGE_SIZE) return result;
+    }
+  }
+
+  let pendingRankingMeta = null;
+  async function sync(suppliedMeta = null) {
+    if (suppliedMeta && Number(suppliedMeta.ranking_version || 0) > Number(pendingRankingMeta?.ranking_version || 0)) pendingRankingMeta = suppliedMeta;
+    if (syncPromise) return syncPromise;
+    syncPromise = navigator.locks.request('corralon-ranking-download-v2', async () => {
+      const shared = await cacheDb.get(CACHE_KEY);
+      if (shared && Array.isArray(shared.rows) && Number(shared.version || 0) >= Number(state.version || 0)) {
+        state = shared; byId = new Map(shared.rows.map(row => [String(row.idart), row]));
+      }
+      let meta = pendingRankingMeta; pendingRankingMeta = null;
+      if (!meta) {
+        meta = await fetchMeta();
+        if (Number(pendingRankingMeta?.ranking_version || 0) > Number(meta?.ranking_version || 0)) meta = pendingRankingMeta;
+        pendingRankingMeta = null;
+      }
+      const target = Number(meta?.ranking_version || 0);
+      if (!target) { state.meta = meta; refreshVisible(); return; }
+      const full = !state.version || !state.rows.length || state.version > target;
+      if (!full && state.version === target) { state.meta = meta; refreshVisible(); return; }
+      const changed = await fetchChanges(full ? 0 : state.version, target);
+      const merged = new Map((full ? [] : state.rows).map((row) => [String(row.idart), row]));
+      changed.forEach((row) => merged.set(String(row.idart), row));
+      const next = { version: target, rows: [...merged.values()], meta };
+      await cacheDb.set(CACHE_KEY, next);
+      state = next;
+      byId = merged;
+      refreshVisible();
+    }).finally(() => {
+      syncPromise = null;
+      const next = pendingRankingMeta; pendingRankingMeta = null;
+      if (Number(next?.ranking_version || 0) > Number(state.version || 0)) sync(next).catch(console.warn);
+    });
+    return syncPromise;
+  }
+
+  function displayArticle(article) {
+    if (!article) return;
+    selectedArticle = article;
+    const data=statsFor(idOf(article)),one=replenishment(article,'1'),two=replenishment(article,'2');
+    const value=number=>state.version?fmt(number):'—';
+    const suggested=row=>state.version?quantityText(row.suggested):'—';
+    consult.querySelectorAll('[data-ranking-id]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.rankingId===idOf(article))));
+    consult.querySelector('#rankingConsultResult').innerHTML=`<div class="ranking-article-title">${rankingBoxIcon}<div><strong>${html(article.nombre||article.descripcion||'')}</strong><small>IDArt ${html(idOf(article))} · Cód. proveedor ${html(article.codprov||article.idartprov||'')}</small></div></div>
+      <div class="ranking-table-wrap"><table class="ranking-article-metrics"><colgroup><col span="6" style="width:14.6%"><col style="width:12.4%"></colgroup><thead><tr><th colspan="3" scope="colgroup">Progreso</th><th colspan="3" scope="colgroup">Calle 5</th><th rowspan="2" scope="col" title="Ventas totales × importe histórico vendido ÷ 100.000">Puntaje</th></tr><tr><th scope="col">Ventas</th><th scope="col">Unidades</th><th scope="col">Sugerido<small>2 meses</small></th><th scope="col">Ventas</th><th scope="col">Unidades</th><th scope="col">Sugerido<small>2 meses</small></th></tr></thead><tbody><tr><td>${value(data?.ventas_progreso)}</td><td>${value(data?.unidades_progreso)}</td><td class="ranking-suggested" data-ranking-suggested="1">${suggested(one)}</td><td>${value(data?.ventas_calle5)}</td><td>${value(data?.unidades_calle5)}</td><td class="ranking-suggested" data-ranking-suggested="2">${suggested(two)}</td><td class="ranking-score">${state.version?scoreText(data,article):'—'}</td></tr></tbody></table></div>
+      <div class="ranking-pending-controls"><strong>Pendiente de recibir</strong>${['1','2'].map(branch=>`<label>${branch==='1'?'Progreso':'Calle 5'}<input data-ranking-pending="${branch}" type="number" min="0" step="0.01" value="${pendingFor(article,branch)}" aria-label="Pendiente de recibir ${branch==='1'?'Progreso':'Calle 5'}"></label>`).join('')}</div>
+      <small class="ranking-pending-help" title="Pendiente de recibir: cantidad manual guardada en este navegador. Actualizala al recibir mercadería. Se descuenta una sola vez; el stock negativo se considera cero. Cantidades orientativas.">El sugerido contempla 2 meses y descuenta el stock y los pendientes.</small>`;
+    updateConsultPeriod();
+  }
+
+  function suggest() {
+    const input = consult.querySelector('#rankingArticleSearch');
+    const target = norm(input.value);
+    const words = target.split(' ').filter(Boolean);
+    const list = consult.querySelector('#rankingSuggestions');
+    if (!target) { list.innerHTML = ''; list.hidden = true; return; }
+    const matched = articles.filter((row) => {
+      const haystack = norm(`${idOf(row)} ${row.codprov || ''} ${row.nombre || row.descripcion || ''}`);
+      return words.every((word) => haystack.includes(word));
+    }).sort((a, b) => {
+      const exactA = norm(a.codprov) === target || norm(idOf(a)) === target ? 0 : 1;
+      const exactB = norm(b.codprov) === target || norm(idOf(b)) === target ? 0 : 1;
+      return exactA - exactB || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
+    }).slice(0, 35);
+    list.innerHTML = matched.length ? '<div class="ranking-results-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Artículo</span><span class="ranking-stock-heading">Stock por sucursal</span><span class="ranking-result-score-heading">Puntaje</span><span class="ranking-result-stock-one">Progreso</span><span class="ranking-result-stock-two">Calle 5</span></div>'+matched.map((a) => `<button type="button" data-ranking-id="${html(idOf(a))}" aria-pressed="${idOf(a)===idOf(selectedArticle)}"><b>${html(idOf(a))}</b><span>${html(a.codprov || '')}</span><strong>${html(a.nombre || a.descripcion || '')}</strong><span class="ranking-stock" title="Stock Progreso"><b>${stockText(a.stockSucursalProgresoRuta)}</b></span><span class="ranking-stock" title="Stock Calle 5"><b>${stockText(a.stockSucursalCalle5Espana)}</b></span><span class="ranking-suggestion-score" title="Puntaje de ambas sucursales"><small>Puntaje</small><b>${state.version ? scoreText(statsFor(idOf(a)),a) : '—'}</b></span></button>`).join('')
+      : '<p>No hay artículos de Index con esa búsqueda.</p>';
+    list.hidden = false;
+  }
+
+  function rankingRows() {
+    const query = norm(panel.querySelector('#rankingFilter').value);
+    const branch = panel.querySelector('#rankingBranch').value;
+    const provider = panel.querySelector('#rankingProvider').dataset.value || '';
+    const rubro = panel.querySelector('#rankingRubro').dataset.value || '';
+    const onlyZero = panel.querySelector('#rankingNoSales').checked;
+    const sort = panel.querySelector('#rankingSort').value;
+    const words = query.split(' ').filter(Boolean);
+    return articles.filter((a) => {
+      const stats = statsFor(idOf(a));
+      const sales = saleCount(stats, branch);
+      if (onlyZero ? sales !== 0 : sales <= 0) return false;
+      if (provider && String(a.id_proveedor || a.idProveedor || '') !== provider) return false;
+      if (rubro && String(a.rubro || '') !== rubro) return false;
+      const haystack = norm(`${idOf(a)} ${a.codprov || ''} ${a.nombre || a.descripcion || ''}`);
+      return words.every((word) => haystack.includes(word));
+    }).sort((a, b) => {
+      const left = statsFor(idOf(a)), right = statsFor(idOf(b));
+      const value = sort === 'puntaje-asc' ? score(left,a) - score(right,b) : sort === 'puntaje' ? score(right,b) - score(left,a) : sort === 'unidades' ? units(right, branch) - units(left, branch) : saleCount(right, branch) - saleCount(left, branch);
+      return value || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
+    });
+  }
+
+  function renderRanking() {
+    if (!panel.classList.contains('visible')) return;
+    panel.querySelector('#rankingPeriod').textContent = 'Período: '+periodText().replace(/(\d{4})-(\d{2})-(\d{2})/g,'$3/$2/$1');
+    if (!articles.length || !state.version) {
+      panel.querySelector('#rankingTableBody').innerHTML = `<tr><td colspan="8">${articles.length ? 'Ranking todavía no publicado.' : 'Cargando artículos de Index...'}</td></tr>`;
+      panel.querySelector('#rankingCount').textContent = '';
+      panel.querySelector('#rankingMore').hidden = true;
+      return;
+    }
+    const filtered = rankingRows();
+    const shown = filtered.slice(0, rankPage * 50);
+    panel.querySelector('#rankingTableBody').innerHTML = shown.map((a) => {
+      const data = statsFor(idOf(a));
+      const supply = replenishment(a, panel.querySelector('#rankingBranch').value);
+      return `<tr data-ranking-article="${html(idOf(a))}" tabindex="0" role="button"><td><b>${html(a.nombre || a.descripcion || '')}</b><small>${html(idOf(a))} · ${html(a.codprov || '')}</small></td><td>${fmt(data?.ventas_progreso)}</td><td>${fmt(data?.unidades_progreso)}</td><td>${stockText(a.stockSucursalProgresoRuta)}</td><td>${fmt(data?.ventas_calle5)}</td><td>${fmt(data?.unidades_calle5)}</td><td>${stockText(a.stockSucursalCalle5Espana)}</td><td class="ranking-score" title="Puntaje de ambas sucursales">${scoreText(data,a)}</td><td hidden>${fmt(supply.monthly)}</td><td hidden>${quantityText(supply.suggested)}</td><td hidden>${quantityText(supply.maximum)}</td></tr>`;
+    }).join('') || '<tr><td colspan="8">No hay artículos para esos filtros.</td></tr>';
+    panel.querySelector('#rankingCount').textContent = `${shown.length.toLocaleString('es-AR')} de ${filtered.length.toLocaleString('es-AR')} artículos`;
+    panel.querySelector('#rankingMore').hidden = shown.length >= filtered.length;
+  }
+
+  function refreshVisible() {
+    if (selectedArticle && consult.classList.contains('visible')) displayArticle(selectedArticle);
+    renderRanking();
+  }
+
+  async function openConsult(orderRow, preferredArticle = null) {
+    selectedArticle = null;
+    consult.querySelector('#rankingOrigin').textContent = `Cód. proveedor: ${orderRow?.codProv || '—'} · ${orderRow?.articulo || ''}`;
+    consult.querySelector('#rankingConsultResult').textContent = 'Elegí un artículo de Index.';
+    const input = consult.querySelector('#rankingArticleSearch');
+    input.value = String(orderRow?.codProv || String(orderRow?.articulo || '').split(/\s+/).slice(0, 3).join(' ')).trim();
+    const initialSearch = input.value;
+    updateConsultPeriod();
+    consult.classList.add('visible');
+    input.focus();
+    const [catalogResult, rankingResult] = await Promise.allSettled([catalogue(), sync(), pendingReady]);
+    if (catalogResult.status === 'fulfilled') {
+      if (preferredArticle && input.value === initialSearch) {suggest();displayArticle(preferredArticle);}
+      else suggest();
+    }
+    else { console.warn(catalogResult.reason); consult.querySelector('#rankingConsultResult').textContent = 'No pude cargar los artículos de Index. Volvé a intentar.'; }
+    if (rankingResult.status === 'rejected') console.warn('El ranking todavía no está disponible', rankingResult.reason);
+  }
+
+  async function openRanking() {
+    rankPage = 1;
+    panel.classList.add('visible');
+    panel.querySelector('#rankingFilter').focus();
+    renderRanking();
+    try { await Promise.all([catalogue(), sync(), pendingReady]); renderRanking(); }
+    catch (error) { console.warn(error); panel.querySelector('#rankingPeriod').textContent = 'No pude actualizar el ranking; se muestra la copia disponible.'; renderRanking(); }
+  }
+
+  consult.querySelector('#rankingConsultResult').addEventListener('change', event => {
+    const input = event.target.closest('[data-ranking-pending]');
+    if (!input || !selectedArticle) return;
+    const value = Number(input.value);
+    if (!Number.isFinite(value) || value < 0) { input.value = pendingFor(selectedArticle, input.dataset.rankingPending); return; }
+    pendingReceipts[`${idOf(selectedArticle)}:${input.dataset.rankingPending}`] = value;
+    cacheDb.set(PENDING_KEY, { ...pendingReceipts }).catch(error => console.warn('No se pudo guardar pendiente de recibir', error));
+    displayArticle(selectedArticle);
+    renderRanking();
+  });
+  consult.querySelector('[data-ranking-clear]').addEventListener('click',()=>{const input=consult.querySelector('#rankingArticleSearch');input.value='';selectedArticle=null;suggest();input.focus();});
+  consult.querySelector('#rankingArticleSearch').addEventListener('input', () => { selectedArticle = null; suggest(); });
+  consult.querySelector('#rankingArticleSearch').addEventListener('focus', (event) => { event.target.select(); suggest(); });
+  consult.querySelector('#rankingArticleSearch').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { const first = consult.querySelector('[data-ranking-id]'); if (first) { event.preventDefault(); first.click(); } }
+  });
+  for (const input of [consult.querySelector('#rankingArticleSearch'), panel.querySelector('#rankingFilter')]) {
+    input.addEventListener('focus', () => { input.dataset.beforeFocus = input.value; input.select(); });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'F2') {
+        event.preventDefault();
+        if (input.selectionStart === 0 && input.selectionEnd === input.value.length)
+          input.setSelectionRange(input.value.length, input.value.length);
+        else input.select();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        input.value = input.dataset.beforeFocus || '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.select();
+      }
+    });
+  }
+  consult.querySelector('#rankingSuggestions').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-ranking-id]');
+    if (!button) return;
+    displayArticle(articles.find((a) => idOf(a) === button.dataset.rankingId));
+  });
+  for (const input of panel.querySelectorAll('.ranking-controls input:not([data-ranking-filter-input]),.ranking-controls select')) {
+    input.addEventListener(input.tagName === 'INPUT' && input.type === 'text' ? 'input' : 'change', () => { rankPage = 1; renderRanking(); });
+  }
+  for (const kind of ['provider', 'rubro']) {
+    const input = panel.querySelector(`[data-ranking-filter-input="${kind}"]`);
+    const drop = panel.querySelector(`[data-ranking-filter-drop="${kind}"]`);
+    const menu = panel.querySelector(`[data-ranking-filter-menu="${kind}"]`);
+    input.addEventListener('focus', () => { input.select(); });
+    input.addEventListener('input', () => renderFilterMenu(kind));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'F4') { event.preventDefault(); renderFilterMenu(kind, true); return; }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeFilterMenus(); restoreFilterText(kind); return; }
+      if (!menu.classList.contains('visible') && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) renderFilterMenu(kind, true);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const total = filterMenus[kind].visible.length;
+        if (!total) return;
+        filterMenus[kind].active = Math.max(0, Math.min(total - 1, filterMenus[kind].active + (event.key === 'ArrowDown' ? 1 : -1)));
+        menu.querySelectorAll('[data-ranking-filter-option]').forEach((button, index) => button.classList.toggle('active', index === filterMenus[kind].active));
+        menu.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!menu.classList.contains('visible')) renderFilterMenu(kind);
+        chooseFilter(kind, filterMenus[kind].active);
+      }
+    });
+    input.addEventListener('blur', () => setTimeout(() => { if (!menu.matches(':hover')) { closeFilterMenus(); restoreFilterText(kind); } }, 0));
+    drop.addEventListener('mousedown', (event) => event.preventDefault());
+    drop.addEventListener('click', () => menu.classList.contains('visible') ? closeFilterMenus() : renderFilterMenu(kind, true));
+    menu.addEventListener('mousedown', (event) => event.preventDefault());
+    menu.addEventListener('click', (event) => {
+      const option = event.target.closest(`[data-ranking-filter-option="${kind}"]`);
+      if (option) chooseFilter(kind, Number(option.dataset.index));
+    });
+  }
+  const rankingScroll=panel.querySelector('.ranking-table-wrap');
+  function loadMoreRanking(){
+    if(!panel.classList.contains('visible')||panel.querySelector('#rankingMore').hidden)return;
+    const top=rankingScroll.scrollTop;
+    rankPage++;renderRanking();rankingScroll.scrollTop=top;
+  }
+  rankingScroll.addEventListener('scroll',()=>{
+    if(rankingScroll.scrollHeight-rankingScroll.scrollTop-rankingScroll.clientHeight<=64)loadMoreRanking();
+  },{passive:true});
+  panel.querySelector('#rankingMore').addEventListener('click',loadMoreRanking);
+  panel.querySelector('#rankingTableBody').addEventListener('click', (event) => {
+    const row = event.target.closest('[data-ranking-article]');
+    if (row) {
+      row.focus();
+      const article = articles.find((a) => idOf(a) === row.dataset.rankingArticle);
+      openConsult({ codProv: '', articulo: row.querySelector('b')?.textContent || '' }, article);
+    }
+  });
+  panel.querySelector('#rankingTableBody').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const row = event.target.closest('[data-ranking-article]');
+    if (!row) return;
+    event.preventDefault();
+    row.click();
+  });
+  document.getElementById('rankingBtn')?.addEventListener('click', openRanking);
+  for (const overlay of [consult, panel]) {
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay || event.target.closest('[data-ranking-close]')) {
+        overlay.classList.remove('visible');
+        if (overlay === panel) closeFilterMenus();
+      }
+    });
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (consult.classList.contains('visible')) {
+      event.preventDefault();
+      consult.classList.remove('visible');
+    } else if (panel.classList.contains('visible')) {
+      event.preventDefault();
+      closeFilterMenus();
+      panel.classList.remove('visible');
+    }
+  });
+  cacheDb.get(CACHE_KEY).then((cached) => {
+    if (cached && Array.isArray(cached.rows)) {
+      state = cached;
+      byId = new Map(cached.rows.map((row) => [String(row.idart), row]));
+      refreshVisible();
+    }
+  }).catch((error) => console.warn('No se pudo iniciar el ranking', error));
+  loadSupplierNames();
+  window.CorralonPedidosRanking = { openConsult, openRanking, sync };
+})();
+
+</script>
 <script src="pedidos-modal-focus.js"></script>
 <script src="recargar-deslizando.js" defer></script>
 </body>

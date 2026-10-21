@@ -2411,6 +2411,10 @@
     padding: 4px 0 2px;
   }
   .home-carousel .splide__track::-webkit-scrollbar { display: none; }
+  .home-carousel .splide__track { cursor:grab;user-select:none; }
+  .home-carousel .splide__track.is-dragging { cursor:grabbing;scroll-snap-type:none;scroll-behavior:auto; }
+  .home-carousel .splide__track img { -webkit-user-drag:none; }
+
   .home-carousel .splide__list {
     align-items: stretch;
   }
@@ -4442,7 +4446,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
 <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.50"></script>
+<script src="corralon-system.js?v=1.0.51"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -5926,12 +5930,8 @@ function renderHomeCompactItem(articulo, idxLocal, label = '') {
 }
 
 function renderHomeSection({ kicker, title, subtitle, chip, items }) {
-  const isMobile = window.matchMedia('(max-width: 700px)').matches;
-  const compactMobile = `<div class="home-mobile-compact-list">${items.slice(0, 4).map((a, i) => renderHomeSectionCard(a, i)).join('')}</div>`;
   const slides = items.map((articulo, index) => `<li class="splide__slide home-slide">${renderHomeSectionCard(articulo, index)}</li>`).join('');
-  const contenido = items.length && isMobile
-    ? compactMobile
-    : items.length
+  const contenido = items.length
     ? `<div class="home-strip-shell">
         <button class="home-strip-arrow" type="button" data-home-carousel-move="-1" data-home-carousel-target="${escaparHtml(chip)}" aria-label="Ver anteriores">‹</button>
         <div class="home-carousel splide" data-home-carousel="${escaparHtml(chip)}">
@@ -6092,6 +6092,44 @@ function moverHomeCarouselInstance(instance, direction = 1) {
   alinearHomeCarousel(instance, instance.index + (direction > 0 ? 1 : -1), true);
 }
 
+function bindHomeCarouselDrag(instance) {
+  const track=instance.track;if(!track)return ()=>{};
+  let pointer=null,suppressClick=false;
+  const down=event=>{
+    if(event.button!==0||event.isPrimary===false||pointer)return;
+    suppressClick=false;instance.pause();
+    pointer={id:event.pointerId,x:event.clientX,y:event.clientY,left:track.scrollLeft,touch:event.pointerType==='touch',dragged:false};
+  };
+  const move=event=>{
+    if(!pointer||event.pointerId!==pointer.id||pointer.touch)return;
+    const dx=event.clientX-pointer.x,dy=event.clientY-pointer.y;
+    if(!pointer.dragged){
+      if(Math.abs(dx)<6||Math.abs(dx)<Math.abs(dy))return;
+      pointer.dragged=true;track.classList.add('is-dragging');track.setPointerCapture?.(pointer.id);
+    }
+    event.preventDefault();track.scrollLeft=pointer.left-dx;
+  };
+  const end=event=>{
+    if(!pointer||event.pointerId!==pointer.id)return;
+    const previous=pointer;pointer=null;
+    if(previous.dragged){suppressClick=true;track.classList.remove('is-dragging');}
+    if(track.hasPointerCapture?.(previous.id))track.releasePointerCapture(previous.id);
+    actualizarIndiceHomeCarousel(instance);instance.play();
+  };
+  const click=event=>{if(suppressClick){suppressClick=false;event.preventDefault();event.stopImmediatePropagation();}};
+  const nativeDrag=event=>event.preventDefault();
+  track.addEventListener('pointerdown',down);track.addEventListener('pointermove',move,{passive:false});
+  window.addEventListener('pointerup',end);window.addEventListener('pointercancel',end);
+  track.addEventListener('click',click,true);track.addEventListener('dragstart',nativeDrag);
+  return ()=>{
+    if(pointer&&track.hasPointerCapture?.(pointer.id))track.releasePointerCapture(pointer.id);
+    pointer=null;track.classList.remove('is-dragging');
+    track.removeEventListener('pointerdown',down);track.removeEventListener('pointermove',move);
+    window.removeEventListener('pointerup',end);window.removeEventListener('pointercancel',end);
+    track.removeEventListener('click',click,true);track.removeEventListener('dragstart',nativeDrag);
+  };
+}
+
 function crearHomeCarouselInstance(root) {
   const track = root.querySelector('.splide__track');
   const list = root.querySelector('.splide__list');
@@ -6114,6 +6152,7 @@ function crearHomeCarouselInstance(root) {
     },
     destroy() {
       this.pause();
+      this.destroyDrag?.();
       if (this.scrollTimer) clearTimeout(this.scrollTimer);
       if (this.track && this.onScroll) this.track.removeEventListener('scroll', this.onScroll);
     }
@@ -6123,6 +6162,7 @@ function crearHomeCarouselInstance(root) {
     instance.scrollTimer = setTimeout(() => actualizarIndiceHomeCarousel(instance), 120);
   };
   if (track) track.addEventListener('scroll', instance.onScroll, { passive: true });
+  instance.destroyDrag=bindHomeCarouselDrag(instance);
   requestAnimationFrame(() => alinearHomeCarousel(instance, 0, false));
   return instance;
 }

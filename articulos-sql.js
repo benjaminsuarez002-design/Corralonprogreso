@@ -5,8 +5,14 @@
   const els = Object.fromEntries(['search','provider','category','state','status','articles','page','reload','detail','articleDialog','articlePosition','prevArticle','nextArticle','closeArticle','dialogStatus'].map(id => [id,$(id)]));
   const size = 120;
   const embedded=new URLSearchParams(location.search).get('embed')==='stock';
+  const detailOnly=embedded&&new URLSearchParams(location.search).get('ficha')==='1';
   const requestedArticle=new URLSearchParams(location.search).get('articulo');
-  const notifyParent=(type)=>{if(embedded&&parent!==window)parent.postMessage({type,id:selected},location.origin);};
+  let integratedCallbacks=null;
+  const notifyParent=(type)=>{
+    if(type==='corralon:article-editor-saved')integratedCallbacks?.onSaved?.(selected);
+    if(type==='corralon:article-editor-close'){const callback=integratedCallbacks?.onClose;integratedCallbacks=null;callback?.();}
+    if(embedded&&parent!==window)parent.postMessage({type,id:selected},location.origin);
+  };
   if(embedded){
     const style=document.createElement('style');style.textContent='body>header,body>main{display:none}body{background:white}.article-dialog{width:calc(100vw - 8px)!important;max-width:none!important;max-height:calc(100dvh - 8px)!important;margin:4px!important}.article-dialog::backdrop{background:transparent}';document.head.append(style);
   }
@@ -169,7 +175,7 @@
     const token=++stockGeneration;loadingDetail=true;articleNavigation();const fields=$('articleFields');if(fields)fields.disabled=true;status('Cargando ficha…');
     try {
       const data=await api({id});if(token!==stockGeneration)return;
-      selected=String(data.articulo.id);drawForm(data.articulo,data.stock||[]);render();if(!els.articleDialog.open)els.articleDialog.showModal();els.articleDialog.scrollTop=0;els.detail.querySelector('[data-field="descripcion"]')?.focus({preventScroll:true});status('Ficha lista para editar.');
+      selected=String(data.articulo.id);if(detailOnly){articles=[{...data.articulo,search:normalize(data.articulo.descripcion)}];filtered=articles;}drawForm(data.articulo,data.stock||[]);render();if(!els.articleDialog.open)els.articleDialog.showModal();els.articleDialog.scrollTop=0;els.detail.querySelector('[data-field="descripcion"]')?.focus({preventScroll:true});status('Ficha lista para editar.');
     }catch(error){if(token===stockGeneration)status(error.message,true);}
     finally{if(token===stockGeneration){loadingDetail=false;articleNavigation();const fields=$('articleFields');if(fields)fields.disabled=false;}}
   }
@@ -399,5 +405,9 @@
       if(!system.articleEditor.open(selected,{articles:[article],operation}))els.articleDialog.showModal();
     }catch(error){status(error.message,true);editWeb.disabled=false;}
   });
-  render(true);load().then(()=>{if(requestedArticle&&/^\d{6}$/.test(requestedArticle))select(requestedArticle,true);});
+  render(true);const initialLoad=(detailOnly?api({catalogos:1}).then(data=>{catalogs=data;}):load()).then(()=>{if(requestedArticle&&/^\d{6}$/.test(requestedArticle))return select(requestedArticle,true);});
+  window.CorralonSQLArticleEditor={async open(id,callbacks={}){
+    if(!mayDiscard())return false;
+    await initialLoad;integratedCallbacks=callbacks;await select(String(id),true);return els.articleDialog.open;
+  }};
 })();

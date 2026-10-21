@@ -396,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderReceiptHistory(){
     const rows=filteredReceiptHistory();
     $('receiptHistoryVoided').setAttribute('aria-pressed',String(receiptHistoryVoided));
-    $('historyBody').innerHTML='<div class="receipt-history-grid"><table class="dialog-table"><thead><tr><th>Recibo</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>'+rows.map(row=>`<tr data-receipt-row="${Number(row.id)}"><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cliente)}</td><td class="receipt-num">${money(row.total)}</td><td><span class="receipt-state ${row.anulado?'is-voided':''}">${row.anulado?'Anulado':'Vigente'}</span></td><td><button data-receipt="${Number(row.id)}" type="button">Ver recibo</button></td></tr>`).join('')+'</tbody></table></div><p class="receipt-history-count">'+rows.length+' recibos'+(rows.length?'':' · No hay recibos para esta consulta')+'</p>';
+    $('historyBody').innerHTML='<div class="receipt-history-grid"><table class="dialog-table"><thead><tr><th>Recibo</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>'+rows.map(row=>`<tr data-receipt-row="${Number(row.id)}" tabindex="0" role="button" aria-label="Ver recibo ${esc(row.numero)}" style="cursor:pointer"><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cliente)}</td><td class="receipt-num">${money(row.total)}</td><td><span class="receipt-state ${row.anulado?'is-voided':''}">${row.anulado?'Anulado':'Vigente'}</span></td><td><button data-receipt="${Number(row.id)}" type="button">Ver recibo</button></td></tr>`).join('')+'</tbody></table></div><p class="receipt-history-count">'+rows.length+' recibos'+(rows.length?'':' · No hay recibos para esta consulta')+'</p>';
   }
   async function history(record=true){
     if(busy||cancellingReceipt)return;
@@ -484,7 +484,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(confirmed&&viewedReceipt&&Number(confirmed.id)===Number(viewedReceipt.recibo.id))startNewReceipt();
     viewedReceipt=null;
   });
-  $('historyBody').addEventListener('click',event=>{const button=event.target.closest('[data-receipt]');if(button)openReceiptConsult(Number(button.dataset.receipt)).catch(receiptConsultError);});
+  $('historyBody').addEventListener('click',event=>{const row=event.target.closest('[data-receipt-row]');if(row)openReceiptConsult(Number(row.dataset.receiptRow)).catch(receiptConsultError);});
   $('viewInvoice').onclick=async()=>{
     const row=invoices[selectedInvoice];
     if(!row){status('Seleccioná una factura de la grilla.',true);return;}
@@ -499,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('printReceipt').onclick=()=>window.print();document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>{if(button.dataset.close==='historyModal')receiptReturnToEmission();else $(button.dataset.close).close();});
   $('receiptHistoryQuery').oninput=renderReceiptHistory;
   $('receiptHistoryVoided').onclick=()=>{receiptHistoryVoided=!receiptHistoryVoided;renderReceiptHistory();};
-  $('historyBody').ondblclick=event=>{const row=event.target.closest('[data-receipt-row]');if(row&&!event.target.closest('button'))openReceiptConsult(Number(row.dataset.receiptRow)).catch(receiptConsultError);};
+  $('historyBody').addEventListener('keydown',event=>{if(event.target.matches('[data-receipt-row]')&&['Enter',' '].includes(event.key)){event.preventDefault();event.target.click();}});
   $('receiptConsultBack').onclick=receiptReturnToEmission;$('receiptConsultLoad').onclick=receiptReturnToEmission;
   $('receiptConsultSearch').onclick=history;$('receiptConsultVoided').onclick=()=>{receiptHistoryVoided=true;history();};
   $('receiptConsultPrevious').onclick=()=>navigateConsultReceipt(-1).catch(error=>$('receiptStatus').textContent=error.message);

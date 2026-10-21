@@ -495,8 +495,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       purchaseCombo.input.setAttribute('aria-activedescendant', selected.id);
       const top = selected.offsetTop, bottom = top + selected.offsetHeight;
       if (firstVisible) {
-        menu.style.paddingBottom = '0px';
-        menu.scrollTop = Math.max(0, top - (menu.clientHeight - selected.offsetHeight) / 2);
+        menu.style.paddingBottom = `${Math.max(0, menu.clientHeight - selected.offsetHeight)}px`;
+        menu.scrollTop = Math.max(0, top);
       }
       else if (top < menu.scrollTop) menu.scrollTop = top;
       else if (bottom > menu.scrollTop + menu.clientHeight) menu.scrollTop = bottom - menu.clientHeight;
@@ -1166,28 +1166,6 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   $('purchaseForm').addEventListener('submit', event => event.preventDefault());
   decoratePurchaseCombos(document);
   document.addEventListener('keydown', event => {
-    const taxInput = event.target.closest('#taxRows input[data-field]');
-    if (event.key === 'Enter' && !event.isComposing && taxInput && ['impuesto', 'importe'].includes(taxInput.dataset.field)) {
-      event.preventDefault(); event.stopImmediatePropagation();
-      const rowKey = taxInput.closest('[data-row]').dataset.row;
-      if (taxInput.dataset.field === 'impuesto') {
-        if (!taxInput.value.trim() && rows.find(row => row.key === rowKey)?.empty) {
-          hidePurchaseCombo();
-          $('discount').focus(); $('discount').select();
-          return;
-        }
-        if (purchaseCombo.input !== taxInput) showPurchaseCombo(taxInput);
-        if (!pickPurchaseCombo()) return;
-        const amount = $('taxRows').querySelector(`[data-row="${rowKey}"] [data-field="importe"]`);
-        amount?.focus(); amount?.select();
-      } else {
-        taxInput.dispatchEvent(new Event('change', { bubbles: true }));
-        const currentRow = $('taxRows').querySelector(`[data-row="${rowKey}"]`);
-        const nextTax = currentRow?.nextElementSibling?.querySelector('[data-field="impuesto"]');
-        nextTax?.focus(); nextTax?.select();
-      }
-      return;
-    }
     const input = event.target.closest('[data-purchase-combo]');
     if (!input) return;
     const open = purchaseCombo.input === input;
@@ -1211,16 +1189,33 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if (!open) { showPurchaseCombo(input); return; }
     movePurchaseCombo(event.key === 'Home' ? -purchaseCombo.items.length : event.key === 'End' ? purchaseCombo.items.length : event.key === 'ArrowDown' ? 1 : -1);
   }, true);
-  $('purchaseForm').addEventListener('keydown', event => {
-    if (event.key !== 'Enter' || event.isComposing || !['quickTotal', 'discount'].includes(event.target.id)) return;
-    event.preventDefault(); event.stopImmediatePropagation();
-    const target = event.target.id === 'discount' ? $('confirm')
-      : currencyNumber($('quickTotal').value) > 0 ? $('discount')
-      : $('taxRows').querySelector('[data-field="impuesto"]');
-    target?.focus();
-    if (target?.tagName === 'INPUT') target.select();
-  }, true);
-  FX.bindLinearNavigation({ root: $('purchaseForm'), selector: '[data-flow]', selectOnAnyFocus: false, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
+  // Recorrido principal; los demás campos se pueden editar con el mouse.
+  function purchaseRouteControls() {
+    const taxes=currencyNumber($('quickTotal').value)>0?[]:[...$('taxRows').querySelectorAll('input[data-field]')];
+    return ['type','number','date','provider','account','payment','quickTotal'].map($).concat(taxes,[$('discount'),$('confirm')])
+      .filter(input=>input&&!input.disabled&&!input.readOnly&&!input.closest('[hidden]'));
+  }
+  function refreshPurchaseRoute(){
+    const route=new Set(purchaseRouteControls());
+    $('purchaseForm').querySelectorAll('input,select,textarea,button,a[href],[tabindex]').forEach(input=>{
+      input.tabIndex=route.has(input)?0:-1;input.toggleAttribute('data-purchase-route',route.has(input));
+    });
+  }
+  refreshPurchaseRoute();
+  new MutationObserver(refreshPurchaseRoute).observe($('purchaseForm'),{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','readonly']});
+  $('quickTotal').addEventListener('input',refreshPurchaseRoute);
+  $('quickTotal').addEventListener('change',refreshPurchaseRoute);
+  $('purchaseForm').addEventListener('keydown',event=>{
+    if(event.defaultPrevented||event.isComposing||!['Tab','Enter'].includes(event.key)||event.ctrlKey||event.altKey||event.metaKey)return;
+    const input=event.target.closest('input,select,textarea,button');if(!input)return;
+    if(input===$('confirm')&&event.key==='Enter')return;
+    const route=purchaseRouteControls(),index=route.indexOf(input),forward=!event.shiftKey;
+    let target=index<0?(forward?route.find(node=>input.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING):[...route].reverse().find(node=>input.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_PRECEDING)):route[index+(forward?1:-1)];
+    if(forward&&input.dataset.field==='impuesto'&&!input.value.trim()&&rows.find(row=>row.key===input.closest('[data-row]')?.dataset.row)?.empty)target=$('discount');
+    event.preventDefault();event.stopImmediatePropagation();hidePurchaseCombo();
+    if(target){target.focus();target.select?.();}
+  },true);
+  FX.bindLinearNavigation({ root: $('purchaseForm'), selector: '[data-purchase-route]', selectOnAnyFocus: false, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
   FX.bindLinearNavigation({ root: $('reportFilters'), selector: 'input,button[type="submit"]', selectOnAnyFocus: true, selectOnFirstPointerFocus: true, navigateLeftRight: true, smartCaret: true });
   FX.bindFieldRestore({ root: $('reportFilters') });
   FX.bindLiveCurrency({ root: $('purchaseForm') });

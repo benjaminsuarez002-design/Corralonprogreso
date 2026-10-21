@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Control General De Caja</title>
+  <script>
+  window.cajaInSystem=window.parent!==window&&new URLSearchParams(location.search).get('sistema')==='1';
+  window.cajaSystemInactive=false;
+  if(window.cajaInSystem)document.documentElement.dataset.cajaEmbedded='true';
+  </script>
+
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -1120,7 +1126,7 @@
     #diffSystemBoard .diff-table :is(th,td):nth-child(2){width:170px!important;min-width:170px!important;max-width:170px!important;text-overflow:clip!important}
   </style>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.30"></script>
+<script src="corralon-system.js?v=1.0.31"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260720-caja-mode2" data-menu-guard="caja"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
@@ -2564,6 +2570,7 @@
     }
 
     async function loadDolarCards() {
+      if(window.cajaSystemInactive || (window.cajaInSystem && !document.getElementById('cajaAdditionalPopup')?.classList.contains('open')))return;
       const now = Date.now();
       if (dolarRequest) return dolarRequest;
       if (now - dolarLastAttempt < DOLAR_MIN_REFRESH_MS) return;
@@ -6110,7 +6117,7 @@
 
     function startPublicCajaPolling() {
       setInterval(() => {
-        if (document.hidden || cajaRealtimeSubscribed) return;
+        if (window.cajaSystemInactive || document.hidden || cajaRealtimeSubscribed) return;
         loadPublicCajaData({ silent: true });
       }, CAJA_META_POLL_MS);
     }
@@ -7851,6 +7858,13 @@ initializeCashHistory(true);
   popup.innerHTML = '<section class="caja-additional-window" role="dialog" aria-modal="true" aria-label="Opciones adicionales"></section>';
   const returnToSql = document.createElement('button');returnToSql.className='top-link';returnToSql.id='cajaAdditionalClose';returnToSql.type='button';returnToSql.textContent='Volver a Caja SQL';
   oldApp.querySelector('#cajaBranchCombo').insertAdjacentElement('afterend',returnToSql);
+  if(window.cajaInSystem){
+    const menuButton=document.createElement('button');menuButton.type='button';menuButton.id='cajaSystemMenuToggle';menuButton.textContent='☰ Menú';menuButton.setAttribute('aria-label','Abrir menú del sistema');
+    menuButton.addEventListener('click',()=>window.parent.CorralonInvoiceSections?.openMenu());
+    oldApp.querySelector('.topbar .brand-logo').replaceWith(menuButton);
+    returnToSql.hidden=true;oldApp.querySelector('.topbar a[href="menu.html"]').hidden=true;
+  }
+
   popup.firstElementChild.append(oldApp); document.body.append(popup);
   const main = document.createElement('main'); main.id = 'cajaSqlMain';
   main.innerHTML = `<header><h1>Caja Diaria</h1><label>Sucursal: <select id="sqlCajaDeposit"></select></label><span id="sqlCajaClock"></span><button id="sqlCajaReports">Informes Diarios</button><button id="sqlCajaAdditional">Opciones adicionales</button><button id="sqlCajaCollections">Cobranzas en caja</button><a href="menu.html">Menú</a></header>
@@ -7873,6 +7887,12 @@ initializeCashHistory(true);
   dailyLayout.before(main.querySelector('.caja-sql-totals'));
   dailyLayout.after(main.querySelector('.caja-sql-footer'));
   const dailyHeader=main.querySelector('header');
+  if(window.cajaInSystem){
+    dailyHeader.querySelector('h1').textContent='Control de caja';
+    const menuButton=document.createElement('button');menuButton.id='cajaDailyMenuToggle';menuButton.type='button';menuButton.textContent='☰ Menú';menuButton.setAttribute('aria-label','Abrir menú del sistema');
+    menuButton.addEventListener('click',()=>window.parent.CorralonInvoiceSections?.openMenu());dailyHeader.prepend(menuButton);
+  }
+
   dailyHeader.querySelector('h1').after($('sqlCajaAdditional'),$('sqlCajaCollections'));
   const reports=$('sqlCajaReports');reports.classList.add('caja-daily-report-link');
   const sections=[...dailyLayout.children];
@@ -8228,7 +8248,8 @@ initializeCashHistory(true);
   function cajaSectionRoute(){return location.hash==='#caja-adicionales'?'adicionales':location.hash==='#caja-cobranzas'?'cobranzas':'diaria';}
   function recordCajaSection(section){
     if(cajaSectionRoute()===section)return;
-    window.history.pushState({...window.history.state,cajaSection:section},'','#caja-'+(section==='adicionales'?'adicionales':section==='cobranzas'?'cobranzas':'diaria'));
+    window.history[window.cajaInSystem?'replaceState':'pushState']({...window.history.state,cajaSection:section},'','#caja-'+(section==='adicionales'?'adicionales':section==='cobranzas'?'cobranzas':'diaria'));
+    if(window.cajaInSystem)window.parent.CorralonInvoiceSections?.cajaRoute(section);
   }
   async function restoreCajaSection(){
     const section=cajaSectionRoute();
@@ -8238,18 +8259,20 @@ initializeCashHistory(true);
     else{$('sqlCajaDate').value=selectedDateKey;await load();fitCajaForm();}
   }
   function backToDailyCaja(){
+    if(window.cajaInSystem){window.CorralonCajaSection.navigate('diaria');return;}
     if(window.history.state?.cajaSection&&cajaSectionRoute()!=='diaria')window.history.back();
     else{recordCajaSection('diaria');restoreCajaSection().catch(error=>status(error.message,'error'));}
   }
-  window.addEventListener('popstate',()=>restoreCajaSection().catch(error=>status(error.message,'error')));
+  window.addEventListener('popstate',()=>{if(window.cajaInSystem){window.parent.CorralonInvoiceSections?.restoreRoute();return;}restoreCajaSection().catch(error=>status(error.message,'error'));});
   async function openAdditional(record=true) {
-    await run(async () => { if(record){await saveDetail(); await CajaSQL.flush();} synchronizeDate(); if (!toolsReady) toolsReady = CajaSQLInitializeTools().catch(error => { toolsReady = null; throw error; }); await toolsReady; const branch = current?.cabecera?.IDSucAsoc || boot.sucursal; if (branch && !cajaBranches.some(item => item.id === localStorage.getItem(CAJA_BRANCH_KEY))) selectCajaBranch(branch === 2 ? 'calle5_espana' : 'progreso_ruta'); if (loadedSupabaseCajaCacheDate !== selectedDateKey) { loadState(selectedDateKey); await Promise.all([CajaSQL.load(),loadUserCashState()]); } else await CajaSQL.load(); if(!record&&cajaSectionRoute()!=='adicionales')return;popup.classList.add('open'); if(record)recordCajaSection('adicionales');fitAdditionalTools(); $('cajaAdditionalClose').focus(); if (!window.cajaSqlDollarStarted) { window.cajaSqlDollarStarted = true; iniciarActualizacionDolar(); } });
+    await run(async () => { if(record){await saveDetail(); await CajaSQL.flush();} synchronizeDate(); if (!toolsReady) toolsReady = CajaSQLInitializeTools().catch(error => { toolsReady = null; throw error; }); await toolsReady; const branch = current?.cabecera?.IDSucAsoc || boot.sucursal; if (branch && !cajaBranches.some(item => item.id === localStorage.getItem(CAJA_BRANCH_KEY))) selectCajaBranch(branch === 2 ? 'calle5_espana' : 'progreso_ruta'); if (loadedSupabaseCajaCacheDate !== selectedDateKey) { loadState(selectedDateKey); await Promise.all([CajaSQL.load(),loadUserCashState()]); } else await CajaSQL.load(); if(!record&&cajaSectionRoute()!=='adicionales')return;window.CajaCobranzas?.close();main.hidden=false;popup.classList.add('open'); if(record)recordCajaSection('adicionales');fitAdditionalTools(); if(!window.cajaSystemInactive)$(window.cajaInSystem?'cajaSystemMenuToggle':'cajaAdditionalClose').focus(); if (!window.cajaSqlDollarStarted) { window.cajaSqlDollarStarted = true; iniciarActualizacionDolar(); } });
   }
   $('sqlCajaAdditional').onclick = ()=>openAdditional();
   async function openCollections(record=true){return run(async () => {
     if(record){await saveDetail(); await CajaSQL.flush();recordCajaSection('cobranzas');}
     if(cajaSectionRoute()!=='cobranzas')return;
     await window.CajaCobranzas.open({main,branch:current?.cabecera?.IDSucAsoc || boot.sucursal,onBack:async()=>{backToDailyCaja();$('sqlCajaCollections').focus();}});
+    popup.classList.remove('open');
   });}
   $('sqlCajaCollections').onclick = ()=>openCollections();
   let cajaFitFrame=0;
@@ -8277,7 +8300,7 @@ initializeCashHistory(true);
   fitCajaForm();
   let toolsRemoteVersion='',toolsRemoteDate='',toolsSyncBusy=false;
   async function syncAdditionalTools(){
-    if(toolsSyncBusy || document.hidden || !popup.classList.contains('open') || !toolsReady || !CajaSQL.canRefreshTools())return;
+    if(window.cajaSystemInactive || toolsSyncBusy || document.hidden || !popup.classList.contains('open') || !toolsReady || !CajaSQL.canRefreshTools())return;
     toolsSyncBusy=true;const date=selectedDateKey;
     try {
       const update=await CajaSQL.request('version-herramientas',{fecha:date});
@@ -8289,7 +8312,7 @@ initializeCashHistory(true);
   }
   let mainRemoteVersion='',mainRemoteCaja=0,mainSyncBusy=false;
   function canRefreshMain(){
-    return !main.hidden && !busy && !dirty && !document.hidden && !popup.classList.contains('open') && current?.cabecera
+    return !window.cajaSystemInactive && !main.hidden && !busy && !dirty && !document.hidden && !popup.classList.contains('open') && current?.cabecera
       && !main.contains(document.activeElement?.closest('input:not([readonly]),textarea,select'))
       && !Array.from($('sqlCajaCash').querySelectorAll('tr[data-caja-draft] input')).some(input=>input.value.trim())
       && !document.querySelector('.modal-bg.open,.caja-sql-dialog[open],.invoice-history-overlay:not([hidden])');
@@ -8316,6 +8339,25 @@ initializeCashHistory(true);
   $('sqlCajaReports').onclick = async () => { await openAdditional(); document.getElementById('cashTotalsBtn').click(); };
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && popup.classList.contains('open') && !document.querySelector('.modal-bg.open')) { backToDailyCaja(); $('sqlCajaAdditional').focus(); } });
   const updateDailyClock=()=>{const now=new Date();$('sqlCajaClock').textContent=now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});$('sqlCajaClock').title=now.toLocaleDateString('es-AR',{dateStyle:'full'});};updateDailyClock();setInterval(updateDailyClock,60000);
+  let systemReady=false,systemPendingView=null;
+  if(window.cajaInSystem){
+    popup.firstElementChild.setAttribute('role','region');popup.firstElementChild.removeAttribute('aria-modal');
+    window.CorralonCajaSection={
+      canLeave:()=>!busy&&!document.querySelector('dialog[open]')&&window.CajaCobranzas?.canLeave?.()!==false,
+      setActive(active){window.cajaSystemInactive=!active;},
+      async navigate(view){
+        if(!['diaria','adicionales','cobranzas'].includes(view))return;
+        systemPendingView=view;if(!systemReady||window.cajaSystemInactive)return;
+        const visibleView=popup.classList.contains('open')?'adicionales':document.getElementById('cajaCobranzas')?.hidden===false?'cobranzas':'diaria';
+        if(view===visibleView&&view===cajaSectionRoute())return;
+        if(!this.canLeave())return;
+        if(view==='adicionales')await openAdditional();
+        else if(view==='cobranzas')await openCollections();
+        else await run(async()=>{await saveDetail();await CajaSQL.flush();recordCajaSection('diaria');await restoreCajaSection();});
+        window.parent.CorralonInvoiceSections?.cajaRoute(cajaSectionRoute());
+      }
+    };
+  }
   $('sqlCajaDate').value = TODAY_DATE_KEY;
   CajaSQL.bootstrap().then(async data => {
     boot = data;
@@ -8334,7 +8376,8 @@ initializeCashHistory(true);
         catch (error) { await load(); if (!current?.cabecera) throw error; }
       });
     }
-  }).catch(error => { boot = { editar:false }; status(error.message, 'error'); lockControls(); });
+    systemReady=true;if(systemPendingView)await window.CorralonCajaSection?.navigate(systemPendingView);
+  }).catch(error => { systemReady=true;boot = { editar:false }; status(error.message, 'error'); lockControls(); });
 })();
 
 </script>
@@ -8348,17 +8391,24 @@ initializeCashHistory(true);
   const qty=value=>new Intl.NumberFormat('es-AR',{maximumFractionDigits:4}).format(Number(value)||0);
   const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const ccIcon=name=>'<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+({wallet:'<path d="M3 7V3h15v4M3 7h18v14H3zM15 11h6v6h-6z"/>',invoice:'<path d="M5 2h14v20l-3-2-4 2-4-2-3 2zM8 7h8M8 11h8M8 15h5"/>',box:'<path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10M7.5 4.5l9 5"/>',card:'<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M6 15h5"/>',search:'<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/>',refresh:'<path d="M21 7v5h-5M3 17v-5h5M5 7a8 8 0 0 1 13-2l3 3M3 16l3 3a8 8 0 0 0 13-2"/>',back:'<path d="m10 5-7 7 7 7M3 12h18"/>'}[name]||'')+'</svg>';
-  section.innerHTML=`<header class="cc-header"><img src="logo-corralon.png" alt="Corralón Progreso"><h1>${ccIcon('wallet')}Cobranzas en caja</h1><label>Sucursal <select data-cc-branch><option value="0">Todas las sucursales</option><option value="1">Progreso y Ruta</option><option value="2">Calle 5 y España</option></select></label><span data-cc-date></span><button data-cc-refresh>${ccIcon('refresh')}Actualizar</button><button data-cc-back>${ccIcon('back')}Volver a Caja</button></header>
-    <div class="cc-toolbar"><p class="cc-status" role="status" aria-live="polite"></p><div class="cc-actions"><button id="consultInvoices">${ccIcon('search')}Consultar ventas</button><button data-cc-open disabled>${ccIcon('invoice')}Abrir comprobante</button></div></div><div class="cc-layout"><div class="cc-tables">
+  section.innerHTML=`<header class="cc-header"><img src="logo-corralon.png" alt="Corralón Progreso"><h1>${ccIcon('wallet')}Cobranzas en caja</h1><label>Sucursal <select data-cc-branch><option value="0">Todas las sucursales</option><option value="1">Progreso y Ruta</option><option value="2">Calle 5 y España</option></select></label><span data-cc-date></span><button data-cc-refresh>${ccIcon('refresh')}Actualizar</button><button id="consultInvoices">${ccIcon('search')}Consultar ventas</button><button data-cc-back>${ccIcon('back')}Volver a Caja</button></header>
+    <p class="cc-status" role="status" aria-live="polite" hidden></p><div class="cc-layout"><div class="cc-tables">
     <div class="cc-panel cc-invoices"><div class="cc-panel-title"><h2>${ccIcon('invoice')}Facturas a cobrar</h2><span data-cc-pending></span></div><div class="cc-scroll"><table><colgroup><col style="width:12%"><col style="width:14%"><col style="width:23%"><col style="width:6%"><col style="width:12%"><col style="width:13%"><col style="width:12%"><col style="width:8%"></colgroup><thead><tr><th>Tipo comp.</th><th>N.º comprobante</th><th>Cliente</th><th>Pagada</th><th>Importe</th><th>Paga con</th><th>Vuelto</th><th>Hora</th></tr></thead><tbody data-cc-queue></tbody></table></div><div class="cc-foot"><span data-cc-count></span><span>Total pendiente <strong data-cc-total-pending></strong></span></div></div>
     <div class="cc-panel cc-articles"><div class="cc-panel-title"><h2>${ccIcon('box')}Artículos de la factura</h2><span data-cc-detail-label></span></div><div class="cc-scroll"><table><colgroup><col style="width:11%"><col style="width:43%"><col style="width:11%"><col style="width:17%"><col style="width:18%"></colgroup><thead><tr><th>IDArt</th><th>Descripción</th><th>Cantidad</th><th>Precio unitario</th><th>Importe</th></tr></thead><tbody data-cc-items></tbody></table></div><div class="cc-foot cc-right" data-cc-article-count></div></div>
     <div class="cc-panel cc-payments"><div class="cc-panel-title"><h2>${ccIcon('card')}Tipo de pago</h2></div><div class="cc-scroll"><table><colgroup><col style="width:10%"><col style="width:12%"><col style="width:14%"><col style="width:6%"><col style="width:8%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:15%"></colgroup><thead><tr><th>Tipo de valor</th><th>Importe</th><th>Tarjeta / cuenta</th><th>Cuotas</th><th>Coef.</th><th>Recargo / dto.</th><th>Importe final</th><th>Fecha vto.</th><th>Descripción</th></tr></thead><tbody data-cc-values></tbody></table></div><div class="cc-foot"><small>Paga con y Vuelto son un cálculo local.</small><span>Total a cobrar <strong data-cc-total-payment></strong></span></div></div>
     </div></div>`;
+  if(window.cajaInSystem){
+    const menuButton=document.createElement('button');menuButton.id='cajaCollectionsMenuToggle';menuButton.type='button';menuButton.textContent='☰ Menú';menuButton.setAttribute('aria-label','Abrir menú del sistema');
+    menuButton.addEventListener('click',()=>window.parent.CorralonInvoiceSections?.openMenu());
+    section.querySelector('.cc-header>img').replaceWith(menuButton);
+  }
   function fitCollections(){const scale=Math.max(.1,Math.min(innerWidth/1672,innerHeight/941)*1.2);section.style.setProperty('--cc-scale',scale);section.style.setProperty('--cc-width',innerWidth/scale+'px');section.style.setProperty('--cc-height',innerHeight/scale+'px');}
   window.addEventListener('resize',fitCollections);fitCollections();
   document.body.append(section);
   const $=s=>section.querySelector(s);let rows=[],selected=0,detail=null,busy=false,editing=false,sequence=0,options=null,boot=null;const tenders=new Map();
   const sendMenu=document.createElement('div');sendMenu.id='cajaCobranzaContextMenu';sendMenu.hidden=true;sendMenu.setAttribute('role','menu');sendMenu.setAttribute('aria-label','Acciones del comprobante');sendMenu.innerHTML='<button type="button" role="menuitem"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H5v20h14V7zM14 2v5h5M8 11h8M8 15h5"/><path d="m15 17 3 3 3-3M18 14v6"/></svg><span>Mandar a Comprobantes</span></button><button type="button" role="menuitem" data-cc-reprint><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9V3h12v6M6 17H3V9h18v8h-3M6 14h12v7H6z"/></svg><span>Reimprimir</span></button>';document.body.append(sendMenu);
+  const openInvoiceOption=document.createElement('button');openInvoiceOption.type='button';openInvoiceOption.setAttribute('role','menuitem');openInvoiceOption.setAttribute('data-cc-open','');openInvoiceOption.disabled=true;openInvoiceOption.innerHTML=ccIcon('invoice')+'<span>Abrir comprobante</span>';sendMenu.append(openInvoiceOption);
+
   const sendDialog=document.createElement('dialog');sendDialog.style.cssText='width:min(1050px,96vw);height:92dvh;padding:0;border:1px solid #aaa;border-radius:8px';sendDialog.innerHTML='<header style="display:flex;justify-content:space-between;padding:10px"><strong>Cargar comprobante</strong><button type="button" data-send-close>Cerrar</button></header><iframe title="Cargar comprobante de la factura" style="width:100%;height:calc(100% - 58px);border:0"></iframe>';document.body.append(sendDialog);
   let sendId=0,sendPayload=null,sendSaving=false;const sendFrame=sendDialog.querySelector('iframe');
   const printDialog=document.createElement('dialog');printDialog.dataset.ccPrintDialog='';
@@ -8399,9 +8449,9 @@ initializeCashHistory(true);
     if(e.data?.type==='corralon:comprobantes-saved'){sendSaving=false;sendDialog.close();status('Comprobante guardado.');}
   });
   const request=(action,params={},body=null)=>window.CajaSQL.request(action,{fecha:today(),...params},body?{...body,fecha:today()}:null);
-  function status(text,error=false){$('.cc-status').textContent=text;$('.cc-status').classList.toggle('error',error);}
+  function status(text,error=false){$('.cc-status').textContent=text;$('.cc-status').classList.toggle('error',error);$('.cc-status').hidden=!error;}
   let backgroundRefresh=false;
-  function controls(){for(const el of section.querySelectorAll('button,select,[data-cc-paid]'))el.disabled=(busy&&!backgroundRefresh)||editing||(el.matches('[data-cc-paid]')&&!boot?.editar); $('[data-cc-open]').disabled=busy||editing||!detail;}
+  function controls(){for(const el of section.querySelectorAll('button,select,[data-cc-paid]'))el.disabled=(busy&&!backgroundRefresh)||editing||(el.matches('[data-cc-paid]')&&!boot?.editar); openInvoiceOption.disabled=busy||editing||!detail;}
   function clearDetail(){$('[data-cc-items]').textContent='';$('[data-cc-values]').innerHTML=blankPaymentRows(0);$('[data-cc-detail-label]').textContent='';$('[data-cc-article-count]').textContent='';$('[data-cc-total-payment]').textContent=money(0);detail=null;controls();}
   function blankPaymentRows(count){return ('<tr class="cc-empty-row" aria-hidden="true">'+Array(9).fill('<td></td>').join('')+'</tr>').repeat(Math.max(0,3-count));}
   async function select(id,quiet=false){
@@ -8453,11 +8503,11 @@ initializeCashHistory(true);
     tenders.set(id,input.value);calculate(input);paid(id,tr.querySelector('[data-cc-paid]'));
   });
   $('[data-cc-queue]').addEventListener('input',e=>{if(e.target.matches('[data-cc-tender]')){tenders.set(Number(e.target.closest('[data-cc-id]').dataset.ccId),e.target.value);calculate(e.target);}});
-  $('[data-cc-branch]').onchange=()=>{selected=0;refresh();};$('[data-cc-refresh]').onclick=()=>refresh();$('[data-cc-open]').onclick=()=>openInvoice();
+  $('[data-cc-branch]').onchange=()=>{selected=0;refresh();};$('[data-cc-refresh]').onclick=()=>refresh();openInvoiceOption.onclick=async()=>{const id=sendId||selected;closeSendMenu();await select(id);if(detail?.idRecibo===id)await openInvoice();};
   $('[data-cc-back]').onclick=async()=>{if(busy||editing)return;section.hidden=true;++sequence;options.main.hidden=false;await options.onBack();};
   let openSequence=0;
-  window.CajaCobranzas={close(){++openSequence;++sequence;section.hidden=true;if(options?.main)options.main.hidden=false;},async open(config){const ticket=++openSequence;options=config;boot=await window.CajaSQL.bootstrap();if(ticket!==openSequence)return;$('[data-cc-branch]').value=String(boot.restringido?boot.sucursal:config.branch||0);$('[data-cc-branch]').hidden=boot.restringido;$('[data-cc-date]').textContent=new Date().toLocaleDateString('es-AR');config.main.hidden=true;section.hidden=false;await refresh();if(ticket===openSequence&&!section.hidden)$('[data-cc-back]').focus();}};
-  setInterval(()=>{if(!section.hidden&&!document.hidden&&!document.querySelector('.invoice-history-overlay:not([hidden])'))refresh(true);},2000);
+  window.CajaCobranzas={canLeave:()=>!editing&&!sendSaving&&!printing&&(!busy||backgroundRefresh),close(){++openSequence;++sequence;section.hidden=true;if(options?.main)options.main.hidden=false;},async open(config){const ticket=++openSequence;options=config;boot=await window.CajaSQL.bootstrap();if(ticket!==openSequence)return;$('[data-cc-branch]').value=String(boot.restringido?boot.sucursal:config.branch||0);$('[data-cc-branch]').hidden=boot.restringido;$('[data-cc-date]').textContent=new Date().toLocaleDateString('es-AR');config.main.hidden=true;section.hidden=false;await refresh();if(ticket===openSequence&&!section.hidden&&!window.cajaSystemInactive)$('[data-cc-back]').focus();}};
+  setInterval(()=>{if(!window.cajaSystemInactive&&!section.hidden&&!document.hidden&&!document.querySelector('.invoice-history-overlay:not([hidden])'))refresh(true);},2000);
 })();
 
 

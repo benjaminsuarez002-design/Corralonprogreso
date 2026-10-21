@@ -105,6 +105,7 @@
     return [valueSelect(value,index,'idTipoPago',types),[3,5].includes(cls)?valueSelect(value,index,'idTarjeta',cards):escape(value.tarjeta||'Ninguna'),cls===5?valueSelect(value,index,'cuotas',plans):escape(value.cuotas??0)];
   }
   function fitReceiptDetail(){
+    if(sectionActive&&detail.parentElement===sectionHost){detail.classList.remove('receipt-scaled-desktop');detail.querySelector('.invoice-history-card').style.removeProperty('--receipt-scale');return;}
     const card=detail.querySelector('.invoice-history-card');
     const desktop=window.innerWidth>700;detail.classList.toggle('receipt-scaled-desktop',desktop);
     if(!desktop){card.style.removeProperty('--receipt-scale');return;}
@@ -358,10 +359,17 @@
     annulButton.hidden=!isAdministrator();annulButton.disabled=true;
     const row=rows[index];if(!row||actionBusy)return;warrantyMenu.hidden=true;detailData=null;detailIndex=index;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;detail.querySelector('[data-action-status]').textContent='';detail.hidden=false;detailController?.abort();const controller=detailController=new AbortController(),request=++detailSequence;
     detail.querySelector('[data-title]').textContent='Boleta '+row.numero+(row.tipo?' · '+row.tipo:'');detail.querySelector('[data-detail-position]').textContent=`${index+1} de ${rows.length}`;detail.querySelector('[data-detail-prev]').disabled=index===0;detail.querySelector('[data-detail-next]').disabled=index===rows.length-1;
+    if(sectionActive){
+      sectionHost.appendChild(detail);sectionHost.dataset.detailOpen='true';
+      detail.removeAttribute('aria-modal');detail.setAttribute('role','region');
+      detail.querySelector('[data-detail-close]').textContent='Volver a consultar';
+      notifyDetailSection(true);
+    }
     const body=detail.querySelector('[data-detail-body]');const footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='Consultando detalle…';
     try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;detailData=result;const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
       const typeName=h.tipo||(historyConfig?.comprobantes||[]).find(t=>Number(t.id)===Number(h.idComprobante))?.nombre||row.tipo;
       detail.querySelector('[data-title]').textContent='Boleta '+h.numero+(typeName?' · '+typeName:'');
+      if(sectionActive)notifyDetailSection(true);
       detail.querySelector('[data-preview]').hidden=!adapters.preview;detail.querySelector('[data-reprint]').hidden=!adapters.reprint;detail.querySelector('[data-recall]').hidden=!adapters.recall;
       detail.querySelector('.invoice-history-footer').style.display=adapters.preview||adapters.reprint||adapters.recall||canEditValues()||isAdministrator()?'':'none';
       body.innerHTML=receiptLayout(result,row);decorateReceiptDetail(body);
@@ -373,9 +381,10 @@
     if(detailData?.valuesDirty){status.textContent='Guardá los valores antes de ver, reimprimir o llamar la boleta.';return;}
     if(!adapter){status.textContent='Facturación todavía está cargando. Reintentá en unos segundos.';return}
     actionBusy=true;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;status.textContent=action==='preview'?'Preparando vista previa…':action==='reprint'?'Preparando reimpresión…':'Cargando boleta en Facturación…';
-    try{const result=await adapter(Number(row.idRecibo));if(result?.cancelled){status.textContent='Carga cancelada.';}else if(action==='recall'||result?.preview)close();else status.textContent='Ticket enviado a la impresora.'}
+    let closeAfterAction=false;
+    try{const result=await adapter(Number(row.idRecibo));if(result?.cancelled){status.textContent='Carga cancelada.';}else if(action==='recall'||result?.preview)closeAfterAction=true;else status.textContent='Ticket enviado a la impresora.'}
     catch(error){status.textContent=error.message}
-    finally{actionBusy=false;if(!detail.hidden){detail.querySelector('[data-preview]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().preview;detail.querySelector('[data-reprint]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().reprint;detail.querySelector('[data-recall]').disabled=!Number(detailData?.comprobante?.confirmado)||!historyActions().recall}}
+    finally{actionBusy=false;if(!detail.hidden){detail.querySelector('[data-preview]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().preview;detail.querySelector('[data-reprint]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().reprint;detail.querySelector('[data-recall]').disabled=!Number(detailData?.comprobante?.confirmado)||!historyActions().recall}if(closeAfterAction)close();}
   }
   detail.querySelector('[data-preview]').addEventListener('click',()=>detailAction('preview'));
   detail.querySelector('[data-reprint]').addEventListener('click',()=>detailAction('reprint'));
@@ -412,14 +421,33 @@
       detail.querySelector('[data-reprint]').disabled=unavailable||!historyActions().reprint;
     }
   });
-  function closeDetail(){if(cancellationBusy)return;const wasOpen=!detail.hidden;warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;detailController?.abort();const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='';if(overlay.hidden)returnFocus?.focus();else get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus();if(wasOpen)detailOptions.onClose?.();}
-  function close(){clearTimeout(searchTimer);closeDetail();overlay.hidden=true;sequence++;listController?.abort();rows=[];listLoading=false;hasMore=false;moreError=false;listQuery='';get('[data-rows]').textContent='';button?.focus()}
+  function closeDetail(){if(cancellationBusy)return;const wasOpen=!detail.hidden;if(sectionHost?.dataset.detailOpen==='true')notifyDetailSection(false);warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;detailController?.abort();const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='';if(overlay.hidden)returnFocus?.focus();else get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus();if(wasOpen)detailOptions.onClose?.();}
+  let sectionActive=false,sectionExit=null,sectionHost=null;
+  function notifyDetailSection(active){
+    if(!sectionHost)return;
+    sectionHost.dataset.detailOpen=String(active);
+    window.dispatchEvent(new CustomEvent('invoice-detail-section',{detail:{active,title:detail.querySelector('[data-title]').textContent,
+      controls:[...detail.querySelector('.invoice-history-head').children].filter(node=>!node.matches('h2'))}}));
+  }
+  function close(){if(sectionActive){if(actionBusy||cancellationBusy||detailData?.valuesDirty){message('Guardá los cambios antes de salir.',true);return;}sectionExit?.();return;}clearTimeout(searchTimer);closeDetail();overlay.hidden=true;sequence++;listController?.abort();rows=[];listLoading=false;hasMore=false;moreError=false;listQuery='';get('[data-rows]').textContent='';button?.focus()}
   window.CorralonInvoiceHistory={
+    openSection(host,onExit){
+      sectionActive=true;sectionExit=onExit;sectionHost=host;
+      host.appendChild(overlay);overlay.removeAttribute('aria-modal');overlay.setAttribute('role','region');
+      get('[data-close]').textContent='Volver a Facturación';
+      return openList();
+    },
+    canLeaveSection(){return !actionBusy&&!cancellationBusy&&!detailData?.valuesDirty;},
+    suspendSection(){
+      sectionActive=false;clearTimeout(searchTimer);closeDetail();overlay.hidden=true;
+      sequence++;listController?.abort();listLoading=false;
+    },
     async openInvoice(id,context=[],options={}){
       id=Number(id);if(!Number.isInteger(id)||id<=0)throw new Error('Seleccioná una factura válida.');
       if(actionBusy)throw new Error('Esperá a que termine la operación actual.');
       detailOptions=options;
       const host=options.host || document.body;
+      detail.setAttribute('role','dialog');detail.setAttribute('aria-modal','true');detail.querySelector('[data-detail-close]').textContent='Cerrar';
       if(detail.parentElement!==host)host.appendChild(detail);
       if(warrantyMenu.parentElement!==host)host.appendChild(warrantyMenu);
       const request=++directOpenSequence;returnFocus=document.activeElement;
@@ -433,7 +461,7 @@
     },
     close:closeDetail
   };
-  button?.addEventListener('click',async()=>{
+  async function openList(){
     if(!overlay.hidden)return;detailOptions={};overlay.hidden=false;get('[data-search]').value='';get('[data-article]').value='';sortField='';sortDirection='';paintSort();page=0;const current=dateText(new Date());get('[data-from]').value=current;get('[data-to]').value=current;get('[data-branch]').innerHTML='<option value="0">Todas las sucursales</option>';
     const selectedPoint=Number(document.getElementById('pos')?.value)||0;
     message('Consultando la sucursal del punto de venta…');get('[data-search]').focus();const controller=new AbortController();
@@ -441,7 +469,8 @@
       const branch=Number((config.puntosVenta||[]).find(p=>Number(p.id)===selectedPoint)?.idSucursal)||0;
       get('[data-branch]').value=String(branch);get('[data-point]').innerHTML='<option value="0">Todos los puntos de venta</option>'+(config.puntosVenta||[]).map(p=>`<option value="${Number(p.id)}">${escape(p.id)} · ${escape(p.nombre)}</option>`).join('');await load();
     }catch(error){if(!overlay.hidden)message('No se pudieron cargar las sucursales: '+error.message,true)}
-  });
+  }
+  button?.addEventListener('click',()=>window.CorralonInvoiceSections?window.CorralonInvoiceSections.show('invoice-consult'):openList());
   get('form').addEventListener('submit',event=>{event.preventDefault();completeReceiptSearch();load()});get('[data-close]').addEventListener('click',close);get('[data-branch]').addEventListener('change',()=>load());get('[data-point]').addEventListener('change',()=>load());
   for(const selector of ['[data-from]','[data-to]']){const field=get(selector);field.addEventListener('input',()=>field.setCustomValidity(''));field.addEventListener('change',()=>load())}
   for(const selector of ['[data-search]','[data-article]'])get(selector).addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>load(),350)});
