@@ -423,6 +423,11 @@
     if(additional){const selected=Boolean(articleEditorHost.querySelector('[data-editor-additional-dialog] .is-active'));additional.classList.toggle('is-active',selected);additional.setAttribute('aria-pressed',String(selected));}
     articleEditorHost.querySelectorAll('[data-editor-chip]').forEach(chip=>chip.setAttribute('aria-pressed',String(chip.classList.contains('is-active'))));
     if (offer) offer.hidden = !articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active');
+    const promotion = editorField('ofertaTipo')?.value === 'promocion';
+    const discountField = editorField('ofertaPct')?.closest('.corralon-article-editor-field');
+    const promotionField = editorField('promocionTexto')?.closest('.corralon-article-editor-field');
+    if (discountField) discountField.hidden = promotion;
+    if (promotionField) promotionField.hidden = !promotion;
     if (ceramic) ceramic.hidden = !articleEditorHost.querySelector('[data-editor-chip="ceramico"]')?.classList.contains('is-active');
     if (arid) arid.hidden = !articleEditorHost.querySelector('[data-editor-chip="arido"]')?.classList.contains('is-active');
     renderArticleEditorPrice();
@@ -435,17 +440,18 @@
     const previous = editorInfo('precioAnterior');
     if (!value || !state || !previous) return;
     const offerActive = articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active');
+    const promotion = offerActive && editorField('ofertaTipo')?.value === 'promocion';
     const percentage = Math.max(0, Math.min(100, Number(parseFlexibleNumber(editorField('ofertaPct')?.value) || 0)));
-    const offerPrice = offerActive
+    const offerPrice = offerActive && !promotion
       ? Math.round(articleEditorBasePrice * (1 - percentage / 100) * 100) / 100
       : articleEditorBasePrice;
     const money = (number) => `$ ${Number(number || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     value.textContent = money(offerPrice);
     value.classList.toggle('is-offer', offerActive);
-    state.textContent = offerActive ? `OFERTA ${percentage.toLocaleString('es-AR', { maximumFractionDigits: 2 })} %` : 'PRECIO DE LISTA';
+    state.textContent = promotion ? 'PROMOCIÓN' : offerActive ? `OFERTA ${percentage.toLocaleString('es-AR', { maximumFractionDigits: 2 })} %` : 'PRECIO DE LISTA';
     state.classList.toggle('is-offer', offerActive);
     previous.textContent = offerActive ? `Antes ${money(articleEditorBasePrice)}` : '';
-    previous.hidden = !offerActive;
+    previous.hidden = !offerActive || promotion;
   }
 
   function editorImageUrl() {
@@ -732,6 +738,7 @@
         updated.oferta = source.oferta;
         updated.ofertaPct = source.ofertaPct;
         updated.ofertaHasta = source.ofertaHasta;
+        updated.promocionTexto = source.promocionTexto || '';
       }
       if (labels.has('destacado')) updated.destacado = source.destacado;
       if (labels.has('masVendido')) updated.masVendido = source.masVendido;
@@ -968,6 +975,8 @@
         </div>
         <div class="corralon-article-editor-extras" data-editor-extra="oferta" hidden>
           <div class="corralon-article-editor-section-title">Configuración de oferta</div>
+          <div class="corralon-article-editor-field"><label for="corralonEditOfertaTipo">Tipo de oferta</label><select id="corralonEditOfertaTipo" data-editor-field="ofertaTipo"><option value="descuento">Descuento</option><option value="promocion">Promoción</option></select></div>
+          <div class="corralon-article-editor-field" hidden><label for="corralonEditPromocionTexto">Texto de la promoción</label><textarea id="corralonEditPromocionTexto" data-editor-field="promocionTexto" maxlength="300" rows="2" placeholder="Ej.: Llevá 20 L + 5 L de regalo"></textarea></div>
           <div class="corralon-article-editor-field"><label for="corralonEditOfertaPct">Descuento oferta %</label><input id="corralonEditOfertaPct" data-editor-field="ofertaPct" data-editor-number="2" data-editor-kind="percent" inputmode="decimal"></div>
           <div class="corralon-article-editor-field"><label for="corralonEditOfertaHasta">Oferta hasta</label><input id="corralonEditOfertaHasta" type="text" data-editor-field="ofertaHasta" data-editor-date placeholder="dd/mm/aaaa"></div>
         </div>
@@ -1150,6 +1159,7 @@
         articleEditorHost.querySelector('[data-editor-apply-open]')?.focus();
       }
     });
+    editorField('ofertaTipo').addEventListener('change', syncArticleEditorSections);
     articleEditorHost.querySelector('[data-editor-photo-input]').addEventListener('change', (event) => {
       addArticleEditorFiles(event.target.files);
       event.target.value = '';
@@ -1436,6 +1446,8 @@
     articleEditorBasePrice = Number(article.precio || 0);
     editorField('detalle').value = String(article.detalle ?? '');
     editorField('tags').value = articleTags(article.tagsOcultos ?? article.tagsBusqueda ?? article.tags ?? '').join(', ');
+    editorField('promocionTexto').value = String(article.promocionTexto ?? article.promocion_texto ?? '');
+    editorField('ofertaTipo').value = editorField('promocionTexto').value.trim() ? 'promocion' : 'descuento';
     editorField('ofertaPct').value = Number(article.ofertaPct ?? article.oferta_pct ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     editorField('ofertaHasta').value = articleEditorDateToDisplay(article.ofertaHasta ?? article.oferta_hasta ?? '');
     editorField('ceramicoM2').value = Number(article.ceramicoM2 ?? article.m2 ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1546,6 +1558,12 @@
       alert('Ya existe otro artículo con ese código');
       return;
     }
+    const promotion = editorField('ofertaTipo').value === 'promocion';
+    if (articleEditorHost.querySelector('[data-editor-chip="oferta"]')?.classList.contains('is-active') && promotion && !editorField('promocionTexto').value.trim()) {
+      alert('Completá el texto de la promoción');
+      editorField('promocionTexto').focus();
+      return;
+    }
     const saveButton = articleEditorHost.querySelector('[data-editor-save]');
     saveButton.disabled = true;
     saveButton.textContent = 'Guardando...';
@@ -1596,7 +1614,8 @@
         galeria: [...savedImages],
         fotoUrls: [...savedImages],
         oferta: active('oferta'),
-        ofertaPct: active('oferta') ? Number(parseFlexibleNumber(editorField('ofertaPct').value) || 0) : 0,
+        ofertaPct: active('oferta') && !promotion ? Number(parseFlexibleNumber(editorField('ofertaPct').value) || 0) : 0,
+        promocionTexto: active('oferta') && promotion ? editorField('promocionTexto').value.trim().slice(0, 300) : '',
         ofertaHasta: active('oferta') ? articleEditorDateToIso(editorField('ofertaHasta').value) : '',
         destacado: active('destacado'),
         masVendido: active('masVendido'),
@@ -2265,6 +2284,7 @@
       oferta: articleBool(article.oferta),
       ofertaPct: Number(article.ofertaPct || 0),
       ofertaHasta: String(article.ofertaHasta || ''),
+      promocionTexto: String(article.promocionTexto ?? article.promocion_texto ?? ''),
       destacado: articleBool(article.destacado),
       masVendido: articleBool(article.masVendido ?? article.mas_vendido),
       accesoRapido: articleBool(article.accesoRapido ?? article.rapido),
@@ -3754,6 +3774,7 @@
           oferta: articleBool(raw?.oferta),
           oferta_pct: Math.max(0, Math.min(100, numberValue(raw?.ofertaPct ?? raw?.oferta_pct))),
           oferta_hasta: dateValue(raw?.ofertaHasta ?? raw?.oferta_hasta),
+          promocion_texto: String(raw?.promocionTexto ?? raw?.promocion_texto ?? '').trim().slice(0, 300),
           destacado: articleBool(raw?.destacado),
           mas_vendido: articleBool(raw?.masVendido ?? raw?.mas_vendido),
           acceso_rapido: articleBool(raw?.accesoRapido ?? raw?.acceso_rapido),
@@ -3846,7 +3867,7 @@
       'stock_progreso', 'stock_calle5',
       'sync_version', 'activo',
       'detalle', 'tags_ocultos', 'foto_url', 'imagenes',
-      'oferta', 'oferta_pct', 'oferta_hasta', 'destacado',
+      'oferta', 'oferta_pct', 'oferta_hasta', 'promocion_texto', 'destacado',
       'mas_vendido', 'acceso_rapido', 'ceramico',
       'ceramico_m2', 'ceramico_placas', 'editado_por', 'edicion_updated_at'
     ].join(',');
@@ -3982,6 +4003,8 @@
         oferta_pct: Number(row.oferta_pct || 0),
         ofertaHasta: String(row.oferta_hasta || ''),
         oferta_hasta: String(row.oferta_hasta || ''),
+        promocionTexto: String(row.promocion_texto || ''),
+        promocion_texto: String(row.promocion_texto || ''),
         destacado: Boolean(row.destacado),
         masVendido: Boolean(row.mas_vendido),
         mas_vendido: Boolean(row.mas_vendido),
@@ -4272,6 +4295,7 @@
           case 'imagenes': next.imagenes = Array.isArray(rawValue) ? rawValue : []; break;
           case 'oferta': next.oferta = Boolean(rawValue); break;
           case 'oferta_pct': set(['ofertaPct', 'oferta_pct'], Number(rawValue || 0)); break;
+          case 'promocion_texto': set(['promocionTexto', 'promocion_texto'], String(rawValue || '')); break;
           case 'oferta_hasta': set(['ofertaHasta', 'oferta_hasta'], String(rawValue || '')); break;
           case 'destacado': next.destacado = Boolean(rawValue); break;
           case 'mas_vendido': set(['masVendido', 'mas_vendido'], Boolean(rawValue)); break;

@@ -4446,7 +4446,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
 <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.52"></script>
+<script src="corralon-system.js?v=1.0.53"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4610,7 +4610,7 @@ const indexCategoryCache=new Map(),indexRubrosKnown=new Set();
 const indexAridosKnown=new Set();
 let indexCategoryHasMore=false,indexCategoryNextOffset=0,indexCategoryMoreBusy=false;
 let indexRubrosViewActive=false;
-const indexPublicCategoryFields='codigo,codigo_proveedor,nombre,rubro,id_rubro,precio_venta,stock,stock_progreso,stock_calle5,sync_version,detalle,tags_ocultos,foto_url,imagenes,oferta,oferta_pct,oferta_hasta,destacado,mas_vendido,acceso_rapido,ceramico,ceramico_m2,ceramico_placas,id_proveedor,edicion_updated_at';
+const indexPublicCategoryFields='codigo,codigo_proveedor,nombre,rubro,id_rubro,precio_venta,stock,stock_progreso,stock_calle5,sync_version,detalle,tags_ocultos,foto_url,imagenes,oferta,oferta_pct,oferta_hasta,promocion_texto,destacado,mas_vendido,acceso_rapido,ceramico,ceramico_m2,ceramico_placas,id_proveedor,edicion_updated_at';
 const indexCategoryDefinitions={
   construccion:{label:'Construcción',rubro:'CONSTRUCCION',copy:'Materiales para obras grandes y pequeñas.'},
   pinturas:{label:'Pinturas',rubro:'PINTURAS',copy:'Dale color a tus ideas.'},
@@ -4660,7 +4660,7 @@ function indexMatchesCategory(article,key=indexCategoryActive){
   if(!key || key==='todos')return true;
   if(key==='aridos')return indexIsArido(article);
   if(key==='ceramico')return Boolean(article.ceramico);
-  if(key==='oferta')return Boolean(article.ofertaVigente);
+  if(key==='oferta')return esOfertaArticulo(article);
   if(indexCategoryDefinitions[key]?.rubros)return indexCategoryDefinitions[key].rubros.some(rubro=>normalizarTexto(article.rubro||'')===normalizarTexto(rubro));
   const rubro=indexCategoryDefinitions[key]?.rubro || (key.startsWith('rubro:')?key.slice(6):key);
   return normalizarTexto(article.rubro||'')===normalizarTexto(rubro);
@@ -5080,6 +5080,7 @@ function extraerMetadatosArticulo(raw = {}) {
     ceramico: toBool(raw?.ceramico ?? raw?.tagCeramico),
     ceramicoM2: sanitizeM2(raw?.ceramicoM2 ?? raw?.m2Ceramico ?? raw?.m2 ?? raw?.metros2Ceramico ?? 0),
     ceramicoPlacas: sanitizePlacas(raw?.ceramicoPlacas ?? raw?.placasCeramico ?? raw?.placasPorCaja ?? raw?.placas ?? 0),
+    promocionTexto: String(raw?.promocionTexto ?? raw?.promocion_texto ?? '').trim().slice(0, 300),
     ofertaPct: clampPct(raw?.ofertaPct ?? raw?.oferta_pct ?? raw?.ofertaPorcentaje ?? raw?.descuentoOferta ?? 0),
     ofertaHasta: sanitizeIsoDate(raw?.ofertaHasta ?? raw?.oferta_hasta ?? raw?.fechaOfertaHasta ?? '')
   };
@@ -5090,6 +5091,7 @@ function extraerMetadatosArticulo(raw = {}) {
     meta.fotoUrl ||
     meta.imagenes.length ||
     meta.oferta ||
+    meta.promocionTexto ||
     meta.ofertaPct > 0 ||
     meta.ofertaHasta ||
     meta.destacado ||
@@ -5120,6 +5122,7 @@ function aplicarMetadatosArticulo(raw = {}, meta = null) {
     fotoUrl: meta.fotoUrl ?? raw.fotoUrl ?? '',
     imagenes: meta.imagenes ?? raw.imagenes ?? [],
     oferta: meta.oferta ?? raw.oferta ?? raw.enOferta ?? raw.tagOferta,
+    promocionTexto: meta.promocionTexto ?? raw.promocionTexto ?? raw.promocion_texto ?? '',
     ofertaPct: meta.ofertaPct ?? raw.ofertaPct ?? raw.oferta_pct ?? raw.ofertaPorcentaje ?? raw.descuentoOferta ?? 0,
     ofertaHasta: meta.ofertaHasta ?? raw.ofertaHasta ?? raw.oferta_hasta ?? raw.fechaOfertaHasta ?? '',
     destacado: meta.destacado ?? raw.destacado ?? raw.tagDestacado,
@@ -5421,7 +5424,9 @@ function normalizarArticulo(raw) {
   const ceramicoPlacas = sanitizePlacas(raw?.ceramicoPlacas ?? raw?.placasCeramico ?? raw?.placasPorCaja ?? raw?.placas ?? 0);
   const ofertaPct = clampPct(raw?.ofertaPct ?? raw?.oferta_pct ?? raw?.ofertaPorcentaje ?? raw?.descuentoOferta ?? 0);
   const ofertaHasta = sanitizeIsoDate(raw?.ofertaHasta ?? raw?.oferta_hasta ?? raw?.fechaOfertaHasta ?? '');
-  const ofertaVigente = !!(oferta && ofertaPct > 0 && ofertaHasta && ofertaHasta >= todayIsoLocal());
+  const promocionTexto = String(raw?.promocionTexto ?? raw?.promocion_texto ?? '').trim().slice(0, 300);
+  const promocionVigente = !!(oferta && promocionTexto && (!ofertaHasta || ofertaHasta >= todayIsoLocal()));
+  const ofertaVigente = !!(oferta && !promocionTexto && ofertaPct > 0 && ofertaHasta && ofertaHasta >= todayIsoLocal());
   const precioVigente = ofertaVigente ? precioOferta(precioLista, ofertaPct) : precioLista;
   const articuloNormalizado = {
     ...raw,
@@ -5443,6 +5448,8 @@ function normalizarArticulo(raw) {
     ofertaPct,
     ofertaHasta,
     ofertaVigente,
+    promocionTexto,
+    promocionVigente,
     precioVigente
   };
   return window.CorralonSystem?.aridos?.decorateArticle?.(articuloNormalizado) || articuloNormalizado;
@@ -5847,8 +5854,13 @@ function renderHomeArticuloFoto(articulo, alt) {
   return `<div class="foto-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>`;
 }
 
+function esOfertaArticulo(articulo) {
+  return !!(articulo.ofertaVigente || articulo.promocionVigente);
+}
+
 function construirTagsArticulo(articulo) {
   const tags = [];
+  if (articulo.promocionVigente) tags.push(`<span class="chip-oferta">${escaparHtml(articulo.promocionTexto)}</span>`);
   if (articulo.ofertaVigente) {
     const hastaOferta = formatoFechaCortaIso(articulo.ofertaHasta);
     tags.push(`<span class="chip-oferta">Oferta${hastaOferta ? ` hasta ${hastaOferta}` : ''}</span>`);
@@ -5964,10 +5976,10 @@ function renderHomeLanding() {
   const estado = document.getElementById('estado');
   body.removeAttribute('aria-busy');
   limpiarResultadoActivo();
-  const ofertas = obtenerArticulosPortada('oferta', (articulo) => articulo.ofertaVigente, 'oferta');
+  const ofertas = obtenerArticulosPortada('oferta', (articulo) => esOfertaArticulo(articulo), 'oferta');
   const destacados = obtenerArticulosPortada('destacado', (articulo) => !!articulo.destacado, 'general');
   const masVendidos = obtenerArticulosPortada('masVendido', (articulo) => !!articulo.masVendido, 'general');
-  const ofertasCount = (todosArticulos || []).filter((articulo) => articulo.ofertaVigente).length;
+  const ofertasCount = (todosArticulos || []).filter((articulo) => esOfertaArticulo(articulo)).length;
   const destacadosCount = (todosArticulos || []).filter((articulo) => !!articulo.destacado).length;
   const masVendidosCount = (todosArticulos || []).filter((articulo) => !!articulo.masVendido).length;
   const accesoRapidoCount = (todosArticulos || []).filter((articulo) => !!articulo.accesoRapido).length;
@@ -6464,7 +6476,7 @@ function parsearBusquedaAvanzada(rawInput) {
 
 function cumpleFiltrosBusqueda(articulo, parsed) {
   const filtros = parsed.filtros;
-  if (filtros.oferta && !articulo.ofertaVigente) return false;
+  if (filtros.oferta && !esOfertaArticulo(articulo)) return false;
   if (filtros.destacado && !articulo.destacado) return false;
   if (filtros.masVendido && !articulo.masVendido) return false;
   if (filtros.accesoRapido && !articulo.accesoRapido) return false;
@@ -7001,7 +7013,7 @@ function actualizarResumenCatalogoSinRender() {
   const indicadores = estado.querySelectorAll('.estado-home-meta span');
   if (indicadores[0]) indicadores[0].textContent = `${todosArticulos.filter((articulo) => !!articulo.destacado).length} destacados`;
   if (indicadores[1]) indicadores[1].textContent = `${todosArticulos.filter((articulo) => !!articulo.masVendido).length} más vendidos`;
-  if (indicadores[2]) indicadores[2].textContent = `${todosArticulos.filter((articulo) => articulo.ofertaVigente).length} en oferta`;
+  if (indicadores[2]) indicadores[2].textContent = `${todosArticulos.filter((articulo) => esOfertaArticulo(articulo)).length} en oferta`;
 }
 
 function aplicarDatosCatalogoServidor(data, serverInfo, { guardarCache = true, actualizarDom = true } = {}) {
@@ -7821,6 +7833,7 @@ function abrirDetalleProducto(codigo) {
   const precioVigente = Number(articulo.precioVigente ?? precioLista);
   const precioVisual = obtenerPrecioVisualArticulo(articulo);
   const tags = [];
+  if (articulo.promocionVigente) tags.push(`<span class="chip-oferta">${escaparHtml(articulo.promocionTexto)}</span>`);
   if (articulo.ofertaVigente) {
     const hastaOferta = formatoFechaCortaIso(articulo.ofertaHasta);
     tags.push(`<span class="chip-oferta">Oferta${hastaOferta ? ` hasta ${hastaOferta}` : ''}</span>`);
@@ -7943,6 +7956,7 @@ function renderProductos(lista, { preserveWindow = false, restoreActiveIndex = n
     const precioVigente = Number(a.precioVigente ?? precioLista);
     const precioVisual = obtenerPrecioVisualArticulo(a);
     const tags = [];
+    if (a.promocionVigente) tags.push(`<span class="chip-oferta">${escaparHtml(a.promocionTexto)}</span>`);
     if (a.ofertaVigente) tags.push('<span class="chip-oferta">Oferta</span>');
     if (a.destacado) tags.push('<span class="chip-destacado">&#9733; Destacado</span>');
     if (a.masVendido) tags.push('<span class="chip-mas-vendido">Más vendido</span>');
@@ -8136,7 +8150,7 @@ function aplicarBusquedaActual() {
 
   actualizarChipsRubro(resultado);
   if (rubroActivo) resultado = resultado.filter(a => (a.rubro || '') === rubroActivo);
-  if (chipActivo === 'oferta') resultado = resultado.filter(a => a.ofertaVigente);
+  if (chipActivo === 'oferta') resultado = resultado.filter(a => esOfertaArticulo(a));
   if (chipActivo === 'destacado') resultado = resultado.filter(a => !!a.destacado);
   if (chipActivo === 'masVendido') resultado = ordenarPorRankingVentas(resultado.filter(a => !!a.masVendido));
   if (chipActivo === 'ceramico') resultado = resultado.filter(a => !!a.ceramico);
