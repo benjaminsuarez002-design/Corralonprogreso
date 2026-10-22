@@ -142,6 +142,7 @@ function Wait-GitHubManifest {
 function ConvertTo-PageKey {
     param([string]$FileName)
     $value = ([System.IO.Path]::GetFileNameWithoutExtension($FileName)).ToLowerInvariant().Replace(' ', '-')
+    if ($value -eq 'gestion') { return 'facturacion' }
     $normalized = $value.Normalize([Text.NormalizationForm]::FormD)
     $builder = New-Object Text.StringBuilder
     foreach ($char in $normalized.ToCharArray()) {

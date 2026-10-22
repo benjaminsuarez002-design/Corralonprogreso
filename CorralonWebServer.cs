@@ -499,6 +499,7 @@ internal sealed class ServerForm : Form
     private static string PageKeyFromFile(string file)
     {
         string value = Path.GetFileNameWithoutExtension(file).ToLowerInvariant().Replace(' ', '-');
+        if (value == "gestion") return "facturacion";
         string normalized = value.Normalize(NormalizationForm.FormD);
         var result = new StringBuilder();
         foreach (char c in normalized) if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark) result.Append(c);

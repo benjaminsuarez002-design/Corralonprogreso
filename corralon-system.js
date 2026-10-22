@@ -7781,6 +7781,7 @@
       try { name = decodeURIComponent(name); } catch (_) {}
       name = name.replace(/\.html?$/i, '').trim().toLowerCase();
       name = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '-');
+      if (name === 'gestion') return 'facturacion';
       return name || 'index';
     }
     function recordExecutedVersion() {
