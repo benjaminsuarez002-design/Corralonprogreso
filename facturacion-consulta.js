@@ -105,7 +105,16 @@
     return [valueSelect(value,index,'idTipoPago',types),[3,5].includes(cls)?valueSelect(value,index,'idTarjeta',cards):escape(value.tarjeta||'Ninguna'),cls===5?valueSelect(value,index,'cuotas',plans):escape(value.cuotas??0)];
   }
   function fitReceiptDetail(){
-    if(sectionActive&&detail.parentElement===sectionHost){detail.classList.remove('receipt-scaled-desktop');detail.querySelector('.invoice-history-card').style.removeProperty('--receipt-scale');return;}
+    if(sectionActive&&detail.parentElement===sectionHost){
+      const card=detail.querySelector('.invoice-history-card');
+      const bounds=sectionHost.getBoundingClientRect();
+      const width=Math.max(1,sectionHost.clientWidth-20);
+      const height=Math.max(1,window.innerHeight-Math.max(0,bounds.top)-20);
+      detail.classList.add('receipt-scaled-desktop','receipt-fit-section');
+      card.style.setProperty('--receipt-scale',String(Math.max(.01,Math.min(width/1450,height/760))));
+      return;
+    }
+    detail.classList.remove('receipt-fit-section');
     const card=detail.querySelector('.invoice-history-card');
     const desktop=window.innerWidth>700;detail.classList.toggle('receipt-scaled-desktop',desktop);
     if(!desktop){card.style.removeProperty('--receipt-scale');return;}
