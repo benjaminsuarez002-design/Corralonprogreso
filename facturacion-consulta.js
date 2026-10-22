@@ -106,12 +106,20 @@
   }
   function fitReceiptDetail(){
     if(sectionActive&&detail.parentElement===sectionHost){
+      if(window.matchMedia('print').matches)return;
       const card=detail.querySelector('.invoice-history-card');
-      const bounds=sectionHost.getBoundingClientRect();
-      const width=Math.max(1,sectionHost.clientWidth-20);
-      const height=Math.max(1,window.innerHeight-Math.max(0,bounds.top)-20);
+      // La misma referencia y redondeo que fitInvoiceForm; nunca depende del scroll.
+      const width=Math.max(1,window.innerWidth-8),height=Math.max(1,window.innerHeight-8);
+      const scale=Math.max(.01,Math.floor(Math.min(width/1760,height/880)*1000)/1000);
+      const header=document.querySelector('body > .app > .topbar');
+      const top=Math.ceil(header?.getBoundingClientRect().height||70*scale)+8;
+      const availableWidth=Math.max(1,window.innerWidth-20);
+      const availableHeight=Math.max(1,window.innerHeight-top-10);
+      sectionHost.style.setProperty('--receipt-fit-top',top+'px');
       detail.classList.add('receipt-scaled-desktop','receipt-fit-section');
-      card.style.setProperty('--receipt-scale',String(Math.max(.01,Math.min(width/1450,height/760))));
+      card.style.setProperty('--receipt-scale',String(scale));
+      card.style.setProperty('--receipt-fit-width',Math.floor(availableWidth/scale)+'px');
+      card.style.setProperty('--receipt-fit-height',Math.floor(availableHeight/scale)+'px');
       return;
     }
     detail.classList.remove('receipt-fit-section');
