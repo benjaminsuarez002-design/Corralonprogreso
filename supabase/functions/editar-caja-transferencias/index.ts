@@ -9,13 +9,18 @@ const cors = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (req.method !== "POST") return new Response("Metodo no permitido", { status: 405, headers: cors });
+  if (req.method !== "POST")
+    return new Response("Metodo no permitido", { status: 405, headers: cors });
 
   try {
     const body = await req.json();
     const fecha = String(body.fecha || "");
     const today = new Date().toISOString().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha < "2026-07-29" || fecha > today) {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(fecha) ||
+      fecha < "2026-07-29" ||
+      fecha > today
+    ) {
       throw new Error("Fecha fuera del periodo editable");
     }
 
@@ -25,6 +30,8 @@ Deno.serve(async (req) => {
       { auth: { persistSession: false } },
     );
     const action = String(body.action || "");
+    const version = Number(body.version || Date.now());
+    const updatedAt = new Date().toISOString();
     let result;
 
     if (action === "upsert") {
@@ -42,44 +49,75 @@ Deno.serve(async (req) => {
         merge_group: row.merge_group ? String(row.merge_group) : null,
         deleted: false,
         source_present: true,
-        updated_at: new Date().toISOString(),
+        idversion: version,
+        updated_at: updatedAt,
       }));
       result = rows.length
-        ? await supabase.from("caja_transferencias_sistema").upsert(rows, { onConflict: "id" })
+        ? await supabase
+            .from("caja_transferencias_sistema")
+            .upsert(rows, { onConflict: "id" })
         : { error: null };
     } else if (action === "soft_delete") {
       const ids = (Array.isArray(body.ids) ? body.ids : []).map(String);
       result = ids.length
-        ? await supabase.from("caja_transferencias_sistema")
-          .update({ deleted: true, updated_at: new Date().toISOString() })
-          .eq("fecha", fecha)
-          .in("id", ids)
+        ? await supabase
+            .from("caja_transferencias_sistema")
+            .update({
+              deleted: true,
+              source_present: false,
+              idversion: version,
+              updated_at: updatedAt,
+            })
+            .eq("fecha", fecha)
+            .in("id", ids)
         : { error: null };
     } else if (action === "merge") {
       const ids = (Array.isArray(body.ids) ? body.ids : []).map(String);
       result = ids.length
-        ? await supabase.from("caja_transferencias_sistema")
-          .update({
-            merge_group: body.mergeGroup ? String(body.mergeGroup) : null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("fecha", fecha)
-          .in("id", ids)
+        ? await supabase
+            .from("caja_transferencias_sistema")
+            .update({
+              merge_group: body.mergeGroup ? String(body.mergeGroup) : null,
+              idversion: version,
+              updated_at: updatedAt,
+            })
+            .eq("fecha", fecha)
+            .in("id", ids)
         : { error: null };
     } else if (action === "clear_date") {
-      result = await supabase.from("caja_transferencias_sistema").delete().eq("fecha", fecha);
+      result = await supabase
+        .from("caja_transferencias_sistema")
+        .update({
+          deleted: true,
+          source_present: false,
+          idversion: version,
+          updated_at: updatedAt,
+        })
+        .eq("fecha", fecha);
     } else {
       throw new Error("Accion no valida");
     }
 
     if (result.error) throw result.error;
-    return new Response(JSON.stringify({ ok: true }), {
+    const publicationResult = await supabase
+      .from("caja_publicaciones")
+      .update({
+        version,
+        transferencias_version: version,
+        updated_at: updatedAt,
+      })
+      .eq("fecha", fecha);
+    if (publicationResult.error) throw publicationResult.error;
+    return new Response(JSON.stringify({ ok: true, version }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ ok: false, error: String(error?.message || error) }), {
-      status: 400,
-      headers: { ...cors, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ ok: false, error: String(error?.message || error) }),
+      {
+        status: 400,
+        headers: { ...cors, "Content-Type": "application/json" },
+      },
+    );
   }
 });

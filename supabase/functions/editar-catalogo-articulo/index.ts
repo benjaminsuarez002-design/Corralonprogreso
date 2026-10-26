@@ -50,6 +50,7 @@ function editPayload(raw: Record<string, unknown>, userId: string) {
   const imagenes = stringArray(raw.imagenes ?? raw.fotos);
   const fotoUrl = stringValue(raw.fotoUrl ?? raw.foto_url ?? raw.imagen ?? imagenes[0]);
   if (fotoUrl && !imagenes.includes(fotoUrl)) imagenes.unshift(fotoUrl);
+  const promocionTexto = stringValue(raw.promocionTexto ?? raw.promocion_texto).slice(0, 300);
   return {
     codigo: stringValue(raw.codigo ?? raw.idart ?? raw.idArt),
     detalle: stringValue(raw.detalle),
@@ -57,7 +58,8 @@ function editPayload(raw: Record<string, unknown>, userId: string) {
     foto_url: fotoUrl,
     imagenes,
     oferta: boolean(raw.oferta),
-    oferta_pct: Math.max(0, Math.min(100, number(raw.ofertaPct ?? raw.oferta_pct))),
+    promocion_texto: boolean(raw.oferta) ? promocionTexto : "",
+    oferta_pct: promocionTexto ? 0 : Math.max(0, Math.min(100, number(raw.ofertaPct ?? raw.oferta_pct))),
     oferta_hasta: isoDate(raw.ofertaHasta ?? raw.oferta_hasta),
     destacado: boolean(raw.destacado),
     mas_vendido: boolean(raw.masVendido ?? raw.mas_vendido),
@@ -90,9 +92,8 @@ Deno.serve(async (request) => {
     .eq("token_hash", sessionHash)
     .maybeSingle();
   if (sessionError) return json({ error: sessionError.message }, 500);
-  if (!session || new Date(session.expires_at).getTime() <= Date.now()) {
-    if (session) await supabase.from("catalogo_editor_sesiones").delete().eq("token_hash", sessionHash);
-    return json({ error: "La sesion de edicion vencio. Volve a iniciar sesion.", code: "editor_session_expired" }, 401);
+  if (!session) {
+    return json({ error: "No hay una sesion de edicion activa. Volve a iniciar sesion.", code: "editor_session_required" }, 401);
   }
   await supabase.from("catalogo_editor_sesiones").update({
     last_used_at: new Date().toISOString(),

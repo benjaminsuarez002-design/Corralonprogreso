@@ -386,6 +386,19 @@ export async function open(options) {
     menu.addEventListener('click', e => { const button=e.target.closest('[data-rubro-match]'); if(button) pickRubro(row,matches[Number(button.dataset.rubroMatch)].id); });
     document.body.append(menu);
   }
+  let marginContextMenu=null;
+  backdrop.addEventListener('pointerdown',event=>{if(marginContextMenu&&!marginContextMenu.contains(event.target)){marginContextMenu.remove();marginContextMenu=null;}},true);
+  backdrop.addEventListener('contextmenu',event=>{
+    const input=event.target.closest('[data-field="margen"]');if(!input||busy||input.disabled||rowAt(input)?.sqlSaved)return;
+    event.preventDefault();event.stopPropagation();hideMenu();marginContextMenu?.remove();
+    const value=parseMargin(input.value);if(!Number.isFinite(value)||value<0){setStatus('Ingresá un margen válido antes de aplicarlo a los demás.',true);return;}
+    const menu=document.createElement('div');menu.dataset.marginContext='';menu.style.cssText='position:fixed;z-index:2147483647;background:white;border:1px solid #bad3ee;border-radius:7px;padding:5px;box-shadow:0 5px 18px #0003;left:'+Math.max(4,Math.min(event.clientX,innerWidth-250))+'px;top:'+Math.max(4,Math.min(event.clientY,innerHeight-60))+'px';
+    const action=document.createElement('button');action.type='button';action.textContent='Aplicar '+displayMargin(value)+' a los demás';action.style.cssText='padding:9px 12px;background:#f3f8ff;border:0;color:#12395e;cursor:pointer';
+    action.onclick=()=>{
+      let count=0;rows.forEach((row,index)=>{if(row.sqlSaved)return;const field=backdrop.querySelector('tr[data-row="'+index+'"] [data-field="margen"]');if(!field)return;beginFieldEdit(field);row.margen=value;field.value=displayMargin(value);finishFieldEdit(field);count++;});
+      changed();flushDraft();menu.remove();marginContextMenu=null;input.focus({preventScroll:true});setStatus('Margen aplicado a '+count+' artículos del lote.');
+    };menu.append(action);backdrop.append(menu);marginContextMenu=menu;
+  });
   backdrop.addEventListener('click', e => {
     if (e.target.closest('[data-cancel]')) { close(); return; }
     if (e.target.closest('[data-close]')) { close(); return; }
@@ -669,7 +682,7 @@ export async function open(options) {
         rows=draft ? draft.rows.map(row=>({ ...row,
             importedDescription:row.importedDescription || importedText(row.codigo && importedRows.find(source=>importedCode(source)===row.codigo)) || row.descripcion,
             uid:row.uid || (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()), loading:false, lookup:null }))
-          : importedRows.map(source=>({uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),sourceRowId:source.sourceRowId||'',mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:30,newConfirmed:true,needsNewConfirmation:false}));
+          : importedRows.map(source=>({uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),sourceRowId:source.sourceRowId||'',mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:60,newConfirmed:true,needsNewConfirmation:false}));
         if (draft?.operation) operation = draft.operation;
         catalogReady=true;
         await saveDraft();

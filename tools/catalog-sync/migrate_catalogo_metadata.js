@@ -1,4 +1,5 @@
 const fs = require('fs');
+const {publish: publishCatalogVersion} = require('./catalogo-version-publish.js');
 const path = require('path');
 
 function arg(name, fallback = '') {
@@ -128,6 +129,7 @@ async function main() {
   if (Number(result?.total_metadatos || 0) < rows.length) {
     throw new Error(`Supabase informa ${result?.total_metadatos || 0} metadatos y se migraron ${rows.length}`);
   }
+  await publishCatalogVersion();
   console.log(`[METADATA] Migracion finalizada: ${rows.length} articulos. Cloudinary permanece intacto.`);
 }
 

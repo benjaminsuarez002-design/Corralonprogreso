@@ -7892,6 +7892,8 @@
     }
     async function check(realtimeConfig = null, { preferRaw = false } = {}) {
       try {
+        let manifest = realtimeConfig?.paginas ? realtimeConfig : null;
+        if (!manifest) {
         const primaryUrl = preferRaw ? RAW_MANIFEST_URL : MANIFEST_URL;
         const fallbackUrl = preferRaw ? MANIFEST_URL : RAW_MANIFEST_URL;
         let response = await fetch(`${primaryUrl}?t=${Date.now()}`, { cache: 'no-store' });
@@ -7899,7 +7901,8 @@
           response = await fetch(`${fallbackUrl}?t=${Date.now()}`, { cache: 'no-store' });
         }
         if (!response.ok) return;
-        const manifest = await response.json();
+        manifest = await response.json();
+        }
         const currentPageKey = pageKey();
         const page = manifest.paginas?.[currentPageKey] || manifest;
         // An unversioned page establishes its baseline once instead of reporting 0.0.0 forever.
@@ -7921,6 +7924,8 @@
         });
       } catch (_) {}
     }
+    let realtimeActive = false;
+    let lastRealtimeSignature = null;
     async function startRealtime() {
       const [appModule, firestoreModule] = await Promise.all([
         import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
@@ -7931,8 +7936,15 @@
       const firestore = firestoreModule.getFirestore(app);
       return firestoreModule.onSnapshot(
         firestoreModule.doc(firestore, 'configuracion', 'version_web'),
-        (snapshot) => check(snapshot.exists() ? snapshot.data() : null, { preferRaw: true }),
-        () => {}
+        (snapshot) => {
+          realtimeActive = true;
+          const data = snapshot.exists() ? snapshot.data() : null;
+          const signature = JSON.stringify(data);
+          if (signature === lastRealtimeSignature) return;
+          lastRealtimeSignature = signature;
+          check(data, { preferRaw: true });
+        },
+        () => { realtimeActive = false; check(); }
       );
     }
     let started = false;
@@ -7943,13 +7955,15 @@
       started = true;
       const begin = () => {
         recordExecutedVersion();
-        check();
-        if (!globalThis.CORRALON_DISABLE_CATALOG_REALTIME) startRealtime().catch(() => {});
-        window.addEventListener('focus', () => check());
-        window.addEventListener('online', () => check());
-        window.addEventListener('pageshow', () => check());
+        if (!globalThis.CORRALON_DISABLE_VERSION_REALTIME) startRealtime().catch(() => { realtimeActive = false; check(); });
+        else check();
+        // Sin sondeo paralelo. Si no hay listener, revisar sólo al volver a la página.
+        const checkIfDisconnected = () => { if (!realtimeActive) check(); };
+        window.addEventListener('focus', checkIfDisconnected);
+        window.addEventListener('online', checkIfDisconnected);
+        window.addEventListener('pageshow', checkIfDisconnected);
         document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'visible') check();
+          if (document.visibilityState === 'visible') checkIfDisconnected();
         });
       };
       if (document.body) begin(); else document.addEventListener('DOMContentLoaded', begin, { once: true });

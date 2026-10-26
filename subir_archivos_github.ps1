@@ -79,6 +79,14 @@ function Publish-WebVersionRealtime {
     param([string]$ManifestPath)
     if (-not (Test-Path -LiteralPath $ManifestPath)) { return $false }
     $manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $pageFields = @{}
+    foreach ($entry in $manifest.paginas.PSObject.Properties) {
+        $fields = @{}
+        foreach ($field in @('nombre','version','ultimo_cambio','actualizado','prioridad')) {
+            $fields[$field] = @{ stringValue = [string]$entry.Value.$field }
+        }
+        $pageFields[$entry.Name] = @{ mapValue = @{ fields = $fields } }
+    }
     $payload = @{
         fields = @{
             version = @{ stringValue = [string]$manifest.version }
@@ -86,8 +94,9 @@ function Publish-WebVersionRealtime {
             mensaje = @{ stringValue = [string]$manifest.mensaje }
             publicado = @{ stringValue = [string]$manifest.publicado }
             actualizado_en = @{ timestampValue = (Get-Date).ToUniversalTime().ToString('o') }
+            paginas = @{ mapValue = @{ fields = $pageFields } }
         }
-    } | ConvertTo-Json -Depth 6
+    } | ConvertTo-Json -Depth 12
     # Actualiza solo estos campos para conservar el mapa de prioridades que se
     # administra desde el historial de versiones del menu.
     $url = 'https://firestore.googleapis.com/v1/projects/corralon-progreso/databases/(default)/documents/configuracion/version_web?key=AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0' +
@@ -95,7 +104,8 @@ function Publish-WebVersionRealtime {
         '&updateMask.fieldPaths=prioridad' +
         '&updateMask.fieldPaths=mensaje' +
         '&updateMask.fieldPaths=publicado' +
-        '&updateMask.fieldPaths=actualizado_en'
+        '&updateMask.fieldPaths=actualizado_en' +
+        '&updateMask.fieldPaths=paginas'
     Invoke-RestMethod -Uri $url -Method Patch -ContentType 'application/json; charset=utf-8' -Body $payload -TimeoutSec 20 | Out-Null
     return $true
 }
@@ -123,6 +133,7 @@ function Publish-CloudflareDirect {
 function Wait-GitHubManifest {
     param(
         [string]$ExpectedVersion,
+        $ExpectedPages = $null,
         [int]$TimeoutSeconds = 30
     )
 
@@ -131,7 +142,13 @@ function Wait-GitHubManifest {
         try {
             $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             $manifest = Invoke-RestMethod -Uri ("https://raw.githubusercontent.com/benjaminsuarez002-design/Corralonprogreso/main/version-web.json?t=" + $stamp) -Method Get -TimeoutSec 10
-            if ([string]$manifest.version -eq [string]$ExpectedVersion) { return $true }
+            $matches = [string]$manifest.version -eq [string]$ExpectedVersion
+            if ($ExpectedPages) {
+                foreach ($page in $ExpectedPages.PSObject.Properties) {
+                    if ([string]$manifest.paginas.($page.Name).version -ne [string]$page.Value.version) { $matches = $false; break }
+                }
+            }
+            if ($matches) { return $true }
         } catch {}
         Start-Sleep -Milliseconds 1200
     } while ((Get-Date) -lt $deadline)
@@ -160,12 +177,37 @@ function Get-NextPageVersion {
     return "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
 }
 
+function Get-ModifiedUploadPaths {
+    param([string]$Root, $Baseline)
+    $published = @{}
+    foreach ($entry in @($Baseline.files)) { $published[[string]$entry.path] = [string]$entry.hash }
+    $paths = @($published.Keys)
+    $tracked = Run-Git -WorkingDirectory $Root -Arguments @('-c', 'core.quotepath=false', 'ls-files')
+    $paths += @($tracked.Output -split "`r?`n" | Where-Object { $_ })
+    $paths += @(Get-ChildItem -LiteralPath $Root -File | ForEach-Object Name)
+    foreach ($folder in @('assets','vendor','tests','tools','supabase')) {
+        $directory = Join-Path $Root $folder
+        if (Test-Path -LiteralPath $directory) {
+            $paths += @(Get-ChildItem -LiteralPath $directory -File -Recurse | ForEach-Object { $_.FullName.Substring($Root.Length).TrimStart([char[]]@('\','/')).Replace('\','/') })
+        }
+    }
+    foreach ($path in @($paths | Sort-Object -Unique)) {
+        $path = $path.Replace('\','/')
+        if ($path -match '\.(new|next)\.exe$') { continue }
+        if ($path -eq 'actualizacion-version.json' -or $path -match '(^|/)(\.git|node_modules|\.codex[^/]*|\.wrangler|servidor|tmp|output|outputs|access_export)(/|$)|(^|/)\.env|\.private\.|api-key|service.?account|credentials|\.bak(\.|$)|\.(log|bin|pfx|p12|mdb|accdb)$') { continue }
+        $full = Join-Path $Root $path
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { if ($published.ContainsKey($path)) { $path }; continue }
+        if (-not $published.ContainsKey($path) -and [IO.Path]::GetExtension($path) -notmatch '^\.(html|js|mjs|cjs|css|json|txt|ps1|cs|sql|svg|png|jpg|jpeg|webp|ico|woff2?|toml|md)$') { continue }
+        if (-not $published.ContainsKey($path) -or (Get-Sha256Hash -Path $full) -ne $published[$path]) { $path }
+    }
+}
+
 function Show-VersionDetailsDialog {
-    param([string[]]$HtmlFiles, $Manifest)
+    param([string[]]$HtmlFiles, $Manifest, [string[]]$UploadFiles)
     $form = New-Object Windows.Forms.Form
     $form.Text = 'Datos de la actualizacion'
     $form.Width = 600
-    $form.Height = 410
+    $form.Height = 550
     $form.FormBorderStyle = [Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
@@ -174,31 +216,36 @@ function Show-VersionDetailsDialog {
 
     $label = New-Object Windows.Forms.Label
     $label.Left = 16; $label.Top = 14; $label.Width = 550
-    $label.Text = 'Paginas HTML que cambiaran de version:'
+    $label.Text = "Archivos que se subiran: $($UploadFiles.Count) (incluye eliminaciones y dependencias)"
     $list = New-Object Windows.Forms.TextBox
-    $list.Left = 16; $list.Top = 38; $list.Width = 550; $list.Height = 105
+    $list.Left = 16; $list.Top = 38; $list.Width = 550; $list.Height = 245
     $list.Multiline = $true; $list.ReadOnly = $true; $list.ScrollBars = 'Vertical'
     $versionLines = foreach ($file in $HtmlFiles) {
         $key = ConvertTo-PageKey $file
         $property = $Manifest.paginas.PSObject.Properties[$key]
         if ($property) { "$(Split-Path $file -Leaf): $($property.Value.version) -> $(Get-NextPageVersion $property.Value.version)" }
+        else { "$(Split-Path $file -Leaf): nueva pagina -> 0.0.1" }
     }
-    $list.Text = $versionLines -join "`r`n"
+    $fileLines = foreach ($path in $UploadFiles) {
+        $prefix = if (Test-Path -LiteralPath (Join-Path $repoRoot $path) -PathType Leaf) { 'SUBIR' } else { 'ELIMINAR' }
+        "$prefix  $path"
+    }
+    $list.Text = (@($fileLines) + @('', 'Paginas que cambiaran de version:') + @($versionLines)) -join "`r`n"
 
     $changeLabel = New-Object Windows.Forms.Label
-    $changeLabel.Left = 16; $changeLabel.Top = 154; $changeLabel.Width = 550
+    $changeLabel.Left = 16; $changeLabel.Top = 294; $changeLabel.Width = 550
     $changeLabel.Text = '¿Que se actualizo?'
     $change = New-Object Windows.Forms.TextBox
-    $change.Left = 16; $change.Top = 177; $change.Width = 550; $change.Height = 70; $change.Multiline = $true
+    $change.Left = 16; $change.Top = 317; $change.Width = 550; $change.Height = 70; $change.Multiline = $true
     $priorityLabel = New-Object Windows.Forms.Label
-    $priorityLabel.Left = 16; $priorityLabel.Top = 260; $priorityLabel.Width = 85; $priorityLabel.Text = 'Importancia:'
+    $priorityLabel.Left = 16; $priorityLabel.Top = 400; $priorityLabel.Width = 85; $priorityLabel.Text = 'Importancia:'
     $priority = New-Object Windows.Forms.ComboBox
-    $priority.Left = 105; $priority.Top = 256; $priority.Width = 170; $priority.DropDownStyle = 'DropDownList'
+    $priority.Left = 105; $priority.Top = 396; $priority.Width = 170; $priority.DropDownStyle = 'DropDownList'
     [void]$priority.Items.AddRange(@('Normal', 'Recomendada', 'Importante')); $priority.SelectedIndex = 0
     $upload = New-Object Windows.Forms.Button
-    $upload.Text = 'Subir'; $upload.Left = 374; $upload.Top = 306; $upload.Width = 92; $upload.DialogResult = 'OK'
+    $upload.Text = 'Subir'; $upload.Left = 374; $upload.Top = 446; $upload.Width = 92; $upload.DialogResult = 'OK'
     $cancel = New-Object Windows.Forms.Button
-    $cancel.Text = 'Cancelar'; $cancel.Left = 474; $cancel.Top = 306; $cancel.Width = 92; $cancel.DialogResult = 'Cancel'
+    $cancel.Text = 'Cancelar'; $cancel.Left = 474; $cancel.Top = 446; $cancel.Width = 92; $cancel.DialogResult = 'Cancel'
     $form.Controls.AddRange(@($label, $list, $changeLabel, $change, $priorityLabel, $priority, $upload, $cancel))
     $form.AcceptButton = $upload; $form.CancelButton = $cancel
     $form.Add_Shown({ $form.Activate(); $change.Focus() })
@@ -221,7 +268,11 @@ function Update-PageVersions {
     foreach ($file in $HtmlFiles) {
         $key = ConvertTo-PageKey $file
         $property = $manifest.paginas.PSObject.Properties[$key]
-        if (-not $property) { continue }
+        if (-not $property) {
+            $pageName = [IO.Path]::GetFileNameWithoutExtension($file)
+            $manifest.paginas | Add-Member -NotePropertyName $key -NotePropertyValue ([pscustomobject]@{nombre=$pageName;version='0.0.0';ultimo_cambio='';actualizado='';prioridad='normal'})
+            $property = $manifest.paginas.PSObject.Properties[$key]
+        }
         $page = $property.Value
         $next = Get-NextPageVersion ([string]$page.version)
         $page.version = $next
@@ -230,6 +281,7 @@ function Update-PageVersions {
         $page | Add-Member -NotePropertyName prioridad -NotePropertyValue $Priority -Force
         $html = [IO.File]::ReadAllText($file)
         $html = [Text.RegularExpressions.Regex]::Replace($html, '(corralon-system\.js\?v=)\d+\.\d+\.\d+', "`${1}$next", 1)
+        $html = [Text.RegularExpressions.Regex]::Replace($html, '(corralon-system\.js)(["''])', ('${1}?v=' + $next + '${2}'), 1)
         $sourceBytes = [IO.File]::ReadAllBytes($file)
         $hasBom = $sourceBytes.Length -ge 3 -and $sourceBytes[0] -eq 239 -and $sourceBytes[1] -eq 187 -and $sourceBytes[2] -eq 191
         [IO.File]::WriteAllText($file, $html, (New-Object Text.UTF8Encoding($hasBom)))
@@ -262,14 +314,9 @@ try {
 
     $baselinePath = Join-Path $repoRoot 'actualizacion-version.json'
     if (-not (Test-Path -LiteralPath $baselinePath -PathType Leaf)) { throw 'No encontre actualizacion-version.json.' }
-    $lastUploadTime = (Get-Item -LiteralPath $baselinePath).LastWriteTime
-    $automaticFiles = @(Get-ChildItem -LiteralPath $repoRoot -File | Where-Object {
-        $_.FullName -ne $baselinePath -and
-        $_.LastWriteTime -gt $lastUploadTime -and
-        $_.Extension -ne '.log' -and
-        $_.Name -notmatch '\.bak(\.|$)|backup.*\.exe$|\.test\.exe$'
-    } | Sort-Object LastWriteTime, Name)
-    $confirmationText = "Se detectaron $($automaticFiles.Count) archivos con fecha posterior a la ultima actualizacion ($($lastUploadTime.ToString('dd/MM/yyyy HH:mm:ss'))).`r`n`r`n¿Subir automaticamente esos archivos?"
+    $baseline = Get-Content -LiteralPath $baselinePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $automaticFiles = @(Get-ModifiedUploadPaths -Root $repoRoot -Baseline $baseline)
+    $confirmationText = "Se detectaron $($automaticFiles.Count) archivos nuevos, modificados o eliminados respecto de la ultima publicacion (comparacion por contenido).`r`n`r`n¿Seleccionarlos todos automaticamente? Vas a ver la lista completa antes de subir."
     $answer = [System.Windows.Forms.MessageBox]::Show(
         $dialogOwner,
         $confirmationText,
@@ -279,10 +326,10 @@ try {
     )
     if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
         if (-not $automaticFiles.Count) {
-            Show-Message -Text 'No hay archivos mas recientes que actualizacion-version.json.'
+            Show-Message -Text 'No hay cambios respecto de la ultima publicacion.'
             return
         }
-        $selectedFiles = @($automaticFiles | ForEach-Object FullName)
+        $selectedFiles = @($automaticFiles | ForEach-Object { Join-Path $repoRoot $_ })
     } else {
         $dialog = New-Object System.Windows.Forms.OpenFileDialog
         $dialog.Title = 'Elegir archivos para subir a Corralonprogreso'
@@ -332,13 +379,25 @@ try {
         $relativeFiles = @($relativeFiles | Sort-Object -Unique)
     }
 
-    $htmlFiles = @($relativeFiles | Where-Object { $_ -match '\.html$' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
+    # Los cambios en JS/CSS compartidos tambien actualizan las paginas que los usan.
+    $dependencies = @($relativeFiles | Where-Object { $_ -match '\.(js|css)$' })
+    foreach ($pageFile in @(Get-ChildItem -LiteralPath $repoRoot -Filter '*.html' -File)) {
+        if ($pageFile.Name -match ' - copia|\(\d+\)|-reference') { continue }
+        $source = [IO.File]::ReadAllText($pageFile.FullName)
+        foreach ($dependency in $dependencies) {
+            if ($source.Contains($dependency) -and $relativeFiles -notcontains $pageFile.Name) { $relativeFiles += $pageFile.Name; break }
+        }
+    }
+    $relativeFiles = @($relativeFiles | Where-Object { $_ -notmatch '\.(new|next)\.exe$' } | Sort-Object -Unique)
+    $htmlFiles = @($relativeFiles | Where-Object { $_ -match '^[^/]+\.html$' -and $_ -notmatch ' - copia|\(\d+\)|-reference' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
+    $manifestSource = Join-Path $repoRoot 'version-web.json'
+    $manifestForDialog = Get-Content -LiteralPath $manifestSource -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($htmlFiles.Count -and $relativeFiles -notcontains 'version-web.json') { $relativeFiles += 'version-web.json' }
+    $displayFiles = @($relativeFiles) + @('actualizacion-version.json')
+    $versionDetails = Show-VersionDetailsDialog -HtmlFiles $htmlFiles -Manifest $manifestForDialog -UploadFiles $displayFiles
+    if (-not $versionDetails) { return }
     if ($htmlFiles.Count) {
-        $manifestSource = Join-Path $repoRoot 'version-web.json'
         if (-not (Test-Path -LiteralPath $manifestSource)) { throw 'No encontre version-web.json.' }
-        $manifestForDialog = Get-Content -LiteralPath $manifestSource -Raw -Encoding UTF8 | ConvertFrom-Json
-        $versionDetails = Show-VersionDetailsDialog -HtmlFiles $htmlFiles -Manifest $manifestForDialog
-        if (-not $versionDetails) { return }
         foreach ($versionFile in @($htmlFiles) + @($manifestSource)) {
             $versionOriginals[$versionFile] = [IO.File]::ReadAllBytes($versionFile)
         }
@@ -367,6 +426,18 @@ try {
         }
     }
 
+    # Una ruta de la referencia local puede no existir tampoco en origin/main.
+    # Omitirla evita un pathspec invalido; conservar las eliminaciones registradas.
+    $uploadTracked = Run-Git -WorkingDirectory $uploadWorktree -Arguments @('-c', 'core.quotepath=false', 'ls-files')
+    $uploadTrackedPaths = @($uploadTracked.Output -split "`r?`n" | Where-Object { $_ })
+    $fileNames = @($fileNames | Where-Object {
+        (Test-Path -LiteralPath (Join-Path $uploadWorktree $_) -PathType Leaf) -or
+        ($uploadTrackedPaths -contains $_)
+    })
+    if (-not $fileNames.Count) {
+        Show-Message -Text 'Los archivos elegidos ya no existen ni estan registrados en GitHub. No hay cambios para subir.'
+        return
+    }
     Run-Git -WorkingDirectory $uploadWorktree -Arguments (@('add', '-A', '--') + $fileNames) | Out-Null
     $staged = Run-Git -WorkingDirectory $uploadWorktree -Arguments (@('diff', '--cached', '--quiet', '--') + $fileNames) -AllowFailure
     if ($staged.ExitCode -eq 0) {
@@ -457,12 +528,12 @@ try {
     if ($cloudflareReady) {
         try {
             $publishedManifest = Get-Content -LiteralPath (Join-Path $uploadWorktree 'version-web.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-            $rawReady = Wait-GitHubManifest -ExpectedVersion ([string]$publishedManifest.version)
+            $rawReady = Wait-GitHubManifest -ExpectedVersion ([string]$publishedManifest.version) -ExpectedPages $publishedManifest.paginas
             Publish-WebVersionRealtime -ManifestPath (Join-Path $uploadWorktree 'version-web.json') | Out-Null
             $realtimeStatus = if ($rawReady) {
                 "`r`nAviso en tiempo real enviado despues de verificar Cloudflare y GitHub."
             } else {
-                "`r`nAviso enviado; GitHub Raw no confirmo a tiempo, pero queda activo el control cada 60 segundos."
+                "`r`nAviso Firebase enviado con las versiones publicadas. GitHub Raw aun no confirmo su cache. Sin sondeo periodico."
             }
         } catch {
             $realtimeStatus = "`r`nCloudflare se actualizo, pero no se pudo enviar el aviso en tiempo real: $($_.Exception.Message)"

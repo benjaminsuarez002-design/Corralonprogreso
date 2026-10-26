@@ -12,7 +12,7 @@
   const USERS_COLLECTION = 'menuUsuarios';
   const CATALOG_EDITOR_LOCAL_KEY = 'corralon_catalogo_editor_session_v1';
   const CATALOG_EDITOR_SESSION_KEY = 'corralon_catalogo_editor_session_temp_v1';
-  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'ventas_tarjeta', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
+  const ALL_MENU_IDS = ['lista', 'a_descontar', 'remitos', 'historial', 'comprobantes', 'caja', 'faltantes', 'pedidos', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'pagos_proveedores', 'proveedores_sql', 'ventas_tarjeta', 'tarjetas', 'actualizar_articulos', 'carga_stock', 'historial_movimiento', 'articulos_sql', 'proveedores', 'listas_proveedores', 'diferencias_proveedores', 'admin', 'garantias', 'usuarios', 'calculadoras', 'configuracion'];
   const DEFAULT_SELLER_IDS = ['lista', 'remitos', 'admin', 'garantias'];
   const firebaseConfig = {
     apiKey: 'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',
@@ -54,10 +54,10 @@
   const rawFile = decodeURIComponent(location.pathname.split('/').pop() || '').toLowerCase();
   const pageKey = rawFile.replace(/\.html?$/i, '');
   const declaredPageId = (rawFile==='historial.html'&&new URLSearchParams(location.search).get('embed')==='remito-sql'&&window.parent!==window)?'remitos':(document.currentScript?.dataset?.menuGuard || pageIds[pageKey] || pageIds[rawFile]);
-  const integratedPermissions={compras:'cargar_facturas',stock:'carga_stock',proveedores:'proveedores_sql',articulos:'articulos_sql',tarjetas:'ventas_tarjeta'};
-  const integratedPermission=rawFile==='facturacion.html'?(location.hash.startsWith('#sql/')?integratedPermissions[location.hash.split('/')[1]]:location.hash.startsWith('#caja/')?'caja':location.hash.startsWith('#recibos/')?'recibos_cobro':null):null;
-  const pageId = integratedPermission || (rawFile==='facturacion.html'&&Number(new URLSearchParams(location.search).get('reimprimirCaja'))>0?'caja':rawFile==='recibos-cobro.html'&&new URLSearchParams(location.search).get('origen')==='caja'?'caja':declaredPageId === 'calculadoras' && new URLSearchParams(location.search).get('embed') === 'flete' ? 'cargar_facturas' : declaredPageId);
-  const loginPage = document.currentScript?.dataset?.menuLogin || (['caja', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'proveedores_sql', 'ventas_tarjeta', 'carga_stock', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html');
+  const integratedPermissions={compras:'cargar_facturas',stock:'carga_stock',historial:'historial_movimiento',proveedores:'proveedores_sql',articulos:'articulos_sql',tarjetas:'ventas_tarjeta',pagos:'pagos_proveedores'};
+  const integratedPermission=rawFile==='gestion.html'?(location.hash.startsWith('#sql/')?integratedPermissions[location.hash.split('/')[1]]:location.hash.startsWith('#caja/')?'caja':location.hash.startsWith('#recibos/')?'recibos_cobro':null):null;
+  const pageId = integratedPermission || (rawFile==='gestion.html'&&Number(new URLSearchParams(location.search).get('reimprimirCaja'))>0?'caja':rawFile==='recibos-cobro.html'&&new URLSearchParams(location.search).get('origen')==='caja'?'caja':declaredPageId === 'calculadoras' && new URLSearchParams(location.search).get('embed') === 'flete' ? 'cargar_facturas' : declaredPageId);
+  const loginPage = document.currentScript?.dataset?.menuLogin || (['caja', 'facturacion', 'recibos_cobro', 'cargar_facturas', 'pagos_proveedores', 'proveedores_sql', 'ventas_tarjeta', 'carga_stock', 'historial_movimiento', 'articulos_sql'].includes(pageId) ? 'menu.html' : 'index.html');
   const sharedComprobantesView = pageId === 'comprobantes'
     && Boolean(new URLSearchParams(location.search).get('resumenCompartido'));
 
@@ -106,7 +106,7 @@
   function userPermissions(user) {
     if (!user) return [];
     if (user.nivel === 'administrador') return ALL_MENU_IDS;
-    if (user.nivel === 'vendedor') return DEFAULT_SELLER_IDS;
+    if (user.nivel === 'vendedor') return [...DEFAULT_SELLER_IDS,...(user.permisos||[]).filter(id=>id==='historial_movimiento')];
     return user.permisos || [];
   }
 

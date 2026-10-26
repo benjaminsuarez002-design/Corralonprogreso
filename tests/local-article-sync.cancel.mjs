@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+let stored=[],indicator;
+const drafts=new Map();
+globalThis.window={CorralonSystem:{localCache:{read:async key=>key==='corralon_local_article_sync_queue_v1'?[]:drafts.get(key),write:async(key,value)=>{if(key==='corralon_local_article_sync_queue_v1')stored=structuredClone(value);else drafts.set(key,structuredClone(value));}},articleSync:{set:(state,message,options)=>{indicator={state,message,...options};}}}};
+globalThis.fetch=async()=>({ok:false,status:409,json:async()=>({error:'El articulo cambio en la base.'})});
+const queue=await import('../local-article-sync.js?cancel-test');
+await queue.enqueue({operation:'cancel-example',provider:2,rows:[{mode:'update',id:'004519',version:'old',codigo:'123',costo:1,rubro:1,iva:.21,margen:30,originalMargin:30}]},()=>{},'token');
+for(let i=0;i<30 && !indicator?.cancel;i++)await new Promise(resolve=>setTimeout(resolve,10));
+assert.equal(stored[0].state,'error');assert.equal(typeof indicator.cancel,'function');
+await indicator.cancel();assert.deepEqual(stored,[]);assert.match(indicator.message,/cancelada/);
+assert.equal(drafts.get('corralon_local_article_import_draft_v1_2').rows[0].id,'004519');
+console.log('PASS cancel removes failed durable queue job without retrying SQL');

@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="corralon-system.js?v=1.0.17"></script>
+<script src="corralon-system.js?v=1.0.18"></script>
   <script src="funciones.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -213,7 +213,7 @@ async function getProvidersCache(){try{const pdb=await openProvidersDb();return 
 async function setProvidersCache(data){try{const pdb=await openProvidersDb();await new Promise((res,rej)=>{const tx=pdb.transaction('data','readwrite');const store=tx.objectStore('data');store.clear();data.forEach(x=>store.put(x));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(error){console.warn(error)}}
 async function putProvidersCacheItem(item){try{const pdb=await openProvidersDb();await new Promise((res,rej)=>{const tx=pdb.transaction('data','readwrite');tx.objectStore('data').put(item);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(error){console.warn(error)}}
 function renderProviders(){providers.sort((a,b)=>String(a.proveedor||'').localeCompare(String(b.proveedor||''),'es'));renderProviderCombo(false)}
-function providerMatches(text){const q=norm(text);return providers.filter(p=>norm(p.proveedor).includes(q)||norm(CorralonSystem.providerIdentity.externalId(p)).includes(q))}
+function providerMatches(text){const terms=norm(text).split(' ').filter(Boolean);return providers.filter(p=>{const name=norm(p.proveedor),code=norm(CorralonSystem.providerIdentity.externalId(p));return terms.every(term=>name.includes(term)||code.includes(term))})}
 function selectProviderByText(text){
   const q=norm(text);
   if(provider&&q===norm(provider.proveedor)){providerSearch.value=provider.proveedor;closeProviderCombo();return;}
@@ -224,11 +224,11 @@ function selectProviderByText(text){
   openProviderCombo();
 }
 function selectProvider(found){provider=found||null;providerSearch.value=provider?.proveedor||'Independiente';provId.textContent=CorralonSystem.providerIdentity.externalId(provider);provName.textContent=provider?.proveedor||'';provDiscount.textContent=pct(provider?.descuento_lista||0);provDate.textContent=provider?.ultima_actualizacion||'';note.value=provider?.nota||'';setProviderLinkState();recalcArticles();render()}
-function renderProviderCombo(open=true){comboMatches=providerMatches(providerSearch.value).slice(0,80);if(!comboMatches.length&&providers.length)comboMatches=providers.slice(0,80);comboActive=Math.min(comboActive,Math.max(0,comboMatches.length-1));providerDropdown.innerHTML=comboMatches.map((p,i)=>`<div class="combo-option ${i===comboActive?'active':''}" data-index="${i}"><span class="combo-code">${escapeHtml(CorralonSystem.providerIdentity.externalId(p))}</span><span class="combo-name ${providerPageValue(p)?'provider-link':''}">${escapeHtml(p.proveedor)}</span></div>`).join('');providerCombo.classList.toggle('open',open&&comboMatches.length>0)}
+function renderProviderCombo(open=true){comboMatches=providerMatches(providerSearch.value).slice(0,80);comboActive=Math.min(comboActive,Math.max(0,comboMatches.length-1));providerDropdown.innerHTML=comboMatches.map((p,i)=>`<div class="combo-option ${i===comboActive?'active':''}" data-index="${i}"><span class="combo-code">${escapeHtml(CorralonSystem.providerIdentity.externalId(p))}</span><span class="combo-name ${providerPageValue(p)?'provider-link':''}">${escapeHtml(p.proveedor)}</span></div>`).join('')||'<div class="combo-option" role="status">Sin proveedores coincidentes</div>';providerCombo.classList.toggle('open',open)}
 function openProviderCombo(){renderProviderCombo(true)}
 function closeProviderCombo(){providerCombo.classList.remove('open')}
 function moveProviderCombo(delta){if(!providerCombo.classList.contains('open'))openProviderCombo();if(!comboMatches.length)return;comboActive=(comboActive+delta+comboMatches.length)%comboMatches.length;renderProviderCombo(true);providerDropdown.querySelector('.active')?.scrollIntoView({block:'nearest'})}
-function chooseProviderCombo(){const found=comboMatches[comboActive]||providerMatches(providerSearch.value)[0]||null;selectProvider(found);closeProviderCombo()}
+function chooseProviderCombo(){const found=comboMatches[comboActive]||providerMatches(providerSearch.value)[0]||null;if(!found){show('No hay proveedores coincidentes');return}selectProvider(found);closeProviderCombo()}
 function providerDiscount(){return Number(provider?.descuento_lista||0)||0}
 function netListPrice(list,desc=providerDiscount()){return Number((Number(list||0)*(1-Number(desc||0))).toFixed(2))}
 function applyProviderData(article){if(!article||!provider)return article;article.id_proveedor=provider.id_proveedor;article.proveedor=provider.proveedor;article.descuento_lista=providerDiscount();article.ultima_actualizacion=provider.ultima_actualizacion||'';article.proveedor_norm=norm(provider.proveedor);return article}

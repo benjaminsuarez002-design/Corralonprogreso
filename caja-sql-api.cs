@@ -97,6 +97,26 @@ internal static partial class FacturacionCopiaApi
         foreach(var row in CajaAmounts(c,tx,date,branch,deposit,id))Execute(c,tx,"UPDATE dbo.CajaDiaTS SET Importe=@p2 WHERE IDRecibo=@p0 AND IDTipoPago=@p1",id,row["IDTipoPago"],row["Importe"]);
         Execute(c,tx,"UPDATE dbo.CajaDiaTS SET ImpRet=(SELECT ISNULL(SUM(Importe),0) FROM dbo.CajaDiaTSEfec WHERE IDRecibo=@p0) WHERE IDRecibo=@p0 AND IDTipoPago=1; UPDATE dbo.CajaDiaTS SET ImpAct=ImpAnt+Importe+ImpRet WHERE IDRecibo=@p0; UPDATE dbo.CajaDiaTP SET Total=(SELECT ISNULL(SUM(ImpAct),0) FROM dbo.CajaDiaTS WHERE IDRecibo=@p0) WHERE IDRecibo=@p0",id);
     }
+    private static List<Dictionary<string,object>> CajaInvoiceDifferences(SqlConnection c,SqlTransaction tx,DateTime date,int branch,int deposit,int openId) {
+        return CajaRows(c,tx,
+            "SELECT f.IDRecibo,t.Abreviatura,f.NroFactura,f.Total,ISNULL(v.Total,0)*t.ImpPor AS TotImp," +
+            "f.Total-ISNULL(v.Total,0)*t.ImpPor AS ImpDif," +
+            "ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0) AS TotXVal," +
+            "f.Total-(ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0)) AS ImpDifVal," +
+            "ABS(ISNULL(a.Total,0)) AS TotalArticulos,ABS(f.Total)-ABS(ISNULL(a.Total,0)) AS AjusteEmitido,ISNULL(v.Ajuste,0) AS AjusteValores," +
+            "(ABS(ISNULL(a.Total,0))+ISNULL(v.Ajuste,0)-ABS(f.Total))*CASE WHEN f.Total<0 THEN -1 ELSE 1 END AS ImpDifArticulos," +
+            "(ABS(ISNULL(a.Total,0))-ISNULL(v.Base,0))*CASE WHEN f.Total<0 THEN -1 ELSE 1 END AS ImpDifBase " +
+            "FROM dbo.FacturasATP f JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob " +
+            "JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp " +
+            "OUTER APPLY(SELECT SUM(x.ImpEnt) AS Total,SUM(x.Importe) AS Base,SUM(x.ImpRec) AS Ajuste FROM dbo.FacturasTSVal x WHERE x.IDRecibo=f.IDRecibo) v " +
+            "OUTER APPLY(SELECT SUM(x.Importe) AS Total FROM dbo.FacturasATS x WHERE x.IDRecibo=f.IDRecibo) a " +
+            "WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.EnCaja<>0 AND t.IDTipoAcred>0 AND f.EnInfVtas<>0 " +
+            "AND d.IDSucAsoc=@p2 AND (@p3=0 OR f.[IDDepósito]=@p3) AND ISNULL(f.IDCaja,0) IN(0,@p4) AND (" +
+            "ABS(f.Total-ISNULL(v.Total,0)*t.ImpPor)>.005 OR " +
+            "ABS(f.Total-(ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0)))>.005 OR " +
+            "ABS(ABS(ISNULL(a.Total,0))+ISNULL(v.Ajuste,0)-ABS(f.Total))>.005 OR " +
+            "ABS(ABS(ISNULL(a.Total,0))-ISNULL(v.Base,0))>.005) ORDER BY t.Abreviatura,f.NroFactura",date,date.AddDays(1),branch,deposit,openId);
+    }
     private static object CajaForm(SqlConnection c,SqlTransaction tx,int id,CajaSession session) {
         var h=CajaHeader(c,tx,id,false,session);
         var detail=CajaRows(c,tx,"SELECT v.*,p.TipoPago FROM dbo.CajaDiaTS v JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago WHERE v.IDRecibo=@p0 ORDER BY v.IDTipoPago",id);
@@ -105,7 +125,7 @@ internal static partial class FacturacionCopiaApi
         var cards=CajaRows(c,tx,"SELECT v.IDTarjeta,a.[Descripción] Tarjeta,SUM(v.ImpEnt*t.ImpPor) Importe FROM dbo.FacturasATP f JOIN dbo.FacturasTSVal v ON v.IDRecibo=f.IDRecibo JOIN dbo.Tarjetas a ON a.IDTarjeta=v.IDTarjeta JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.IDTipoAcred>0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR f.[IDDepósito]=@p3) AND v.IDTarjeta>0 GROUP BY v.IDTarjeta,a.[Descripción]",date,date.AddDays(1),branch,deposit);
         var sales=CajaRows(c,tx,"SELECT f.[IDDepósito] PV,SUM(f.Total) ImpVta,SUM(ISNULL(a.Costo,0)*t.StkPor*-1) ImpCosto,SUM(ISNULL(a.Articulos,0)*t.StkPor*-1) Articulos FROM dbo.FacturasATP f JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] OUTER APPLY(SELECT SUM(x.PrecioUniCpra*x.Cantidad) Costo,SUM(x.Cantidad) Articulos FROM dbo.FacturasATS x WHERE x.IDRecibo=f.IDRecibo) a WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.IDTipoAcred>0 AND f.EnInfVtas<>0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR f.[IDDepósito]=@p3) GROUP BY f.[IDDepósito]",date,date.AddDays(1),branch,deposit);
         var receipts=CajaRows(c,tx,"SELECT SUM(r.Total) TotCob FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] d ON d.[IDDepósito]=r.[IDDepósito] WHERE r.IDEmp=1 AND r.Fecha>=@p0 AND r.Fecha<@p1 AND r.Confirmado<>0 AND r.Anulado=0 AND d.IDSucAsoc=@p2 AND (@p3=0 OR r.[IDDepósito]=@p3)",date,date.AddDays(1),branch,deposit);
-        var differences=CajaRows(c,tx,"SELECT f.IDRecibo,t.Abreviatura,f.NroFactura,f.Total,SUM(v.ImpEnt*t.ImpPor) TotImp,f.Total-SUM(v.ImpEnt*t.ImpPor) ImpDif,ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0) TotXVal,f.Total-(ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0)) ImpDifVal FROM dbo.FacturasATP f JOIN dbo.FacturasTSVal v ON v.IDRecibo=f.IDRecibo JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND t.EnCaja<>0 AND t.IDTipoAcred>0 AND f.EnInfVtas<>0 AND d.IDSucAsoc=@p2 AND ISNULL(f.IDCaja,0) IN(0,@p4) GROUP BY f.IDRecibo,t.Abreviatura,f.NroFactura,f.Total,f.TotalCC,f.TotalEF,f.TotalCH,f.TotalEC HAVING ABS(f.Total-SUM(v.ImpEnt*t.ImpPor))>0.01 OR ABS(f.Total-(ISNULL(f.TotalCC,0)+ISNULL(f.TotalEF,0)+ISNULL(f.TotalCH,0)+ISNULL(f.TotalEC,0)))>0.01 ORDER BY t.Abreviatura,f.NroFactura",date,date.AddDays(1),branch,deposit,id);
+        var differences=CajaInvoiceDifferences(c,tx,date,branch,deposit,id);
         return new {ok=true,cabecera=h,detalle=detail,efectivo=cash,tarjetas=cards,ventas=sales,cobros=receipts,diferencias=differences,version=ProviderVersion(new Dictionary<string,object>{{"cabecera",h},{"detalle",detail},{"efectivo",cash}})};
     }
     private static void CajaVerifyVersion(SqlConnection c,SqlTransaction tx,int id,CajaSession session,string expected) {

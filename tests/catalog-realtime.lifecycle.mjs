@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+const source=await readFile(new URL('../corralon-system.js',import.meta.url),'utf8');
+const start=source.indexOf('  const CATALOG_REALTIME = (() => {'),end=source.indexOf('\n  })();',start)+9;
+let now=100000,created=0,disconnected=0,fullRefreshes=0,publicRefreshes=0;
+const timers=new Map(),handlers=new Map(),store=new Map(),subscribers=[];let timerId=0;
+const document={documentElement:{dataset:{}},addEventListener(){}};
+const window={document,supabase:{createClient(){created++;return{realtime:{disconnect(){disconnected++;}},removeChannel:async()=>{},channel(){const channel={on(){return channel;},subscribe(fn){subscribers.push(fn);return channel;}};return channel;}};}},addEventListener(name,fn){handlers.set(name,fn);},dispatchEvent(){}};window.self=window.top=window;
+const ctx=vm.createContext({window,document,console,IS_AUTOMATED_CRAWLER:false,SUPABASE_URL:'https://example.test',SUPABASE_KEY:'public',TABLES:{catalogMeta:'meta'},Date:class extends Date{static now(){return now;}},localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)},setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,{fn,interval:true});return timerId;},clearInterval:id=>timers.delete(id),CATALOG:{refresh:async()=>{fullRefreshes++;}},Event:class{},CustomEvent:class{}});
+vm.runInContext(source.slice(start,end)+';globalThis.api=CATALOG_REALTIME;',ctx);
+ctx.api.configure({refresh:async()=>{publicRefreshes++;}});ctx.api.start();ctx.api.start();handlers.get('focus')();handlers.get('focus')();await Promise.resolve();await Promise.resolve();
+assert.equal(created,1,'one client despite concurrent focus events');
+subscribers[0]('SUBSCRIBED');
+for(const [id,timer]of timers){if(!timer.interval){timers.delete(id);timer.fn();}}
+await new Promise(resolve=>setImmediate(resolve));assert.equal(publicRefreshes,1);assert.equal(fullRefreshes,0,'public realtime must not download full catalog');
+subscribers[0]('CHANNEL_ERROR');await new Promise(resolve=>setImmediate(resolve));
+handlers.get('focus')();assert.equal(created,1,'backoff prevents immediate reconnect');assert.equal(disconnected,1);
+now+=5000;handlers.get('focus')();await Promise.resolve();await Promise.resolve();assert.equal(created,2);
+subscribers[0]('CHANNEL_ERROR');await Promise.resolve();assert.equal(disconnected,1,'old callback cannot close replacement client');
+handlers.get('pagehide')();await new Promise(resolve=>setImmediate(resolve));assert.equal(disconnected,2);
+const html=await readFile(new URL('../index.html',import.meta.url),'utf8');
+assert.ok(!html.includes('setInterval(comprobarVersionCatalogoPublico'));
+assert.ok(html.includes('configure({refresh:comprobarVersionCatalogoPublico})'));
+console.log('PASS Index has no minute polling; public refresh stays reduced; single client, retry backoff, stale callback and pagehide cleanup');

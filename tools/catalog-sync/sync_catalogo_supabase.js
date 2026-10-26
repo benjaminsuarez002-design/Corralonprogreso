@@ -1,4 +1,5 @@
 const fs = require('fs');
+const {publish: publishCatalogVersion} = require('./catalogo-version-publish.js');
 const path = require('path');
 
 let XLSX;
@@ -141,7 +142,8 @@ async function countPublicRows(baseUrl, anonKey) {
       headers: {
         apikey: anonKey,
         Authorization: `Bearer ${anonKey}`,
-        Prefer: 'count=exact'
+        Prefer: 'count=exact',
+        'x-client-info': 'corralon-catalog/1;page=sync_catalogo_supabase.js;caller=count-public-rows'
       },
       cache: 'no-store'
     }
@@ -202,6 +204,7 @@ async function main() {
   if (publicCount !== catalogRows.length) {
     throw new Error(`La vista publica devuelve ${publicCount} articulos y se esperaban ${catalogRows.length}`);
   }
+  await publishCatalogVersion();
   log(`Supabase actualizado y verificado. Version ${version}; ${publicCount} articulos; ${totalRows} filas fuente.`);
 }
 

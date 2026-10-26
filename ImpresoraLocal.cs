@@ -47,14 +47,32 @@ internal static class ImpresoraLocal
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--restart-spooler")
+        {
+            try
+            {
+                using (var service = new System.ServiceProcess.ServiceController("Spooler"))
+                {
+                    if (service.Status != System.ServiceProcess.ServiceControllerStatus.Stopped)
+                    {
+                        if (service.Status != System.ServiceProcess.ServiceControllerStatus.StopPending) service.Stop();
+                        service.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(25));
+                    }
+                    service.Start();
+                    service.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running, TimeSpan.FromSeconds(25));
+                }
+                Environment.Exit(0);
+            }
+            catch (Exception ex) { MessageBox.Show(ex.Message, "No se pudo reiniciar la cola"); Environment.Exit(1); }
+            return;
+        }
         if (args.Length > 0 && args[0] == "--agent") { Run(args.Length > 1 ? args[1] : null); return; }
         Application.EnableVisualStyles();
         using (var form = new Form { Text = "Impresora local de Facturación", Width = 440, Height = 220, StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false })
         {
             var label = new Label { Text = "Dirección de Facturación que abrís en esta PC:", Left = 18, Top = 22, Width = 390 };
             string savedOrigin = File.Exists(OriginFile) ? File.ReadAllText(OriginFile).Trim() : "";
-            string initialOrigin = savedOrigin.Length == 0 || String.Equals(savedOrigin, LocalOrigin, StringComparison.OrdinalIgnoreCase)
-                ? TailscaleOrigin : savedOrigin;
+            string initialOrigin = savedOrigin.Length == 0 ? LocalOrigin : savedOrigin;
             var input = new TextBox { Text = initialOrigin, Left = 18, Top = 47, Width = 385 };
             var explanation = new Label { Text = "Instalá este conector una sola vez. Después, en Facturación, tocá Elegir impresora y Actualizar lista.", Left = 18, Top = 83, Width = 390, Height = 43 };
             var button = new Button { Text = "Instalar y conectar", Left = 224, Top = 135, Width = 178, Height = 32 };
@@ -64,7 +82,7 @@ internal static class ImpresoraLocal
                 {
                     Uri uri;
                     if (!Uri.TryCreate(input.Text.Trim().TrimEnd('/'), UriKind.Absolute, out uri) || uri.Scheme != "http" || uri.Port != 8080 || uri.UserInfo.Length > 0 || uri.AbsolutePath != "/")
-                        throw new InvalidOperationException("Ingresá una dirección como " + TailscaleOrigin);
+                        throw new InvalidOperationException("Ingresá la dirección que abrís en el navegador, por ejemplo " + LocalOrigin + " (red local) o " + TailscaleOrigin + " (Tailscale).");
                     string origin = uri.GetLeftPart(UriPartial.Authority);
                     Directory.CreateDirectory(Folder);
                     foreach (var process in Process.GetProcessesByName("ImpresoraLocal"))
@@ -162,6 +180,27 @@ internal static class ImpresoraLocal
                     if (method == "OPTIONS") { Reply(stream, 200, new { ok = true }, origin); return; }
                     if (method == "GET" && path == "/impresoras")
                     { Reply(stream, 200, new { ok = true, impresoras = TicketPrinters() }, origin); return; }
+                    if (method == "POST" && path == "/reiniciar-cola")
+                    {
+                        int size;
+                        if (!fields.ContainsKey("Content-Type") || !fields["Content-Type"].StartsWith("application/json", StringComparison.OrdinalIgnoreCase) ||
+                            !fields.ContainsKey("Content-Length") || !Int32.TryParse(fields["Content-Length"], out size) || size < 1 || size > 256)
+                            throw new InvalidOperationException("Confirmación de reinicio inválida.");
+                        byte[] bytes = new byte[size]; int offset = 0;
+                        while (offset < size) { int count = stream.Read(bytes, offset, size - offset); if (count <= 0) throw new IOException("Solicitud incompleta."); offset += count; }
+                        var confirmation = Json.DeserializeObject(Encoding.UTF8.GetString(bytes)) as Dictionary<string, object>;
+                        if (confirmation == null || !confirmation.ContainsKey("confirmar") || !(confirmation["confirmar"] is bool) || !(bool)confirmation["confirmar"])
+                            throw new InvalidOperationException("Confirmá el reinicio desde Gestión.");
+                        using (var helper = Process.Start(new ProcessStartInfo {
+                            FileName = Process.GetCurrentProcess().MainModule.FileName, Arguments = "--restart-spooler",
+                            UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden
+                        }))
+                        {
+                            if (!helper.WaitForExit(90000)) throw new InvalidOperationException("Windows todavía no confirmó el reinicio. Revisá la solicitud de permisos en esta PC.");
+                            if (helper.ExitCode != 0) throw new InvalidOperationException("No se pudo reiniciar la cola de impresión. Revisá los permisos de administrador.");
+                        }
+                        Reply(stream, 200, new { ok = true, mensaje = "Cola de impresión reiniciada en esta PC. No se eliminaron trabajos." }, origin); return;
+                    }
                     if (method == "POST" && path == "/imprimir")
                     {
                         int length;

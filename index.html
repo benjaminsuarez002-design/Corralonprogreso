@@ -4446,7 +4446,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
 <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.53"></script>
+<script src="corralon-system.js?v=1.0.54"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -4846,6 +4846,7 @@ let rankingVentasCargado = false;
 let rankingVentasPorCodigo = new Map();
 let rankingVentasInicializada = false;
 let rankingVentasFirma = '';
+let articulosMasVendidosRanking = [];
 let codigosMasVendidos = new Set();
 let homeLandingFingerprintActiva = '';
 const homeCarouselInstances = new Map();
@@ -5635,14 +5636,14 @@ function aplicarRankingVentasArticulos(lista = []) {
     return {
       ...articulo,
       masVendido: codigosMasVendidos.has(codigo),
-      _ventasAgregados: Number(rankingVentasPorCodigo.get(codigo) || 0)
+      _rotacionPuntaje: Number(rankingVentasPorCodigo.get(codigo) || 0)
     };
   });
 }
 
 function ordenarPorRankingVentas(lista = []) {
   return [...lista].sort((a, b) => {
-    const diferencia = Number(b?._ventasAgregados || 0) - Number(a?._ventasAgregados || 0);
+    const diferencia = Number(rankingVentasPorCodigo.get(obtenerIdArticulo(b)) || 0) - Number(rankingVentasPorCodigo.get(obtenerIdArticulo(a)) || 0);
     if (diferencia) return diferencia;
     return obtenerDescripcionArticulo(a).principal.localeCompare(obtenerDescripcionArticulo(b).principal, 'es', { sensitivity: 'base' });
   });
@@ -5802,7 +5803,8 @@ function resolverArticulosPortadaManual(key) {
 
 function obtenerArticulosPortada(key, fallbackPredicate, fallbackType = 'general') {
   if (key === 'masVendido' && rankingVentasCargado) {
-    return ordenarPorRankingVentas((todosArticulos || []).filter((articulo) => !!articulo.masVendido)).slice(0, 8);
+    const disponibles = new Map([...articulosMasVendidosRanking, ...(todosArticulos || [])].map(articulo => [obtenerIdArticulo(articulo), articulo]));
+    return ordenarPorRankingVentas([...disponibles.values()].filter(articulo => codigosMasVendidos.has(obtenerIdArticulo(articulo)))).slice(0, 8);
   }
   const seleccionManual = resolverArticulosPortadaManual(key);
   const manuales = key === 'oferta' ? seleccionManual.filter(fallbackPredicate) : seleccionManual;
@@ -5858,9 +5860,13 @@ function esOfertaArticulo(articulo) {
   return !!(articulo.ofertaVigente || articulo.promocionVigente);
 }
 
-function construirTagsArticulo(articulo) {
+function construirTagsArticulo(articulo, { promotionValidity = false } = {}) {
   const tags = [];
-  if (articulo.promocionVigente) tags.push(`<span class="chip-oferta">${escaparHtml(articulo.promocionTexto)}</span>`);
+  if (articulo.promocionVigente) {
+    const fecha=formatoFechaCortaIso(articulo.ofertaHasta);
+    const texto=promotionValidity?(fecha?`Oferta hasta ${fecha}`:'Hasta agotar stock'):articulo.promocionTexto;
+    tags.push(`<span class="chip-oferta">${escaparHtml(texto)}</span>`);
+  }
   if (articulo.ofertaVigente) {
     const hastaOferta = formatoFechaCortaIso(articulo.ofertaHasta);
     tags.push(`<span class="chip-oferta">Oferta${hastaOferta ? ` hasta ${hastaOferta}` : ''}</span>`);
@@ -5903,7 +5909,7 @@ function renderHomeSectionCard(articulo, index) {
       <div class="home-card-media">${renderHomeArticuloFoto(articulo, descripcion.principal)}</div>
       <div class="home-card-body">
         <div class="home-card-top">
-          ${construirTagsArticulo(articulo)}
+          ${construirTagsArticulo(articulo, { promotionValidity: true })}
           <div class="home-card-title">${escaparHtml(descripcion.principal)}</div>
           <div class="home-card-detail">${escaparHtml(detalle)}</div>
         </div>
@@ -5913,7 +5919,9 @@ function renderHomeSectionCard(articulo, index) {
         </div>
         <div class="home-card-footer">
           <div class="home-card-price">
-            <div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}${articulo.ofertaVigente ? ' oferta-tachada' : ''}">${precioVisual.precioBaseHtml}</div>
+            ${articulo.promocionVigente && !articulo.ofertaVigente
+              ? `<div class="home-card-promotion">${escaparHtml(articulo.promocionTexto)}</div>`
+              : `<div class="precio-lista${precioVisual.esCeramico ? ' precio-caja' : ''}${articulo.ofertaVigente ? ' oferta-tachada' : ''}">${precioVisual.precioBaseHtml}</div>`}
             <div class="precio-vigente">${precioVisual.precioFinalCompactoHtml}</div>
           </div>
           <button class="agregar-btn" data-detail-trigger="1" data-detail-code="${codigo}" type="button">Agregar</button>
@@ -6084,6 +6092,7 @@ function actualizarIndiceHomeCarousel(instance) {
     }
   });
   instance.index = bestIndex;
+  actualizarPuntosHomeCarousel(instance);
 }
 
 function alinearHomeCarousel(instance, index, smooth = true) {
@@ -6093,6 +6102,7 @@ function alinearHomeCarousel(instance, index, smooth = true) {
   if (nextIndex >= slides.length) nextIndex = 0;
   if (nextIndex < 0) nextIndex = slides.length - 1;
   instance.index = nextIndex;
+  actualizarPuntosHomeCarousel(instance);
   instance.track.scrollTo({
     left: obtenerScrollTargetHomeCarousel(instance, slides[nextIndex]),
     behavior: smooth ? 'smooth' : 'auto'
@@ -6101,7 +6111,8 @@ function alinearHomeCarousel(instance, index, smooth = true) {
 
 function moverHomeCarouselInstance(instance, direction = 1) {
   actualizarIndiceHomeCarousel(instance);
-  alinearHomeCarousel(instance, instance.index + (direction > 0 ? 1 : -1), true);
+  const step = window.matchMedia('(max-width:700px)').matches ? 3 : 1;
+  alinearHomeCarousel(instance, instance.index + (direction > 0 ? step : -step), true);
 }
 
 function bindHomeCarouselDrag(instance) {
@@ -6142,6 +6153,27 @@ function bindHomeCarouselDrag(instance) {
   };
 }
 
+// Indicadores compartidos por las secciones de la portada; usan el desplazamiento del carrusel.
+function actualizarPuntosHomeCarousel(instance) {
+  if (!instance.dots) return;
+  const step = window.matchMedia('(max-width:700px)').matches ? 3 : 1;
+  const count = Math.ceil(obtenerSlidesHomeCarousel(instance).length / step);
+  if (instance.dots.children.length !== count) {
+    instance.dots.replaceChildren(...Array.from({length:count},(_,page)=>{
+      const button=document.createElement('button');button.type='button';
+      button.setAttribute('aria-label',`Ver página ${page+1} de ${instance.root.dataset.homeCarousel==='oferta'?'ofertas':instance.root.dataset.homeCarousel==='destacado'?'destacados':'más vendidos'}`);
+      button.addEventListener('click',()=>{instance.pause();alinearHomeCarousel(instance,page*step,true);instance.play();});
+      return button;
+    }));
+  }
+  const page=Math.min(count-1,Math.floor(instance.index/step));
+  [...instance.dots.children].forEach((button,index)=>{
+    button.classList.toggle('is-active',index===page);
+    if(index===page)button.setAttribute('aria-current','true');else button.removeAttribute('aria-current');
+  });
+  instance.dots.hidden=count<=1;
+}
+
 function crearHomeCarouselInstance(root) {
   const track = root.querySelector('.splide__track');
   const list = root.querySelector('.splide__list');
@@ -6167,8 +6199,17 @@ function crearHomeCarouselInstance(root) {
       this.destroyDrag?.();
       if (this.scrollTimer) clearTimeout(this.scrollTimer);
       if (this.track && this.onScroll) this.track.removeEventListener('scroll', this.onScroll);
+      window.removeEventListener('resize',this.onDotsResize);
+      this.dots?.remove();
     }
   };
+  if(root.dataset.homeCarousel){
+    instance.dots=document.createElement('nav');instance.dots.className='home-carousel-dots';
+    instance.dots.setAttribute('aria-label','Páginas de '+(root.dataset.homeCarousel==='oferta'?'ofertas':root.dataset.homeCarousel==='destacado'?'destacados':'más vendidos'));root.after(instance.dots);
+    instance.onDotsResize=()=>actualizarPuntosHomeCarousel(instance);
+    window.addEventListener('resize',instance.onDotsResize);
+    actualizarPuntosHomeCarousel(instance);
+  }
   instance.onScroll = () => {
     if (instance.scrollTimer) clearTimeout(instance.scrollTimer);
     instance.scrollTimer = setTimeout(() => actualizarIndiceHomeCarousel(instance), 120);
@@ -10263,33 +10304,47 @@ if (!INDEX_ENLACE_COMPARTIDO) {
   restaurarConfigPortadaCache();
 }
 
-const rankingVentasQuery = query(collection(db, CART_POPULARITY_COLLECTION), orderBy('agregados', 'desc'), limit(10));
-function aplicarRankingVentasSnapshot(snapshot) {
+async function cargarRankingVentasRotacion() {
+  try {
+    const url = new URL(SUPABASE_URL + '/rest/v1/ranking_articulos_4m');
+    url.searchParams.set('select', 'idart,puntaje');
+    url.searchParams.set('puntaje', 'gt.0');
+    url.searchParams.set('order', 'puntaje.desc,idart.asc');
+    url.searchParams.set('limit', '60');
+    const response = await fetch(url, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY }, cache: 'no-store' });
+    if (!response.ok) throw new Error('No se pudo cargar el puntaje de rotación');
+    const rows = await response.json();
+    const articles = rows.length ? await consultarCatalogoPublicoReducido({ codigos: rows.map(row => String(row.idart).trim()), limite: 60 }) : [];
+    const activeCodes = new Set(articles.map(obtenerIdArticulo));
+    const top = rows.filter(row => activeCodes.has(String(row.idart).trim())).slice(0, 10);
     const siguienteRanking = new Map();
-    snapshot.docs.forEach((item) => {
-      const data = item.data() || {};
-      const codigo = String(data.codigo || '').trim();
-      if (codigo) siguienteRanking.set(codigo, Number(data.agregados || 0));
+    top.forEach((row) => {
+      const codigo = String(row.idart || '').trim();
+      if (codigo) siguienteRanking.set(codigo, Number(row.puntaje || 0));
     });
     const siguienteFirma = JSON.stringify([...siguienteRanking.entries()]);
     if (rankingVentasInicializada && siguienteFirma === rankingVentasFirma) return;
-    const esPrimeraCargaRanking = !rankingVentasInicializada;
     rankingVentasInicializada = true;
     rankingVentasFirma = siguienteFirma;
     rankingVentasPorCodigo = siguienteRanking;
     codigosMasVendidos = new Set(siguienteRanking.keys());
     rankingVentasCargado = true;
-    if (!todosArticulos.length) return;
+    articulosMasVendidosRanking = prepararArticulosParaVista(articles.filter(article => codigosMasVendidos.has(obtenerIdArticulo(article))));
+    const merged = new Map([...todosArticulos, ...articulosMasVendidosRanking].map(article => [obtenerIdArticulo(article), article]));
+    todosArticulos = [...merged.values()];
     todosArticulos = aplicarRankingVentasArticulos(todosArticulos);
-    if (esPrimeraCargaRanking) return;
     actualizarVistaEtiqueta();
     aplicarBusquedaActual();
+  } catch (error) { console.warn('No se pudo cargar Más vendidos desde rotación', error); }
 }
-if (INDEX_MENU_SESSION_ACTIVE) {
-  onSnapshot(rankingVentasQuery, aplicarRankingVentasSnapshot, (error) => console.warn('No se pudo cargar el ranking de artículos', error));
-} else {
-  getDocsFromServer(rankingVentasQuery).then(aplicarRankingVentasSnapshot).catch((error) => console.warn('No se pudo cargar el ranking de artículos', error));
-}
+cargarRankingVentasRotacion();
+window.addEventListener('corralon:catalog-meta-changed', event => {
+  const version = Number(event.detail?.rankingVersion || 0);
+  if (version && version !== cargarRankingVentasRotacion.version) {
+    cargarRankingVentasRotacion.version = version;
+    cargarRankingVentasRotacion();
+  }
+});
 
 function iniciarEscuchaListaArticulos() {
   if (INDEX_MENU_SESSION_ACTIVE) window.CorralonSystem?.catalogRealtime?.start();

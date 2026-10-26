@@ -1,0 +1,24 @@
+const fs=require('fs'),assert=require('assert'),vm=require('vm'),{spawnSync}=require('child_process');
+const pub=fs.readFileSync('tmp/saldos-proveedores-export/publish_saldos_proveedores.js','utf8');
+const key=pub.match(/const supabaseKey = arg\('--supabaseKey', '([^']+)'\)/)[1];
+const endpoint='https://tizyjenayrcdkcodsjnc.supabase.co/functions/v1/saldos-proveedores-sync';
+const headers={apikey:key,Authorization:`Bearer ${key}`,'Content-Type':'application/json'};
+const read=async body=>{const r=await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(body)});assert(r.ok,await r.clone().text());return r.json()};
+(async()=>{
+  const before=await read({action:'state'});
+  const run=spawnSync(process.execPath,['tmp/saldos-proveedores-export/publish_saldos_proveedores.js','--dir','.codex-staging/proveedores-sql-test'],{encoding:'utf8'});
+  assert.equal(run.status,0,run.stderr);assert(run.stdout.includes('sin cambios'));
+  const after=await read({action:'state'});assert.equal(before.version,after.version);assert.equal(after.notified_version,after.version);
+  const unchanged=await read({action:'read',since:after.version});assert.equal(unchanged.rows.length,0);assert.equal(unchanged.deleted.length,0);
+  const snapshot=await read({action:'read',since:0});const expected=JSON.parse(fs.readFileSync('.codex-staging/proveedores-sql-test/saldos_proveedores.json','utf8').replace(/^\uFEFF/,''));
+  const {canonical}=require('../tmp/saldos-proveedores-export/publish_saldos_proveedores.js');
+  assert.deepEqual(snapshot.rows.map(canonical).sort((a,b)=>a.id.localeCompare(b.id)),expected.rows.map(canonical).sort((a,b)=>a.id.localeCompare(b.id)));
+  const html=fs.readFileSync('comprobantes.html','utf8');
+  const normalize=html.slice(html.indexOf('function normalizeSupplierBalancesPayload'),html.indexOf('async function restoreSupplierBalancesCache'));
+  const sync=html.slice(html.indexOf('let supplierBalancesSyncQueue'),html.indexOf('function subscribeSupplierBalances'));
+  let cached;
+  const context={state:{supplierBalances:{version:0,rows:[]}},providerId:String,window:{CorralonSystem:{SUPABASE_URL:'https://tizyjenayrcdkcodsjnc.supabase.co',headers:()=>headers}},fetch,writeSupplierBalancesCache:async p=>{cached=p},renderAliases(){}};
+  vm.runInNewContext(normalize+sync,context);await context.downloadSupplierBalances({protocol:'sql-delta-v1',version:after.version});
+  assert.equal(cached.rows.length,expected.rows.length);assert.equal(cached.protocol,'sql-delta-v1');assert.equal(cached.version,after.version);
+  console.log(`PASS remoto: ${snapshot.rows.length} filas iguales a SQL; repeticion sin version ni aviso nuevos; delta vacio; cliente inicial sincronizado`);
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -936,7 +936,7 @@ internal sealed class ServerForm : Form
         string method = context.Request.HttpMethod;
         bool allowed = (method == "GET" && Array.IndexOf(new[] { "bootstrap", "caja-estado", "catalogo", "articulos-sql", "stock", "stock-ingreso", "clientes", "comprobante", "consultar-comprobantes", "facturas-asociables", "factura-asociable", "estado-emision", "borradores-fiscales", "impresoras", "revision-venta" }, route) >= 0)
             || (method == "POST" && Array.IndexOf(new[] { "emitir", "imprimir", "stock-ingreso", "articulos-sql", "clientes", "revision-venta", "imprimir-revision", "comprobante-valores", "comprobante-anular" }, route) >= 0);
-        allowed = allowed || ((method == "GET" || method == "POST") && route == "cargar-facturas");
+        allowed = allowed || ((method == "GET" || method == "POST") && (route == "cargar-facturas" || route == "pagos-proveedores"));
         allowed = allowed || ((method == "GET" || method == "POST") && route == "recibos-cobro");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "ventas-tarjeta");
         allowed = allowed || ((method == "GET" || method == "POST") && route == "proveedores-sql");

@@ -1,7 +1,7 @@
 CONTEXTO TECNICO — CORRALONPROGRESO-MAIN
 ==========================================
 
-Fecha de referencia y ultimo corte de contexto: 19 de octubre de 2026.
+Fecha de referencia y ultimo corte de contexto: 24 de octubre de 2026.
 El cuerpo historico corresponde al 25/08/2026; las secciones 21 a 23 registran
 actualizaciones posteriores. Las secciones 24 a 27 registran cambios hasta el
 08/10/2026. La seccion 30 registra un plan futuro acordado el 10/10/2026,
@@ -14,8 +14,9 @@ Las secciones 39 y 40 agregan la apariencia de Facturacion/Cargar facturas/
 Cargar stock y el diagnostico pendiente de dos ventas de Alexis (19/10/2026).
 La seccion 41 agrega Ventas con Tarjeta y la regla de HTML con JS/CSS integrados (19/10/2026).
 La seccion mas reciente prevalece sobre las anteriores.
-Este corte incorpora los cambios de apariencia y el diagnostico de ventas
-realizados hasta el 19/10/2026; las comprobaciones pendientes estan en seccion 40.
+Las secciones 42 a 46 consolidan cambios del 20 al 24/10/2026: revisiones,
+pagos a proveedores, Stock, impresion y launcher externo de cuentas ChatGPT.
+El incidente del 19/10 mantiene sus limites y pendientes en seccion 40.
 Carpeta principal:
 C:\Users\Administrador\Documents\Corralonprogreso-main
 
@@ -2906,3 +2907,173 @@ el reintento automatico NO fue modificado. Este chat continua con apariencia.
   DeserializeObject producia object[] y rechazaba los articulos antes de CAE.
 - Detalles y verificaciones en docs/ventas-tarjeta-sql.md. Pruebas leen bloques
   integrados del HTML. No se emitieron facturas reales como prueba.
+
+42. CORTE CONSOLIDADO DEL CHAT: 24/10/2026
+========================================
+- Actualizacion solicitada por el usuario desde el ultimo corte (19/10).
+- Esta ampliacion resume el trabajo y las decisiones de este chat. El codigo
+  actual prevalece; no equivale a una nueva auditoria integral ni a pruebas
+  fisicas de impresoras o entre dos puestos realizadas en esta actualizacion.
+- No interpretar las cifras de pruebas mencionadas en respuestas anteriores
+  como una ejecucion nueva. Hay pruebas especificas en tests/ para estos flujos.
+- Gestion concentra las secciones SQL y sus recursos integrados. Para editar
+  buscar el bloque de modulo correspondiente dentro de gestion.html; algunas
+  fuentes estan serializadas en lineas largas. Evitar imprimirlas completas.
+- Menu: accesos SQL mediante gestion.html#sql/...; primer acceso Facturacion.
+
+43. FACTURACION: REVISIONES, RECUPERACION Y ADMINISTRADORES
+=========================================================
+- Incidente LUNA, Arturo, 23/10: borrador con documento f4287197 e importe
+  141527,63; consulta de 0004-00016393 devolvio documento 4287197 e importe
+  141500,00 autorizado en ARCA. No son datos iguales. El usuario confirmo que
+  el vendedor hizo otra venta y que la segunda estaba en SQL con CAE.
+- Un borrador conservado NO prueba guardado SQL ni autorizacion fiscal. No
+  vincular automaticamente el CAE de un numero que corresponde a otros datos.
+- El boton Consultar ARCA y SQL debe consultar ambos servicios y mostrar estado
+  real, numero y diferencias de documento/importe/fecha, sin emitir otra venta.
+  Error HTTP 500/timeout es resultado incierto, no rechazo fiscal demostrado.
+- La letra F en documento es invalida, pero por si sola no demuestra el estado
+  del intento previo. Tampoco la ausencia de numero visible prueba que no se
+  haya reservado un numero interno o iniciado una solicitud.
+- Se informo corregido el parpadeo por reconsulta periodica en revisiones
+  fiscales: verificar al abrir o por boton, con bloqueo de consultas simultaneas.
+  Esto actualiza el comportamiento descrito en seccion 40 para ese caso; no
+  inferir que todos los reintentos de otros tipos fueron desactivados.
+- Revision compartida para TODOS los administradores, no un usuario fijo.
+  Guardar pendiente y hacer otra venta envia revision compartida; los pendientes
+  viejos solo locales pueden requerir reenvio. No confundir con copia en SQL.
+- Unico acceso Pendientes en cabecera junto a navegacion; avisos limitados a
+  Facturacion y sin abrirse continuamente en otros HTML.
+- Ver articulos y pagos abre nueva pestaña de Facturacion con cliente, detalle
+  y valores del borrador, conservando el bloqueo ante autorizacion incierta.
+- Buscar venta realizada usa la consulta completa existente de boletas SQL;
+  permite abrir detalle y revisar articulos/pagos antes de Resolver pendiente
+  con esta boleta. Se elimino el buscador reducido como flujo principal.
+- La vinculacion cierra el intento viejo y registra la resolucion; no emite una
+  venta adicional. Revisado cierra el aviso para administradores y registra
+  quien lo reviso sin modificar el comprobante SQL.
+- Revisiones antiguas vacias (Consumidor final, cero, sin articulos/pagos) eran
+  avisos incompletos; se bloqueo el envio de nuevos vacios. No son evidencia de
+  ventas reales; pueden marcarse Revisado para sacar el aviso.
+- Interfaz de revision simplificada: estados ARCA/SQL, tabla de diferencias,
+  detalle tecnico plegable y acciones segun el resultado comprobado.
+- Corregir y emitir / continuar como X-venta solo cuando se comprueba ausencia
+  de autorizacion y guardado. Incierto o autorizado con otros datos mantiene
+  bloqueo. Presupuesto conserva detalle; X-venta debe identificarse sin CAE.
+- Falta de vendedor: aviso compacto Elegi vendedor con lista, Cancelar y
+  Guardar y continuar; conserva la eleccion. Botones con estilo Corralon.
+- Pruebas de referencia: facturacion-revision-workflow.test.cjs,
+  facturacion-revisiones.test.js, facturacion-required-seller.test.cjs.
+
+44. PAGOS A PROVEEDORES DENTRO DE GESTION
+=======================================
+- Nueva seccion gestion.html#sql/pagos y subseccion #sql/pagos/consultar,
+  bloque modules.pagos.html integrado en gestion.html, con permisos por usuario.
+  API de interfaz CorralonSupplierPayments. No crear CSS/JS separados.
+- Proveedor: campo editable con lista desplegable; mostrar solo nombre en
+  MAYUSCULAS. Tipo de valor: texto con lista como Facturacion. Desplegables
+  responden tambien con filas cargadas y conservan area activa de flecha.
+- Lista de facturas: numero, fecha, total, importe pagado, saldo, tipo y vence.
+  Encabezados claros del mismo tono de tarjetas, no negro.
+- Agregar facturas: antigua a reciente, cada asignacion automatica limitada
+  por saldo de factura y restante de valores; detener al completar el monto,
+  sin agregar facturas de importe cero. Edicion manual de importes permitida.
+- Moneda en vivo con miles y centavos argentinos separados; no reinterpretar
+  puntos de miles como decimales. Funciones TXT/seleccion aplicadas al formulario:
+  seleccion de texto, F2, Escape, deshacer, navegacion, pegado y fechas flexibles.
+- Solo administradores pueden cambiar fecha. Cada NUEVA orden vuelve a HOY;
+  fecha elegida queda en el pago confirmado pero no como defecto del siguiente.
+- Reseleccionar proveedor, aun el mismo, vuelve a consultar facturas y recalcula
+  disponibilidad/saldos. No confiar en lista anterior tras descuentos o pagos.
+- Quitados Volver al menu, Ctas. Ctes., barras Registro y numerales pedidos.
+  Consulta: cualquier celda de fila abre recibo. Detalle sin filas de botones
+  Ver factura / Ver valor: clic derecho en factura ofrece Ver factura.
+- Ver factura llama directamente al popup existente Consultar Compras a
+  Proveedores, no una ficha alternativa reducida. Ver carga debe abrir movimiento
+  en primer plano. Cierre debe liberar capas/foco y admitir boton lateral atras.
+- Generar descuento/credito interno usa la animacion compartida de funciones,
+  tanto al abrir desde Pagos como desde Compras. Se reportaron y trataron capas
+  bloqueantes/congelamiento; comprobar codigo actual si reaparece.
+- Credito interno generado por descuento se aplica al saldo automaticamente.
+  No asumir por eso que toda nota de credito independiente se ofrece como valor:
+  verificar origen SQL y disponibilidad al investigar un caso concreto.
+- Administrador: Modificar orden devuelve al formulario TODOS los datos del
+  pago guardado, facturas e importes y valores, para REEMPLAZAR el original al
+  confirmar, no crear un segundo pago. Conserva identificacion/version.
+- Anular orden para administradores: debe desvincular comprobantes y valores
+  asociados y recalcular saldos. No anular ninguna orden real como prueba.
+- Caso 12174: existia vinculacion huerfana por 155030 de descuento eliminado;
+  total facturas 1155030 frente a valores 1000000. Captura posterior mostro
+  cuatro facturas/total 1000000. No reproducir modificaciones reales sin pedido.
+- Impresion A5: boletas vinculadas arriba (numero, fecha, importe factura,
+  importe pagado, saldo), valores abajo, totales, nota, monto en letras y firma.
+  Referencia visual proporcionada por usuario para OP12174. Papel fisico no
+  comprobado por esta actualizacion de contexto.
+- Confirmar orden usa animacion de carga/exito/error compartida de funciones.
+- Referencia tests/pagos-proveedores.test.cjs: asignacion, moneda, fecha, TXT,
+  desplegables repetidos, edicion admin, clic derecho, impresion A5, anulacion,
+  reseleccion proveedor, animacion y reinicio de fecha. Tambien
+  tests/pagos-proveedores-validation.ps1. No se ejecutaron al actualizar contexto.
+
+45. COMPRAS, STOCK E IMPRESION: CONTINUIDAD
+========================================
+- Compras: quitar encabezado extra de carga vinculada; Volver cierra popup.
+  Revision previa encontro consultas duplicadas de articulos y cargas auxiliares
+  innecesarias al ver movimiento; no afirmar que lee todo el stock por defecto.
+- Al cambiar ventana, preservar campo, valor sin reformateo de salida y cursor;
+  recuperar foco no debe disparar efectos de blur ni poner cursor al final.
+- Importador Stock: Ctrl no debe perder foco/seleccion. Margen predeterminado
+  solicitado 60%; aplicar a demas debe agregarse al menu contextual EXISTENTE,
+  no superponer un segundo menu. Borradores previos pueden conservar otro margen.
+- Editar articulo desde Stock no debe abrir URL404. Al cerrar editor refrescar
+  datos/costos de fila conservando cantidad sin confirmar; suspendido desaparece.
+  Otros puestos detectan cambios por revision-articulos aproximadamente cada
+  8 segundos y al foco. Prueba real en dos PCs no acreditada en este corte.
+- Consultar boletas permite filtro articulo por descripcion, IDArt o codigo
+  proveedor separado del filtro cliente/numero y conserva filtros restantes.
+- Impresion: separar venta SQL/CAE de fallo posterior al enviar ticket. Un
+  error de impresora no autoriza repetir emision. Diagnosticar direccion y cola.
+- 127.0.0.1:8082/impresoras rechazado en PC5-CAJA implica servicio local no
+  accesible en ESE puesto; distinguir LAN de Tailscale. Hubo compatibilidad
+  solicitada para ambas redes, selector de otra impresora y reinicio de cola
+  mediante conector local (HTML solo no puede reiniciar servicios Windows).
+- El usuario autorizo una prueba reversible de cola en esta PC; no es permiso
+  permanente para detener impresoras, borrar trabajos o tocar otra sucursal.
+- Reporte posterior: imprimir hacia otra sucursal falla, sentido inverso si
+  imprime. No dar por resuelta simetria de red ni salida fisica sin verificar.
+- ERR_BLOCKED_BY_CLIENT en Firestore puede corresponder a bloqueador del cliente;
+  aviso HTTP al descargar ImpresoraLocal.exe es distinto del fallo de impresion.
+- Diferencias proveedores: Ctrl+C con texto seleccionado debe copiar ese texto
+  y no interceptarlo para copiar toda la fila.
+
+46. LAUNCHER DE CUENTAS CHATGPT DE ESCRITORIO (FUERA DE CORRALON)
+==============================================================
+- Usuario pidio app de ESCRITORIO oficial, no perfiles del navegador; cuatro
+  cuentas iniciales y agregar mas, con sesiones independientes y varios Plus.
+- Entregado acceso Desktop/ChatGPT - Mis cuentas.lnk y launcher Windows en:
+  C:\Users\Administrador\AppData\Local\ChatGPTProfilesLauncher\ChatGPT-Cuentas.exe
+  Fuente Launcher.cs, cuentas accounts.json, icono ChatGPT.ico, Verify.ps1.
+- App instalada OpenAI.Codex 26.1021.3705.0, ejecutable app/ChatGPT.exe dentro
+  WindowsApps. Resolver obtiene paquete actual al abrir, no ruta fija de version.
+- Launcher externo: no se parcheo EXE oficial ni se copiaron credenciales.
+  CODEX_ELECTRON_USER_DATA_PATH y --user-data-dir separan datos Electron;
+  CODEX_HOME separa perfil Codex; config keyring por perfil. Override Electron
+  descubierto localmente, no prometer funcion oficial soportada multi-cuenta.
+- Primer perfil conserva datos/sesion actuales. Perfiles nuevos requieren login
+  humano en ventana oficial; no escribir ni pedir claves. Suscripciones dependen
+  de cada cuenta, el launcher no comparte Plus ni consume una sola suscripcion.
+- Abrir, Renombrar y Agregar cuenta sin limite fijo de cuatro. El usuario renombro
+  los dos primeros perfiles y uso el segundo; preservar accounts.json y GUIDs.
+- Appx puede virtualizar ruta bajo Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/
+  LocalCache/Local/ChatGPTProfilesLauncher. Metadata anclada al EXE; rutas de
+  perfiles mantienen destino logico estable. No migrar directorios a ciegas.
+- Verificado compilacion, acceso directo, cuatro perfiles distintos, no herencia
+  de API keys, rechazo de rutas invalidas, cuenta nueva sin sesion y dos procesos
+  oficiales simultaneos. UI Agregar ofrecio Cuenta5; se cancelo sin crearla.
+  No se autenticaron las cuatro cuentas como prueba. No cerrar la app original.
+- ChatGPT-MisCuentas.exe es una compilacion inicial que puede seguir abierta;
+  acceso directo final apunta a ChatGPT-Cuentas.exe. No borrar perfiles activos.
+
+PUNTO DE CORTE NUEVO: 24/10/2026. Secciones 42 a 46 prevalecen para estos
+flujos; conservan limites de verificacion y no cierran por inferencia el
+incidente de Alexis del 19/10 documentado en seccion 40.

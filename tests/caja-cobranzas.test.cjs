@@ -1,0 +1,64 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
+const {JSDOM}=require('../.codex-staging/importer-dom-test/node_modules/jsdom');
+const cajaHtml=fs.readFileSync(require('node:path').join(__dirname,'../respaldo/caja.html'),'utf8');
+const source=cajaHtml.match(/<script id="cajaCobranzasScript">([\s\S]*?)<\/script>/)[1];
+const tick=()=>new Promise(r=>setTimeout(r,10));
+function setup(edit=true,admin=false){
+ const dom=new JSDOM('<main id="cajaSqlMain"></main>',{runScripts:'outside-only',pretendToBeVisual:true,url:'http://localhost/caja.html'}),w=dom.window,calls=[];let paid=false,fail=false,back=0,invoice,changed=false,poll,interval;
+ w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'))};w.setInterval=(fn,ms)=>{poll=fn;interval=ms;return 1};w.confirm=()=>true;w.CajaSQL={bootstrap:async()=>({editar:edit,administrador:admin,restringido:!edit,sucursal:1}),request:async(a,p,b)=>{calls.push({a,p,b});if(fail)throw Error('Sin conexión');if(a==='cobranzas')return {filas:paid?[]:[{id:42,numero:'0004-42',cliente:changed?'Cliente actualizado':'Cliente <SQL>',tipo:'PRES. ESPECIAL',total:100,hora:'10:00'}]};if(a==='cobranza-detalle')return{idRecibo:42,version:'v1',articulos:[{idart:'000001',descripcion:'Arena',cantidad:2,precio:50,importe:100}],valores:[{tipo:'Efectivo',importe:100,total:100}]};if(a==='cobranza-pagada'){paid=true;return{ok:true}}return{ok:true}}};
+ w.eval(fs.readFileSync(require('node:path').join(__dirname,'../funciones.js'),'utf8'));w.CorralonInvoiceHistory={openInvoice:async(...args)=>{invoice=args}};w.eval(source);
+ const open=()=>w.CajaCobranzas.open({main:w.document.querySelector('main'),branch:1,onBack:async()=>{back++}});
+ return{dom,w,calls,open,poll:()=>poll(),interval:()=>interval,change:()=>{changed=true},get invoice(){return invoice},get back(){return back},fail:()=>{fail=true},q:s=>w.document.querySelector(s)};
+}
+test('abre una sección, vincula las tres tablas y vuelve a Caja',async()=>{const s=setup();try{await s.open();assert.equal(s.q('main').hidden,true);assert.equal(s.q('#cajaCobranzas').hidden,false);assert.equal(s.q('[data-cc-items]').rows.length,1);assert.match(s.q('[data-cc-values]').textContent,/Efectivo/);assert.match(s.q('[data-cc-queue]').textContent,/Cliente <SQL>/);assert.equal(s.q('[data-cc-queue] script'),null);s.q('[data-cc-back]').click();await tick();assert.equal(s.q('main').hidden,false);assert.equal(s.back,1)}finally{s.dom.window.close()}});
+test('paga con calcula vuelto localmente sin escribir SQL ni Nota',async()=>{const s=setup();try{await s.open();const n=s.calls.length,input=s.q('[data-cc-tender]');input.value='1.000,50';input.dispatchEvent(new s.w.Event('input',{bubbles:true}));assert.match(s.q('[data-cc-change]').textContent,/900,50/);assert.equal(s.calls.length,n);await s.open();assert.match(s.q('[data-cc-tender]').value,/1\.000,50/)}finally{s.dom.window.close()}});
+test('Pagada requiere confirmar y envía versión; elimina de pendientes solo tras éxito',async()=>{const s=setup();try{await s.open();s.w.confirm=()=>false;s.q('[data-cc-paid]').click();await tick();assert.equal(s.calls.filter(c=>c.a==='cobranza-pagada').length,0);s.w.confirm=()=>true;s.q('[data-cc-paid]').click();await tick();const call=s.calls.find(c=>c.a==='cobranza-pagada');assert.equal(call.b.idRecibo,42);assert.equal(call.b.version,'v1');assert.equal(s.q('[data-cc-queue]').rows.length,0)}finally{s.dom.window.close()}});
+test('lector puede consultar pero no cobrar ni editar',async()=>{const s=setup(false);try{await s.open();assert.equal(s.q('[data-cc-paid]').disabled,true);assert.equal(s.q('[data-cc-edit]'),null);s.q('[data-cc-open]').click();await tick();assert.equal(s.invoice[2].allowEditValues,false);assert.equal(s.invoice[2].allowAnnul,false);assert.equal(s.q('[data-cc-branch]').hidden,true);s.q('[data-cc-paid]').click();assert.equal(s.calls.some(c=>c.a==='cobranza-pagada'),false)}finally{s.dom.window.close()}});
+test('fallo de SQL conserva las filas y el cálculo local',async()=>{const s=setup();try{await s.open();s.q('[data-cc-tender]').value='150';s.q('[data-cc-tender]').dispatchEvent(new s.w.Event('input',{bubbles:true}));s.fail();s.q('[data-cc-refresh]').click();await tick();assert.equal(s.q('[data-cc-queue]').rows.length,1);assert.equal(s.q('[data-cc-tender]').value,'$ 150');assert.match(s.q('.cc-status').textContent,/Sin conexión/)}finally{s.dom.window.close()}});
+test('edición usa la validación de valores existente y la autorización de Caja',async()=>{const s=setup();try{await s.open();s.q('[data-cc-open]').click();await tick();assert.equal(s.invoice[0],42);assert.equal(s.invoice[2].allowEditValues,true);await s.invoice[2].saveValues({idRecibo:42,version:'v1',valores:[]});assert.equal(s.calls.at(-1).a,'cobranza-valores');s.invoice[2].onClose();await tick();assert.equal(s.q('[data-cc-back]').disabled,false)}finally{s.dom.window.close()}});
+
+test('toda la celda Pagada pide confirmacion y respeta permisos',async()=>{const s=setup();try{await s.open();let confirmations=0;s.w.confirm=()=>{confirmations++;return false};s.q('[data-cc-paid-cell]').click();await tick();assert.equal(confirmations,1);assert.equal(s.calls.filter(c=>c.a==='cobranza-pagada').length,0);s.w.confirm=()=>true;s.q('[data-cc-paid-cell]').click();await tick();assert.equal(s.calls.filter(c=>c.a==='cobranza-pagada').length,1);}finally{s.dom.window.close()}const reader=setup(false);try{await reader.open();reader.q('[data-cc-paid-cell]').click();await tick();assert.equal(reader.calls.some(c=>c.a==='cobranza-pagada'),false);}finally{reader.dom.window.close()}});
+
+test('actualiza cada dos segundos aun con Paga con enfocado, conserva valor, cursor y scroll',async()=>{const s=setup();try{await s.open();assert.equal(s.interval(),2000);const input=s.q('[data-cc-tender]'),scroll=s.q('.cc-scroll');input.value='150';input.dispatchEvent(new s.w.Event('input',{bubbles:true}));input.focus();input.setSelectionRange(1,2);scroll.scrollTop=50;s.change();s.poll();await tick();assert.match(s.q('[data-cc-queue]').textContent,/actualizado/);assert.equal(s.q('[data-cc-tender]').value,'$ 150');assert.equal(s.w.document.activeElement,s.q('[data-cc-tender]'));assert.equal(s.q('[data-cc-tender]').selectionStart,1);assert.equal(scroll.scrollTop,50);assert.equal(s.q('[data-cc-values]').rows.length,3);assert.equal(s.q('[data-cc-values]').querySelectorAll('.cc-empty-row').length,2);assert.match(s.q('[data-cc-total-payment]').textContent,/100,00/);}finally{s.dom.window.close()}});
+
+test('mandar a Comprobantes abre el formulario con factura seleccionada sin cobrar ni guardar automaticamente',async()=>{const s=setup();try{
+ s.w.HTMLDialogElement.prototype.showModal=function(){this.open=true};s.w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new s.w.Event('close'))};await s.open();s.q('[data-cc-id] td').dispatchEvent(new s.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:10,clientY:10}));await tick();const send=Array.from(s.w.document.querySelectorAll('button')).find(b=>b.textContent==='Mandar a Comprobantes');send.click();await tick();const dialog=s.q('dialog'),frame=dialog.querySelector('iframe');assert.equal(dialog.open,true);assert.match(frame.src,/comprobantes.html\?embed=cobranza&cobranzaId=42/);let data;frame.contentWindow.postMessage=payload=>data=payload;s.w.dispatchEvent(new s.w.MessageEvent('message',{origin:s.w.location.origin,source:frame.contentWindow,data:{type:'corralon:comprobantes-ready'}}));assert.equal(data.factura.idRecibo,42);assert.equal(data.factura.cliente,'Cliente <SQL>');assert.equal(data.factura.numero,'0004-42');assert.equal(data.factura.total,100);assert.equal(s.calls.some(c=>c.a==='cobranza-pagada'),false);s.w.dispatchEvent(new s.w.MessageEvent('message',{origin:s.w.location.origin,source:frame.contentWindow,data:{type:'corralon:comprobantes-saved'}}));assert.equal(dialog.open,false);
+ }finally{s.dom.window.close()}});
+
+
+test('un solo acceso permite reimprimir a lector y anular solo a administrador',async()=>{
+ for(const admin of [false,true]){const s=setup(admin,admin);try{await s.open();s.q('[data-cc-open]').click();await tick();const options=s.invoice[2];assert.equal(s.q('[data-cc-edit]'),null);assert.equal(options.allowAnnul,admin);s.w.open=()=>{throw Error('No debe abrir otra ventana')};await options.actions.reprint(42);assert.equal(s.q('[data-cc-print-dialog]').open,true);assert.match(s.q('[data-cc-print-dialog] iframe').src,/reimprimirCaja=42/);if(admin){await options.cancelInvoice({idRecibo:42,version:'cancel-v1'});assert.equal(s.calls.at(-1).a,'cobranza-anular');assert.equal(s.calls.at(-1).b.version,'cancel-v1');}}finally{s.dom.window.close()}}
+});
+
+test('segundo clic permite reimprimir al lector con selector de impresora sin cobrar',async()=>{
+ const s=setup(false);try{await s.open();const row=s.q('[data-cc-id="42"]');row.dispatchEvent(new s.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:80}));await tick();s.w.open=()=>{throw Error('No debe abrir otra ventana')};s.q('[data-cc-reprint]').click();assert.equal(s.q('[data-cc-print-dialog]').open,true);assert.equal(s.q('[data-cc-print-dialog] iframe').getAttribute('src'),'gestion.html?reimprimirCaja=42&soloImpresora=1&embed=caja-impresion');assert.equal(s.q('#cajaCobranzaContextMenu').hidden,true);assert.equal(s.calls.some(c=>c.b),false);assert.equal(s.q('[data-cc-id="42"]').getAttribute('aria-selected'),'true');}finally{s.dom.window.close()}
+});
+
+test('popup de impresion incrustado valida origen, bloquea cierre al imprimir y limpia iframe al terminar',async()=>{
+ const s=setup(false);try{await s.open();s.q('[data-cc-id="42"]').dispatchEvent(new s.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true}));await tick();s.q('[data-cc-reprint]').click();const popup=s.q('[data-cc-print-dialog]'),frame=popup.querySelector('iframe');
+ const message=(origin,type,extra={})=>s.w.dispatchEvent(new s.w.MessageEvent('message',{origin,source:frame.contentWindow,data:{type,...extra}}));
+ message('http://otro','corralon:caja-print-close');assert.equal(popup.open,true);message(s.w.location.origin,'corralon:caja-print-busy',{busy:true});assert.equal(popup.querySelector('button').disabled,true);const cancel=new s.w.Event('cancel',{cancelable:true});assert.equal(popup.dispatchEvent(cancel),false);
+ message(s.w.location.origin,'corralon:caja-print-busy',{busy:false});message(s.w.location.origin,'corralon:caja-print-close');assert.equal(popup.open,false);assert.equal(frame.getAttribute('src'),'about:blank');
+ }finally{s.dom.window.close()}
+});
+
+test('Enter y Tab en Paga con piden confirmar y solo cobran al aceptar',async()=>{
+ for(const key of ['Enter','Tab']){const s=setup();try{await s.open();let count=0;s.w.confirm=()=>{count++;return false};const input=s.q('[data-cc-tender]');input.value='10.000';input.dispatchEvent(new s.w.Event('input',{bubbles:true}));assert.equal(input.value,'$ 10.000');assert.match(s.q('[data-cc-change]').textContent,/9\.900,00/);
+ const press=()=>{const e=new s.w.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});input.dispatchEvent(e);assert.equal(e.defaultPrevented,true)};
+ press();await tick();assert.equal(count,1);assert.equal(s.calls.some(c=>c.a==='cobranza-pagada'),false);assert.match(input.value,/10\.000,00/);s.w.confirm=()=>true;press();await tick();assert.equal(s.calls.filter(c=>c.a==='cobranza-pagada').length,1);
+ }finally{s.dom.window.close()}}
+});
+test('moneda en vivo y al salir conserva miles y centavos sin dividir por mil',async()=>{
+ const s=setup();try{await s.open();const input=s.q('[data-cc-tender]');for(const [text,value] of [['10.000',10000],['10000',10000],['1.234.567,89',1234567.89],['10,50',10.5]]){input.value=text;input.dispatchEvent(new s.w.Event('input',{bubbles:true}));assert.equal(s.w.CorralonFunciones.parseLocaleNumber(input.value),value);input.dispatchEvent(new s.w.Event('blur'));assert.equal(s.w.CorralonFunciones.parseLocaleNumber(input.value),value);input.dispatchEvent(new s.w.Event('input',{bubbles:true}));assert.equal(s.w.CorralonFunciones.parseLocaleNumber(input.value),value);}
+ }finally{s.dom.window.close()}
+});
+
+
+test('Caja oculta en Sistema conserva Paga con y no consulta hasta volver',async()=>{
+ const s=setup();try{
+ await s.open();const input=s.q('[data-cc-tender]');input.value='$ 200';input.dispatchEvent(new s.w.Event('input',{bubbles:true}));
+ s.w.cajaSystemInactive=true;const before=s.calls.length;s.poll();await tick();assert.equal(s.calls.length,before);assert.equal(s.q('[data-cc-tender]').value,'$ 200');
+ s.w.cajaSystemInactive=false;s.poll();await tick();assert.ok(s.calls.length>before);assert.equal(s.q('[data-cc-tender]').value,'$ 200');
+ assert.equal(s.calls.some(call=>call.b),false);
+ }finally{s.w.close();}
+});

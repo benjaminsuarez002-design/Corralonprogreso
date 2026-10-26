@@ -126,27 +126,23 @@ Deno.serve(async (request) => {
     return json({ error: "Usuario o clave no validos" }, 401);
   }
 
-  const persistent = body.persistent === true;
-  const durationMs = persistent ? 30 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
-  const expiresAt = new Date(Date.now() + durationMs);
   const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
   const token = base64Url(tokenBytes);
   const tokenHash = await sha256(token);
 
-  await supabase.from("catalogo_editor_sesiones").delete().lt("expires_at", new Date().toISOString());
   const { error } = await supabase.from("catalogo_editor_sesiones").insert({
     token_hash: tokenHash,
     user_id: user.id,
     user_name: user.nombre,
     user_level: user.nivel,
-    expires_at: expiresAt.toISOString(),
+    expires_at: "infinity",
   });
   if (error) return json({ error: error.message }, 500);
 
   return json({
     ok: true,
     token,
-    expiresAt: expiresAt.getTime(),
+    expiresAt: null,
     user: { id: user.id, nombre: user.nombre, nivel: user.nivel },
   });
 });
