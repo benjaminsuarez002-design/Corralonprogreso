@@ -1785,6 +1785,10 @@
       if(options.fixedMenu){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,options.menuWidth||0),Math.max(1,window.innerWidth-16));menu.style.position='fixed';menu.style.top=rect.bottom+'px';menu.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';menu.style.width=width+'px';menu.style.minWidth=width+'px';menu.style.maxHeight=Math.max(80,Math.min(240,window.innerHeight-rect.bottom-10))+'px';}
       const query = reason === 'typing' || reason === 'typing-key' ? normalize(input.value) : '';
       matches = items.filter(item => !query || (options.match?options.match(item,query):normalize(item.searchText||item.label).includes(query)) || normalize(item.value) === query);
+      if(query&&typeof options.rank==='function'){
+        const ranks=new Map(matches.map(item=>[item,Number(options.rank(item,query))||0]));
+        matches.sort((a,b)=>ranks.get(a)-ranks.get(b));
+      }
       active = 0; menu.replaceChildren();
       const columns=options.columns||[],grid=columns.map(column=>`${column.width||100}px`).join(' '),gridWidth=columns.reduce((sum,column)=>sum+(column.width||100),20);
       function fillColumns(row,cells){row.style.cssText=`display:grid;grid-template-columns:${grid};min-width:${gridWidth}px;padding:6px 10px;white-space:nowrap;font-size:12px;cursor:pointer`;cells.forEach((value,index)=>{const cell=document.createElement('span');cell.textContent=String(value??'');cell.title=cell.textContent;cell.style.cssText=`overflow:hidden;text-overflow:ellipsis;padding:0 5px;text-align:${columns[index]?.align||'left'}`;row.append(cell);});}

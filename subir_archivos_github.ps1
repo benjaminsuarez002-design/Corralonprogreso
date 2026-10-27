@@ -40,7 +40,10 @@ function Run-Git {
     )
 
     $previousErrorAction = $ErrorActionPreference
+    $previousConsoleEncoding = [Console]::OutputEncoding
     try {
+        # Git escribe UTF-8; conservar tildes en nombres y manifiestos.
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
         # Git envia mensajes normales de fetch/push por stderr. No deben tratarse
         # como excepciones: el resultado real lo determina su codigo de salida.
         $ErrorActionPreference = 'Continue'
@@ -51,6 +54,7 @@ function Run-Git {
         }
         $exitCode = $LASTEXITCODE
     } finally {
+        [Console]::OutputEncoding = $previousConsoleEncoding
         $ErrorActionPreference = $previousErrorAction
     }
     if (-not $AllowFailure -and $exitCode -ne 0) {
@@ -181,6 +185,12 @@ function Get-ModifiedUploadPaths {
     param([string]$Root, $Baseline)
     $published = @{}
     foreach ($entry in @($Baseline.files)) { $published[[string]$entry.path] = [string]$entry.hash }
+    # El manifiesto puede ser parcial. Una entrada ausente no implica archivo nuevo.
+    $originFiles = @{}
+    $originTree = Run-Git -WorkingDirectory $Root -Arguments @('-c', 'core.quotepath=false', 'ls-tree', '-r', '--full-tree', 'origin/main')
+    foreach ($line in @($originTree.Output -split "`r?`n")) {
+        if ($line -match '^\d+ blob ([0-9a-f]+)\t(.+)$') { $originFiles[$Matches[2]] = $Matches[1] }
+    }
     $paths = @($published.Keys)
     $tracked = Run-Git -WorkingDirectory $Root -Arguments @('-c', 'core.quotepath=false', 'ls-files')
     $paths += @($tracked.Output -split "`r?`n" | Where-Object { $_ })
@@ -196,9 +206,15 @@ function Get-ModifiedUploadPaths {
         if ($path -match '\.(new|next)\.exe$') { continue }
         if ($path -eq 'actualizacion-version.json' -or $path -match '(^|/)(\.git|node_modules|\.codex[^/]*|\.wrangler|servidor|tmp|output|outputs|access_export)(/|$)|(^|/)\.env|\.private\.|api-key|service.?account|credentials|\.bak(\.|$)|\.(log|bin|pfx|p12|mdb|accdb)$') { continue }
         $full = Join-Path $Root $path
-        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { if ($published.ContainsKey($path)) { $path }; continue }
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { if ($published.ContainsKey($path) -and $originFiles.ContainsKey($path)) { $path }; continue }
         if (-not $published.ContainsKey($path) -and [IO.Path]::GetExtension($path) -notmatch '^\.(html|js|mjs|cjs|css|json|txt|ps1|cs|sql|svg|png|jpg|jpeg|webp|ico|woff2?|toml|md)$') { continue }
-        if (-not $published.ContainsKey($path) -or (Get-Sha256Hash -Path $full) -ne $published[$path]) { $path }
+        if ($published.ContainsKey($path) -and (Get-Sha256Hash -Path $full) -eq $published[$path]) { continue }
+        if ($originFiles.ContainsKey($path)) {
+            # Hash de lo que Git guardaria, aplicando sus reglas de fin de linea.
+            $blob = Run-Git -WorkingDirectory $Root -Arguments @('hash-object', "--path=$path", '--', $full)
+            if ($blob.Output -eq $originFiles[$path]) { continue }
+        }
+        $path
     }
 }
 
