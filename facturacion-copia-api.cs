@@ -3251,6 +3251,40 @@ internal static partial class FacturacionCopiaApi
             tx.Commit();return result;
         }
     }
+    // Read-only recovery check when a browser intent never acquired a server draft number.
+    private static object CardFiscalVerifyPending(SqlConnection c,Dictionary<string,object> input)
+    {
+        int source=RequiredId(Value(input,"idRecibo"),"la boleta X");Dictionary<string,object> invoice;
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){
+            var snapshot=CardFiscalSnapshot(c,tx,source);
+            if(Text(Value(input,"version"))!=ProviderVersion(snapshot))throw new InvalidOperationException("La boleta X cambió. Cerrá el aviso y volvé a abrirla para revisar sus datos.");
+            invoice=CardFiscalInvoice(c,tx,snapshot,input);tx.Commit();
+        }
+        Guid draft=CardFiscalDraftId(source);
+        if(File.Exists(PendingDraftPath(draft))||File.Exists(RecoveryPath(draft)))return new {ok=true,estado="incierto",detalle="El servidor conserva una solicitud fiscal. Volvé a verificar esa misma operación."};
+        int type=Id(invoice["idComprobante"]),point=Id(invoice["idPuntoVenta"]),customer=Id(invoice["idCliente"]);
+        DateTime date=DateTime.ParseExact(Text(invoice["fecha"]),"yyyy-MM-dd",CultureInfo.InvariantCulture);
+        decimal total=Number(Object(invoice["totales"])["total"]);
+        string cuit=Text(Scalar(c,null,"SELECT CUIT FROM dbo.Empresa WHERE IDEmpresa=1")).Replace("-","").Replace(" ","");
+        int afipType=Convert.ToInt32(Scalar(c,null,"SELECT IDTipoAFIP FROM dbo.TipoComprobantes WHERE IDComprob=@p0 AND EnLibroIVA=1",type));
+        var known=Rows(c,"SELECT NroFactura,IDCliente,Fecha,Total,NroFacNC,NroOTrab FROM dbo.FacturasATP WHERE IDEmp=1 AND IDComprob=@p0 AND NroFactura LIKE @p1 AND Confirmado=-1 AND LEN(CAE)=14",type,point.ToString("0000")+"-%");
+        string originalNumber=Text(Scalar(c,null,"SELECT NroFactura FROM dbo.FacturasATP WHERE IDRecibo=@p0",source));
+        foreach(var row in known)if(Text(row["NroFacNC"])==originalNumber||Text(row["NroOTrab"])==DraftMarker(draft)||(Number(row["IDCliente"])==customer&&Convert.ToDateTime(row["Fecha"]).Date==date.Date&&Math.Abs(Number(row["Total"])-total)<=.01m))
+            return new {ok=true,estado="incierto",detalle="Hay una factura en SQL que puede corresponder a este intento. Cerrá el aviso y revisá Ver factura emitida antes de continuar."};
+        var numbers=new HashSet<int>();foreach(var row in known){string n=Text(row["NroFactura"]);int sequence;if(n.Length>=8&&Int32.TryParse(n.Substring(n.Length-8),out sequence)&&sequence>0)numbers.Add(sequence);}
+        lock(FiscalGate){
+            int last=FiscalLastAuthorized(afipType,point,cuit);
+            if(last<0||last>100000)return new {ok=true,estado="incierto",detalle="La numeración requiere una revisión más amplia. No se habilitó otra emisión."};
+            var gaps=new List<int>();for(int n=1;n<=last;n++)if(!numbers.Contains(n))gaps.Add(n);
+            if(gaps.Count>20)return new {ok=true,estado="incierto",detalle="Hay más de 20 números fiscales sin respaldo en SQL. Se requiere revisión antes de reintentar."};
+            var client=Object(invoice["cliente"]);string documentType=Text(client["tipoDocumento"]),document=CustomerDocumentDigits(Text(client["numeroDocumento"]));int doc=documentType=="CUIT"?80:documentType=="DNI"?96:99;
+            foreach(int n in gaps){string number=point.ToString("0000")+"-"+n.ToString("00000000");try{
+                var authorized=FiscalConsult(afipType,point,number,cuit,date,doc,document,total);
+                if(authorized!=null)return new {ok=true,estado="incierto",detalle="ARCA tiene una autorización coincidente en "+number+" que no figura en SQL. No se pidió otro CAE; debe revisarse para recuperar la factura."};
+            }catch(FiscalMismatchException){/* This fiscal number belongs to a different date, document or amount. */}}
+            return new {ok=true,estado="reintentable",detalle="Se cruzó la numeración autorizada de ARCA con SQL y los números faltantes no corresponden a este intento. Se puede continuar con el mismo identificador."};
+        }
+    }
     private static object CardFiscalIssue(SqlConnection c,Dictionary<string,object> input)
     {
         int source=RequiredId(Value(input,"idRecibo"),"la boleta X");Dictionary<string,object> invoice;
@@ -3264,6 +3298,12 @@ internal static partial class FacturacionCopiaApi
     private static object CardSalesQuery(SqlConnection c,HttpListenerRequest request)
     {
         if(Text(request.QueryString["consulta"])=="opciones")return new {ok=true,tarjetas=Rows(c,"SELECT IDTarjeta id,[Descripción] nombre FROM dbo.Tarjetas WHERE Susp=0 ORDER BY [Descripción]")};
+        if(Text(request.QueryString["consulta"])=="factura-vinculada"){
+            int source=RequiredId(request.QueryString["idRecibo"],"la boleta X");
+            var original=Rows(c,"SELECT NroFactura FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND IDEmp=1 AND IDComprob=13 AND Confirmado=-1 AND Anulada=0",source);
+            if(original.Count!=1)throw new InvalidOperationException("No se encontró la boleta X original.");
+            return new {ok=true,facturas=Rows(c,"SELECT IDRecibo idRecibo,NroFactura numero FROM dbo.FacturasATP WHERE IDEmp=1 AND IDComprob IN(1,2) AND Confirmado=-1 AND Anulada=0 AND (NroOTrab=@p0 OR NroFacNC=@p1) ORDER BY Fecha,IDRecibo",DraftMarker(CardFiscalDraftId(source)),original[0]["NroFactura"])};
+        }
         if(Text(request.QueryString["consulta"])=="preparar-factura"){AssertPurchasePermission(request.QueryString["usuarioId"],"ventas_tarjeta",true);return CardFiscalPrepare(c,RequiredId(request.QueryString["idRecibo"],"la boleta X"));}
         DateTime from,to;
         if(!DateTime.TryParseExact(request.QueryString["desde"],"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out from)||!DateTime.TryParseExact(request.QueryString["hasta"],"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out to)||to<from||to>=DateTime.MaxValue.Date)throw new InvalidOperationException("Revisá las fechas Desde y Hasta.");
@@ -4088,7 +4128,7 @@ internal static partial class FacturacionCopiaApi
                     if(request.HttpMethod=="POST"){
                         if(!(request.ContentType??"").StartsWith("application/json",StringComparison.OrdinalIgnoreCase)||request.ContentLength64>10000)throw new InvalidOperationException("Solicitud inválida.");
                         string body;using(var reader=new StreamReader(request.InputStream,Encoding.UTF8))body=reader.ReadToEnd();if(body.Length>10000)throw new InvalidOperationException("Solicitud demasiado grande.");
-                        var input=Object(Json.DeserializeObject(body));AssertPurchasePermission(Text(Value(input,"usuarioId")),"ventas_tarjeta",true);Reply(context,200,Text(Value(input,"accion"))=="facturar"?CardFiscalIssue(connection,input):CardSalesUncheck(connection,input));return;
+                        var input=Object(Json.DeserializeObject(body));AssertPurchasePermission(Text(Value(input,"usuarioId")),"ventas_tarjeta",true);Reply(context,200,Text(Value(input,"accion"))=="verificar-pendiente"?CardFiscalVerifyPending(connection,input):Text(Value(input,"accion"))=="facturar"?CardFiscalIssue(connection,input):CardSalesUncheck(connection,input));return;
                     }
                 }
                 if (request.Url.AbsolutePath == "/recibos-cobro")
