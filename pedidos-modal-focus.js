@@ -27,7 +27,8 @@
   }
 
   function focusFirst(modal) {
-    const first = focusable(modal)[0] || modal.querySelector('.modal-card, .ranking-dialog');
+    const controls = focusable(modal);
+    const first = (matchMedia('(max-width:760px)').matches ? controls.find(element => !element.matches('input,textarea,select,[contenteditable="true"]')) : controls[0]) || modal.querySelector('.modal-card, .ranking-dialog');
     if (!first) return;
     if (first.tabIndex < 0 && !first.matches(focusSelector)) first.tabIndex = -1;
     first.focus({ preventScroll: true });
@@ -54,7 +55,7 @@
     active = current;
     if (current) {
       const origin = previous && previous !== current ? origins.get(previous) : null;
-      if (origin?.isConnected && current.contains(origin)) origin.focus({ preventScroll: true });
+      if (origin?.isConnected && current.contains(origin)) (matchMedia('(max-width:760px)').matches && origin.matches('input,textarea,select,[contenteditable="true"]') ? origin.blur() : origin.focus({ preventScroll: true }));
       else if (!current.contains(document.activeElement)) requestAnimationFrame(() => {
         if (top() === current && !current.contains(document.activeElement)) focusFirst(current);
       });
