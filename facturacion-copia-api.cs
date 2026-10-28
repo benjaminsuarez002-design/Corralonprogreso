@@ -52,9 +52,108 @@ internal static partial class FacturacionCopiaApi
         names.Sort(StringComparer.CurrentCultureIgnoreCase);
         return names;
     }
+    private static readonly object PrinterConfigGate = new object();
+    private static string PrinterConfigPath { get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "impresoras-config.json"); } }
+    private static Dictionary<string,object> ReadPrinterConfig() {
+        if(!File.Exists(PrinterConfigPath))return new Dictionary<string,object>{{"version",0},{"equipos",new Dictionary<string,object>()},{"puntosVenta",new Dictionary<string,object>()}};
+        return Object(Json.DeserializeObject(File.ReadAllText(PrinterConfigPath,Encoding.UTF8)));
+    }
+    private static void WritePrinterConfig(Dictionary<string,object> config) {
+        string temp=PrinterConfigPath+".tmp";File.WriteAllText(temp,Json.Serialize(config),new UTF8Encoding(false));
+        if(File.Exists(PrinterConfigPath))File.Replace(temp,PrinterConfigPath,null);else File.Move(temp,PrinterConfigPath);
+    }
+    private static void DiscoverPrinters(Dictionary<string,object> config,string id,string name,List<string> names,bool server) {
+        var machines=Object(Value(config,"equipos"));var machine=Object(Value(machines,id));
+        if(machine.Count==0){machine["nombre"]=name;machine["navegador"]=true;}
+        var printers=Object(Value(machine,"impresoras"));foreach(var pair in printers)Object(pair.Value)["disponible"]=false;
+        foreach(string printer in names){var row=Object(Value(printers,printer));if(row.Count==0)row["visible"]=!server||printer.IndexOf("POS",StringComparison.OrdinalIgnoreCase)>=0||printer.IndexOf("ticket",StringComparison.OrdinalIgnoreCase)>=0;row["disponible"]=true;printers[printer]=row;}
+        machine["impresoras"]=printers;machine["ultimaConexion"]=DateTime.UtcNow.ToString("o");machines[id]=machine;config["equipos"]=machines;
+    }
+    private static object PrinterPublicMachine(Dictionary<string,object> machine) {
+        return new{nombre=Value(machine,"nombre"),impresoras=Value(machine,"impresoras"),navegador=Value(machine,"navegador"),ultimaConexion=Value(machine,"ultimaConexion"),consultadoEl=Value(machine,"consultadoEl"),consulta=Value(machine,"respuesta"),remoto=Text(Value(machine,"claveHash")).Length>0};
+    }
+    private static string PrinterPoint(Dictionary<string,object> input,string fallback) {
+        int point=0;Int32.TryParse(input==null?fallback:Text(Value(input,"puntoVenta")),out point);return point>0?point.ToString(CultureInfo.InvariantCulture):"";
+    }
+    private static string PrinterSecret(string value){using(var sha=SHA256.Create())return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(value)));}
+    private static List<string> PrinterNames(object values){var names=new List<string>();foreach(object raw in PurchaseArray(values)){string name=Limited(raw,300,"Impresora");if(name.Length>0&&!names.Contains(name))names.Add(name);if(names.Count>100)throw new InvalidOperationException("Demasiadas impresoras.");}return names;}
+    private static Dictionary<string,object> PrinterView(Dictionary<string,object> config,string id,string point,bool admin){
+        var machines=Object(Value(config,"equipos"));var points=Object(Value(config,"puntosVenta"));var rules=Object(Value(points,point));string bound=Text(Value(rules,"equipo"));
+        var machine=Object(Value(machines,bound.Length>0?bound:id));
+        var result=new Dictionary<string,object>{{"ok",true},{"version",Value(config,"version")},{"puntoVenta",point},{"equipo",bound},{"puesto",PrinterPublicMachine(machine)},{"servidor",PrinterPublicMachine(Object(Value(machines,"servidor")))},{"reglas",rules}};
+        if(!admin){result["impresoras"]=TicketPrinters();result["disponibles"]=WindowsPrinters();}
+        return result;
+    }
+    private static void HandlePrinterSettings(HttpListenerContext context) {
+        try {
+            var request=context.Request;Dictionary<string,object> input=null;string action="";
+            if(request.HttpMethod=="POST"){
+                if(!(request.ContentType??"").StartsWith("application/json")||request.ContentLength64<0||request.ContentLength64>100000)throw new InvalidOperationException("Configuración de impresoras inválida.");
+                using(var reader=new StreamReader(request.InputStream,Encoding.UTF8))input=Object(Json.DeserializeObject(reader.ReadToEnd()));action=Text(Value(input,"accion"));
+                if(action!="guardar-punto"&&action!="consultar-punto"&&action!="registrar"&&action!="conectar"&&action!="sondeo"&&action!="respuesta")throw new InvalidOperationException("Acción de impresoras inválida.");
+            }
+            bool admin=(input==null&&request.QueryString["configuracion"]=="1")||action=="guardar-punto"||action=="consultar-punto";
+            if(admin)AssertPurchasePermission(input==null?request.QueryString["usuarioId"]:Text(Value(input,"usuarioId")),"facturacion",false,false,true);
+            if(action=="conectar"){AssertPurchasePermission(Text(Value(input,"usuarioId")),"facturacion");int bindPoint=0;Int32.TryParse(Text(Value(input,"puntoVenta")),out bindPoint);using(var connection=Connect())if(Rows(connection,"SELECT IDDepósito FROM dbo.[Depósitos] WHERE IDDepósito=@p0 AND IDDepósito>1",bindPoint).Count==0)throw new InvalidOperationException("El punto de venta no existe.");}
+            string id=Limited(input==null?request.QueryString["puesto"]:Value(input,"puesto"),180,"Equipo"),point=PrinterPoint(input,request.QueryString["puntoVenta"]);
+            string waiting="",target="";Dictionary<string,object> result;
+            lock(PrinterConfigGate){
+                var config=ReadPrinterConfig();var machines=Object(Value(config,"equipos"));
+                if(action!="sondeo"&&action!="respuesta")DiscoverPrinters(config,"servidor",Environment.MachineName+" · Servidor",WindowsPrinters(),true);
+                if(action=="conectar"||action=="registrar"){
+                    if(String.IsNullOrWhiteSpace(id)||!id.StartsWith("pc:"))throw new InvalidOperationException("Identificador de equipo inválido.");
+                    var names=PrinterNames(Value(input,"impresoras"));DiscoverPrinters(config,id,Limited(Value(input,"nombre"),120,"Nombre del equipo"),names,false);
+                    if(action=="conectar"){
+                        if(point.Length==0)throw new InvalidOperationException("Elegí el punto de venta de esta PC.");
+                        string key=Text(Value(input,"clave"));if(key.Length<32||key.Length>100)throw new InvalidOperationException("Clave del conector inválida.");
+                        var machine=Object(Value(machines,id));string previous=Text(Value(machine,"claveHash"));
+                        if(previous.Length>0&&previous!=PrinterSecret(key))throw new InvalidOperationException("El conector de este equipo tiene otra clave. Pedí al administrador que revise el equipo.");
+                        machine["claveHash"]=PrinterSecret(key);machine["consultadoEl"]=DateTime.UtcNow.ToString("o");
+                        var points=Object(Value(config,"puntosVenta"));var rules=Object(Value(points,point));if(Text(Value(rules,"equipo"))!=id)config["version"]=Convert.ToInt32(Value(config,"version"))+1;rules["equipo"]=id;points[point]=rules;config["puntosVenta"]=points;
+                    }
+                }
+                if(action=="sondeo"||action=="respuesta"){
+                    var machine=Object(Value(machines,id));if(Text(Value(machine,"claveHash"))!=PrinterSecret(Text(Value(input,"clave"))))throw new InvalidOperationException("Conector no autorizado.");
+                    DateTime seen;bool saveHeartbeat=!DateTime.TryParse(Text(Value(machine,"ultimaConexion")),null,DateTimeStyles.RoundtripKind,out seen)||(DateTime.UtcNow-seen.ToUniversalTime()).TotalSeconds>=60;
+                    if(saveHeartbeat||action=="respuesta")machine["ultimaConexion"]=DateTime.UtcNow.ToString("o");
+                    if(action=="respuesta"){
+                        string query=Text(Value(input,"consulta"));if(query!=Text(Value(machine,"solicitud")))throw new InvalidOperationException("La consulta de impresoras cambió; consultá otra vez.");
+                        DiscoverPrinters(config,id,Text(Value(machine,"nombre")),PrinterNames(Value(input,"impresoras")),false);machine["respuesta"]=query;machine["consultadoEl"]=DateTime.UtcNow.ToString("o");
+                    }
+                    if(saveHeartbeat||action=="respuesta")WritePrinterConfig(config);Reply(context,200,new{ok=true,consulta=Text(Value(machine,"solicitud"))!=Text(Value(machine,"respuesta"))?Text(Value(machine,"solicitud")):""});return;
+                }
+                if(action=="guardar-punto"){
+                    if(point.Length==0)throw new InvalidOperationException("Elegí un punto de venta.");
+                    if(Text(Value(input,"version"))!=Text(Value(config,"version")))throw new InvalidOperationException("Otro administrador cambió las impresoras. Consultá nuevamente antes de guardar.");
+                    var points=Object(Value(config,"puntosVenta"));var rules=Object(Value(points,point));
+                    if(Text(Value(rules,"equipo")).Length==0)throw new InvalidOperationException("Ese punto de venta todavía no tiene un equipo conectado.");
+                    var next=new Dictionary<string,object>();foreach(var pair in Object(Value(input,"locales")))if(pair.Value is bool)next[Limited(pair.Key,300,"Impresora")]=pair.Value;rules["locales"]=next;
+                    next=new Dictionary<string,object>();foreach(var pair in Object(Value(input,"servidor")))if(pair.Value is bool)next[Limited(pair.Key,300,"Impresora")]=pair.Value;rules["servidor"]=next;
+                    rules["navegador"]=Value(input,"navegador") is bool?Value(input,"navegador"):true;points[point]=rules;config["puntosVenta"]=points;
+                    config["version"]=Convert.ToInt32(Value(config,"version"))+1;config["actualizadoPor"]=Text(Value(input,"usuarioId"));config["actualizadoEl"]=DateTime.UtcNow.ToString("o");
+                }
+                if(action=="consultar-punto"){
+                    if(point.Length==0)throw new InvalidOperationException("Elegí un punto de venta.");
+                    var rules=Object(Value(Object(Value(config,"puntosVenta")),point));target=Text(Value(rules,"equipo"));var machine=Object(Value(machines,target));
+                    if(target.Length==0||Text(Value(machine,"claveHash")).Length==0)throw new InvalidOperationException("Este punto todavía no tiene el conector remoto asociado. Actualizá el conector en esa PC y abrí Facturación eligiendo este punto de venta una vez.");
+                    waiting=Guid.NewGuid().ToString("N");machine["solicitud"]=waiting;
+                }
+                WritePrinterConfig(config);result=PrinterView(config,id,point,admin);
+            }
+            if(waiting.Length>0){
+                bool completed=false;for(int attempt=0;attempt<48&&!completed;attempt++){Thread.Sleep(250);lock(PrinterConfigGate){var config=ReadPrinterConfig();completed=Text(Value(Object(Value(Object(Value(config,"equipos")),target)),"respuesta"))==waiting;result=PrinterView(config,id,point,true);}}
+                result["consultaCompletada"]=completed;result["mensaje"]=completed?"Lista consultada en el equipo del punto de venta.":"El equipo no respondió a tiempo. Se muestra la última lista recibida; verificá que esté encendido y tenga el conector actualizado.";
+            }
+            if(admin&&input==null&&request.QueryString["puntos"]=="1")using(var c=Connect())result["puntosVenta"]=Rows(c,"SELECT IDDepósito id,[Descripción] nombre FROM dbo.[Depósitos] WHERE IDDepósito>1 ORDER BY IDDepósito");
+            Reply(context,200,result);
+        }catch(InvalidOperationException error){Reply(context,400,new{ok=false,error=error.Message});}
+        catch(Exception){Reply(context,500,new{ok=false,error="No se pudo consultar o guardar la configuración de impresoras."});}
+    }
+    private static List<string> WindowsPrinters(){var names=new List<string>();foreach(string name in PrinterSettings.InstalledPrinters)names.Add(name);names.Sort(StringComparer.CurrentCultureIgnoreCase);return names;}
+
     private static void PrintRawTicket(string printer, string pngBase64, string jobName)
     {
-        if (!TicketPrinters().Contains(printer))
+        if (!WindowsPrinters().Contains(printer))
             throw new InvalidOperationException("La ticketera elegida no está instalada en esta PC.");
         // Una cola local con puerto UNC añade un monitor intermedio que puede
         // quedar bloqueado. Abrir directamente la impresora compartida evita
@@ -909,10 +1008,10 @@ internal static partial class FacturacionCopiaApi
         var accounts=RowsTx(c,tx,"SELECT IDCliente AS id,[RazónSocial] AS nombre,CUIT AS documento,ISNULL(IDTipoDoc,0) AS idTipoDoc,CONVERT(int,ISNULL(Suspendido,0)) AS suspendido,ISNULL(SaldoCC,0) AS saldoInicial,ISNULL(ImpCred,0) AS limiteCredito,CONVERT(nvarchar(max),Nota) AS nota FROM dbo.Clientes WITH(UPDLOCK,HOLDLOCK) WHERE IDCliente IN("+numbers+") ORDER BY IDCliente");
         if(accounts.Count!=ids.Count)throw new CustomerMergeRejected("Una de las cuentas ya no existe.");
         int principal=requestedPrincipal;
-        if(principal==0){var candidate=accounts.Find(row=>InvoiceValueNumber(row["suspendido"])==0);if(candidate!=null)principal=Convert.ToInt32(candidate["id"]);}
+        if(principal==0){var candidate=accounts.Find(row=>InvoiceValueNumber(row["suspendido"])==0)??accounts[0];principal=Convert.ToInt32(candidate["id"]);}
         if(!ids.Contains(principal))throw new CustomerMergeRejected("La cuenta principal debe estar entre las seleccionadas.");
         var target=accounts.Find(row=>Convert.ToInt32(row["id"])==principal);
-        if(InvoiceValueNumber(target["suspendido"])!=0)throw new CustomerMergeRejected("La cuenta principal debe estar activa.");
+        // Una cuenta suspendida puede ser principal; se reactiva solo al confirmar la unificación.
         decimal totalBalance=0,initialBalance=0;
         foreach(var account in accounts){int accountId=Convert.ToInt32(account["id"]),destination=CustomerMergeDestination(c,tx,accountId);if(destination>0)throw new CustomerMergeRejected("La cuenta ID "+accountId+" ya se unificó en ID "+destination+". Usá la cuenta principal.");decimal balance=CollectionBalance(c,tx,accountId,1);account["saldoActual"]=balance;account["movimientos"]=0;totalBalance+=balance;initialBalance+=InvoiceValueNumber(account["saldoInicial"]);}
         var refs=RowsTx(c,tx,"SELECT s.name AS esquema,t.name AS tabla,c.name AS columna,c.is_identity,c.is_computed,ty.name AS tipo,QUOTENAME(s.name)+'.'+QUOTENAME(t.name) AS objeto,QUOTENAME(c.name) AS campo,t.object_id AS objetoId FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id JOIN sys.columns c ON c.object_id=t.object_id JOIN sys.types ty ON ty.user_type_id=c.user_type_id WHERE t.object_id<>OBJECT_ID('dbo.Clientes') AND (c.name='IDCliente' OR EXISTS(SELECT 1 FROM sys.foreign_key_columns fk WHERE fk.parent_object_id=t.object_id AND fk.parent_column_id=c.column_id AND fk.referenced_object_id=OBJECT_ID('dbo.Clientes'))) ORDER BY s.name,t.name,c.column_id");
@@ -951,7 +1050,7 @@ internal static partial class FacturacionCopiaApi
             if(Text(Value(input,"version"))!=ProviderVersion(snapshot))throw new CustomerMergeRejected("Las cuentas o sus movimientos cambiaron. Volvé a revisar la unificación antes de confirmar.");
             var sources=ids.FindAll(id=>id!=principal);string sourceList=CustomerMergeIdList(sources);var moved=new List<object>();
             foreach(var reference in (List<Dictionary<string,object>>)snapshot["referencias"]){int expected=Convert.ToInt32(reference["aTrasladar"]);if(expected==0)continue;int updated=Execute(c,tx,"UPDATE "+Text(reference["objeto"])+" SET "+Text(reference["campo"])+"=@p0 WHERE "+Text(reference["campo"])+" IN("+sourceList+")",principal);if(updated!=expected)throw new InvalidOperationException("No coincide la cantidad de movimientos trasladados de "+Text(reference["tabla"])+".");moved.Add(new {tabla=reference["tabla"],columna=reference["columna"],movimientos=updated});}
-            Execute(c,tx,"UPDATE dbo.Clientes SET SaldoCC=@p1 WHERE IDCliente=@p0",principal,snapshot["saldoInicialTotal"]);
+            Execute(c,tx,"UPDATE dbo.Clientes SET SaldoCC=@p1,Suspendido=0 WHERE IDCliente=@p0",principal,snapshot["saldoInicialTotal"]);
             foreach(int source in sources){Execute(c,tx,"UPDATE dbo.Clientes SET SaldoCC=0,Suspendido=1,Nota=ISNULL(CONVERT(nvarchar(max),Nota),'')+@p1 WHERE IDCliente=@p0",source," [UNIFICADO EN CLIENTE "+principal+"; OPERACION "+operation.ToString("D")+"]");Execute(c,tx,"UPDATE dbo.WebClientesUnificados SET Principal=@p1 WHERE Principal=@p0;INSERT dbo.WebClientesUnificados(Origen,Principal,Operacion,FechaUtc) VALUES(@p0,@p1,@p2,SYSUTCDATETIME())",source,principal,operation);}
             decimal actualBalance=CollectionBalance(c,tx,principal,1);
             if(Math.Abs(actualBalance-InvoiceValueNumber(snapshot["saldoFinal"]))>.01m)throw new InvalidOperationException("El saldo resultante no coincide con la suma de las cuentas. No se confirmó la unificación.");
@@ -2210,8 +2309,9 @@ internal static partial class FacturacionCopiaApi
     private static string InvoiceValuesVersion(SqlConnection c, SqlTransaction tx, int receipt)
     {
         return ProviderVersion(new Dictionary<string,object> {
-            {"cabecera", RowsTx(c,tx,"SELECT IDRecibo,Confirmado,Anulada,IDCliente,IDComprob,Total,TotalME,ImpAtoDto,TotalEF,TotalEC,TotalCC,TotalCH FROM dbo.FacturasATP WITH(HOLDLOCK) WHERE IDRecibo=@p0",receipt)},
+            {"cabecera", RowsTx(c,tx,"SELECT IDRecibo,Confirmado,Anulada,IDCliente,IDComprob,Total,TotalME,ImpAtoDto,TotalEF,TotalEC,TotalCC,TotalCH,Pagada,ActStock,EnInfVtas,IDSuc,CAE,CUIT,ApeYNom,IDTipoDocFis,IDTipoIVA FROM dbo.FacturasATP WITH(HOLDLOCK) WHERE IDRecibo=@p0",receipt)},
             {"baseArticulos", RowsTx(c,tx,"SELECT SUM(Importe) AS importe,COUNT(*) AS filas FROM dbo.FacturasATS WITH(HOLDLOCK) WHERE IDRecibo=@p0",receipt)},
+            {"cantidades",RowsTx(c,tx,"SELECT IDArt,SUM(Cantidad) AS cantidad FROM dbo.FacturasATS WITH(HOLDLOCK) WHERE IDRecibo=@p0 GROUP BY IDArt ORDER BY IDArt",receipt)},
             {"valores", RowsTx(c,tx,"SELECT * FROM dbo.FacturasTSVal WITH(HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY Orden",receipt)} });
     }
     private static decimal InvoiceValueNumber(object value) { return value==null || value==DBNull.Value ? 0m : Number(value); }
@@ -2226,15 +2326,64 @@ internal static partial class FacturacionCopiaApi
                 "; ajuste cargado: " + valuesAdjustment.ToString("N2",CultureInfo.GetCultureInfo("es-AR")) + ". Reasigná el ajuste entre los medios de pago antes de guardar.";
         return "";
     }
+    private static bool InvoiceHeaderFlag(object value){return value is bool?(bool)value:InvoiceValueNumber(value)!=0;}
+    private static Dictionary<string,object> InvoiceHeaderChanges(SqlConnection c,SqlTransaction tx,int receipt,Dictionary<string,object> input,Dictionary<string,object> header) {
+        var edits=Object(Value(input,"cabecera"));if(edits.Count==0)return edits;
+        AssertPurchasePermission(Text(Value(input,"usuarioId")),"facturacion",false,true);
+        foreach(var pair in edits)if(Array.IndexOf(new[]{"idCliente","completo","actualizaStock","enInformeVentas"},pair.Key)<0)throw new InvalidOperationException("Campo de boleta no editable: "+pair.Key);
+        foreach(string key in new[]{"completo","actualizaStock","enInformeVentas"})if(edits.ContainsKey(key)&&!(edits[key] is bool))throw new InvalidOperationException("Estado inválido para "+key+".");
+        var result=new Dictionary<string,object>(edits);int original=Convert.ToInt32(InvoiceValueNumber(Value(header,"IDCliente")));
+        int customer=edits.ContainsKey("idCliente")?RequiredId(Value(edits,"idCliente"),"el cliente"):original;result["idCliente"]=customer;
+        if(customer!=original){
+            var customers=CustomerDetail(c,customer,tx);if(customers.Count!=1||InvoiceHeaderFlag(Value(customers[0],"suspendido")))throw new InvalidOperationException("El cliente no existe o está suspendido.");
+            if(CustomerMergeDestination(c,tx,customer)>0)throw new InvalidOperationException("La cuenta elegida fue unificada. Elegí la cuenta principal.");
+            if(InvoiceValueNumber(Scalar(c,tx,"SELECT COUNT(*) FROM dbo.RecibosXTSFac f WITH(HOLDLOCK) JOIN dbo.RecibosXTP r WITH(HOLDLOCK) ON r.IDRecibo=f.IDRecibo WHERE f.IDFactura=@p0 AND r.Anulado=0 AND r.IDCliente<>@p1",receipt,customer))>0)throw new InvalidOperationException("La boleta tiene recibos de cobro de otro cliente. Resolvé esos recibos o unificá las cuentas antes de cambiar el cliente.");
+            var client=customers[0];bool fiscal=System.Text.RegularExpressions.Regex.IsMatch(Text(Value(header,"CAE")),@"^\d{14}$");
+            if(fiscal&&CustomerDocumentDigits(Text(Value(client,"documento")))!=CustomerDocumentDigits(Text(Value(header,"CUIT"))))throw new InvalidOperationException("La factura tiene CAE. Solo se puede vincular a otra cuenta del mismo documento; los datos autorizados no se modifican.");
+            result["cliente"]=client;result["conservarDatosFiscales"]=fiscal;
+        }
+        return result;
+    }
+    private static decimal InvoiceHeaderStockTarget(object current,object quantity,decimal multiplier){return StoredStock((current==null||current==DBNull.Value?0m:StockNumber(current))+(quantity==null||quantity==DBNull.Value?0m:StockNumber(quantity))*multiplier);}
+    private static void InvoiceApplyHeaderChanges(SqlConnection c,SqlTransaction tx,int receipt,Dictionary<string,object> changes,Dictionary<string,object> header) {
+        if(changes.Count==0)return;
+        int customer=Convert.ToInt32(changes["idCliente"]);bool stock=changes.ContainsKey("actualizaStock")?Convert.ToBoolean(changes["actualizaStock"]):InvoiceHeaderFlag(Value(header,"ActStock"));
+        bool complete=changes.ContainsKey("completo")?Convert.ToBoolean(changes["completo"]):InvoiceHeaderFlag(Value(header,"Pagada"));
+        bool report=changes.ContainsKey("enInformeVentas")?Convert.ToBoolean(changes["enInformeVentas"]):InvoiceHeaderFlag(Value(header,"EnInfVtas"));
+        if(stock!=(InvoiceHeaderFlag(Value(header,"ActStock")))){
+            var types=RowsTx(c,tx,"SELECT IDTipoMovStock,StkPor FROM dbo.TipoComprobantes WITH(HOLDLOCK) WHERE IDComprob=@p0",Value(header,"IDComprob"));
+            decimal direction=types.Count==1&&InvoiceValueNumber(Value(types[0],"IDTipoMovStock"))>0?InvoiceValueNumber(Value(types[0],"StkPor")):0;
+            if(direction==0&&stock)throw new InvalidOperationException("Este tipo de comprobante no genera movimientos de stock.");
+            if(direction!=0){
+                int branch=RequiredId(Value(header,"IDSuc"),"la sucursal de la boleta");decimal multiplier=direction*(stock?1m:-1m);
+                var articles=RowsTx(c,tx,"SELECT d.IDArt,SUM(d.Cantidad) AS Cantidad,MAX(CONVERT(int,ISNULL(a.EnStock,0))) AS EnStock FROM dbo.FacturasATS d WITH(HOLDLOCK) LEFT JOIN dbo.[Artículos] a WITH(HOLDLOCK) ON a.IDArt=d.IDArt WHERE d.IDRecibo=@p0 GROUP BY d.IDArt ORDER BY d.IDArt",receipt);
+                foreach(var article in articles){
+                    string id=Text(Value(article,"IDArt"));var stocks=RowsTx(c,tx,"SELECT StockAct FROM dbo.ArtsStock WITH(UPDLOCK,HOLDLOCK) WHERE IDArt=@p0 AND IDSuc=@p1",id,branch);
+                    if(stocks.Count==0&&InvoiceValueNumber(Value(article,"EnStock"))==0)continue;
+                    if(stocks.Count!=1)throw new InvalidOperationException("Falta un registro de stock único para "+id+" en la sucursal de la boleta.");
+                    decimal expected=InvoiceHeaderStockTarget(Value(stocks[0],"StockAct"),Value(article,"Cantidad"),multiplier);
+                    if(Execute(c,tx,"UPDATE dbo.ArtsStock SET StockAct=@p0 WHERE IDArt=@p1 AND IDSuc=@p2",expected,id,branch)!=1||!StockMatches(Scalar(c,tx,"SELECT StockAct FROM dbo.ArtsStock WHERE IDArt=@p0 AND IDSuc=@p1",id,branch),expected))throw new InvalidOperationException("No se pudo verificar el ajuste de stock de "+id+".");
+                }
+            }
+        }
+        if(changes.ContainsKey("cliente")){
+            var client=Object(changes["cliente"]);
+            if(Convert.ToBoolean(changes["conservarDatosFiscales"]))Execute(c,tx,"UPDATE dbo.FacturasATP SET IDCliente=@p0 WHERE IDRecibo=@p1",customer,receipt);
+            else Execute(c,tx,"UPDATE dbo.FacturasATP SET IDCliente=@p0,ApeYNom=@p1,CUIT=@p2,IDTipoDocFis=@p3,IDTipoIVA=@p4,[Dirección]=@p5,[Teléfono]=@p6 WHERE IDRecibo=@p7",customer,Limited(Upper(Value(client,"nombre")),100,"Nombre del cliente"),Limited(Value(client,"documento"),13,"Documento"),Value(client,"idTipoDoc"),Value(client,"idTipoIva"),Limited(Value(client,"direccion"),100,"Dirección"),Limited(Value(client,"telefono"),50,"Teléfono"),receipt);
+        }
+        if(Execute(c,tx,"UPDATE dbo.FacturasATP SET Pagada=@p0,ActStock=@p1,EnInfVtas=@p2 WHERE IDRecibo=@p3",complete,stock?-1:0,report,receipt)!=1)throw new InvalidOperationException("No se pudieron guardar los datos de la boleta.");
+    }
+
     private static object InvoiceValuesSave(SqlConnection c,Dictionary<string,object> input) {
         using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){var result=InvoiceValuesSaveCore(c,tx,input);tx.Commit();return result;}
     }
     private static object InvoiceValuesSaveCore(SqlConnection c,SqlTransaction tx,Dictionary<string,object> input) {
         int receipt=RequiredId(Value(input,"idRecibo"),"la boleta");var edits=PurchaseArray(Value(input,"valores"));
-            var headers=RowsTx(c,tx,"SELECT IDCliente,IDComprob,Confirmado,Anulada,Total FROM dbo.FacturasATP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0",receipt);
+            var headers=RowsTx(c,tx,"SELECT IDCliente,IDComprob,Confirmado,Anulada,Total,Pagada,ActStock,EnInfVtas,IDSuc,CAE,CUIT FROM dbo.FacturasATP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0",receipt);
             if(headers.Count!=1 || InvoiceValueNumber(Value(headers[0],"Confirmado"))==0 || InvoiceValueNumber(Value(headers[0],"Anulada"))!=0)throw new InvalidOperationException("La boleta debe estar confirmada y sin anular.");
             if(Array.IndexOf(new[]{1,2,5,6,7,8,13,29,43},Convert.ToInt32(InvoiceValueNumber(Value(headers[0],"IDComprob"))))<0)throw new InvalidOperationException("Este comprobante no admite edición desde Facturación.");
             if(Text(Value(input,"version"))!=InvoiceValuesVersion(c,tx,receipt))throw new InvalidOperationException("La boleta cambió en otro equipo. Cerrá y volvé a consultar antes de guardar.");
+            var headerChanges=InvoiceHeaderChanges(c,tx,receipt,input,headers[0]);int targetCustomer=headerChanges.Count>0?Convert.ToInt32(headerChanges["idCliente"]):Convert.ToInt32(InvoiceValueNumber(Value(headers[0],"IDCliente")));
             var stored=RowsTx(c,tx,"SELECT Orden,IDTipoPago,IDTarjeta,Cuotas,Importe,ImpRec,Coef,ImpEnt,Concepto,FechaVto,IDMovBco,IDRec FROM dbo.FacturasTSVal WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 ORDER BY Orden",receipt);
             if(edits.Count<1 || edits.Count>100)throw new InvalidOperationException("Ingresá entre 1 y 100 valores recibidos.");
             decimal cash=0,card=0,account=0,bank=0,valuesBase=0,valuesAdjustment=0;var seen=new HashSet<int>();var prepared=new List<object[]>();
@@ -2264,7 +2413,7 @@ internal static partial class FacturacionCopiaApi
                 else
                 {
                     if(cardId!=0 || installments!=0)throw new InvalidOperationException("Este tipo de valor no admite tarjeta ni cuotas.");
-                    if(cls==6){if(InvoiceValueNumber(Value(headers[0],"IDCliente"))<=1)throw new InvalidOperationException("Cuenta corriente requiere un cliente registrado.");account+=amount;}else cash+=amount;
+                    if(cls==6){if(targetCustomer<=1)throw new InvalidOperationException("Cuenta corriente requiere un cliente registrado.");account+=amount;}else cash+=amount;
                 }
                 string description=Limited(Value(edit,"descripcion"),30,"Concepto");
                 prepared.Add(new object[]{order,kind,cardId,installments,baseAmount,fee,amount,coefficient,description});
@@ -2289,6 +2438,7 @@ internal static partial class FacturacionCopiaApi
             }
             decimal sign=InvoiceValueNumber(Value(headers[0],"Total"))<0?-1m:1m;
             Execute(c,tx,"UPDATE dbo.FacturasATP SET TotalEF=@p0,TotalEC=@p1,TotalCC=@p2,TotalCH=@p3 WHERE IDRecibo=@p4",cash*sign,card*sign,account*sign,bank*sign,receipt);
+        InvoiceApplyHeaderChanges(c,tx,receipt,headerChanges,headers[0]);
         return new {ok=true};
     }
     private static string ProviderVersion(Dictionary<string, object> row)
@@ -4082,12 +4232,7 @@ internal static partial class FacturacionCopiaApi
             catch (Exception) { Reply(context, 500, new { ok = false, error = "No se pudieron leer los borradores fiscales guardados en esta PC." }); }
             return;
         }
-        if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/impresoras")
-        {
-            try { Reply(context, 200, new { ok = true, impresoras = TicketPrinters() }); }
-            catch (Exception) { Reply(context, 500, new { ok = false, error = "No se pudieron consultar las ticketeras de Windows." }); }
-            return;
-        }
+        if ((request.HttpMethod == "GET" || request.HttpMethod == "POST") && request.Url.AbsolutePath == "/impresoras") { HandlePrinterSettings(context); return; }
         try
         {
             using (var connection = Connect())
@@ -4494,7 +4639,7 @@ internal static partial class FacturacionCopiaApi
                 {
                     int receipt = Id(request.QueryString["id"]);
                     using(var tx=connection.BeginTransaction(IsolationLevel.Serializable)) {
-                    var header = RowsTx(connection,tx, "SELECT IDRecibo AS idRecibo,NroFactura AS numero,Fecha AS fecha,CONVERT(varchar(10),Fecha,23) AS fechaComprobante,CONVERT(varchar(19),FechaYHora,126) AS fechaHora,IDComprob AS idComprobante,IDDepósito AS idPuntoVenta,Confirmado AS confirmado,Anulada AS anulada,Total AS total,TotalME AS totalAbsoluto,IDCliente AS idCliente,ApeYNom AS cliente,CUIT AS documento,CAE AS cae,CASE WHEN LEN(CodBarra)=40 THEN SUBSTRING(CodBarra,32,8) ELSE '' END AS caeExpiry,NroFacNC AS facturaAsociada,IDVend AS vendedor,IDSuc AS sucursal,Impresa AS impresa,ActStock AS stockActualizado,IDTipoIVA AS idTipoIva,IDTipoDocFis AS idTipoDoc,[Dirección] AS direccion,[Teléfono] AS telefono,Nota AS nota,IDOper AS operador,SubTot1 AS neto21,ImpIVA21 AS iva21,SubTot2 AS neto105,ImpIVA105 AS iva105,SubTSDto AS subtotalSinDto,SubTotal AS gravado,ImpIVA1 AS importeIva,TotalEF AS efectivo,TotalEC AS tarjeta,TotalCC AS cuentaCorriente,TotalCH AS cheque,CONVERT(varchar(10),FechaPriVto,23) AS vencimiento FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND IDComprob IN (1,2,5,6,7,8,13,29,43)", receipt);
+                    var header = RowsTx(connection,tx, "SELECT IDRecibo AS idRecibo,NroFactura AS numero,Fecha AS fecha,CONVERT(varchar(10),Fecha,23) AS fechaComprobante,CONVERT(varchar(19),FechaYHora,126) AS fechaHora,IDComprob AS idComprobante,IDDepósito AS idPuntoVenta,Confirmado AS confirmado,Anulada AS anulada,Total AS total,TotalME AS totalAbsoluto,IDCliente AS idCliente,ApeYNom AS cliente,CUIT AS documento,CAE AS cae,CASE WHEN LEN(CodBarra)=40 THEN SUBSTRING(CodBarra,32,8) ELSE '' END AS caeExpiry,NroFacNC AS facturaAsociada,IDVend AS vendedor,IDSuc AS sucursal,Impresa AS impresa,ActStock AS stockActualizado,Pagada AS Completo,IDTipoIVA AS idTipoIva,IDTipoDocFis AS idTipoDoc,[Dirección] AS direccion,[Teléfono] AS telefono,Nota AS nota,IDOper AS operador,SubTot1 AS neto21,ImpIVA21 AS iva21,SubTot2 AS neto105,ImpIVA105 AS iva105,SubTSDto AS subtotalSinDto,SubTotal AS gravado,ImpIVA1 AS importeIva,TotalEF AS efectivo,TotalEC AS tarjeta,TotalCC AS cuentaCorriente,TotalCH AS cheque,CONVERT(varchar(10),FechaPriVto,23) AS vencimiento FROM dbo.FacturasATP WHERE IDRecibo=@p0 AND IDComprob IN (1,2,5,6,7,8,13,29,43)", receipt);
                     if (header.Count != 1) { Reply(context, 404, new { ok = false, error = "El comprobante no existe en SQL." }); return; }
                     header[0]["totalArticulos"] = Math.Abs(InvoiceValueNumber(Scalar(connection,tx,"SELECT SUM(Importe) FROM dbo.FacturasATS WITH(HOLDLOCK) WHERE IDRecibo=@p0",receipt)));
                     header[0]["ajusteEmitido"] = Math.Abs(InvoiceValueNumber(header[0]["total"])) - InvoiceValueNumber(header[0]["totalArticulos"]);

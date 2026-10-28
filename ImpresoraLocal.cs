@@ -120,6 +120,43 @@ internal static class ImpresoraLocal
         }
     }
 
+    private static readonly object RemoteConfigGate = new object();
+    private static readonly string RemoteFile=Path.Combine(Folder,"impresora-puesto.json");
+    private static readonly string RemoteKeyFile=Path.Combine(Folder,"impresora-remota.key");
+    private static int remoteBusy;
+    private static string registeredRemote="";
+    private static string PrinterMachineId {get{return "pc:"+Environment.MachineName+"|"+Environment.UserName;}}
+    private static string RemoteSecret(){lock(RemoteConfigGate){Directory.CreateDirectory(Folder);if(!File.Exists(RemoteKeyFile))File.WriteAllText(RemoteKeyFile,Guid.NewGuid().ToString("N")+Guid.NewGuid().ToString("N"));return File.ReadAllText(RemoteKeyFile).Trim();}}
+    private static Dictionary<string,object> RemoteSettings(){lock(RemoteConfigGate){return File.Exists(RemoteFile)?Json.DeserializeObject(File.ReadAllText(RemoteFile,Encoding.UTF8)) as Dictionary<string,object>:null;}}
+    private static Dictionary<string,object> RemoteRequest(Dictionary<string,object> settings,Dictionary<string,object> data){
+        string origin=Convert.ToString(settings["servidor"]);if(!IsAllowedOrigin(origin,File.Exists(OriginFile)?File.ReadAllText(OriginFile,Encoding.UTF8).Trim():""))throw new InvalidOperationException("Servidor de impresoras no autorizado.");
+        var request=(HttpWebRequest)WebRequest.Create(origin+"/api/facturacion/impresoras");request.Proxy=null;request.Method="POST";request.ContentType="application/json";request.Timeout=15000;request.ReadWriteTimeout=15000;
+        byte[] bytes=Encoding.UTF8.GetBytes(Json.Serialize(data));request.ContentLength=bytes.Length;using(var stream=request.GetRequestStream())stream.Write(bytes,0,bytes.Length);
+        using(var response=request.GetResponse())using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8)){var result=Json.DeserializeObject(reader.ReadToEnd()) as Dictionary<string,object>;if(result==null||!result.ContainsKey("ok")||!Convert.ToBoolean(result["ok"]))throw new InvalidOperationException("El servidor no confirmó el registro de impresoras.");return result;}
+    }
+    private static string RemoteSignature(Dictionary<string,object> settings){return Convert.ToString(settings["servidor"])+"|"+Convert.ToString(settings["puntoVenta"])+"|"+Convert.ToString(settings["usuarioId"]);}
+    private static void RegisterRemote(Dictionary<string,object> settings){
+        RemoteRequest(settings,new Dictionary<string,object>{{"accion","conectar"},{"puesto",PrinterMachineId},{"nombre",Environment.MachineName+" · "+Environment.UserName},{"puntoVenta",settings["puntoVenta"]},{"usuarioId",settings["usuarioId"]},{"clave",RemoteSecret()},{"impresoras",TicketPrinters()}});registeredRemote=RemoteSignature(settings);
+    }
+    private static void PollRemotePrinters(object unused){
+        if(Interlocked.CompareExchange(ref remoteBusy,1,0)!=0)return;
+        try{var settings=RemoteSettings();if(settings==null)return;if(registeredRemote!=RemoteSignature(settings))RegisterRemote(settings);
+            var data=RemoteRequest(settings,new Dictionary<string,object>{{"accion","sondeo"},{"puesto",PrinterMachineId},{"clave",RemoteSecret()}});
+            string query=data.ContainsKey("consulta")?Convert.ToString(data["consulta"]):"";
+            if(query.Length>0)RemoteRequest(settings,new Dictionary<string,object>{{"accion","respuesta"},{"puesto",PrinterMachineId},{"clave",RemoteSecret()},{"consulta",query},{"impresoras",TicketPrinters()}});
+        }catch{}finally{Interlocked.Exchange(ref remoteBusy,0);}
+    }
+    private static void ConfigureRemotePrinter(Stream stream,Dictionary<string,string> fields,string origin){
+        int length;if(!fields.ContainsKey("Content-Type")||!fields["Content-Type"].StartsWith("application/json",StringComparison.OrdinalIgnoreCase)||!fields.ContainsKey("Content-Length")||!Int32.TryParse(fields["Content-Length"],out length)||length<1||length>1024)throw new InvalidOperationException("Punto de venta inválido.");
+        byte[] bytes=new byte[length];int offset=0;while(offset<length){int count=stream.Read(bytes,offset,length-offset);if(count<=0)throw new IOException("Solicitud incompleta.");offset+=count;}
+        var input=Json.DeserializeObject(Encoding.UTF8.GetString(bytes)) as Dictionary<string,object>;int point;
+        if(input==null||!input.ContainsKey("puntoVenta")||!Int32.TryParse(Convert.ToString(input["puntoVenta"]),out point)||point<=1||!input.ContainsKey("usuarioId")||Convert.ToString(input["usuarioId"]).Length==0)throw new InvalidOperationException("Elegí un punto de venta e iniciá sesión.");
+        var settings=new Dictionary<string,object>{{"servidor",origin},{"puntoVenta",point},{"usuarioId",Convert.ToString(input["usuarioId"])}};
+        lock(RemoteConfigGate){Directory.CreateDirectory(Folder);File.WriteAllText(RemoteFile,Json.Serialize(settings),Encoding.UTF8);}
+        if(registeredRemote!=RemoteSignature(settings))RegisterRemote(settings);
+        Reply(stream,200,new{ok=true,equipo=Environment.MachineName,equipoId=PrinterMachineId,remoto=true,puntoVenta=point},origin);
+    }
+
     private static void Run(string overrideOrigin)
     {
         if (overrideOrigin == null && !File.Exists(OriginFile)) return;
@@ -127,6 +164,7 @@ internal static class ImpresoraLocal
         var listener = new TcpListener(IPAddress.Loopback, Port);
         try { listener.Start(); }
         catch (SocketException) { return; }
+        var remoteTimer = new System.Threading.Timer(PollRemotePrinters,null,1000,3000);
         while (true)
         {
             TcpClient client;
@@ -134,6 +172,7 @@ internal static class ImpresoraLocal
             catch { break; }
             ThreadPool.QueueUserWorkItem(state => Handle((TcpClient)state, allowedOrigin), client);
         }
+        remoteTimer.Dispose();
     }
 
     private static bool IsAllowedOrigin(string origin, string configuredOrigin)
@@ -179,7 +218,8 @@ internal static class ImpresoraLocal
                     { Reply(stream, 403, new { ok = false, error = "Origen de Facturación no autorizado en esta PC." }, ""); return; }
                     if (method == "OPTIONS") { Reply(stream, 200, new { ok = true }, origin); return; }
                     if (method == "GET" && path == "/impresoras")
-                    { Reply(stream, 200, new { ok = true, impresoras = TicketPrinters() }, origin); return; }
+                    { Reply(stream, 200, new { ok = true, equipo = Environment.MachineName, equipoId = PrinterMachineId, remoto = true, impresoras = TicketPrinters() }, origin); return; }
+                    if (method == "POST" && path == "/puesto") { ConfigureRemotePrinter(stream,fields,origin); return; }
                     if (method == "POST" && path == "/reiniciar-cola")
                     {
                         int size;

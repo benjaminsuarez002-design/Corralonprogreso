@@ -11,7 +11,7 @@
 <script src="funciones.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.28"></script>
+<script src="corralon-system.js?v=1.0.29"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -2197,7 +2197,7 @@ function remitoSqlPayload(remito, pago) {
   const branch = CorralonSystem.normalizeBranch(remito.sucursal);
   const sucursal = branch === 'Suc. Progreso y Ruta' ? 1 : branch === 'Suc. Calle 5 y Espana' ? 2 : 0;
   if(!sucursal) throw new Error('El remito no tiene una sucursal válida.');
-  if(!Number.isInteger(Number(remito.proveedor_sql_id)) || Number(remito.proveedor_sql_id) <= 0) throw new Error('Este remito no tiene ID de proveedor. Seleccioná un proveedor web al crear el remito.');
+  if(!Number.isInteger(Number(remito.proveedor_sql_id)) || Number(remito.proveedor_sql_id) <= 0) throw new Error('Este remito no tiene ID de proveedor. Abrí Editar, elegí un proveedor de la lista y guardá el remito.');
   const articulos = (remito.items || []).map(item => ({ idart:String(item.idart || '').trim(), cantidad:Number(item.cant) }));
   if(!articulos.length || articulos.some(item => !item.idart || !(item.cantidad > 0))) throw new Error('Cada artículo necesita IDArt y cantidad. Los renglones de texto libre no se pueden cargar en SQL.');
   const parts = String(remito.fecha || '').split('/');
@@ -2859,6 +2859,42 @@ function confirmarEliminar() {
 }
 
 // ── EDITAR ──
+let historyRemitoProviders=[],historyRemitoArticles=[],historyRemitoCatalogPromise=null;
+const historyRemitoBindings=new Map();
+const historyRemitoNorm=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+function clearHistoryRemitoBindings(root=null){for(const [input,binding]of historyRemitoBindings)if(!root||root.contains(input)){binding.destroy();const wrapper=input.parentElement;if(wrapper?.tagName==='SPAN')wrapper.replaceWith(input);historyRemitoBindings.delete(input);}}
+async function loadHistoryRemitoChoices(){
+ if(historyRemitoCatalogPromise)return historyRemitoCatalogPromise;
+ historyRemitoCatalogPromise=(async()=>{
+  const providers=await CorralonSystem.getProvidersCache();historyRemitoProviders=providers.length?providers:await CorralonSystem.syncProvidersCache();
+  historyRemitoArticles=await CorralonSystem.catalog.cachedRows();if(!historyRemitoArticles.length)historyRemitoArticles=await CorralonSystem.catalog.load({fallback:true});
+ })().catch(error=>{historyRemitoCatalogPromise=null;throw error;});return historyRemitoCatalogPromise;
+}
+function bindHistoryRemitoChoices(){
+ if(_detalleTipoActual!=='remito'||!document.getElementById('editBg').classList.contains('open'))return;
+ const FX=window.CorralonFunciones;if(!FX?.bindTextDropdown)return;
+ const providerInput=document.getElementById('editCliente');
+ if(providerInput&&!historyRemitoBindings.has(providerInput)){
+  const choices=historyRemitoProviders.map(p=>({value:CorralonSystem.providerIdentity.internalId(p),label:String(p.proveedor||'').trim(),source:p})).filter(p=>p.label);
+  const binding=FX.bindTextDropdown({input:providerInput,items:choices,minWidth:0,fixedMenu:true,zIndex:15000,batchSize:100,match:(item,q)=>q.split(/\s+/).filter(Boolean).every(t=>historyRemitoNorm(item.label).includes(t))});historyRemitoBindings.set(providerInput,binding);
+  providerInput.addEventListener('input',()=>{delete providerInput.dataset.providerWebId;delete providerInput.dataset.providerSqlId;});
+  providerInput.addEventListener('change',()=>{const item=choices.find(p=>String(p.value)===String(binding.getValue()));if(item){providerInput.dataset.providerWebId=item.value;providerInput.dataset.providerSqlId=String(remitoProviderSqlId(CorralonSystem.providerIdentity.externalId(item.source))||'');}});
+ }
+ const items=historyRemitoArticles.map(article=>({value:String(article.codigo||article.idart||article.idArt||'').trim(),label:String(article.nombre||article.descripcion||'').trim(),source:article})).filter(item=>item.value&&item.label);
+ for(const input of document.querySelectorAll('#editItemsRows [data-history-remito-article],#eNuevoDesc')){
+  if(historyRemitoBindings.has(input))continue;
+  const binding=FX.bindTextDropdown({input,items,minWidth:0,fixedMenu:true,zIndex:15000,batchSize:100,match:(item,q)=>q.split(/\s+/).filter(Boolean).every(t=>historyRemitoNorm(item.label+' '+item.value).includes(t))});historyRemitoBindings.set(input,binding);
+  input.addEventListener('input',()=>{delete input.dataset.idart;const i=input.dataset.historyRemitoArticle;if(i!==undefined){editItems[Number(i)].desc=input.value;delete editItems[Number(i)].idart;}});
+  input.addEventListener('change',()=>{
+   const chosen=items.find(item=>String(item.value)===String(binding.getValue()));if(!chosen)return;
+   input.dataset.idart=chosen.value;const cost=Number(chosen.source.PrecioCpraCI??chosen.source.precioCostoConImpuestos??chosen.source.precioCpraCI??chosen.source.precio_compra_con_impuestos),hasCost=Number.isFinite(cost)&&cost>=0;
+   const i=input.dataset.historyRemitoArticle;
+   if(i!==undefined){const item=editItems[Number(i)];item.desc=chosen.label;item.idart=chosen.value;if(hasCost){item.precio=cost;input.closest('.edit-item-row').querySelectorAll('input.edit-item-inp')[2].value=fmt(cost);}actualizarSubEdit();}
+   else if(hasCost){document.getElementById('eNuevoPrecio').value=fmt(cost);actualizarSubtotalFilaNueva();}
+  });
+ }
+}
+
 function abrirEditar() {
   const r = _remitoDetalleActual;
   if(!r) return;
@@ -2868,6 +2904,7 @@ function abrirEditar() {
   document.getElementById('editTitle').textContent = '✏ Editar remito';
   renderEditForm();
   document.getElementById('editBg').classList.add('open');
+  loadHistoryRemitoChoices().then(bindHistoryRemitoChoices).catch(error=>{console.warn(error);toast('No se pudieron cargar las listas de proveedores y artículos');});
 }
 
 async function abrirEditarPresupuesto() {
@@ -2903,6 +2940,7 @@ async function abrirEditarPresupuesto() {
 }
 
 function cerrarEditar() {
+  clearHistoryRemitoBindings();
   document.getElementById('editBg').classList.remove('open');
   cerrarListaArticuloPresupuesto();
   editItems = [];
@@ -2919,8 +2957,8 @@ function renderEditForm() {
   const nroCorto = r.nro ? remitoShort(r.nro) : '';
   document.getElementById('editBody').innerHTML = `
     <div class="edit-section">
-      <div class="edit-lbl">Cliente</div>
-      <input class="edit-inp" id="editCliente" value="${r.cliente||''}" placeholder="Nombre del cliente" autocomplete="off">
+      <div class="edit-lbl">Proveedor</div>
+      <input class="edit-inp" id="editCliente" value="${esc(r.cliente||'')}" data-provider-web-id="${esc(r.proveedor_web_id||'')}" data-provider-sql-id="${esc(r.proveedor_sql_id||'')}" placeholder="Elegí el proveedor" autocomplete="off">
     </div>
     <div class="edit-section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div>
@@ -3032,6 +3070,7 @@ function aplicarFuncionesTxtEdicion() {
 function renderEditItems() {
   const cont = document.getElementById('editItemsRows');
   if(!cont) return;
+  clearHistoryRemitoBindings(cont);
   if(_detalleTipoActual === 'presupuesto') {
     cont.innerHTML = editItems.map((it, i) => `
       <div class="edit-item-row">
@@ -3053,14 +3092,14 @@ function renderEditItems() {
       <input type="text" class="edit-item-inp num" value="${it.cant}" inputmode="numeric" autocomplete="off"
         oninput="this.value=this.value.replace(/[^0-9]/g,'')"
         onchange="editItems[${i}].cant=parseFloat(this.value)||1;actualizarSubEdit()">
-      <input type="text" class="edit-item-inp" value="${it.desc||''}" autocomplete="off"
-        onchange="editItems[${i}].desc=this.value;delete editItems[${i}].idart">
+      <input type="text" class="edit-item-inp" value="${esc(it.desc||'')}" data-history-remito-article="${i}" data-idart="${esc(it.idart||'')}" autocomplete="off">
       <input type="text" class="edit-item-inp num" value="${fmt(it.precio||0)}" inputmode="numeric" autocomplete="off"
         oninput="formatearMonedaEdicion(this)" onchange="editItems[${i}].precio=parseMonto(this.value);this.value=fmt(editItems[${i}].precio);actualizarSubEdit()">
       <input type="text" class="edit-item-inp num" id="editSub${i}" value="${fmt((it.cant||0)*(it.precio||0))}" inputmode="numeric" autocomplete="off"
         oninput="formatearMonedaEdicion(this)" onchange="calcularPrecioEditDesdeSubtotal(${i}, this)">
       <button class="btn-del-item" style="font-size:13px" onclick="editItems.splice(${i},1);renderEditItems()">✕</button>
     </div>`).join('');
+  bindHistoryRemitoChoices();
 }
 
 function resultadosArticulosPresupuesto(valor, mostrarTodos = false) {
@@ -3373,7 +3412,8 @@ function editAgregarItem() {
   const desc  = document.getElementById('eNuevoDesc').value.trim();
   const precio= parseMonto(document.getElementById('eNuevoPrecio').value);
   if(!desc && !precio) return;
-  editItems.push({ cant, desc, precio });
+  editItems.push({ cant, desc, precio, idart:document.getElementById('eNuevoDesc').dataset.idart||null });
+  delete document.getElementById('eNuevoDesc').dataset.idart;
   document.getElementById('eNuevoCant').value = '';
   document.getElementById('eNuevoDesc').value = '';
   document.getElementById('eNuevoPrecio').value = '';
@@ -3402,8 +3442,8 @@ async function guardarEdicion() {
     numero_manual: r.numero_manual === true || remitoFull(nroCorto) !== remitoFull(r.nro),
     nro: remitoFull(nroCorto),
     cliente,
-    proveedor_web_id: cliente === r.cliente ? r.proveedor_web_id : null,
-    proveedor_sql_id: cliente === r.cliente ? r.proveedor_sql_id : null,
+    proveedor_web_id: document.getElementById('editCliente').dataset.providerWebId || (cliente === r.cliente ? r.proveedor_web_id : null),
+    proveedor_sql_id: remitoProviderSqlId(document.getElementById('editCliente').dataset.providerSqlId) || (cliente === r.cliente ? r.proveedor_sql_id : null),
     fecha,
     total: nextItems.reduce((s,it) => s + (it.cant||0)*(it.precio||0), 0),
     items: nextItems

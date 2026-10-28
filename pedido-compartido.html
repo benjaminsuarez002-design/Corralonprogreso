@@ -27,6 +27,9 @@
     .meta span{display:block;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase}
     .meta strong{display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px}
     .content{padding:12px 12px 84px}
+    .order-note{margin:0 0 12px;padding:12px 14px;border:1px solid #e4dcae;border-radius:10px;background:#fffbea;font-size:14px;line-height:1.4}
+    .order-note strong{display:block;margin-bottom:5px;font-weight:900}
+    .order-note div{white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4}
     .table{border:1px solid var(--line);border-radius:12px;overflow:hidden}
     .row{display:grid;grid-template-columns:minmax(130px,20%) minmax(0,1fr) 110px;min-height:39px;border-bottom:1px solid #e7e7e4;align-items:center}
     .row:last-child{border-bottom:0}
@@ -49,7 +52,7 @@
       .actions{width:100%;gap:8px;padding:7px 8px calc(7px + env(safe-area-inset-bottom));border-left:0;border-right:0;border-radius:0}.actions button{flex:1;padding:7px 5px;font-size:14px}
     }
   </style>
-<script src="corralon-system.js?v=0.0.3"></script>
+<script src="corralon-system.js?v=0.0.4"></script>
 </head>
 <body>
   <main class="page">
@@ -67,6 +70,7 @@
         <div><span>Fecha</span><strong id="date"></strong></div>
       </div>
       <div class="content">
+        <section class="order-note" id="orderNote" aria-labelledby="orderNoteTitle" hidden><strong id="orderNoteTitle">Nota</strong><div id="orderNoteText"></div></section>
         <div class="table">
           <div class="row head-row"><div>Código</div><div>Descripción</div><div class="qty">Cantidad</div></div>
           <div id="rows"></div>
@@ -90,7 +94,7 @@
       let order=null;
       function visibleRows(){return(Array.isArray(order?.detalles)?order.detalles:[]).filter(row=>String(row?.codProv||row?.articulo||row?.cantidad||'').trim()).map(row=>({codigo:String(row.codProv||''),descripcion:String(row.articulo||''),cantidad:row.cantidad??''}))}
       function showError(message){$('#loading').hidden=true;$('#order').hidden=true;$('#error').hidden=false;$('#error').textContent=message}
-      function render(){const rows=visibleRows(),provider=providerName(order.proveedor)||'Sin proveedor',number=String(order.id||'').replace(/__user_.*$/,'');document.title=`Pedido ${number} · ${provider}`;$('#title').textContent=`Pedido ${number}`;$('#number').textContent=number;$('#provider').textContent=provider;$('#branch').textContent=branchName(order.sucursalId||order.sucursal);$('#date').textContent=String(order.fecha||'');$('#rows').innerHTML=rows.map(row=>`<div class="row"><div>${esc(row.codigo)}</div><div>${esc(row.descripcion)}</div><div class="qty">${esc(row.cantidad)}</div></div>`).join('')||'<div class="state">Este pedido no tiene artículos.</div>';$('#loading').hidden=true;$('#error').hidden=true;$('#order').hidden=false;$('#excel').disabled=!rows.length;$('#pdf').disabled=!rows.length}
+      function render(){const rows=visibleRows(),provider=providerName(order.proveedor)||'Sin proveedor',number=String(order.id||'').replace(/__user_.*$/,'');document.title=`Pedido ${number} · ${provider}`;$('#title').textContent=`Pedido ${number}`;$('#number').textContent=number;$('#provider').textContent=provider;$('#branch').textContent=branchName(order.sucursalId||order.sucursal);$('#date').textContent=String(order.fecha||'');const note=String(order.nota??'');$('#orderNoteText').textContent=note;$('#orderNote').hidden=!note.trim();$('#rows').innerHTML=rows.map(row=>`<div class="row"><div>${esc(row.codigo)}</div><div>${esc(row.descripcion)}</div><div class="qty">${esc(row.cantidad)}</div></div>`).join('')||'<div class="state">Este pedido no tiene artículos.</div>';$('#loading').hidden=true;$('#error').hidden=true;$('#order').hidden=false;$('#excel').disabled=!rows.length;$('#pdf').disabled=!rows.length}
       function downloadExcel(){const rows=visibleRows(),provider=providerName(order.proveedor)||'Sin proveedor',number=String(order.id||'');const data=[[`Pedido Nro ${number} - Sucursal: ${branchName(order.sucursalId||order.sucursal)}`],[],['codigo','articulos','cantidad'],...rows.map(row=>[row.codigo,row.descripcion,Number(row.cantidad)||row.cantidad])];const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[{wch:18},{wch:60},{wch:12}];ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:2}}];XLSX.utils.book_append_sheet(wb,ws,'Pedido');XLSX.writeFile(wb,`Pedido_${safeFile(provider)}_${safeFile(order.fecha)}.xlsx`)}
       async function downloadPdf(){const rows=visibleRows(),provider=providerName(order.proveedor)||'Sin proveedor';const logo=await PresupuestoShared.ensureLogoDataUrl('/logo-corralon.png');const doc=PresupuestoShared.generarPDFPedidoDoc({numero:order.id||'',fecha:order.fecha||'',proveedor,sucursal:branchName(order.sucursalId||order.sucursal),logoDataUrl:logo,items:rows.map(row=>({codigoProveedor:row.codigo,detalle:row.descripcion,cantidad:row.cantidad}))});doc.save(`Pedido_${safeFile(provider)}_${safeFile(order.fecha)}.pdf`)}
       async function init(){const shareSlug=slug();if(!shareSlug||shareSlug==='pedido-compartido'||shareSlug==='pedido-compartido.html'){showError('El enlace del pedido está incompleto: falta la clave. Volvé a copiarlo desde Pedidos.');return}try{if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CONFIG);const snap=await firebase.firestore().collection('pedidos').where('shareSlug','==',shareSlug).limit(1).get();if(snap.empty){showError('Este enlace no existe o ya no está disponible.');return}const data=snap.docs[0].data()||{};if(data.eliminado||data.shareEnabled!==true||!data.confirmado){showError('Este pedido ya no está disponible.');return}order=data;render()}catch(error){console.warn(error);showError('No se pudo cargar el pedido. Revisá la conexión e intentá nuevamente.')}}
