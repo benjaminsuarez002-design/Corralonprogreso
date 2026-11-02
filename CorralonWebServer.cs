@@ -373,6 +373,8 @@ internal sealed class ServerForm : Form
     private NotifyIcon trayIcon;
     private bool exiting;
     private readonly object catalogSyncLock = new object();
+    private System.Windows.Forms.Timer catalogHourlyTimer;
+    private DateTime catalogNextAttempt = DateTime.UtcNow;
     private readonly object accessPriceUpdateLock = new object();
     private Process catalogSyncProcess;
     private bool catalogSyncFinishing;
@@ -399,6 +401,17 @@ internal sealed class ServerForm : Form
         facturacionWatchdog = new System.Windows.Forms.Timer { Interval = 10000 };
         facturacionWatchdog.Tick += (s, e) => CheckFacturacionApiInBackground();
         StartServer();
+        catalogHourlyTimer = new System.Windows.Forms.Timer { Interval = 60000 };
+        DateTime lastPublication;
+        string stamp = Path.Combine(root, "servidor", "catalogo-sql-ultima-publicacion.txt");
+        if (File.Exists(stamp) && DateTime.TryParse(File.ReadAllText(stamp), null, System.Globalization.DateTimeStyles.RoundtripKind, out lastPublication)) catalogNextAttempt = lastPublication.ToUniversalTime().AddHours(1);
+        catalogHourlyTimer.Tick += (s, e) => {
+            if (listener == null || !listener.IsListening || DateTime.UtcNow < catalogNextAttempt) return;
+            lock (catalogSyncLock) { if (catalogSyncFinishing || (catalogSyncProcess != null && !catalogSyncProcess.HasExited)) return; }
+            catalogNextAttempt = DateTime.UtcNow.AddHours(1);
+            ThreadPool.QueueUserWorkItem(delegate { try { Log("Publicacion horaria SQL: " + StartFullCatalogSync(null, null)); } catch(Exception ex) { Log("Publicacion horaria SQL: " + ex.Message); } });
+        };
+        catalogHourlyTimer.Start();
         if (startInTray) Shown += (s, e) => HideToTray();
     }
 
@@ -1194,13 +1207,13 @@ internal sealed class ServerForm : Form
 
     private string StartFullCatalogSync(HttpListenerContext context, string sourceFile)
     {
-        if (!IsLocalRequest(context))
+        if (context != null && !IsLocalRequest(context))
         {
             return "{\"ok\":false,\"error\":\"La sincronizacion completa solo se puede ejecutar desde localhost.\"}";
         }
 
         string script = string.IsNullOrEmpty(sourceFile)
-            ? @"C:\Update\actualizaciones\Subir Lista Index\run_sync_articulos.bat"
+            ? Path.Combine(root, "tools", "publicar-catalogo-sql.ps1")
             : Path.Combine(root, "catalog-sync-import.bat");
         if (!File.Exists(script))
         {
@@ -1221,10 +1234,12 @@ internal sealed class ServerForm : Form
 
             var info = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = arguments,
+                FileName = string.IsNullOrEmpty(sourceFile) ? "powershell.exe" : "cmd.exe",
+                Arguments = string.IsNullOrEmpty(sourceFile) ? "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\"" : arguments,
                 WorkingDirectory = Path.GetDirectoryName(script),
                 UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden
             };
@@ -1234,6 +1249,9 @@ internal sealed class ServerForm : Form
             catalogSyncMessage = "Sincronizando el catalogo completo...";
             catalogSyncProcess = Process.Start(info);
             Process runningProcess = catalogSyncProcess;
+            runningProcess.OutputDataReceived += (s,e) => { if(e.Data != null) Log("Catalogo: " + e.Data); };
+            runningProcess.ErrorDataReceived += (s,e) => { if(e.Data != null) Log("Catalogo: " + e.Data); };
+            runningProcess.BeginOutputReadLine(); runningProcess.BeginErrorReadLine();
 
             ThreadPool.QueueUserWorkItem(delegate
             {

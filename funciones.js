@@ -1775,6 +1775,18 @@
     const hide = () => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); };
     let renderMatches=null,rendered=0;
     const pager=options.batchSize?bindIncrementalRendering({root:menu,batchSize:options.batchSize,getTotal:()=>matches.length,renderRange:(from,to)=>{if(renderMatches)for(let index=from;index<to;index++)renderMatches(matches[index],index);rendered=to;}}):null;
+    function positionScaledMenu(){
+      const value=typeof options.menuScale==='function'?options.menuScale():options.menuScale,scale=Number(value)>0?Number(value):1,rect=input.getBoundingClientRect();
+      const viewportWidth=window.innerWidth,viewportHeight=window.innerHeight;
+      const width=Math.min(Math.max(rect.width,(options.menuWidth||220)*scale),Math.max(1,viewportWidth-16));
+      const below=Math.max(0,viewportHeight-rect.bottom-8),above=Math.max(0,rect.top-8),openUp=below<160*scale&&above>below;
+      const maxHeight=Math.max(1,Math.min(240*scale,openUp?above:below));
+      Object.assign(menu.style,{position:'fixed',transform:'scale('+scale+')',transformOrigin:'top left',boxSizing:'border-box',fontSize:'14px',width:width/scale+'px',minWidth:width/scale+'px',maxWidth:Math.max(1,viewportWidth-16)/scale+'px',maxHeight:maxHeight/scale+'px',overflowX:'hidden',left:Math.max(8,Math.min(rect.left,viewportWidth-width-8))+'px',bottom:'auto'});
+      const height=menu.hidden?maxHeight:Math.min(maxHeight,menu.getBoundingClientRect().height);
+      menu.style.top=(openUp?Math.max(8,rect.top-height-4):rect.bottom+4)+'px';
+    }
+    const repositionScaledMenu=()=>{if(!menu.hidden)requestAnimationFrame(positionScaledMenu);};
+    if(options.fixedMenu&&options.menuScale)window.addEventListener('resize',repositionScaledMenu);
     function mark() {
       pager?.ensure(active+1);
       const rows=Array.from(menu.querySelectorAll('[data-index]'));
@@ -1782,7 +1794,8 @@
       rows[active]?.scrollIntoView({ block: 'nearest', inline:'nearest' });
     }
     function show(_, reason) {
-      if(options.fixedMenu){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,options.menuWidth||0),Math.max(1,window.innerWidth-16));menu.style.position='fixed';menu.style.top=rect.bottom+'px';menu.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';menu.style.width=width+'px';menu.style.minWidth=width+'px';menu.style.maxHeight=Math.max(80,Math.min(240,window.innerHeight-rect.bottom-10))+'px';}
+      if(options.fixedMenu&&options.menuScale)positionScaledMenu();
+      else if(options.fixedMenu){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,options.menuWidth||0),Math.max(1,window.innerWidth-16));menu.style.position='fixed';menu.style.top=rect.bottom+'px';menu.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';menu.style.width=width+'px';menu.style.minWidth=width+'px';menu.style.maxHeight=Math.max(80,Math.min(240,window.innerHeight-rect.bottom-10))+'px';}
       const query = reason === 'typing' || reason === 'typing-key' ? normalize(input.value) : '';
       matches = items.filter(item => !query || (options.match?options.match(item,query):normalize(item.searchText||item.label).includes(query)) || normalize(item.value) === query);
       if(query&&typeof options.rank==='function'){
@@ -1795,11 +1808,12 @@
       if(columns.length){const heading=document.createElement('div');fillColumns(heading,columns.map(column=>column.label));heading.style.cssText+=';position:sticky;top:0;z-index:1;font-weight:700;cursor:default;'+(options.headerStyle||'background:#171717;color:white');menu.append(heading);}
       renderMatches=(item, index) => {
         const row = document.createElement('div'); row.setAttribute('role', 'option'); row.dataset.index = index;
-        if(columns.length)fillColumns(row,item.cells||[item.label]);else{row.textContent=item.label;row.style.cssText='padding:7px 10px;white-space:nowrap;cursor:pointer';}menu.append(row);
+        if(columns.length)fillColumns(row,item.cells||[item.label]);else{row.textContent=item.label;row.style.cssText='padding:7px 10px;white-space:nowrap;cursor:pointer';if(options.menuScale){row.style.whiteSpace='normal';row.style.overflowWrap='anywhere';}}menu.append(row);
       };
       if(pager)pager.reset();else matches.forEach(renderMatches);
       if (!matches.length) { const empty = document.createElement('div'); empty.textContent = 'Sin coincidencias'; empty.style.padding = '7px 10px'; menu.append(empty); }
       menu.hidden = false; input.setAttribute('aria-expanded', 'true'); mark();
+      if(options.fixedMenu&&options.menuScale)positionScaledMenu();
     }
     function pick() {
       if (!input.value.trim()) { hide(); return false; }
@@ -1822,7 +1836,7 @@
     return {
       setValue(value) { selectedItem = items.find(item=>String(item.value)===String(value)) || null; input.value=selectedItem?.label || ''; },
       getValue() { const query = normalize(input.value); if (!query) return options.emptyValue ?? ''; if(selectedItem && normalize(selectedItem.label)===query)return selectedItem.value; return items.find(item => normalize(item.label) === query || normalize(item.value) === query)?.value ?? null; },
-      destroy() { pager?.destroy(); bindings.destroy(); document.removeEventListener('pointerdown', outside); if(options.fixedMenu)menu.remove(); }
+      destroy() { pager?.destroy(); bindings.destroy(); document.removeEventListener('pointerdown', outside); if(options.fixedMenu&&options.menuScale)window.removeEventListener('resize',repositionScaledMenu); if(options.fixedMenu)menu.remove(); }
     };
   }
 

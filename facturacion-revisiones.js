@@ -20,15 +20,20 @@
     if(!adapters)throw new Error('No está listo el envío de revisiones. Conservá esta pantalla abierta.');
     if(data.revisionPendiente&&typeof data.revisionPendiente==='string')return;
     const sale=structuredClone(data);sale.emision=null;sale.revisionPendiente=true;
-    const entry={id:adapters.newId(),data:sale,reason:String(reason||'Emisión pendiente de verificar en ARCA y SQL.'),url:location.origin+'/gestion.html',central:false};entry.url+='?revision='+encodeURIComponent(entry.id);
+    const existing=Object.values(read(KEY)).find(row=>row.data?.id===sale.id);
+    const entry={id:existing?.id||(typeof data.revisionPendiente==='string'?data.revisionPendiente:(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(sale.id||'')?sale.id:adapters.newId())),data:sale,reason:String(reason||'Emisión pendiente de verificar en ARCA y SQL.'),url:location.origin+'/gestion.html',central:false};entry.url+='?revision='+encodeURIComponent(entry.id);sale.revisionPendiente=entry.id;
     const rows=read(KEY);rows[entry.id]=entry;localStorage.setItem(KEY,JSON.stringify(rows));
     try{await post(entry);entry.central=true;const current=read(KEY);current[entry.id]=entry;localStorage.setItem(KEY,JSON.stringify(current));}catch(error){console.warn('Aviso conservado para reenviar:',error);}
     await adapters.archive?.(sale,entry);
   }
   async function handle(data,error){
-    if(!adapters||busy||!hasSaleDetails(data))return false;busy=true;
+    if(!adapters||busy||!hasSaleDetails(data))return false;
+    const previous=Object.values(read(KEY)).find(row=>row.data?.id===data.id);
+    if(previous){await adapters.archive?.(previous.data,previous);return true;}
+    busy=true;
     const sale=structuredClone(data);sale.emision=null;sale.revisionPendiente=true;
-    const entry={id:adapters.newId(),data:sale,reason:String(error.message||error),url:location.origin+'/gestion.html',central:false};entry.url+='?revision='+encodeURIComponent(entry.id);
+    const existing=Object.values(read(KEY)).find(row=>row.data?.id===sale.id);
+    const entry={id:existing?.id||(typeof data.revisionPendiente==='string'?data.revisionPendiente:(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(sale.id||'')?sale.id:adapters.newId())),data:sale,reason:String(error.message||error),url:location.origin+'/gestion.html',central:false};entry.url+='?revision='+encodeURIComponent(entry.id);sale.revisionPendiente=entry.id;
     const ui=panel('NO SE PUDO CONFIRMAR ESTA VENTA');
     ui.box.insertAdjacentHTML('beforeend',`<p>Se conserva el detalle para revisión. <strong>No vuelvas a emitir esta venta.</strong></p><p data-status>Guardando la venta…</p>`);
     const status=ui.box.querySelector('[data-status]');

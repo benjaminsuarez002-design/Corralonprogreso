@@ -45,3 +45,12 @@ test('el detalle abre Facturación en otra pestaña del servidor actual',()=>{co
 test('no crea revisión de un formulario vacío',async()=>{const s=setup();assert.equal(await s.api.handle({...sale,articulos:[]},new Error('No coincide')),false);assert.equal(s.events.length,0);await assert.rejects(s.api.queue({...sale,articulos:[]},'Pendiente'),/borrador está vacío/);assert.equal(s.events.length,0);});
 
 test('administrador consulta ARCA y SQL con el borrador original sin emitir',()=>{const flow=source.slice(source.indexOf("verify.textContent='Consultar ARCA y SQL'"),source.indexOf("const find=document.createElement('button');find.textContent='Buscar venta realizada'"));assert.ok(flow.includes('id:sale.id'));assert.ok(flow.includes("consultarArca:'1'"));assert.ok(flow.includes('statusView(detail,state'));assert.ok(!flow.includes('/emitir'));});
+
+ test('reabrir el mismo borrador reutiliza la revision sin notificar ni imprimir otra vez',async()=>{
+ const s=setup();await s.api.handle(sale,new Error('Primer aviso'));
+ const panel=s.document.body.children[0].children[0];panel.children.find(x=>x.className==='primary').onclick();
+ await s.api.handle(sale,new Error('Segundo aviso'));
+ assert.equal(s.events.filter(x=>x[0]==='save').length,1);
+ assert.equal(s.events.filter(x=>x[0]==='print').length,1);
+ assert.equal(Object.keys(JSON.parse(s.storage.get('corralon_ventas_revision_v1'))).length,1);
+ });

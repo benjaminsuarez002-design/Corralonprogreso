@@ -1378,13 +1378,16 @@ function renderProviderInfo() {
 }
 function updateProviderOverrides() {
   pushUndoSnapshot();
-  if (!provider) provider = {};
-  provider.descuento_factura = parsePercent(el.providerInvoiceDiscount.value);
-  provider.descuento_total_fc = parsePercent(el.providerFinalInvoiceDiscount.value);
-  provider.descuento_factura_impreso = parsePercent(el.providerPrintedInvoiceDiscount.value);
-  provider.porc_flete = parsePercent(el.providerFreight.value);
-  provider.iva_incluido = el.providerIvaIncluded.checked;
-  provider.porc_iva = parsePercent(el.providerIva.value);
+  // Ajustes exclusivos de la carga: nunca mutar el registro maestro.
+  provider = {
+    ...(provider || {}),
+    descuento_factura: parsePercent(el.providerInvoiceDiscount.value),
+    descuento_total_fc: parsePercent(el.providerFinalInvoiceDiscount.value),
+    descuento_factura_impreso: parsePercent(el.providerPrintedInvoiceDiscount.value),
+    porc_flete: parsePercent(el.providerFreight.value),
+    iva_incluido: el.providerIvaIncluded.checked,
+    porc_iva: parsePercent(el.providerIva.value)
+  };
   rowsData.forEach((row) => row.descuento = provider.descuento_factura);
   saveRows();
   render();
@@ -2068,7 +2071,8 @@ function setProviderModalEditing(enabled) {
   if (enabled) requestAnimationFrame(() => focusProviderModalControl(modalValue('modalProviderId')));
 }
 function openProviderModal() {
-  const current = selectedProvider();
+  const selected = selectedProvider();
+  const current = providers.find(item => String(item.id_proveedor) === String(selected?.id_proveedor)) || selected;
   if (!current) {
     el.providerInput.focus();
     show('Elegí un proveedor');
