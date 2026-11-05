@@ -3323,16 +3323,16 @@ internal static partial class FacturacionCopiaApi
         }
     }
 
-    private static List<Dictionary<string, object>> CollectionPending(SqlConnection c, SqlTransaction tx, int customer, int company)
+    private static List<Dictionary<string, object>> CollectionPending(SqlConnection c, SqlTransaction tx, int customer, int company, int excludeReceipt=0)
     {
         return RowsTx(c, tx,
-            "SELECT h.IDRecibo AS id,h.NroFactura AS numero,CONVERT(varchar(10),h.Fecha,103) AS fecha,t.Abreviatura AS tipo,0 AS cuota," +
+            "SELECT h.IDRecibo AS id,h.NroFactura AS numero,CONVERT(varchar(10),h.Fecha,103) AS fecha,t.Abreviatura AS tipo,0 AS cuota,h.Total AS importeFactura,h.Anulada AS anulado,h.NroFacNC AS facturaAsociada," +
             "ISNULL(cc.importe,0)*t.ImpPor AS impcc,ISNULL(p.totalPagos,0) AS totalPagos,ISNULL(p.cantidadRecibos,0) AS cantidadRecibos," +
             "ISNULL(cc.importe,0)*t.ImpPor-ISNULL(p.totalPagos,0) AS saldo " +
             "FROM dbo.FacturasATP h WITH(UPDLOCK,HOLDLOCK) JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob " +
             "OUTER APPLY(SELECT SUM(v.ImpEnt) AS importe FROM dbo.FacturasTSVal v WHERE v.IDRecibo=h.IDRecibo AND v.IDTipoPago=3) cc " +
-            "OUTER APPLY(SELECT SUM(d.ImpPagado) AS totalPagos,COUNT(d.IDRecibo) AS cantidadRecibos FROM dbo.RecibosXTSFac d JOIN dbo.RecibosXTP r ON r.IDRecibo=d.IDRecibo WHERE d.IDFactura=h.IDRecibo AND r.Confirmado=1 AND r.Anulado=0) p " +
-            "WHERE h.IDCliente=@p0 AND h.IDEmp=@p1 AND h.Confirmado=-1 AND h.Anulada=0 AND t.IDTipoAcred>0 AND EXISTS(SELECT 1 FROM dbo.FacturasTSVal v WHERE v.IDRecibo=h.IDRecibo AND v.IDTipoPago=3) ORDER BY h.Fecha,h.IDComprob,h.NroFactura", customer, company)
+            "OUTER APPLY(SELECT SUM(d.ImpPagado) AS totalPagos,COUNT(d.IDRecibo) AS cantidadRecibos FROM dbo.RecibosXTSFac d JOIN dbo.RecibosXTP r ON r.IDRecibo=d.IDRecibo WHERE d.IDFactura=h.IDRecibo AND r.Confirmado=1 AND r.Anulado=0 AND r.IDRecibo<>@p2) p " +
+            "WHERE h.IDCliente=@p0 AND h.IDEmp=@p1 AND h.Confirmado=-1 AND h.Anulada=0 AND t.IDTipoAcred>0 AND EXISTS(SELECT 1 FROM dbo.FacturasTSVal v WHERE v.IDRecibo=h.IDRecibo AND v.IDTipoPago=3) ORDER BY h.Fecha,h.IDComprob,h.NroFactura", customer, company, excludeReceipt)
             .FindAll(row => Math.Abs(Number(row["saldo"])) > .01m);
     }
     private static decimal CollectionBalance(SqlConnection c, SqlTransaction tx, int customer, int company)
@@ -3518,6 +3518,90 @@ internal static partial class FacturacionCopiaApi
             catch {try {tx.Rollback();}catch{}throw;}
         }
     }
+    private static object CollectionReceiptSaveEdit(SqlConnection c, Dictionary<string,object> input)
+    {
+        AssertPurchasePermission(Text(Value(input,"usuarioId")),"recibos_cobro",false,true);
+        int receipt=RequiredId(Value(input,"id"),"el recibo"), customer=RequiredId(Value(input,"cliente"),"el cliente");
+        DateTime date;
+        if(!DateTime.TryParseExact(Text(Value(input,"fecha")),"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out date))
+            throw new InvalidOperationException("Ingresá una fecha válida.");
+        var invoices=PurchaseArray(Value(input,"facturas"));
+        var payments=PurchaseArray(Value(input,"valores"));
+        if(invoices.Count>500||payments.Count>100)throw new InvalidOperationException("Hay demasiados renglones.");
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable))
+        {
+            var headers=RowsTx(c,tx,"SELECT IDCliente,IDEmp,Fecha,IDCaja,Concepto FROM dbo.RecibosXTP WITH(UPDLOCK,HOLDLOCK) WHERE IDRecibo=@p0 AND Confirmado=1 AND Anulado=0",receipt);
+            if(headers.Count!=1)throw new InvalidOperationException("El recibo no está vigente.");
+            if(Text(Value(input,"version"))!=CollectionReceiptVersion(c,tx,receipt))
+                throw new InvalidOperationException("El recibo cambió. Volvé a consultarlo antes de guardar.");
+            var header=headers[0];
+            int cash=(int)InvoiceValueNumber(header["IDCaja"]);
+            Dictionary<string,object> cashHeader=null;
+            if(cash>0)
+            {
+                var cashRows=RowsTx(c,tx,"SELECT c.IDRecibo,d.IDSucAsoc,c.Fecha,c.Confirmado FROM dbo.CajaDiaTP c WITH(UPDLOCK,HOLDLOCK) JOIN dbo.[Depósitos] d ON d.[IDDepósito]=c.[IDDepósito] AND d.IDEmp=c.IDEmp WHERE c.IDRecibo=@p0",cash);
+                cashHeader=cashRows.Count==1?cashRows[0]:null;
+            }
+            var client=Scalar(c,tx,"SELECT [RazónSocial] FROM dbo.Clientes WHERE IDCliente=@p0 AND IDCliente>1 AND (ISNULL(Suspendido,0)=0 OR IDCliente=@p1)",customer,header["IDCliente"]);
+            if(client==null)throw new InvalidOperationException("Seleccioná un cliente válido.");
+            var pending=CollectionPending(c,tx,customer,Convert.ToInt32(header["IDEmp"]),receipt);
+            var previous=RowsTx(c,tx,"SELECT IDFactura,ImpPagado,CuotaPaga FROM dbo.RecibosXTSFac WHERE IDRecibo=@p0",receipt);
+            var existingValues=RowsTx(c,tx,"SELECT v.*,p.IDClasePago AS clase FROM dbo.RecibosXTS v JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago WHERE v.IDRecibo=@p0",receipt);
+            if(payments.Count==0||payments.Count!=existingValues.Count)throw new InvalidOperationException("Revisá los valores del recibo.");
+            decimal received=0,applied=0;
+            bool paymentsChanged=false;
+            var seen=new HashSet<int>();
+            foreach(var value in payments)
+            {
+                var line=Object(value);
+                int order=RequiredId(Value(line,"orden"),"el valor"),kind=RequiredId(Value(line,"tipo"),"el tipo de valor");
+                var old=existingValues.Find(row=>Convert.ToInt32(row["IDOrden"])==order);
+                if(old==null||!seen.Add(order))throw new InvalidOperationException("Valor del recibo inválido.");
+                decimal amount=Math.Round(Number(Value(line,"importe")),2,MidpointRounding.AwayFromZero);
+                int card=(int)InvoiceValueNumber(Value(line,"tarjeta")),installments=(int)InvoiceValueNumber(Value(line,"cuotas"));
+                if(amount<=0||amount>1000000000m)throw new InvalidOperationException("Revisá el importe de los valores recibidos.");
+                received+=amount;
+                if(kind==(int)Number(old["IDTipoPago"])&&amount==Number(old["Importe"])&&card==(int)InvoiceValueNumber(old["IDTarjeta"])&&installments==(int)InvoiceValueNumber(old["Cuotas"]))continue;
+                if(InvoiceValueNumber(old["IDMovBco"])>0)throw new InvalidOperationException("Los cheques vinculados se corrigen desde su gestión bancaria.");
+                int cls=(int)InvoiceValueNumber(Scalar(c,tx,"SELECT IDClasePago FROM dbo.TiposPagos WHERE IDTipoPago=@p0 AND IDTipoPago NOT IN(3,4)",kind));
+                bool existingUnlinkedCheck=cls==2&&kind==(int)Number(old["IDTipoPago"]);
+                if(cls!=1&&cls!=3&&cls!=5&&!existingUnlinkedCheck)throw new InvalidOperationException("Tipo de valor no admitido.");
+                if(cls==1)card=0;
+                else if((!existingUnlinkedCheck||card!=0)&&(card<=0||Scalar(c,tx,"SELECT IDTarjeta FROM dbo.Tarjetas WHERE IDTarjeta=@p0 AND Susp=0",card)==null))throw new InvalidOperationException("Seleccioná una tarjeta o cuenta vigente.");
+                if(cls!=5)installments=0;
+                if(cls==5&&(installments<1||installments>120))throw new InvalidOperationException("Revisá las cuotas de la tarjeta.");
+                paymentsChanged=true;
+                Execute(c,tx,"UPDATE dbo.RecibosXTS SET IDTipoPago=@p0,Importe=@p1,IDTarjeta=@p2,Cuotas=@p3 WHERE IDRecibo=@p4 AND IDOrden=@p5",kind,amount,card,installments,receipt,order);
+            }
+            seen.Clear();
+            var allocations=new List<object[]>();
+            foreach(var value in invoices)
+            {
+                var line=Object(value);
+                int invoice=RequiredId(Value(line,"id"),"la factura");
+                if(!seen.Add(invoice))throw new InvalidOperationException("La factura está repetida.");
+                decimal amount=Math.Round(Number(Value(line,"importe")),2,MidpointRounding.AwayFromZero);
+                var found=pending.Find(row=>Convert.ToInt32(row["id"])==invoice);
+                var old=previous.Find(row=>Convert.ToInt32(row["IDFactura"])==invoice);
+                bool unchanged=customer==Convert.ToInt32(header["IDCliente"])&&old!=null&&amount==Number(old["ImpPagado"]);
+                decimal balance=found==null?0:Math.Round(Number(found["saldo"]),2,MidpointRounding.AwayFromZero);
+                if(!unchanged&&(amount==0||balance==0||Math.Sign(amount)!=Math.Sign(balance)||Math.Abs(amount)>Math.Abs(balance)))
+                    throw new InvalidOperationException("Una factura no corresponde al cliente o su importe supera el saldo disponible.");
+                allocations.Add(new object[]{receipt,invoice,amount,old==null?0:InvoiceValueNumber(old["CuotaPaga"])});
+                applied+=amount;
+            }
+            if(applied>received)throw new InvalidOperationException("El total imputado supera el total recibido.");
+            Execute(c,tx,"DELETE FROM dbo.RecibosXTSFac WHERE IDRecibo=@p0",receipt);
+            foreach(var line in allocations)
+                Execute(c,tx,"INSERT dbo.RecibosXTSFac(IDRecibo,IDFactura,ImpPagado,CuotaPaga) VALUES(@p0,@p1,@p2,@p3)",line);
+            Execute(c,tx,"UPDATE dbo.RecibosXTP SET IDCliente=@p0,Cliente=@p1,Fecha=@p2,Total=@p3,Nota=@p4 WHERE IDRecibo=@p5",customer,client,date,received,Limited(Value(input,"nota"),100,"Nota"),receipt);
+            if(cashHeader!=null&&!Convert.ToBoolean(cashHeader["Confirmado"])&&(paymentsChanged||date.Date!=Convert.ToDateTime(header["Fecha"]).Date))
+                CajaRecalculate(c,tx,cashHeader);
+            var result=CollectionReceiptResult(c,tx,receipt);
+            tx.Commit();
+            return result;
+        }
+    }
     private static object CollectionReceiptEditPayment(SqlConnection c,Dictionary<string,object> input)
     {
         AssertPurchasePermission(Text(Value(input,"usuarioId")),"recibos_cobro",false,true);
@@ -3543,11 +3627,11 @@ internal static partial class FacturacionCopiaApi
     }
     private static object CollectionReceiptResult(SqlConnection c, SqlTransaction tx, int receipt)
     {
-        var headers = RowsTx(c, tx, "SELECT r.IDRecibo AS id,r.NroFactura AS numero,CONVERT(varchar(10),r.Fecha,103) AS fecha,r.IDCliente AS idCliente,r.Cliente AS cliente,r.Total AS total,r.Nota AS nota,r.Concepto AS concepto,c.CUIT AS documento,r.IDEmp AS empresa,r.Anulado AS anulado,r.IDDepósito AS puntoVenta,p.[Descripción] AS nombrePuntoVenta FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] p ON p.IDDepósito=r.IDDepósito LEFT JOIN dbo.Clientes c ON c.IDCliente=r.IDCliente WHERE r.IDRecibo=@p0 AND r.Confirmado=1", receipt);
+        var headers = RowsTx(c, tx, "SELECT r.IDRecibo AS id,r.NroFactura AS numero,CONVERT(varchar(10),r.Fecha,103) AS fecha,r.IDCliente AS idCliente,r.Cliente AS cliente,r.Total AS total,r.Nota AS nota,r.Concepto AS concepto,c.CUIT AS documento,r.IDEmp AS empresa,r.IDCaja AS idCaja,r.IDOper AS idOperador,r.Anulado AS anulado,r.IDDepósito AS puntoVenta,p.[Descripción] AS nombrePuntoVenta FROM dbo.RecibosXTP r JOIN dbo.[Depósitos] p ON p.IDDepósito=r.IDDepósito LEFT JOIN dbo.Clientes c ON c.IDCliente=r.IDCliente WHERE r.IDRecibo=@p0 AND r.Confirmado=1", receipt);
         if (headers.Count != 1) throw new InvalidOperationException("No se encontró el recibo confirmado.");
         headers[0]["saldo"] = CollectionBalance(c, tx, Convert.ToInt32(headers[0]["idCliente"]), Convert.ToInt32(headers[0]["empresa"]));
-        return new { ok = true, version = CollectionReceiptVersion(c,tx,receipt), recibo = headers[0], facturas = RowsTx(c, tx, "SELECT d.IDFactura AS id,h.NroFactura AS numero,CONVERT(varchar(10),h.Fecha,103) AS fecha,t.Abreviatura AS tipo,d.CuotaPaga AS cuota,h.Total AS importeFactura,d.ImpPagado AS importe FROM dbo.RecibosXTSFac d JOIN dbo.FacturasATP h ON h.IDRecibo=d.IDFactura JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob WHERE d.IDRecibo=@p0 ORDER BY h.Fecha,h.NroFactura", receipt),
-            valores = RowsTx(c, tx, "SELECT v.IDOrden AS orden,v.IDTipoPago AS idTipoPago,p.IDClasePago AS clase,p.TipoPago AS tipo,v.IDTarjeta AS idTarjeta,t.[Descripción] AS tarjeta,v.Cuotas AS cuotas,CONVERT(varchar(10),v.FechaVto,103) AS vencimiento,v.Importe AS importe,v.Concepto AS descripcion,m.NroMovExt AS numero,b.Banco AS banco FROM dbo.RecibosXTS v JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta LEFT JOIN dbo.MovCheques m ON m.NroMovInt=v.IDMovBco LEFT JOIN dbo.Bancos b ON b.IDBanco=COALESCE(NULLIF(v.IDBanco,0),m.IDBanco) WHERE v.IDRecibo=@p0 ORDER BY v.IDOrden", receipt) };
+        return new { ok = true, version = CollectionReceiptVersion(c,tx,receipt), recibo = headers[0], facturas = RowsTx(c, tx, "SELECT d.IDFactura AS id,h.NroFactura AS numero,CONVERT(varchar(10),h.Fecha,103) AS fecha,t.Abreviatura AS tipo,d.CuotaPaga AS cuota,h.Total AS importeFactura,h.Anulada AS anulado,h.NroFacNC AS facturaAsociada,d.ImpPagado AS importe FROM dbo.RecibosXTSFac d JOIN dbo.FacturasATP h ON h.IDRecibo=d.IDFactura JOIN dbo.TipoComprobantes t ON t.IDComprob=h.IDComprob WHERE d.IDRecibo=@p0 ORDER BY h.Fecha,h.NroFactura", receipt),
+            valores = RowsTx(c, tx, "SELECT v.IDOrden AS orden,v.IDMovBco AS idMovBanco,v.IDTipoPago AS idTipoPago,p.IDClasePago AS clase,p.TipoPago AS tipo,v.IDTarjeta AS idTarjeta,t.[Descripción] AS tarjeta,v.Cuotas AS cuotas,CONVERT(varchar(10),v.FechaVto,103) AS vencimiento,v.Importe AS importe,v.Concepto AS descripcion,m.NroMovExt AS numero,b.Banco AS banco FROM dbo.RecibosXTS v JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta LEFT JOIN dbo.MovCheques m ON m.NroMovInt=v.IDMovBco LEFT JOIN dbo.Bancos b ON b.IDBanco=COALESCE(NULLIF(v.IDBanco,0),m.IDBanco) WHERE v.IDRecibo=@p0 ORDER BY v.IDOrden", receipt) };
     }
     private static object CollectionReceiptQuery(SqlConnection c, HttpListenerRequest request)
     {
@@ -3560,8 +3644,27 @@ internal static partial class FacturacionCopiaApi
             valores = Rows(c, "SELECT NroMovInt AS id,NroMovExt AS numero,CONVERT(varchar(10),FechaVto,23) AS vencimiento,Importe AS importe,IDBanco AS banco FROM dbo.MovCheques WHERE Confirmado=1 AND Anulado=0 ORDER BY NroMovExt") };
         if (query == "detalle") return CollectionReceiptResult(c, null, RequiredId(request.QueryString["id"], "el recibo"));
         int customer; Int32.TryParse(request.QueryString["cliente"], out customer);
-        if (query == "recibos") return new { ok = true, recibos = Rows(c, "SELECT TOP 200 IDRecibo AS id,NroFactura AS numero,CONVERT(varchar(10),Fecha,103) AS fecha,Cliente AS cliente,Total AS total,Anulado AS anulado FROM dbo.RecibosXTP WHERE Confirmado=1 AND (@p0=0 OR IDCliente=@p0) ORDER BY IDRecibo DESC", customer) };
+        if (query == "recibos")
+        {
+            string search=(request.QueryString["buscar"]??"").Trim();
+            if(search.Length>200)throw new InvalidOperationException("La búsqueda es demasiado larga.");
+            DateTime from,to;
+            string fromText=request.QueryString["desde"],toText=request.QueryString["hasta"];
+            if(!DateTime.TryParseExact(fromText??"1900-01-01","yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out from)||
+               !DateTime.TryParseExact(toText??"9999-12-30","yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out to)||
+               from>to||to==DateTime.MaxValue.Date)
+                throw new InvalidOperationException("Revisá el rango de fechas.");
+            return new { ok = true, recibos = Rows(c, "SELECT r.IDRecibo AS id,r.NroFactura AS numero,CONVERT(varchar(10),r.Fecha,103) AS fecha,r.Cliente AS cliente,r.Total AS total,r.Anulado AS anulado,CASE WHEN r.Anulado=0 THEN ROUND(r.Total-ISNULL(a.imputado,0),2) END AS diferencia FROM (SELECT TOP 200 IDRecibo,NroFactura,Fecha,Cliente,Total,Anulado FROM dbo.RecibosXTP WHERE Confirmado=1 AND Fecha>=@p2 AND Fecha<@p3 AND (@p0=0 OR IDCliente=@p0) AND (@p1='' OR CHARINDEX(@p1, CONCAT(NroFactura,' ',Cliente,' ',CONVERT(varchar(10),Fecha,103)) COLLATE Latin1_General_CI_AS)>0) ORDER BY IDRecibo DESC) r OUTER APPLY(SELECT SUM(d.ImpPagado) AS imputado FROM dbo.RecibosXTSFac d WHERE d.IDRecibo=r.IDRecibo) a ORDER BY r.IDRecibo DESC", customer, search, from, to.AddDays(1)) };
+        }
         if (query != "facturas" || customer <= 1) throw new InvalidOperationException("Seleccioná un cliente válido.");
+        if(!String.IsNullOrWhiteSpace(request.QueryString["excluirRecibo"]))
+        {
+            AssertPurchasePermission(request.QueryString["usuarioId"],"recibos_cobro",false,true);
+            int receipt=RequiredId(request.QueryString["excluirRecibo"],"el recibo");
+            var companyId=Scalar(c,null,"SELECT IDEmp FROM dbo.RecibosXTP WHERE IDRecibo=@p0 AND Confirmado=1 AND Anulado=0",receipt);
+            if(companyId==null)throw new InvalidOperationException("El recibo no está vigente.");
+            return new {ok=true,facturas=CollectionPending(c,null,customer,Convert.ToInt32(companyId),receipt)};
+        }
         int point = RequiredId(request.QueryString["puntoVenta"], "el punto de venta");
         var points = Rows(c, "SELECT IDEmp FROM dbo.[Depósitos] WHERE IDDepósito=@p0", point);
         if (points.Count != 1) throw new InvalidOperationException("Punto de venta inválido.");
@@ -4290,6 +4393,7 @@ internal static partial class FacturacionCopiaApi
                             AssertPurchasePermission(Text(Value(input,"usuarioId")),"recibos_cobro",false,true);
                             Reply(context,200,CollectionReceiptCancel(connection,input));return;
                         }
+                        if(Text(Value(input,"accion"))=="editar-recibo"){Reply(context,200,CollectionReceiptSaveEdit(connection,input));return;}
                         if(Text(Value(input,"accion"))=="editar-pago"){Reply(context,200,CollectionReceiptEditPayment(connection,input));return;}
                         Reply(context, 200, CollectionReceiptConfirm(connection, input)); return;
                     }

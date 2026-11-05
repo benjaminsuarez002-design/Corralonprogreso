@@ -1,0 +1,2985 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recibos de cobro — Corralón Progreso</title>
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="theme-corralon.css">
+<script src="menu-auth-guard.js" data-menu-guard="recibos_cobro" data-menu-login="menu.html"></script>
+<script src="funciones.js"></script>
+<script src="corralon-system.js?v=0.0.1"></script>
+<style>
+body{margin:0;background:#edf5fd}
+.receipts-page-header{height:58px;display:flex;align-items:center;gap:16px;padding:0 16px;background:linear-gradient(100deg,#1260b4,#22a7dd);color:white}
+.receipts-page-header h1{font:800 clamp(18px,2.2vw,28px) Arial,sans-serif;margin:0}
+.receipts-page-header button{padding:8px 12px;border:1px solid #c7d9ee;border-radius:5px;color:#123768;background:#fff;cursor:pointer}
+#systemReceiptHeaderActions{margin-left:auto}
+@media print{.receipts-page-header{display:none!important}}
+
+#systemInvoiceConsult[data-detail-open="true"]>.invoice-history-overlay:not(.invoice-receipt-detail){display:none!important}
+#systemInvoiceConsult>.invoice-receipt-detail{background:transparent;backdrop-filter:none;z-index:auto!important}
+#systemInvoiceConsult>.invoice-receipt-detail .invoice-history-card{zoom:1!important;width:100%!important;min-width:0!important;height:calc(100dvh - 90px)!important;max-height:none!important;box-shadow:none!important}
+#systemInvoiceConsult>.invoice-receipt-detail .invoice-history-head{display:none!important}
+body.invoice-reference-design>.app>.topbar>#systemInvoiceDetailActions{display:flex;align-items:center;gap:10px;margin-left:auto}
+#systemInvoiceDetailActions[hidden]{display:none!important}
+
+#systemReceipts #rc-receiptConsultSection>.receipt-consult-header,#systemReceipts #rc-historyModal>.dialog-header{display:none!important}
+body.invoice-reference-design>.app>.topbar>#systemReceiptHeaderActions{display:flex;align-items:center;gap:10px;margin-left:auto}
+#systemReceiptHeaderActions nav,#systemReceiptHeaderActions [data-receipt-list-actions]{display:flex;gap:10px;align-items:center}
+#systemReceiptHeaderActions[hidden],#systemReceiptHeaderActions [hidden]{display:none!important}
+@media(max-width:650px){body.invoice-reference-design>.app>.topbar:has(#systemReceiptHeaderActions:not([hidden])){height:auto!important;flex-wrap:wrap}#systemReceiptHeaderActions{flex-wrap:wrap}}
+
+#systemMenu .system-menu-card{position:relative;display:flex;align-items:center;border:0;border-radius:7px;overflow:visible;background:transparent}
+#systemMenu .system-menu-card>button:is([data-system-section],[data-sql-module]){display:flex;align-items:center;gap:15px;width:100%;min-width:0;min-height:64px;box-sizing:border-box;padding:9px 48px 9px 12px;white-space:nowrap;border:1px solid var(--corralon-line);border-radius:7px;background:var(--corralon-white)!important;color:var(--corralon-heading)!important;font:600 16px Arial,sans-serif}
+#systemMenu .system-menu-card>button:first-child{flex:1}
+body[data-page-theme="facturacion"] #systemMenu :is(#systemInvoiceExpand,#systemReceiptsExpand,#systemCajaExpand,[data-sql-expand]){position:absolute;right:12px;top:50%;display:flex;align-items:center;justify-content:center;width:16px;height:40px;min-height:0;padding:0;border:0!important;border-radius:0;background:transparent!important;box-shadow:none;color:var(--corralon-heading)!important;transform:translateY(-50%)}
+body[data-page-theme="facturacion"] #systemMenu>:is(button,a)>.system-menu-chevron{position:absolute;right:12px;top:0;bottom:0;display:flex;align-items:center;justify-content:center;width:16px;margin:0}
+body[data-page-theme="facturacion"] #systemMenu :is(#systemInvoiceExpand,#systemReceiptsExpand,#systemCajaExpand,[data-sql-expand])>.system-menu-chevron{width:16px;margin:0;text-align:center}
+:is(#systemInvoiceExpand,#systemReceiptsExpand,#systemCajaExpand,[data-sql-expand]) .system-menu-chevron{display:block;margin:0;font:25px/1 Arial,sans-serif;transition:transform .16s ease;transform-origin:center}
+:is(#systemInvoiceExpand,#systemReceiptsExpand,#systemCajaExpand,[data-sql-expand])[aria-expanded="true"] .system-menu-chevron{transform:rotate(90deg)}
+:is(#systemInvoiceSubmenu,#systemReceiptsSubmenu){padding:8px 0 0 16px}:is(#systemInvoiceSubmenu,#systemReceiptsSubmenu) button{width:100%}
+:is(#systemInvoiceSubmenu,#systemReceiptsSubmenu)[hidden],#systemInvoiceConsult[hidden]{display:none!important}
+#systemInvoiceConsult{padding:10px;min-height:calc(100dvh - 70px)}
+#systemInvoiceConsult>.invoice-history-overlay{position:relative;inset:auto;z-index:auto;display:flex;align-items:stretch;padding:0;background:transparent}
+#systemInvoiceConsult>.invoice-history-overlay[hidden]{display:none!important}
+#systemInvoiceConsult .invoice-history-card{width:100%;max-width:none;height:calc(100dvh - 90px);max-height:none;box-shadow:none}
+@media print{#systemInvoiceConsult{display:none!important}}
+
+@page system-receipt{size:A5 portrait;margin:10mm 12mm}
+body.invoice-reference-design>.app>.topbar .brand{margin-left:1cm!important}
+body.invoice-reference-design>.app>.topbar>#systemMenuToggle{order:-1;flex:none}
+body.invoice-reference-design>.app>.topbar>#systemMenuToggle::before{display:none!important}
+#systemMenuBackdrop{position:fixed;inset:0;background:#0005;z-index:2000}
+#systemMenu{position:fixed;top:0;bottom:0;left:0;width:min(300px,85vw);z-index:2001;background:white;color:#16395e;padding:18px;box-shadow:8px 0 30px #0003;display:flex;flex-direction:column;gap:12px}
+#systemMenu header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+#systemMenu button,#systemMenu a{padding:12px;border:1px solid #bad3ee;border-radius:7px;background:#f3f8ff;color:#16395e;text-align:left;font:700 15px Arial;text-decoration:none;cursor:pointer}
+#systemMenu [aria-current="page"]{background:#d9ebff;border-color:#1780e5}
+#systemMenu[hidden],#systemMenuBackdrop[hidden],#systemReceipts[hidden],#systemCaja[hidden]{display:none!important}
+#systemMenuToggle[hidden],[data-system-section][hidden]{display:none!important}
+body:is([data-system-section="receipts"],[data-system-section="invoice-consult"],[data-system-section="customers"],[data-system-section="caja"])>.app>:not(.topbar){display:none!important}
+body:is([data-system-section="receipts"],[data-system-section="invoice-consult"],[data-system-section="customers"],[data-system-section="caja"])>.app>.topbar>:not(.brand):not(#systemMenuToggle):not(#systemReceiptHeaderActions):not(#systemInvoiceDetailActions){display:none!important}
+body:is([data-system-section="receipts"],[data-system-section="invoice-consult"],[data-system-section="customers"],[data-system-section="caja"])>.app{min-height:0!important;height:auto!important}
+body:is([data-system-section="receipts"],[data-system-section="invoice-consult"],[data-system-section="customers"],[data-system-section="caja"])>.modal-wrap{display:none!important}
+#systemReceipts{position:relative;isolation:isolate;background:white;min-height:calc(100dvh - 70px);overflow:auto}
+#systemReceipts #rc-receiptPrint{display: none;}
+
+@media print {#systemReceipts>main,#systemReceipts>dialog:not(#rc-receiptModal),#systemReceipts #rc-receiptModal>.dialog-header,#systemReceipts #rc-receiptBody,#systemReceipts #rc-receiptActions,#systemReceipts #rc-receiptStatus{display: none !important;}
+#systemReceipts #rc-receiptModal{position: static !important; margin: 0px !important; padding: 0px !important; width: 100% !important; max-width: none !important; height: auto !important; max-height: none !important; overflow: visible !important; background: white !important; box-shadow: none !important;}
+#systemReceipts #rc-receiptPrint{display: block !important; width: 124mm; max-width: 100%; margin: 0px auto; color: rgb(0, 0, 0); font: 8pt Arial, sans-serif;}
+#systemReceipts #rc-receiptPrint .receipt-brand{display: flex; align-items: center; gap: 8mm; border-bottom: 1px solid black; padding: 0px 0px 2mm;}
+#systemReceipts #rc-receiptPrint .receipt-brand img{width: 56mm; height: 16mm; object-fit: contain;}
+#systemReceipts #rc-receiptPrint .receipt-contact{font-size: 7pt; line-height: 2; overflow-wrap: anywhere;}
+#systemReceipts #rc-receiptPrint .receipt-number{display: flex; justify-content: space-between; margin: 1mm 0px 5mm;}
+#systemReceipts #rc-receiptPrint .receipt-data{display: grid; grid-template-columns: 1fr 1fr; gap: 2mm 5mm; margin-bottom: 5mm;}
+#systemReceipts #rc-receiptPrint .receipt-wide{grid-column: 1/-1; overflow-wrap: anywhere;}
+#systemReceipts #rc-receiptPrint .receipt-label{font-weight: bold; text-decoration: underline; margin-right: 2mm;}
+#systemReceipts #rc-receiptPrint .receipt-balance{display: flex; justify-content: space-between;}
+#systemReceipts #rc-receiptPrint table{width: 100%; table-layout: fixed; border-collapse: collapse; font: 8pt Arial, sans-serif;}
+#systemReceipts #rc-receiptPrint th,#systemReceipts #rc-receiptPrint td{position: static; background: white !important; border: 0px; padding: 1mm 0px; height: auto; overflow-wrap: anywhere; text-align: left;}
+#systemReceipts #rc-receiptPrint th{font-weight: bold; text-decoration: underline;}
+#systemReceipts #rc-receiptPrint th:last-child,#systemReceipts #rc-receiptPrint td:last-child{text-align: right;}
+#systemReceipts #rc-receiptPrint .receipt-applied{margin-bottom: 3mm; border-bottom: 1px dotted black;}
+#systemReceipts #rc-receiptPrint .receipt-applied th:nth-child(3),#systemReceipts #rc-receiptPrint .receipt-applied td:nth-child(3){text-align: center;}
+#systemReceipts #rc-receiptPrint .receipt-applied th:nth-child(4),#systemReceipts #rc-receiptPrint .receipt-applied td:nth-child(4){text-align: right;}
+#systemReceipts #rc-receiptPrint .receipt-grand-total{border-top: 1px dotted black; display: flex; justify-content: flex-end; gap: 12mm; padding-top: 1mm; font-weight: bold; font-size: 10pt;}
+#systemReceipts #rc-receiptPrint .receipt-words{margin: 4mm 0px 2mm;}
+#systemReceipts #rc-receiptPrint .receipt-print-note{white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 1mm;}
+#systemReceipts #rc-receiptPrint .receipt-signatures{display: flex; justify-content: space-around; gap: 20mm; margin-top: 10mm; font-size: 8pt; text-align: center; break-inside: avoid;}
+#systemReceipts #rc-receiptPrint .receipt-signatures span{width: 55mm; border-top: 1px dotted black; padding-top: 1mm;}
+#systemReceipts #rc-receiptPrint tr{break-inside: avoid;}}
+#systemReceipts *{box-sizing: border-box;}
+#systemReceipts{margin: 0px; background: rgb(240, 240, 240); color: rgb(17, 17, 17); font: 14px Arial, sans-serif;}
+#systemReceipts main{padding: 8px 16px; max-width: 1060px;}
+#systemReceipts header{display: flex; align-items: center; gap: 16px; padding-bottom: 6px; border-bottom: 1px solid rgb(153, 153, 153);}
+#systemReceipts h1{font-size: 20px; margin: 0px; border: 1px solid rgb(170, 170, 170); padding: 4px 12px;}
+#systemReceipts header label{display: flex; align-items: center; gap: 6px;}
+#systemReceipts input,#systemReceipts select,#systemReceipts button,#systemReceipts textarea{font: inherit;}
+#systemReceipts input,#systemReceipts select,#systemReceipts textarea{border: 1px solid rgb(170, 170, 170); background: white; padding: 4px 6px; min-width: 0px;}
+#systemReceipts button{border: 1px solid rgb(170, 170, 170); background: rgb(245, 245, 245); padding: 6px 10px; cursor: pointer; font-weight: 700;}
+#systemReceipts button:disabled{opacity: 0.5; cursor: default;}
+#systemReceipts input[readonly]{background: rgb(246, 246, 246);}
+#systemReceipts label{font-weight: 700;}
+#systemReceipts #rc-point{width: 190px;}
+#systemReceipts .header-fields{padding: 8px 0px; display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); gap: 6px 8px; max-width: 890px;}
+#systemReceipts .header-fields label{display: flex; align-items: center; gap: 5px; white-space: nowrap;}
+#systemReceipts .header-fields input{width: 100%;}
+#systemReceipts .header-fields label.w5>span{flex: 1 1 0%; min-width: 0px;}
+#systemReceipts .w3{grid-column: span 3;}
+#systemReceipts .w4{grid-column: span 4;}
+#systemReceipts .w5{grid-column: span 5;}
+#systemReceipts .w2{grid-column: span 2;}
+#systemReceipts .header-buttons{grid-column: span 3; display: flex; gap: 6px;}
+#systemReceipts .points{grid-column: 11 / span 2; grid-row: 1;}
+#systemReceipts .points input{max-width: 55px; text-align: right;}
+#systemReceipts h2{font-size: 14px; margin: 6px 0px 3px;}
+#systemReceipts .invoice-section{display: flex; align-items: center; gap: 8px;}
+#systemReceipts .invoice-section .grid-block{width: 910px; flex-shrink: 0;}
+#systemReceipts .invoice-section .table-scroll{height: 234px;}
+#systemReceipts .invoice-section th{height: 26px;}
+#systemReceipts .grid-block{border: 1px solid rgb(153, 153, 153);}
+#systemReceipts .table-scroll{overflow-x: auto; overflow-y: scroll; scrollbar-gutter: stable; height: 104px; background: repeating-linear-gradient(rgb(255, 255, 255) 0, rgb(255, 255, 255) 25px, rgb(225, 225, 225) 25px, rgb(225, 225, 225) 26px);}
+#systemReceipts table{width: 100%; border-collapse: collapse; table-layout: fixed;}
+#systemReceipts th{background: rgb(229, 229, 229); font-weight: 400; padding: 4px; text-align: left; position: sticky; top: 0px; z-index: 1;}
+#systemReceipts td{height: 26px; padding: 0px; border: 1px solid rgb(221, 221, 221);}
+#systemReceipts td input,#systemReceipts td select{width: 100%; border: 0px; background: transparent; padding: 4px;}
+#systemReceipts tbody tr:nth-child(even){background: rgb(244, 244, 244);}
+#systemReceipts tbody tr.selected{background: rgb(203, 229, 243);}
+#systemReceipts td .number{text-align: right;}
+#systemReceipts td button{padding: 0px 6px; border: 0px; background: transparent; color: rgb(201, 0, 6);}
+#systemReceipts .records{background: rgb(238, 238, 238); border-top: 1px solid rgb(170, 170, 170); padding: 3px 6px; font-size: 12px;}
+#systemReceipts .invoice-total{width: 910px; display: flex; justify-content: flex-end; gap: 4px; align-items: center; margin: 4px 0px 6px; font-weight: 700; font-size: 18px;}
+#systemReceipts output.total{background: black; color: rgb(255, 233, 0); padding: 4px 10px; display: inline-block; min-width: 145px; text-align: right;}
+#systemReceipts .values{max-width: 910px;}
+#systemReceipts .values .table-scroll{height: 130px;}
+#systemReceipts .values th{height: 26px;}
+#systemReceipts .totals{display: flex; justify-content: space-around; gap: 18px; padding: 4px; font-size: 18px; font-weight: 700;}
+#systemReceipts #rc-difference{background: white; color: black; border: 1px solid black; min-width: 125px; padding: 3px 8px; text-align: right;}
+#systemReceipts .bottom{display: flex; align-items: end; gap: 8px; max-width: 910px; margin-top: 8px;}
+#systemReceipts .bottom label{width: 220px; display: block;}
+#systemReceipts .bottom textarea{width: 100%; height: 35px; resize: vertical;}
+#systemReceipts .actions{display: flex; gap: 6px; border: 1px solid rgb(187, 187, 187); padding: 6px;}
+#systemReceipts .actions button{min-width: 98px;}
+#systemReceipts .primary{color: rgb(8, 122, 32);}
+#systemReceipts #rc-cancel{color: red;}
+#systemReceipts #rc-consult{color: blue;}
+#systemReceipts #rc-status{margin: 6px 0px; min-height: 18px;}
+#systemReceipts dialog{width: min(1000px, 95vw); max-height: 90vh; border: 1px solid rgb(170, 170, 170); border-radius: 8px; padding: 16px; overflow: auto;}
+#systemReceipts dialog::backdrop{background: rgba(0, 0, 0, 0.4);}
+#systemReceipts .dialog-header{display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px;}
+#systemReceipts .dialog-header h2{font-size: 20px; margin: 0px;}
+#systemReceipts .dialog-table{table-layout: auto;}
+#systemReceipts .dialog-table td,#systemReceipts .dialog-table th{padding: 6px;}
+#systemReceipts .dialog-table button{white-space: nowrap;}
+#systemReceipts .receipt-summary{display: flex; gap: 30px; flex-wrap: wrap; padding: 10px 0px;}
+#systemReceipts .receipt-summary strong{display: block;}
+#systemReceipts .receipt-note{white-space: pre-wrap;}
+#systemReceipts #rc-receiptActions{display: flex; justify-content: flex-end; margin-top: 14px;}
+#systemReceipts #rc-receiptModal table{table-layout: auto;}
+#systemReceipts #rc-receiptModal td{padding: 5px;}
+#systemReceipts .error{color: rgb(176, 0, 32);}
+@media (max-width:900px) {#systemReceipts main{min-width: 940px; padding: 10px;}
+#systemReceipts header{gap: 12px;}}
+@media print {#systemReceipts{background: white;}
+#systemReceipts>main,#systemReceipts #rc-historyModal,#systemReceipts #rc-accountModal,#systemReceipts #rc-receiptModal .dialog-header button,#systemReceipts #rc-receiptActions{display: none !important;}
+#systemReceipts #rc-receiptModal{position: static; display: block; border: 0px; width: 100%; max-height: none;}
+#systemReceipts #rc-receiptModal::backdrop{display: none;}}
+@media screen {#systemReceipts:not([data-page-theme="soloadmin"]){background: rgb(255, 255, 255) !important;}
+#systemReceipts main{margin: 0px; background: rgb(255, 255, 255); border: 0px; border-radius: 0px; box-shadow: none; width: 1060px; max-width: none; min-width: 0px; padding: 8px 16px; zoom: var(--receipt-scale,.9);}
+#systemReceipts main>header{gap: 16px;}
+#systemReceipts main>header{border-color: var(--corralon-line); background: rgb(255, 255, 255);}
+#systemReceipts main h1{border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 3px solid var(--corralon-red); border-image: none; padding: 4px 10px; font-size: 19px; letter-spacing: -0.3px;}
+#systemReceipts main>header>span{color: var(--corralon-muted); font-size: 12px;}
+#systemReceipts main>header>a{color: var(--corralon-text); font-weight: 700; text-decoration: none; border: 1px solid var(--corralon-line); border-radius: 5px; padding: 5px 10px;}
+#systemReceipts main>header>a:hover{background: var(--corralon-soft);}
+#systemReceipts main label{font-size: 13px; font-weight: 600; color: rgb(68, 68, 68);}
+#systemReceipts main :is(input,select,textarea){border-radius: 4px; min-height: 26px;}
+#systemReceipts main input[readonly]{font-weight: 600;}
+#systemReceipts main #rc-number{color: var(--corralon-muted);}
+#systemReceipts main button{border-radius: 5px; background: rgb(255, 255, 255); box-shadow: 0 1px 2px #00000006; transition: background .12s,color .12s;}
+#systemReceipts main button:hover:not(:disabled):not(.primary){background: var(--corralon-soft);}
+#systemReceipts main button:focus-visible,#systemReceipts main>header>a:focus-visible{outline: 2px solid var(--corralon-red); outline-offset: 2px;}
+#systemReceipts main h2{color: rgb(51, 51, 51); font-size: 13px; font-weight: 700;}
+#systemReceipts main .grid-block{border-color: var(--corralon-line-strong); border-radius: 5px; overflow: hidden;}
+#systemReceipts main th{font-size: 12px; font-weight: 700; color: rgb(85, 85, 85); padding: 5px 6px;}
+#systemReceipts main td{border-color: var(--corralon-line); font-size: 13px;}
+#systemReceipts main td :is(input,select){border-radius: 0px; min-height: 25px;}
+#systemReceipts main .records{border-color: var(--corralon-line); color: var(--corralon-muted); background: var(--corralon-soft); padding: 3px 6px; font-size: 11px;}
+#systemReceipts main .records button{box-shadow: none; border-radius: 3px; font-size: 11px;}
+#systemReceipts main .invoice-total,#systemReceipts main .totals{font-size: 16px; gap: 8px;}
+#systemReceipts main output.total{border-radius: 4px; color: white; font-variant-numeric: tabular-nums; background: rgb(23, 23, 23);}
+#systemReceipts main #rc-difference{border-color: var(--corralon-line-strong); border-radius: 4px; font-variant-numeric: tabular-nums;}
+#systemReceipts main .actions{border-color: var(--corralon-line); border-radius: 6px; background: var(--corralon-soft);}
+#systemReceipts main #rc-consult{color: var(--corralon-text);}
+#systemReceipts main #rc-cancel{color: var(--corralon-red-dark);}
+#systemReceipts main #rc-status{font-size: 12px; color: var(--corralon-muted); padding: 2px 0px;}
+#systemReceipts main #rc-status.error{color: rgb(176, 0, 32);}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:640px) {
+}
+
+
+
+
+
+
+
+
+
+@media (max-width:1100px) {
+
+
+
+
+
+
+
+
+
+}
+@media (max-width:700px) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+@media screen {
+
+
+}
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:760px) {
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-height:800px) {
+
+
+
+
+
+}
+@media (max-width:700px) {
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+@media screen {
+
+
+
+
+
+}
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+@media screen {
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:899px) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:1180px) {
+}
+@media (max-width:760px) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:1200px) {
+
+
+}
+@media (max-width:700px) {
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:850px) {
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:800px) {
+
+
+
+
+
+
+
+
+
+
+
+}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:900px) {
+
+}
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:1150px) {
+
+
+
+
+
+
+
+}
+@media (max-width:700px) {
+
+
+
+
+
+}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (min-width:761px) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+@media screen {
+
+
+
+
+
+
+
+
+}
+@media screen {
+
+
+
+
+}
+
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+@media (max-width:899px) {
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+@media screen {
+
+
+}
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+@media screen {
+
+
+
+}
+@media screen {
+
+
+
+
+}
+
+
+@media screen {
+
+}
+@media screen {
+
+
+
+
+}
+@media screen {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+@media screen {
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media (max-width:750px) {
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@media screen {#systemReceipts [hidden]{display: none !important;}
+#systemReceipts>.receipt-screen{box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; width: var(--receipt-consult-width,100%); height: var(--receipt-consult-height,100dvh); zoom: var(--receipt-consult-scale,1); min-width: 0px; min-height: 0px; margin: 0px; padding: 0px 30px 8px; background: linear-gradient(rgb(247, 252, 255), rgb(237, 248, 255)); color: rgb(16, 47, 103); font: 14px Arial, sans-serif; overflow: hidden;}
+#systemReceipts .receipt-screen :is(button,input,select){font: 14px Arial, sans-serif; padding: 8px 12px; border: 1px solid rgb(190, 215, 245); border-radius: 6px; background: rgb(255, 255, 255); color: rgb(18, 55, 104); min-height: 38px; box-shadow: none;}
+#systemReceipts .receipt-screen button{cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 9px; white-space: nowrap; background: linear-gradient(rgb(255, 255, 255), rgb(246, 251, 255));}
+#systemReceipts .receipt-screen button:disabled{opacity: 0.5; cursor: default;}
+#systemReceipts .receipt-screen>.dialog-header,#systemReceipts .receipt-consult-header{display: flex; align-items: center; gap: 18px; flex: 0 0 auto; height: 84px; margin: 0px -30px; padding: 12px 30px; border: 0px; background: linear-gradient(110deg, rgb(18, 73, 178), rgb(6, 185, 235)); color: rgb(255, 255, 255);}
+#systemReceipts .receipt-screen :is(.dialog-header,.receipt-consult-header)>img{width: 174px; height: 56px; object-fit: contain; filter: brightness(0) invert(1); padding-right: 20px; border-right: 1px solid rgba(255, 255, 255, 0.533);}
+#systemReceipts .receipt-screen :is(.dialog-header h2,.receipt-consult-header h1){display: flex; align-items: center; gap: 14px; flex: 1 1 0%; margin: 0px; padding: 0px; border: 0px; font: 700 32px / 1.2 Arial, sans-serif; color: white !important;}
+#systemReceipts .receipt-screen :is(.dialog-header h2,.receipt-consult-header h1)::before{content: ""; width: 31px; height: 35px; flex: 0 0 auto; background: currentcolor; mask: var(--receipt-consult-doc) center/contain no-repeat;}
+#systemReceipts .receipt-consult-header nav{display: flex; gap: 10px; align-items: center; margin-left: auto;}
+#systemReceipts .receipt-screen .dialog-header button,#systemReceipts .receipt-consult-header :is(button,a){display: inline-flex; align-items: center; gap: 8px; min-height: 43px; padding: 9px 14px; border: 1px solid rgb(198, 227, 252); border-radius: 6px; background: rgba(255, 255, 255, 0.07); color: white !important; font: 600 14px Arial, sans-serif; text-decoration: none;}
+#systemReceipts #rc-receiptConsultBack{font-size: 12px;}
+#systemReceipts #rc-historyModal>label{display: flex; align-items: center; gap: 12px; flex: 0 0 auto; padding: 9px 16px; background: rgb(255, 255, 255); border: 1px solid rgb(194, 221, 247); border-radius: 6px;}
+#systemReceipts .receipt-history-search{display: flex; align-items: center; gap: 14px; flex: 0 0 auto;}
+#systemReceipts .receipt-history-search>input{flex:1 1 0%;max-width:630px;min-width:0;}
+#systemReceipts .receipt-history-search>label{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+#systemReceipts #rc-receiptHistoryVoided[aria-pressed=true]{background: rgb(224, 239, 255); border-color: rgb(39, 136, 236);}
+#systemReceipts #rc-historyBody{display: flex; flex-direction: column; min-height: 0px; flex: 1 1 0%; border: 1px solid rgb(194, 221, 247); border-radius: 7px; background: rgb(255, 255, 255); overflow: hidden;}
+#systemReceipts .receipt-history-grid{flex: 1 1 0%; min-height: 0px; overflow: auto;}
+#systemReceipts .receipt-history-count{margin: 0px; padding: 12px 16px; border-top: 1px solid rgb(207, 226, 247);}
+#systemReceipts .receipt-screen table{width: 100%; min-width: 0px; border-collapse: collapse; table-layout: fixed; font: 14px Arial, sans-serif;}
+#systemReceipts .receipt-screen :is(th,td){height: 31px; padding: 4px 12px; border: 1px solid rgb(209, 227, 246); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(20, 53, 105); vertical-align: middle;}
+#systemReceipts .receipt-screen th{position: sticky; top: 0px; z-index: 1; background: linear-gradient(rgb(237, 247, 255), rgb(222, 239, 255)); font-weight: 600;}
+#systemReceipts .receipt-screen tr:nth-child(even){background: rgb(240, 247, 254);}
+#systemReceipts .receipt-screen tr.selected{background: rgb(204, 231, 253);}
+#systemReceipts .receipt-screen tr.selected td:first-child{box-shadow: inset 4px 0 #087bff;}
+#systemReceipts .receipt-num{text-align: right; font-variant-numeric: tabular-nums;}
+#systemReceipts .receipt-check{text-align: center;}
+#systemReceipts .receipt-state{display: inline-flex; align-items: center; justify-content: center; padding: 5px 12px; border-radius: 6px; background: rgb(83, 196, 141); color: rgb(255, 255, 255); font: 600 14px Arial, sans-serif;}
+#systemReceipts .receipt-state.is-voided{background: rgb(255, 240, 242); color: rgb(184, 24, 52); border: 1px solid rgb(242, 186, 196);}
+#systemReceipts #rc-receiptConsultContent{display: flex; flex: 1 1 0%; min-height: 0px; overflow: hidden;}
+#systemReceipts #rc-receiptConsultSection #rc-receiptBody{display: flex; flex-direction: column; gap: 12px; flex: 1 1 0%; min-width: 0px; min-height: 0px; overflow: auto;}
+#systemReceipts .receipt-consult-info{flex: 0 0 auto; border: 1px solid rgb(198, 222, 247); border-radius: 9px; background: rgb(255, 255, 255); overflow: hidden;}
+#systemReceipts .receipt-consult-info-title{display: flex; align-items: center; gap: 16px; height: 57px; padding: 9px 18px; border-bottom: 1px solid rgb(224, 236, 249);}
+#systemReceipts .receipt-consult-info-title h2{margin: 0px; font: 700 25px Arial, sans-serif; color: rgb(16, 47, 103) !important;}
+#systemReceipts .receipt-consult-info-title label{display: flex; align-items: center; gap: 16px; margin-left: auto; font-size: 14px;}
+#systemReceipts .receipt-consult-info-title select{min-width: 260px; opacity: 1;}
+#systemReceipts .receipt-consult-fields{display: grid; grid-template-columns: 100px 300px 230px 180px 180px minmax(0,1fr); gap: 12px 18px; padding: 10px 18px 14px;}
+#systemReceipts .receipt-consult-field{display: flex; align-items: center; gap: 12px; min-width: 0px; margin: 0px; font-size: 14px;}
+#systemReceipts .receipt-consult-field>span{white-space: nowrap; font-weight: 600;}
+#systemReceipts .receipt-consult-field>strong{display: block; flex: 1 1 0%; min-width: 0px; min-height: 39px; padding: 9px 12px; border: 1px solid rgb(199, 221, 246); border-radius: 6px; background: rgb(247, 251, 255); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+#systemReceipts .receipt-consult-client{grid-column: 1/3;}
+#systemReceipts .receipt-consult-concept{grid-column: 4/7;}
+#systemReceipts .receipt-consult-annulled{justify-content: center;}
+#systemReceipts .receipt-consult-annulled input{width: 20px; height: 20px; min-height: 0px; accent-color: rgb(8, 123, 255);}
+#systemReceipts .receipt-consult-card{display: flex; flex-direction: column; flex: 1 1 0%; min-height: 150px; border: 1px solid rgb(196, 222, 248); border-radius: 9px; background: rgb(255, 255, 255); overflow: hidden; padding: 0px 10px 8px;}
+#systemReceipts .receipt-consult-invoices{flex: 1.2 1 0%;}
+#systemReceipts .receipt-consult-card-title{display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; height: 54px; padding: 7px 10px;}
+#systemReceipts .receipt-consult-card-title h2{display: flex; align-items: center; gap: 15px; margin: 0px; font: 700 24px Arial, sans-serif; color: rgb(16, 47, 103) !important;}
+#systemReceipts .receipt-consult-card-title h2::before{content: ""; width: 30px; height: 31px; background: rgb(7, 87, 181); mask: var(--receipt-consult-doc) center/contain no-repeat;}
+#systemReceipts .receipt-consult-values .receipt-consult-card-title h2::before{mask-image: var(--receipt-consult-wallet);}
+#systemReceipts .receipt-consult-table{flex: 1 1 0%; min-height: 0px; overflow: auto; border: 1px solid rgb(207, 226, 247); border-radius: 6px 6px 0 0; background: repeating-linear-gradient(rgb(255, 255, 255) 0, rgb(255, 255, 255) 30px, rgb(214, 230, 247) 30px, rgb(214, 230, 247) 31px, rgb(244, 249, 255) 31px, rgb(244, 249, 255) 61px, rgb(214, 230, 247) 61px, rgb(214, 230, 247) 62px); scrollbar-width: thin; scrollbar-color: #b9d2ee #f4faff;}
+#systemReceipts .receipt-consult-table table{background: rgb(255, 255, 255);}
+#systemReceipts .receipt-consult-table tbody tr{cursor: pointer;}
+#systemReceipts .receipt-consult-table tbody td :is(input,select,button){display:block;box-sizing:border-box;height:22px;min-height:0;padding-block:0;line-height:normal;}
+#systemReceipts .receipt-consult-table .receipt-add-invoice td{height:27px;padding-block:0;}
+#systemReceipts .receipt-consult-table .receipt-add-invoice input{box-sizing:border-box;height:26px;min-height:0;padding-block:0;border:0;border-radius:0;background:transparent;box-shadow:none;}
+#systemReceipts .receipt-consult-table .receipt-add-invoice input:focus{outline:1px solid #087bff;outline-offset:-1px;}
+#systemReceipts .receipt-consult-values tbody td :is(input,select){border:0;border-radius:0;background:transparent;box-shadow:none;}
+#systemReceipts .receipt-consult-values tbody td :is(input,select):focus-visible{outline:1px solid #087bff;outline-offset:-1px;}
+#systemReceipts .receipt-consult-card-total{display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex: 0 0 auto; min-height: 47px; padding: 4px 0px 0px; background: rgb(255, 255, 255);}
+#systemReceipts .receipt-consult-card-total>span{margin-right: auto; padding-left: 10px; color: rgb(38, 77, 131);}
+#systemReceipts .receipt-consult-card-total label{display: flex; align-items: center; gap: 20px; min-height: 39px; padding: 5px 15px; border: 1px solid rgb(208, 229, 250); border-radius: 6px; background: rgb(238, 247, 255); font-size: 14px;}
+#systemReceipts .receipt-consult-card-total output{font-size: 20px; font-weight: 700; white-space: nowrap;}
+#systemReceipts .receipt-consult-card-total output.balanced{color: rgb(0, 136, 85);}
+#systemReceipts .receipt-empty{margin: 0px; padding: 12px; background: rgb(255, 255, 255); color: rgb(73, 109, 152);}
+#systemReceipts .receipt-consult-note{flex: 0 0 auto; margin: 0px; padding: 5px 14px; font-size: 13px; white-space: pre-wrap;}
+#systemReceipts #receiptConsultValueDetail{flex: 0 0 auto; padding: 9px 14px; background: rgb(238, 247, 255); border: 1px solid rgb(201, 223, 248); border-radius: 6px;}
+#systemReceipts .receipt-consult-footer{display: flex; align-items: center; gap: 10px; flex: 0 0 auto; min-height: 62px; padding: 6px 14px; border: 1px solid rgb(191, 218, 247); border-radius: 8px; background: rgb(255, 255, 255);}
+#systemReceipts .receipt-consult-footer button{min-height: 45px; padding: 9px 16px; font-weight: 600;}
+#systemReceipts #rc-receiptConsultActions #rc-receiptActions{display: flex; align-items: center; gap: 10px; margin: 0px; padding: 0px;}
+#systemReceipts #rc-receiptConsultActions #rc-voidReceipt{order: 2; background: rgb(255, 247, 248); color: rgb(226, 27, 49) !important; border-color: rgb(255, 124, 139); margin: 0px !important;}
+#systemReceipts #rc-receiptConsultActions #rc-printReceipt{order: 1;}
+#systemReceipts .receipt-consult-footer .receipt-consult-primary{background: linear-gradient(rgb(7, 137, 252), rgb(0, 104, 223)); color: white; border-color: rgb(6, 122, 241);}
+#systemReceipts .receipt-consult-navigation{display: flex; align-items: center; gap: 16px; margin-left: auto;}
+#systemReceipts #rc-receiptConsultPosition{white-space: nowrap;}
+#systemReceipts #rc-receiptConsultStatusSlot{flex: 0 0 auto; height: 18px;}
+#systemReceipts #rc-receiptConsultStatusSlot #rc-receiptStatus{display: flex; align-items: center; gap: 9px; min-height: 0px; margin: 0px; padding: 0px 16px; font-size: 12px; line-height: 18px; color: rgb(82, 115, 154);}
+#systemReceipts #rc-receiptConsultStatusSlot #rc-receiptStatus::before{content: ""; width: 11px; height: 11px; border-radius: 50%; background: rgb(44, 198, 77);}
+#systemReceipts #rc-receiptConsultSection [data-payment-editor]{flex: 0 0 auto; margin: 0px; padding: 12px; border: 1px solid rgb(183, 214, 250); border-radius: 7px; background: rgb(247, 251, 255);}
+#systemReceipts #rc-receiptConsultSection [data-payment-editor] h2{margin: 0px 0px 7px;}
+#systemReceipts #rc-receiptConsultSection [data-payment-editor] :is(label,button){display: inline-flex; align-items: center; gap: 5px; margin: 4px;}}
+@media print {#systemReceipts>.receipt-screen{display: none !important;}}
+#systemReceipts .receipt-screen{--receipt-consult-doc: url(data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M5%202h9l5%205v15H5zM14%202v6h5M8%2012h8M8%2016h8%22%2F%3E%3C%2Fsvg%3E); --receipt-consult-wallet: url(data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%206V3h16v4M3%206h18v15H3zM15%2010h6v7h-6zM17%2013h.01%22%2F%3E%3C%2Fsvg%3E);}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#systemReceipts .receipt-screen{top:70px!important;height:calc(100dvh - 70px)!important}
+@media print{
+ html:has(body[data-system-section="receipts"]),body[data-system-section="receipts"]{width:auto!important;min-height:0!important;page:system-receipt}
+ body[data-system-section="receipts"]>.app,body[data-system-section="receipts"]>#systemMenu,body[data-system-section="receipts"]>#systemMenuBackdrop,body[data-system-section="receipts"]>#trialModal{display:none!important}
+ #systemReceipts{overflow:visible!important;min-height:0!important;page:system-receipt}
+ #systemReceipts>.receipt-screen{display:none!important}
+}
+
+[data-system-receipts-group][hidden]{display:none!important}
+
+@media screen{#systemReceipts>.receipt-screen{top:var(--receipt-screen-top,58px)!important;height:var(--receipt-consult-height,calc(100dvh - 58px))!important;width:var(--receipt-consult-width,100%)!important}}
+</style>
+</head>
+<body data-page-theme="facturacion" data-system-section="receipts">
+<header class="receipts-page-header">
+<button type="button" id="systemMenuToggle">☰ Menú</button>
+<h1>Recibos de cobro</h1>
+<div id="systemReceiptHeaderActions" hidden></div>
+</header>
+<section id="systemReceipts" aria-label="Recibos de cobro">
+
+<main id="rc-receiptEmission">
+<header><h1>Emitir Recibos de Cobro</h1><label>Punto de Venta:<select id="rc-point" data-flow=""></select></label><span id="rc-today"></span></header>
+<form id="rc-receiptForm">
+<div class="header-fields">
+<label class="w3">Recibo Nº:<input id="rc-number" readonly="" placeholder="Al confirmar" tabindex="-1"></label>
+<label class="w3">Fecha:<input id="rc-date" type="text" data-date="" data-flow="" autocomplete="off"></label>
+<label class="w4">CUIT/DNI Nº:<input id="rc-document" type="text" data-flow="" autocomplete="off"></label>
+<label class="points">Puntos:<input id="rc-points" readonly="" tabindex="-1" value="0"></label>
+<label class="w5">Cliente:<input id="rc-customer" type="text" data-flow="" autocomplete="off"></label>
+<label class="w2">Nº:<input id="rc-customerId" type="text" data-flow="" autocomplete="off"></label>
+<label class="w2">Saldo:<input id="rc-balance" readonly="" tabindex="-1"></label>
+<div class="header-buttons"><button id="rc-loadInvoices" type="button" data-flow="">Cargar Facturas</button><button id="rc-viewReceipts" type="button" data-flow="">Ver Recibos</button></div>
+
+</div>
+<h2>Facturas a Cobrar</h2>
+<div class="invoice-section"><div class="grid-block"><div class="table-scroll"><table><colgroup><col style="width:105px"><col style="width:100px"><col style="width:165px"><col style="width:90px"><col style="width:140px"><col style="width:28px"></colgroup><thead><tr><th>Fecha</th><th>TipoComp</th><th>Factura</th><th>Cuota</th><th>A Cobrar</th><th></th></tr></thead><tbody id="rc-invoices"></tbody></table></div><div class="records" id="rc-invoiceCount">0 registros</div></div><button id="rc-viewInvoice" type="button">Ver Factura</button></div>
+<div class="invoice-total">Total a Cobrar:<output id="rc-invoiceTotal" class="total">$ 0,00</output></div>
+<h2>Detalle de Valores Recibidos</h2>
+<div class="values"><div class="grid-block"><div class="table-scroll"><table><colgroup><col style="width:135px"><col style="width:140px"><col style="width:115px"><col style="width:65px"><col style="width:100px"><col style="width:125px"><col><col style="width:25px"></colgroup><thead><tr><th>Tipo Valor</th><th>Valor Nº</th><th>Tarjeta</th><th>Cuotas</th><th>Fecha Vto.</th><th>Importe</th><th>Descripción</th><th></th></tr></thead><tbody id="rc-values"></tbody></table></div><div class="records"><span id="rc-valueCount">1 registro</span><button type="button" id="rc-addValue" style="float:right;padding:0 7px">+ Renglón</button></div></div>
+<div class="totals"><span>Diferencia: <output id="rc-difference">$ 0,00</output></span><span>Total Valores: <output id="rc-paymentTotal" class="total">$ 0,00</output></span></div></div>
+<div class="bottom"><label>Nota:<textarea id="rc-note" maxlength="100" data-flow=""></textarea></label><div class="actions"><button id="rc-confirm" class="primary" type="button" data-flow="">Confirmar</button><button id="rc-cancel" type="button" data-flow="">Cancelar</button><button id="rc-consult" type="button" data-flow="">Consultar</button></div><div class="actions"><button id="rc-billing" type="button">Facturación</button><button id="rc-account" type="button">Ctas. Ctes.</button></div></div>
+</form><p id="rc-status" role="status" aria-live="polite">Conectando con SQL…</p>
+</main>
+<section id="rc-historyModal" class="receipt-screen receipt-history-screen" hidden="" aria-label="Consultar recibos"><div class="dialog-header"><img src="logo-corralon.png" alt="Corralón Progreso"><h2>Consultar recibos de cobro</h2><button type="button" data-close="historyModal">Volver a emitir</button></div><label>Cliente: <span id="rc-historyCustomer">Todos</span></label><div class="receipt-history-search"><input id="rc-receiptHistoryQuery" type="search" placeholder="Buscar cliente o número de recibo…" aria-label="Buscar cliente o número de recibo"><label>Desde <input id="rc-receiptHistoryFrom" type="text" autocomplete="off" placeholder="dd/mm/aaaa" data-date aria-label="Desde"></label><label>Hasta <input id="rc-receiptHistoryTo" type="text" autocomplete="off" placeholder="dd/mm/aaaa" data-date aria-label="Hasta"></label><button type="button" id="rc-receiptHistoryVoided" aria-pressed="false">Filtrar anulados</button></div><div id="rc-historyBody"></div></section>
+<dialog id="rc-receiptModal"><div class="dialog-header"><h2 id="rc-receiptTitle">Recibo de Cobro</h2><button type="button" data-close="receiptModal">Cerrar</button></div><div id="rc-receiptBody"></div><section id="rc-receiptPrint" aria-label="Recibo para imprimir"></section><p id="rc-receiptStatus" role="status"></p><div id="rc-receiptActions"><button type="button" id="rc-voidReceipt" style="color:#b00020;margin-right:8px" hidden="">Anular recibo</button><button type="button" id="rc-printReceipt">Imprimir</button></div></dialog>
+<section id="rc-receiptConsultSection" class="receipt-screen receipt-consult-screen" hidden="" data-active="false" aria-label="Detalle del recibo consultado">
+<header class="receipt-consult-header"><img src="logo-corralon.png" alt="Corralón Progreso"><h1>Consultar recibos de cobro</h1><nav><button type="button" id="rc-receiptConsultSearch">Buscar recibo</button><button type="button" id="rc-receiptConsultVoided">Filtrar anulados</button><button type="button" id="rc-receiptConsultBack">Volver a emitir</button></nav></header>
+<div id="rc-receiptConsultContent"></div><footer class="receipt-consult-footer"><button type="button" id="rc-receiptConsultValue">Ver valor</button><button type="button" data-consult-invoice="">Ver factura</button><div id="rc-receiptConsultActions"></div><button type="button" id="rc-receiptConsultLoad" class="receipt-consult-primary" title="Volver al borrador de emisión">＋ Cargar</button><div class="receipt-consult-navigation"><button id="rc-receiptConsultPrevious" type="button">‹ Anterior</button><span id="rc-receiptConsultPosition"></span><button id="rc-receiptConsultNext" type="button">Siguiente ›</button></div></footer><div id="rc-receiptConsultStatusSlot"></div>
+</section>
+<dialog id="rc-accountModal"><div class="dialog-header"><h2>Cuenta corriente del cliente</h2><button type="button" data-close="accountModal">Cerrar</button></div><div id="rc-accountBody"></div></dialog>
+
+
+
+
+</section>
+<script src="facturacion-consulta.js"></script>
+<script id="recibos-cobro">
+(()=>{
+ const root=document.getElementById('systemReceipts');
+ const menu=window.CorralonFunciones.ensureSystemMenu();
+ window.CorralonFunciones.initializeSystemMenu();
+ const current='receipts';
+ const receiptHeaderActions=document.getElementById('systemReceiptHeaderActions');
+ function setSectionTitle(title){
+   document.querySelector('.receipts-page-header h1').textContent=title;
+   document.title=title+' — Corralón Progreso';
+ }
+ const permitted=()=>window.CorralonFunciones.menuUserHasAccess(new URLSearchParams(location.search).get('origen')==='caja'?'caja':'recibos_cobro');
+ function syncReceiptHeader(){
+  const emission=root.querySelector('#rc-receiptEmission'),detail=root.querySelector('#rc-receiptConsultSection'),list=root.querySelector('#rc-historyModal');
+  const consulting=current==='receipts'&&emission?.hidden===true;
+  receiptHeaderActions.hidden=!consulting;
+  if(current==='receipts'){
+   const title=consulting?'Consultar recibos de cobro':'Recibos de cobro';
+   setSectionTitle(title);
+  }
+  if(!emission)return;
+  let detailActions=receiptHeaderActions.querySelector('[data-receipt-detail-actions]');
+  if(!detailActions){detailActions=detail.querySelector('header nav');detailActions.dataset.receiptDetailActions='';receiptHeaderActions.append(detailActions);}
+  let listActions=receiptHeaderActions.querySelector('[data-receipt-list-actions]');
+  if(!listActions){listActions=document.createElement('div');listActions.dataset.receiptListActions='';listActions.append(list.querySelector('[data-close="historyModal"]'));receiptHeaderActions.append(listActions);}
+  detailActions.hidden=detail.hidden;listActions.hidden=list.hidden;
+ }
+ new MutationObserver(syncReceiptHeader).observe(root,{subtree:true,attributes:true,attributeFilter:['hidden']});
+
+  const nativeDocument=document,nativeWindow=window;
+  const query=selector=>selector==='body > main'?'main':selector;
+  const receiptDocument=new Proxy({}, {get(_target,key){
+   if(key==='getElementById')return id=>root.querySelector('#rc-'+CSS.escape(id))||nativeDocument.getElementById('rc-'+id);
+   if(key==='querySelector')return selector=>root.querySelector(query(selector));
+   if(key==='querySelectorAll')return selector=>root.querySelectorAll(query(selector));
+   if(key==='addEventListener')return (...args)=>root.addEventListener(...args);
+   if(key==='removeEventListener')return (...args)=>root.removeEventListener(...args);
+   if(key==='body')return root;
+   const value=nativeDocument[key];return typeof value==='function'?value.bind(nativeDocument):value;
+  }});
+  const receiptLocation={get hash(){return nativeWindow.location.hash.startsWith('#recibos/')?'#'+nativeWindow.location.hash.slice(9):'';},get search(){return nativeWindow.location.search;}};
+  const receiptHistory={get state(){return nativeWindow.history.state;},pushState(state,title,hash){nativeWindow.history.pushState(state,title,hash?'#recibos/'+String(hash).replace(/^#/,''):nativeWindow.location.href);},replaceState(state,title,hash){nativeWindow.history.replaceState(state,title,hash?'#recibos/'+String(hash).replace(/^#/,''):nativeWindow.location.href);}};
+  const receiptWindow=new Proxy({}, {get(_target,key){
+   if(key==='location')return receiptLocation;
+   if(key==='history')return receiptHistory;
+   if(key==='addEventListener')return (type,listener,options)=>nativeWindow.addEventListener(type,event=>{
+    if(type==='menu-user-validated'&&!permitted())return;
+    if(['resize','afterprint','popstate'].includes(type)&&current!=='receipts')return;
+    listener(event);
+   },options);
+   const value=nativeWindow[key];return typeof value==='function'?value.bind(nativeWindow):value;
+  }});
+  (function(document,window,location){
+
+  const receiptMain = root.querySelector('main');
+  let receiptFitFrame = 0;
+  function fitReceiptForm() {
+    receiptFitFrame = 0;
+    if (root.hidden || receiptMain.hidden || window.matchMedia('print').matches) return;
+    receiptMain.style.setProperty('--receipt-scale', '1');
+    const width = Math.max(receiptMain.offsetWidth, receiptMain.scrollWidth);
+    const height = Math.max(receiptMain.offsetHeight, receiptMain.scrollHeight);
+    const top=Math.max(0,root.getBoundingClientRect().top);
+    const availableWidth=Math.max(1,Math.min(window.innerWidth,root.clientWidth||window.innerWidth)-8);
+    const availableHeight=Math.max(1,window.innerHeight-top-8);
+    const scale=Math.max(.001,Math.min(availableWidth/width,availableHeight/height));
+    receiptMain.style.setProperty('--receipt-scale', String(Math.floor(scale * 1000) / 1000));
+  }
+  function scheduleReceiptFit() {
+    if (!receiptFitFrame) receiptFitFrame = requestAnimationFrame(fitReceiptForm);
+  }
+  window.addEventListener('resize', scheduleReceiptFit);
+  window.addEventListener('afterprint', scheduleReceiptFit);
+  new MutationObserver(scheduleReceiptFit).observe(receiptMain, {childList:true, characterData:true, subtree:true});
+  new MutationObserver(scheduleReceiptFit).observe(root,{attributes:true,attributeFilter:['hidden']});
+  if(window.ResizeObserver)new ResizeObserver(scheduleReceiptFit).observe(root);
+  document.fonts?.ready.then(scheduleReceiptFit);
+  fitReceiptForm();
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id), FX = window.CorralonFunciones;
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const money = value => new Intl.NumberFormat('es-AR', {style:'currency',currency:'ARS'}).format(Number(value)||0);
+  const number = value => FX.parseLocaleNumber(String(value??'').replace(/\$/g,'').trim());
+  const today = () => { const date=new Date(); return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; };
+  const dateText = value => value.split('-').reverse().join('/');
+  const isoDate = input => { const parsed=FX.parseFechaFlexible(input.value); if(!parsed)throw new Error('Revisá la fecha de vencimiento.'); input.value=parsed.text; const date=parsed.date; return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; };
+  const uuid = () => globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,char=>{const random=Math.floor(Math.random()*16);return (char==='x'?random:random&3|8).toString(16);});
+  let user, options, ready=false, initializing=false, busy=false, customer=0, invoices=[], invoiceChoices=[], values=[], selectedInvoice=-1, rowBindings=[], confirmed=null, pending=null, requestSequence=0;
+  let viewedReceipt=null, cancellingReceipt=false;
+  const receiptEntry=new URLSearchParams(location.search),receiptFromCaja=receiptEntry.get('origen')==='caja';
+  let receiptCajaSession=null;
+  const receiptAdmin=()=>!receiptFromCaja&&FX.menuUserIsAdministrator('recibos_cobro',user);
+  const headerCombos={};
+  const billingWorkstationKey='facturacion_puesto_v1';
+  let billingPoint=new URLSearchParams(location.search).get('puntoVenta');
+  function billingDefaultPoint(){
+    let station;try{station=JSON.parse(localStorage.getItem(billingWorkstationKey)||'{}');}catch(_){}
+    const id=String(billingPoint||station?.pos||'');
+    return options.puntosVenta.some(point=>String(point.id)===id)?id:String(options.puntosVenta[0]?.id||'');
+  }
+  window.addEventListener('storage',event=>{if(event.key===billingWorkstationKey){try{billingPoint=JSON.parse(event.newValue||'{}').pos||null;}catch(_){billingPoint=null;}}});
+  const key = () => `corralon_recibos_cobro_v1:${user.id}`;
+  function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
+  async function api(params={},payload=null){
+    if(receiptFromCaja)return receiptCajaApi(params,payload);
+    const url='/api/facturacion/recibos-cobro?'+new URLSearchParams({...params,usuarioId:user.id});
+    const response=await fetch(url,{cache:'no-store',...(payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{})});
+    let data; try{data=await response.json();}catch(_){throw new Error('Activá la API nueva con iniciar sistema.bat para usar Recibos de Cobro.');}
+    if(!response.ok||!data.ok){const error=new Error(data.error||'No se pudo consultar SQL.');error.definitive=response.status>=400&&response.status<500;throw error;}return data;
+  }
+  async function receiptCajaApi(params,payload=null,renewed=false){
+    if(payload)throw new Error('Esta consulta de Caja es de solo lectura.');
+    const endpoint='/api/facturacion/caja';
+    if(!receiptCajaSession){const response=await fetch(endpoint+'?'+new URLSearchParams({accion:'bootstrap',usuarioId:user.id}),{cache:'no-store'});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'No se pudo abrir la consulta de Caja.');receiptCajaSession=data;}
+    const day=receiptEntry.get('fecha')||today(),caja=receiptEntry.get('caja'),detail=params.consulta==='detalle';
+    const query={accion:caja?(detail?'recibo-caja':'recibos-caja'):(detail?'recibo-dia':'comprobantes-dia'),fecha:day,token:receiptCajaSession.token};
+    if(caja)query.id=caja;else{query.sucursal=receiptEntry.get('sucursal')||'0';query.tipoValor=receiptEntry.get('tipoValor')||'0';}
+    if(detail)query.recibo=params.id;
+    const response=await fetch(endpoint+'?'+new URLSearchParams(query),{cache:'no-store'}),data=await response.json();
+    if((!response.ok||!data.ok)&&!renewed&&/sesión de Caja venció/i.test(data.error||'')){receiptCajaSession=null;return receiptCajaApi(params,null,true);}
+    if(!response.ok||!data.ok)throw new Error(data.error||'No se pudo consultar el recibo de Caja.');
+    if(detail)return data;
+    return {ok:true,recibos:(data.filas||[]).filter(row=>caja||row.origen==='recibo-cobro').map(row=>({...row,id:row.idRecibo,fecha:day.split('-').reverse().join('/'),anulado:false}))};
+  }
+  function save(){if(!ready||busy)return;localStorage.setItem(key(),JSON.stringify({customer,point:$('point').value,date:$('date').value,invoices,values,note:$('note').value,pending}));}
+  function lock(){
+    root.dataset.busy=String(busy||cancellingReceipt);
+    const blocked=!ready||busy||Boolean(pending)||Boolean(confirmed);
+    $('receiptForm').querySelectorAll('input,textarea,select,button').forEach(field=>{field.disabled=blocked;});
+    $('point').disabled=blocked;
+    $('confirm').disabled=!ready||busy||Boolean(confirmed);$('cancel').disabled=!ready||busy||Boolean(pending);
+    ['consult','viewReceipts','account','billing','viewInvoice'].forEach(id=>{$(id).disabled=!ready||busy;});
+    $('confirm').textContent=pending?'Reintentar confirmación':confirmed?'Recibo confirmado':'Confirmar';
+  }
+  function totals(){
+    const allocated=invoices.reduce((sum,row)=>sum+(Number(row.importe)||0),0),received=values.reduce((sum,row)=>sum+(Number(row.importe)||0),0);
+    $('invoiceTotal').textContent=money(allocated);$('paymentTotal').textContent=money(received);
+    $('difference').textContent=money(invoices.length?allocated-received:0);$('difference').style.color=invoices.length&&Math.abs(allocated-received)>.01?'#b00020':'black';
+    $('invoiceCount').textContent=`${invoices.length} registros`;$('valueCount').textContent=`${values.length} registros`;
+  }
+  function blankValue(){return {tipo:'',valor:0,tarjeta:0,cuotas:0,vencimiento:today(),importe:0,descripcion:''};}
+  function render(){
+    rowBindings.forEach(binding=>binding.destroy?.());rowBindings=[];
+    $('invoices').innerHTML=invoices.map((row,index)=>`<tr data-invoice="${index}" class="${index===selectedInvoice?'selected':''}"><td style="padding:4px">${esc(row.fecha)}</td><td style="padding:4px">${esc(row.tipo)}</td><td style="padding:4px">${esc(row.numero)}</td><td style="padding:4px">${Number(row.cuota)||0}</td><td><input data-invoice-amount="${index}" data-money inputmode="decimal" class="number" value="${esc(money(row.importe))}" data-flow></td><td><button data-remove-invoice="${index}" type="button" aria-label="Quitar factura">×</button></td></tr>`).join('');
+    if(!confirmed){
+      $('invoices').insertAdjacentHTML('beforeend','<tr class="invoice-new"><td></td><td></td><td><input id="rc-addInvoice" aria-label="Agregar factura pendiente" placeholder="Elegir factura…" autocomplete="off" data-flow></td><td></td><td></td><td></td></tr>');
+      const input=$('addInvoice'),available=invoiceChoices.filter(row=>!invoices.some(selected=>Number(selected.id)===Number(row.id)));
+      const binding=bindReceiptInvoiceDropdown(input,available);rowBindings.push(binding);
+      input.placeholder=customer?'Elegir factura…':'Seleccioná un cliente';
+      input.addEventListener('change',()=>{
+        if(busy||pending||confirmed)return;
+        const id=binding.getValue(),row=available.find(item=>String(item.id)===String(id));
+        if(!row){input.setCustomValidity(input.value?'Seleccioná una factura pendiente de la lista.':'');return;}
+        if(invoices.some(selected=>Number(selected.id)===Number(row.id)))return;
+        invoices.push({...row,importe:Number(row.saldo)});selectedInvoice=invoices.length-1;save();
+        requestAnimationFrame(()=>{render();const amount=$('invoices').querySelector(`[data-invoice-amount="${selectedInvoice}"]`);amount?.focus();amount?.select();});
+      });
+    }
+    $('values').innerHTML=values.map((row,index)=>`<tr data-value="${index}"><td><input data-field="tipo" value="${esc(options.pagos.find(item=>Number(item.id)===Number(row.tipo))?.nombre||'')}" data-flow autocomplete="off"></td><td><input data-field="valor" value="${esc(options.valores.find(item=>Number(item.id)===Number(row.valor))?.numero||'')}" data-flow autocomplete="off"></td><td><input data-field="tarjeta" value="${esc(options.tarjetas.find(item=>Number(item.id)===Number(row.tarjeta))?.nombre||'Ninguna')}" data-flow autocomplete="off"></td><td><input data-field="cuotas" value="${Number(row.cuotas)||0}" inputmode="numeric" data-flow></td><td><input data-field="vencimiento" value="${esc(dateText(row.vencimiento))}" data-date data-flow></td><td><input data-field="importe" value="${esc(money(row.importe))}" inputmode="decimal" data-money class="number" data-flow></td><td><input data-field="descripcion" maxlength="100" value="${esc(row.descripcion)}" data-flow></td><td><button data-remove-value="${index}" type="button" aria-label="Quitar valor">×</button></td></tr>`).join('');
+    $('values').querySelectorAll('[data-value]').forEach(tr=>{
+      const row=values[Number(tr.dataset.value)];
+      for(const field of ['tipo','valor','tarjeta']){
+        const input=tr.querySelector(`[data-field="${field}"]`);
+        const list=field==='tipo'?options.pagos:field==='valor'?options.valores:[{id:0,nombre:'Ninguna'},...options.tarjetas];
+        const binding=FX.bindTextDropdown({input,minWidth:0,fixedMenu:true,menuScale:()=>Number(receiptMain.style.getPropertyValue('--receipt-scale'))||1,menuWidth:field==='tarjeta'?260:220,selectedValue:row[field],items:list.map(item=>({value:String(item.id),label:String(field==='valor'?item.numero:item.nombre)})),emptyValue:field==='tipo'?'':'0'});rowBindings.push(binding);
+        input.addEventListener('change',()=>{
+          const picked=binding.getValue();if(picked===null){input.setCustomValidity('Seleccioná una opción de la lista.');return;}row[field]=Number(picked)||0;
+          if(field==='valor'&&row.valor){const item=options.valores.find(item=>Number(item.id)===row.valor);row.importe=Number(item.importe);row.vencimiento=item.vencimiento;tr.querySelector('[data-field="importe"]').value=money(row.importe);tr.querySelector('[data-field="vencimiento"]').value=dateText(row.vencimiento);}
+          totals();save();
+        });
+      }
+    });
+    totals();lock();
+  }
+  async function pickCustomer(id){
+    id=Number(id);if(id===customer)return;
+    if((invoices.length||values.some(row=>row.importe))&&!confirm('¿Cambiar el cliente y limpiar las facturas y valores de este recibo?')){syncCustomer();return;}
+    customer=id;invoices=[];invoiceChoices=[];requestSequence++;values=[blankValue()];selectedInvoice=-1;syncCustomer();$('balance').value='';render();save();
+    if(customer)await refreshBalance();
+  }
+  function syncCustomer(){const row=options.clientes.find(item=>Number(item.id)===customer);$('customer').value=row?.nombre||'';$('customerId').value=row?.id||'';$('document').value=row?.documento||'';Object.values(headerCombos).forEach(binding=>binding.setValue(customer));}
+  async function refreshBalance(){const request=++requestSequence;try{const data=await api({consulta:'facturas',cliente:customer,puntoVenta:$('point').value});if(request!==requestSequence)return;$('balance').value=money(data.saldo);invoiceChoices=data.facturas;if(ready)render();return data;}catch(error){status(error.message,true);throw error;}}
+  async function loadInvoices(){
+    if(busy||pending||confirmed)return;if(!customer){status('Seleccioná un cliente.',true);$('customer').focus();return;}
+    busy=true;lock();status('Consultando facturas pendientes…');
+    try{const data=await refreshBalance();if(!data)return;invoices=data.facturas.map(row=>({...row,importe:Number(row.saldo)}));selectedInvoice=invoices.length?0:-1;status(invoices.length?'Facturas cargadas. Podés modificar A Cobrar para hacer pagos parciales.':'El cliente no tiene facturas pendientes. Podés registrar un pago a cuenta.');}
+    catch(error){status(error.message,true);}finally{busy=false;render();save();}
+  }
+  function receiptAmountWords(amount) {
+    const small=['CERO','UNO','DOS','TRES','CUATRO','CINCO','SEIS','SIETE','OCHO','NUEVE','DIEZ','ONCE','DOCE','TRECE','CATORCE','QUINCE','DIECISÉIS','DIECISIETE','DIECIOCHO','DIECINUEVE','VEINTE','VEINTIUNO','VEINTIDÓS','VEINTITRÉS','VEINTICUATRO','VEINTICINCO','VEINTISÉIS','VEINTISIETE','VEINTIOCHO','VEINTINUEVE'];
+    const tens=['','','','TREINTA','CUARENTA','CINCUENTA','SESENTA','SETENTA','OCHENTA','NOVENTA'];
+    const hundreds=['','CIENTO','DOSCIENTOS','TRESCIENTOS','CUATROCIENTOS','QUINIENTOS','SEISCIENTOS','SETECIENTOS','OCHOCIENTOS','NOVECIENTOS'];
+    const apocope=text=>text.replace(/VEINTIUNO$/,'VEINTIÚN').replace(/UNO$/,'UN');
+    function words(n) {
+      if(n<30)return small[n];
+      if(n<100)return tens[Math.floor(n/10)]+(n%10?' Y '+small[n%10]:'');
+      if(n===100)return 'CIEN';
+      if(n<1000)return hundreds[Math.floor(n/100)]+(n%100?' '+words(n%100):'');
+      if(n<1000000)return (n<2000?'MIL':apocope(words(Math.floor(n/1000)))+' MIL')+(n%1000?' '+words(n%1000):'');
+      return (n<2000000?'UN MILLÓN':apocope(words(Math.floor(n/1000000)))+' MILLONES')+(n%1000000?' '+words(n%1000000):'');
+    }
+    const cents=Math.round(Math.abs(Number(amount)||0)*100);
+    return (Number(amount)<0?'MENOS ':'')+words(Math.floor(cents/100))+(cents%100?' CON '+String(cents%100).padStart(2,'0')+'/100':'');
+  }
+  function renderReceiptPrint(result) {
+    const receipt=result.recibo;
+    const concept=String(receipt.concepto||'').replace(/\[(?:WEBRECIBO|HASH):[^\]]*\]/g,'').trim();
+    return `<div class="receipt-brand"><img src="logo-corralon.png" alt="Corralón Progreso"><div class="receipt-contact">Tel.: 264-5802404<br>Email: corralonprogreso3@gmail.com</div></div>
+      <div class="receipt-number"><span><span class="receipt-label">RECIBO Nº</span>${esc(receipt.numero)}${receipt.anulado?' · ANULADO':''}</span><span><span class="receipt-label">Fecha</span>${esc(receipt.fecha)}</span></div>
+      <div class="receipt-data"><div class="receipt-wide"><span class="receipt-label">Razón Social</span>${esc(receipt.idCliente)} &nbsp; <strong>${esc(receipt.cliente)}</strong></div>
+      <div><span class="receipt-label">CUIT/DNI:</span>${esc(receipt.documento||'—')}</div><div class="receipt-balance"><span class="receipt-label">Saldo Act.:</span><strong>${receipt.saldo==null?'—':money(receipt.saldo)}</strong></div>
+      <div class="receipt-wide"><span class="receipt-label">Concepto:</span>${esc(concept)}</div></div>
+      ${(result.facturas||[]).length?`<table class="receipt-applied"><colgroup><col style="width:26%"><col style="width:19%"><col style="width:9%"><col style="width:23%"><col style="width:23%"></colgroup><thead><tr><th>Nº Factura</th><th>Fecha</th><th>Cuota</th><th>Importe Fac.</th><th>Importe Pagado</th></tr></thead><tbody>${result.facturas.map(row=>`<tr><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cuota??0)}</td><td>${row.importeFactura==null?'—':money(row.importeFactura)}</td><td>${money(row.importe)}</td></tr>`).join('')}</tbody></table>`:''}
+      <table><colgroup><col style="width:24%"><col style="width:19%"><col style="width:32%"><col style="width:25%"></colgroup><thead><tr><th>Tipo Pago</th><th>Fecha Vto.</th><th>Banco</th><th>Importe</th></tr></thead><tbody>${(result.valores||[]).map(row=>`<tr><td>${esc(row.tipo)}</td><td>${esc(row.vencimiento)}</td><td>${esc(row.banco||'')}</td><td>${money(row.importe)}</td></tr>`).join('')}</tbody></table>
+      <div class="receipt-grand-total"><span class="receipt-label">Total:</span><span>${money(receipt.total)}</span></div>
+      <div class="receipt-words"><span class="receipt-label">Son $:</span>${esc(receiptAmountWords(receipt.total))}</div>
+      <div><span class="receipt-label">Nota</span><div class="receipt-print-note">${esc(receipt.nota||'')}</div></div>
+      <div class="receipt-signatures"><span>Firma Cliente</span><span>Firma Cobrador</span></div>`;
+  }
+  async function showReceipt(id,result=null){
+    result=result||await api({consulta:'detalle',id});const receipt=result.recibo;
+    viewedReceipt=result;
+    $('voidReceipt').hidden=!receiptAdmin()||Boolean(receipt.anulado);
+    $('voidReceipt').disabled=cancellingReceipt;
+    $('receiptStatus').textContent='';
+    $('receiptPrint').innerHTML=renderReceiptPrint(result);
+    $('receiptTitle').textContent=`Recibo de Cobro ${receipt.numero}${receipt.anulado?' · ANULADO':''}`;
+    if($('receiptConsultSection')?.dataset.active==='true'){renderReceiptConsult(result);return;}
+    $('receiptBody').innerHTML=`<div class="receipt-summary"><div>Cliente<strong>${esc(receipt.cliente)}</strong></div><div>Fecha<strong>${esc(receipt.fecha)}</strong></div><div>Punto de venta<strong>${esc(receipt.nombrePuntoVenta)}</strong></div></div><h2>Facturas cobradas</h2><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Factura</th><th>A Cobrar</th></tr></thead><tbody>${result.facturas.map(row=>`<tr><td>${esc(row.fecha)}</td><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td>${money(row.importe)}</td></tr>`).join('')}</tbody></table>${result.facturas.length?'':receipt.anulado?'<p>Sin boletas vinculadas.</p>':'<p>Pago a cuenta.</p>'}<h2>Valores recibidos</h2><table><thead><tr><th>Tipo</th><th>Valor Nº</th><th>Tarjeta</th><th>Cuotas</th><th>Vencimiento</th><th>Importe</th><th>Descripción</th></tr></thead><tbody>${result.valores.map(row=>`<tr><td>${esc(row.tipo)}</td><td>${esc(row.numero||'')}</td><td>${esc(row.tarjeta||'Ninguna')}</td><td>${Number(row.cuotas)||0}</td><td>${esc(row.vencimiento)}</td><td>${money(row.importe)}</td><td>${esc(row.descripcion)}</td></tr>`).join('')}</tbody></table><p class="receipt-note">${esc(receipt.nota)}</p><div class="invoice-total" style="width:100%">Total: <output class="total">${money(receipt.total)}</output></div>`;
+    if(receiptAdmin()&&!receipt.anulado){
+      const edit=document.createElement('button');edit.type='button';edit.textContent='Cambiar tipo de pago';edit.onclick=editViewedReceiptPayment;$('receiptBody').append(edit);
+    }
+
+    $('printReceipt').textContent='Imprimir';
+    if(!$('receiptModal').open)$('receiptModal').showModal();
+  }
+  function editViewedReceiptPayment(){
+    if(!receiptAdmin()||busy||!viewedReceipt||viewedReceipt.recibo.anulado)return;
+    const target=$('receiptBody');if(target.querySelector('[data-payment-editor]'))return;
+    const editor=document.createElement('div');editor.dataset.paymentEditor='';
+    editor.innerHTML=`<h2>Cambiar tipo de pago</h2><p>Se conserva el importe y las facturas vinculadas.</p><label>Valor recibido: <select data-edit-order>${viewedReceipt.valores.filter(v=>Number(v.clase)!==2).map(v=>`<option value="${Number(v.orden)}">${esc(v.tipo)} · ${money(v.importe)}</option>`).join('')}</select></label> <label>Tipo: <select data-edit-type>${options.pagos.filter(p=>[1,3,5].includes(Number(p.clase))).map(p=>`<option value="${Number(p.id)}">${esc(p.nombre)}</option>`).join('')}</select></label> <label>Tarjeta / cuenta: <select data-edit-card><option value="0">Ninguna</option>${options.tarjetas.map(c=>`<option value="${Number(c.id)}">${esc(c.nombre)}</option>`).join('')}</select></label> <label>Cuotas: <input data-edit-installments type="number" min="0" max="120" style="width:65px"></label> <button type="button" data-save-payment>Guardar tipo de pago</button> <button type="button" data-cancel-payment>Cancelar</button>`;
+    target.append(editor);const q=selector=>editor.querySelector(selector);
+    function controls(){const cls=Number(options.pagos.find(p=>Number(p.id)===Number(q('[data-edit-type]').value))?.clase);q('[data-edit-card]').disabled=cls===1;q('[data-edit-installments]').disabled=cls!==5;if(cls===1)q('[data-edit-card]').value='0';if(cls!==5)q('[data-edit-installments]').value='0';}
+    function choose(){const row=viewedReceipt.valores.find(v=>Number(v.orden)===Number(q('[data-edit-order]').value));if(!row)return;q('[data-edit-type]').value=String(row.idTipoPago);q('[data-edit-card]').value=String(row.idTarjeta||0);q('[data-edit-installments]').value=Number(row.cuotas)||0;controls();}
+    q('[data-edit-order]').onchange=choose;q('[data-edit-type]').onchange=controls;q('[data-cancel-payment]').onclick=()=>editor.remove();choose();
+    q('[data-save-payment]').onclick=async()=>{
+      if(busy||!receiptAdmin())return;if(!confirm('¿Guardar el cambio de tipo de pago de este recibo? El importe no cambiará.'))return;
+      const selected=viewedReceipt,body={accion:'editar-pago',usuarioId:user.id,id:selected.recibo.id,version:selected.version,orden:Number(q('[data-edit-order]').value),tipo:Number(q('[data-edit-type]').value),tarjeta:Number(q('[data-edit-card]').value),cuotas:Number(q('[data-edit-installments]').value)};
+      busy=true;lock();editor.querySelectorAll('input,select,button').forEach(e=>e.disabled=true);$('voidReceipt').disabled=true;$('receiptStatus').textContent='Guardando tipo de pago…';
+      try{const result=await api({},body);await showReceipt(result.recibo.id,result);$('receiptStatus').textContent='Tipo de pago actualizado.';}
+      catch(error){$('receiptStatus').textContent=error.message;editor.querySelectorAll('input,select,button').forEach(e=>e.disabled=false);controls();}
+      finally{busy=false;lock();$('voidReceipt').disabled=false;}
+    };
+  }
+  async function cancelViewedReceipt(){
+    if(cancellingReceipt||busy||!receiptAdmin()||!viewedReceipt||viewedReceipt.recibo.anulado)return;
+    if(consultHasChanges?.()){$('receiptStatus').textContent='Guardá o descartá los cambios antes de anular.';return;}
+    const selected=viewedReceipt;
+    if(!confirm(`¿Anular el recibo ${selected.recibo.numero}? Se desvincularán sus boletas y el cobro dejará de aplicarse a la cuenta corriente y a la Caja.`))return;
+    cancellingReceipt=true;busy=true;lock();$('voidReceipt').disabled=true;
+    $('receiptStatus').textContent='Anulando recibo…';
+    try{
+      const result=await api({}, {accion:'anular',usuarioId:user.id,id:selected.recibo.id,version:selected.version});
+      if(confirmed&&Number(confirmed.id)===Number(result.recibo.id))confirmed=result.recibo;
+      await showReceipt(result.recibo.id,result);
+      $('receiptStatus').textContent='Recibo anulado.';
+      status(`Recibo ${result.recibo.numero} anulado.`);
+      try{
+        if($('historyModal').open)await history();
+        if(customer&&Number(customer)===Number(result.recibo.idCliente))await refreshBalance();
+      }catch(error){$('receiptStatus').textContent='Recibo anulado. No se pudo actualizar la consulta: '+error.message;}
+    }catch(error){$('receiptStatus').textContent=error.message;}
+    finally{cancellingReceipt=false;busy=false;lock();$('voidReceipt').disabled=false;}
+  }
+  async function confirmReceipt(){
+    if(busy||confirmed)return;
+    try{
+      document.activeElement?.blur();
+      if(!pending){
+        if(!$('receiptForm').reportValidity())return;
+        if(!customer||!$('point').value)throw new Error('Seleccioná el cliente y el punto de venta.');
+        const activeValues=values.filter(row=>Number(row.importe)!==0);
+        if(!activeValues.length||activeValues.some(row=>!row.tipo||!Number.isFinite(row.importe)||row.importe<=0))throw new Error('Completá los valores recibidos.');
+        if(invoices.length&&Math.abs(invoices.reduce((sum,row)=>sum+row.importe,0)-activeValues.reduce((sum,row)=>sum+row.importe,0))>.01)throw new Error('Existen diferencias de importes.');
+        if(!confirm('¿Está seguro que desea CONFIRMAR el Recibo?'))return;
+        pending={operacion:uuid(),usuarioId:user.id,cliente:customer,puntoVenta:Number($('point').value),facturas:invoices.filter(row=>row.importe!==0).map(row=>({id:row.id,importe:row.importe})),valores:structuredClone(activeValues),nota:$('note').value};
+        save();
+      }
+      busy=true;lock();status('Confirmando recibo en SQL…');
+      const result=await api({},pending);
+      confirmed=result.recibo;pending=null;$('number').value=confirmed.numero;$('date').value=confirmed.fecha;localStorage.removeItem(key());
+      status(`Recibo ${confirmed.numero} confirmado. Al cerrar el detalle se iniciará un nuevo recibo.`);await showReceipt(confirmed.id,result);
+    }catch(error){if(error.definitive)pending=null;status(error.message+(pending?' Reintentá la misma confirmación para verificar si quedó guardado.':''),true);}
+    finally{busy=false;lock();if(!confirmed)save();}
+  }
+  let receiptHistoryRows=[],receiptHistoryVoided=false,consultInvoiceIndex=0,consultValueIndex=0;
+  let receiptNavigationEpoch=0;
+  function receiptRoute(){
+    const hash=window.location.hash;
+    if(/^#recibo=\d+$/.test(hash))return {view:'detalle',id:Number(hash.slice(8))};
+    return {view:hash==='#consultar'||receiptFromCaja?'consulta':'emision'};
+  }
+  function receiptHistoryDateRange(validate=false){
+    const from=new Date();
+    from.setDate(from.getDate()-29);
+    const start=[from.getFullYear(),String(from.getMonth()+1).padStart(2,'0'),String(from.getDate()).padStart(2,'0')].join('-');
+    const range={};
+    for(const [key,id,fallback] of [['desde','receiptHistoryFrom',start],['hasta','receiptHistoryTo',today()]]){
+      const field=$(id);
+      if(!field.value.trim()){range[key]=fallback;continue;}
+      try{range[key]=isoDate(field);}
+      catch(error){
+        if(validate){field.setCustomValidity(error.message.replace(' de vencimiento',''));field.reportValidity();}
+        return null;
+      }
+    }
+    return range;
+  }
+  Object.entries(receiptHistoryDateRange()).forEach(([key,value])=>{$(key==='desde'?'receiptHistoryFrom':'receiptHistoryTo').value=dateText(value);});
+  function receiptRememberView(){
+    const state={...(window.history.state||{}),receiptFilters:{...receiptHistoryDateRange(),query:$('receiptHistoryQuery').value,voided:receiptHistoryVoided,scroll:$('historyBody').querySelector('.receipt-history-grid')?.scrollTop||0}};
+    window.history.replaceState(state,'');
+  }
+  function receiptRecordView(view,id){
+    const hash=view==='detalle'?'#recibo='+id:view==='consulta'?'#consultar':'#emitir';
+    if(window.location.hash!==hash)window.history.pushState({receiptFilters:{...receiptHistoryDateRange(),query:$('receiptHistoryQuery').value,voided:receiptHistoryVoided}},'',hash);
+  }
+  async function restoreReceiptRoute(){
+    const route=receiptRoute(),filters=window.history.state?.receiptFilters;
+    if(consultHasChanges?.()){
+      if(route.view==='detalle'&&Number(viewedReceipt.recibo.id)===route.id)return;
+      if(!canLeaveConsultReceipt()){
+        window.history.pushState(window.history.state,'','#recibo='+viewedReceipt.recibo.id);
+        return;
+      }
+      renderReceiptConsult(viewedReceipt);
+    }
+    if(filters){$('receiptHistoryQuery').value=filters.query||'';receiptHistoryVoided=Boolean(filters.voided);if(filters.desde)$('receiptHistoryFrom').value=dateText(filters.desde);if(filters.hasta)$('receiptHistoryTo').value=dateText(filters.hasta);}
+    if(route.view==='emision'){receiptReturnToEmission(false);return;}
+    if(route.view==='detalle'){
+      if(!receiptHistoryRows.length)await history(false);
+      if(receiptRoute().view!=='detalle'||receiptRoute().id!==route.id)return;
+      await openReceiptConsult(route.id,false);
+    }else{await history(false);const grid=$('historyBody').querySelector('.receipt-history-grid');if(grid&&filters)grid.scrollTop=filters.scroll||0;}
+  }
+  async function initializeReceiptRoute(){
+    const route=receiptRoute();
+    if(route.view==='detalle'){
+      await history(false);
+      window.history.replaceState(window.history.state,'','#consultar');
+      await openReceiptConsult(route.id);
+    }else await restoreReceiptRoute();
+  }
+  function receiptConsultError(error){
+    status(error.message,true);
+    if(!$('receiptConsultSection').hidden)$('receiptStatus').textContent=error.message;
+    else if(!$('historyModal').hidden){let message=$('receiptHistoryError');if(!message){message=document.createElement('p');message.id='rc-receiptHistoryError';message.setAttribute('role','alert');$('historyModal').append(message);}message.textContent=error.message;}
+  }
+  function fitReceiptSections(){
+    const top=Math.max(0,root.getBoundingClientRect().top),width=Math.max(1,Math.min(innerWidth,root.clientWidth||innerWidth)),height=Math.max(1,innerHeight-top);
+    const scale=Math.max(.01,Math.min(width/1672,height/941));
+    root.style.setProperty('--receipt-screen-top',top+'px');
+    for(const node of document.querySelectorAll('.receipt-screen')){node.style.setProperty('--receipt-consult-scale',scale);node.style.setProperty('--receipt-consult-width',width/scale+'px');node.style.setProperty('--receipt-consult-height',height/scale+'px');}
+  }
+  function moveReceiptDetail(inline){
+    const section=$('receiptConsultSection');section.dataset.active=String(inline);
+
+    if(inline){$('receiptConsultContent').append($('receiptBody'));$('receiptConsultActions').append($('receiptActions'));$('receiptConsultStatusSlot').append($('receiptStatus'));}
+    else{const modal=$('receiptModal');modal.insertBefore($('receiptBody'),$('receiptPrint'));modal.append($('receiptStatus'),$('receiptActions'));}
+  }
+  function receiptReturnToEmission(record=true){
+    if(busy||cancellingReceipt||!canLeaveConsultReceipt())return;
+    if(receiptFromCaja){location.href='caja.html#caja/diaria';return;}
+    receiptNavigationEpoch++;if(record){receiptRememberView();receiptRecordView('emision');}
+    closeConsultEditor?.();moveReceiptDetail(false);$('receiptConsultSection').hidden=true;$('historyModal').hidden=true;$('historyModal').open=false;$('receiptEmission').hidden=false;viewedReceipt=null;fitReceiptForm();
+  }
+  function filteredReceiptHistory(){
+    const q=String($('receiptHistoryQuery').value||'').trim().toLocaleLowerCase('es');
+    return receiptHistoryRows.filter(row=>(!receiptHistoryVoided||row.anulado)&&(!q||[row.numero,row.cliente,row.fecha].join(' ').toLocaleLowerCase('es').includes(q)));
+  }
+  function renderReceiptHistory(){
+    const rows=filteredReceiptHistory();
+    $('receiptHistoryVoided').setAttribute('aria-pressed',String(receiptHistoryVoided));
+    $('historyBody').innerHTML='<div class="receipt-history-grid"><table class="dialog-table"><thead><tr><th>Recibo</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Diferencia</th><th>Estado</th><th></th></tr></thead><tbody>'+rows.map(row=>`<tr data-receipt-row="${Number(row.id)}" tabindex="0" role="button" aria-label="Ver recibo ${esc(row.numero)}" style="cursor:pointer"><td>${esc(row.numero)}</td><td>${esc(row.fecha)}</td><td>${esc(row.cliente)}</td><td class="receipt-num">${money(row.total)}</td><td class="receipt-num">${row.anulado||row.diferencia==null?'—':money(row.diferencia)}</td><td><span class="receipt-state ${row.anulado?'is-voided':''}">${row.anulado?'Anulado':'Vigente'}</span></td><td><button data-receipt="${Number(row.id)}" type="button">Ver recibo</button></td></tr>`).join('')+'</tbody></table></div><p class="receipt-history-count">'+rows.length+' recibos'+(rows.length?'':' · No hay recibos para esta consulta')+'</p>';
+  }
+  async function history(record=true){
+    if(busy||cancellingReceipt||!canLeaveConsultReceipt())return;
+    const range=receiptHistoryDateRange(true);
+    if(!range)return;
+    if(range.desde>range.hasta){$('receiptHistoryTo').setCustomValidity('Hasta debe ser igual o posterior a Desde.');$('receiptHistoryTo').reportValidity();return;}
+    $('receiptHistoryTo').setCustomValidity('');
+    const navigation=++receiptNavigationEpoch;if(record)receiptRememberView();
+    $('receiptHistoryError')?.remove();
+    try{status('Consultando recibos…');const data=await api({consulta:'recibos',cliente:receiptFromCaja?0:customer,buscar:$('receiptHistoryQuery').value.trim(),...range});if(navigation!==receiptNavigationEpoch)return;receiptHistoryRows=data.recibos||[];$('historyCustomer').textContent=receiptFromCaja?'Recibos de Caja':customer?$('customer').value:'Todos';renderReceiptHistory();closeConsultEditor?.();moveReceiptDetail(false);$('receiptConsultSection').hidden=true;$('receiptEmission').hidden=true;$('historyModal').hidden=false;$('historyModal').open=true;fitReceiptSections();status('Recibos consultados.');if(record)receiptRecordView('consulta');}
+    catch(error){receiptConsultError(error);}
+  }
+  async function openReceiptConsult(id,record=true){
+    if(busy||cancellingReceipt||!canLeaveConsultReceipt())return;
+    const navigation=++receiptNavigationEpoch;if(record)receiptRememberView();
+    const result=await api({consulta:'detalle',id});
+    if(navigation!==receiptNavigationEpoch)return;
+    moveReceiptDetail(true);$('receiptEmission').hidden=true;$('historyModal').hidden=true;$('historyModal').open=false;$('receiptConsultSection').hidden=false;
+    consultInvoiceIndex=0;consultValueIndex=0;
+    await showReceipt(id,result);fitReceiptSections();if(record)receiptRecordView('detalle',id);
+  }
+  function bindReceiptInvoiceDropdown(input,available){
+    return FX.bindTextDropdown({input,minWidth:0,fixedMenu:true,menuWidth:820,
+        columns:[{label:'Nº factura',width:130},{label:'Tipo comp.',width:80},{label:'Fecha',width:90},{label:'ImpCC',width:130,align:'right'},{label:'Saldo',width:130,align:'right'},{label:'Total pagos',width:130,align:'right'},{label:'Cant. recibos',width:100,align:'right'}],
+        items:available.map(row=>({value:String(row.id),label:row.numero,searchText:`${row.numero} ${row.tipo} ${row.fecha}`,cells:[row.numero,row.tipo,row.fecha,money(row.impcc),money(row.saldo),money(row.totalPagos),Number(row.cantidadRecibos)||0]})),emptyValue:''});
+  }
+  let closeConsultEditor=null,consultHasChanges=null,consultInvoices=null;
+  function canLeaveConsultReceipt(){
+    return !consultHasChanges?.()||confirm('¿Salir del recibo sin guardar los cambios?');
+  }
+  function editConsultReceipt(){
+    const result=viewedReceipt;
+    if(!receiptAdmin()||!result||result.recibo.anulado||closeConsultEditor)return;
+    const h=result.recibo,body=$('receiptBody'),status=$('receiptStatus');
+    const invoices=result.facturas.map(row=>({...row})),values=result.valores.map(row=>({...row}));
+    consultInvoices=invoices;
+    const q=selector=>body.querySelector(selector);
+    const fields=q('.receipt-consult-fields');
+    fields.children[6].innerHTML='<span>Cliente</span><input data-edit-customer aria-label="Cliente" autocomplete="off">';
+    const customerBinding=FX.bindTextDropdown({input:q('[data-edit-customer]'),fixedMenu:true,menuWidth:380,
+      selectedValue:h.idCliente,items:(options.clientes||[]).map(item=>({value:String(item.id),label:item.nombre,searchText:item.nombre+' '+item.id+' '+(item.documento||'')}))});
+    if(!customerBinding.getValue())q('[data-edit-customer]').value=h.cliente||'';
+    fields.children[2].innerHTML='<span>Fecha</span><input data-edit-date type="date" aria-label="Fecha" value="'+esc(h.fecha.split('/').reverse().join('-'))+'">';
+    fields.children[7].innerHTML='<span>ID cliente</span><input data-edit-client aria-label="ID cliente" inputmode="numeric" value="'+Number(h.idCliente)+'">';
+    q('.receipt-consult-note')?.remove();
+    body.insertAdjacentHTML('beforeend','<div><label>Nota <input data-edit-note maxlength="100" value="'+esc(h.nota||'')+'"></label> <button type="button" data-save-receipt>Guardar cambios</button> <button type="button" data-cancel-receipt>Descartar cambios</button></div>');
+    const invoiceTable=q('.receipt-consult-invoices tbody'),valueTable=q('.receipt-consult-values tbody');
+    const invoiceGrid=q('.receipt-consult-invoices table');
+    invoiceGrid.querySelector('colgroup').remove();
+    invoiceGrid.tHead.rows[0].innerHTML='<th>Fecha</th><th>TipoComp</th><th>Factura</th><th>Cuota</th><th>A Cobrar</th><th></th>';
+    q('.receipt-consult-invoices .receipt-empty')?.remove();
+    let clientId=Number(h.idCliente),choices=null,sequence=0,binding=null;
+    const sum=rows=>rows.reduce((total,line)=>total+Math.round((Number(line.importe)||0)*100),0)/100;
+    const difference=()=>Math.round((sum(values)-sum(invoices))*100)/100;
+    function updateTotals(){
+      const outputs=body.querySelectorAll('.receipt-consult-invoices output');
+      outputs[0].textContent=money(sum(invoices));
+      outputs[1].textContent=money(difference());
+      outputs[1].classList.toggle('balanced',difference()===0);
+      q('.receipt-consult-values output').textContent=money(sum(values));
+      q('.receipt-consult-invoices .receipt-consult-card-total span').textContent=invoices.length+' facturas';
+    }
+    const amountInput=value=>'<input aria-label="Importe" inputmode="decimal" style="width:100%;min-width:0" value="'+esc(money(value))+'">';
+    function onExit(row){
+      row.addEventListener('focusout',event=>{if(!row.contains(event.relatedTarget))updateTotals();});
+    }
+    function renderInvoices(focus=-1){
+      binding?.destroy();binding=null;
+      invoiceTable.replaceChildren();
+      q('[data-consult-invoice]').disabled=!invoices.length;
+      invoices.forEach((line,index)=>{
+        const row=invoiceTable.insertRow();
+        row.dataset.consultInvoiceRow=index;
+        row.classList.toggle('selected',index===consultInvoiceIndex);
+        row.innerHTML='<td>'+esc(line.fecha)+'</td><td>'+esc(line.tipo)+'</td><td>'+esc(line.numero)+'</td><td>'+esc(line.cuota??0)+'</td><td>'+amountInput(line.importe)+'</td><td><button type="button" aria-label="Quitar factura">×</button></td>';
+        const amount=row.querySelector('input');
+        amount.oninput=()=>{line.importe=number(amount.value);};
+        onExit(row);
+        row.querySelector('button').onclick=()=>{invoices.splice(index,1);renderInvoices();updateTotals();};
+        if(index===focus){amount.focus();amount.select();}
+      });
+      const available=(choices||[]).filter(item=>!invoices.some(line=>Number(line.id)===Number(item.id)));
+      const row=invoiceTable.insertRow();
+      row.className='receipt-add-invoice';
+      row.innerHTML='<td></td><td></td><td><input aria-label="Agregar factura pendiente" autocomplete="off" style="width:100%;min-width:0"></td><td colspan="3"></td>';
+      const input=row.querySelector('input');
+      if(choices===null){
+        input.placeholder='Elegir factura…';
+        input.readOnly=true;
+        input.onfocus=()=>loadChoices(input);
+        input.onclick=()=>loadChoices(input);
+        return;
+      }
+      input.disabled=!available.length;
+      input.placeholder=available.length?'Elegir factura…':'Sin facturas disponibles';
+      if(!available.length)return;
+      binding=bindReceiptInvoiceDropdown(input,available);
+      input.onchange=()=>{
+        const line=available.find(item=>String(item.id)===String(binding.getValue()));
+        if(!line)return;
+        const balance=Number(line.saldo),remaining=difference();
+        invoices.push({...line,importe:balance>0&&remaining>0?Math.min(balance,remaining):balance});
+        renderInvoices(invoices.length-1);
+      };
+    }
+    const selectOptions=(items,selected)=>items.map(item=>'<option value="'+Number(item.id)+'" '+(Number(item.id)===Number(selected)?'selected':'')+'>'+esc(item.nombre)+'</option>').join('');
+    Array.from(valueTable.rows).forEach((row,index)=>{
+      const line=values[index];
+      if(Number(line.idMovBanco)>0){row.title='Cheque vinculado a un movimiento bancario';return;}
+      const types=options.pagos.filter(item=>[1,3,5].includes(Number(item.clase)));
+      if(!types.some(item=>Number(item.id)===Number(line.idTipoPago)))types.unshift({id:line.idTipoPago,nombre:line.tipo,clase:line.clase});
+      const cards=[{id:0,nombre:'Ninguna'},...options.tarjetas];
+      if(line.idTarjeta&&!cards.some(item=>Number(item.id)===Number(line.idTarjeta)))cards.push({id:line.idTarjeta,nombre:line.tarjeta});
+      row.cells[0].innerHTML='<select aria-label="Tipo de valor">'+selectOptions(types,line.idTipoPago)+'</select>';
+      row.cells[3].innerHTML=amountInput(line.importe);
+      row.cells[5].innerHTML='<select aria-label="Tarjeta o cuenta">'+selectOptions(cards,line.idTarjeta||0)+'</select>';
+      row.cells[6].innerHTML='<input aria-label="Cuotas" type="number" min="0" max="120" style="width:100%;min-width:0" value="'+(Number(line.cuotas)||0)+'">';
+      const kind=row.cells[0].firstChild,amount=row.cells[3].firstChild,card=row.cells[5].firstChild,installments=row.cells[6].firstChild;
+      const cls=()=>Number(types.find(item=>Number(item.id)===Number(kind.value))?.clase);
+      const sync=()=>{card.disabled=cls()===1;installments.disabled=cls()!==5;};
+      kind.onchange=()=>{line.idTipoPago=Number(kind.value);if(cls()===1)card.value='0';installments.value=cls()===5?'1':'0';card.onchange();installments.oninput();sync();};
+      amount.oninput=()=>{line.importe=number(amount.value);};
+      card.onchange=()=>{line.idTarjeta=Number(card.value);};
+      installments.oninput=()=>{line.cuotas=Number(installments.value);};
+      sync();onExit(row);
+    });
+    const valueGrid=q('.receipt-consult-values table');
+    const valueColumnOrder=[0,1,5,6,2,3,4];
+    valueGrid.querySelector('colgroup').remove();
+    for(const row of valueGrid.rows){
+      const cells=Array.from(row.cells);
+      row.append(...valueColumnOrder.map(index=>cells[index]));
+    }
+    let loadingChoices=false;
+    async function loadChoices(input){
+      if(loadingChoices)return;
+      const request=++sequence;
+      loadingChoices=true;input.placeholder='Cargando facturas…';
+      try{
+        const data=await api({consulta:'facturas',cliente:clientId,excluirRecibo:h.id});
+        if(closeConsultEditor!==finish||viewedReceipt!==result||request!==sequence)return;
+        const focused=input.matches(':focus');
+        choices=data.facturas;renderInvoices();
+        const field=invoiceTable.querySelector('.receipt-add-invoice input');
+        if(focused&&!field.disabled){field.focus();field.parentElement.querySelector('button')?.click();}
+      }catch(error){
+        if(closeConsultEditor===finish&&viewedReceipt===result&&request===sequence){
+          input.placeholder='Reintentar carga de facturas';status.textContent=error.message;
+        }
+      }finally{if(request===sequence)loadingChoices=false;}
+    }
+    const clientInput=q('[data-edit-client]');
+    clientInput.onchange=event=>{
+      const input=event.target,next=Number(input.value);
+      if(next===clientId)return;
+      const client=options.clientes.find(item=>Number(item.id)===next);
+      if(!client){input.value=clientId;status.textContent='Ingresá el ID de un cliente vigente.';return;}
+      if(invoices.length&&!confirm('¿Cambiar el cliente y quitar las facturas del recibo en esta edición?')){input.value=clientId;return;}
+      clientId=next;invoices.length=0;customerBinding.setValue(clientId);
+      sequence++;loadingChoices=false;choices=null;renderInvoices();updateTotals();
+    };
+    q('[data-edit-customer]').onchange=()=>{
+      const next=customerBinding.getValue();
+      if(next){clientInput.value=next;clientInput.onchange({target:clientInput});}
+      customerBinding.setValue(clientId);
+    };
+    const payload=()=>({accion:'editar-recibo',usuarioId:user.id,id:h.id,version:result.version,cliente:clientId,fecha:q('[data-edit-date]').value,nota:q('[data-edit-note]').value,
+      facturas:invoices.map(line=>({id:line.id,importe:line.importe})),
+      valores:values.map(line=>({orden:line.orden,tipo:line.idTipoPago,importe:line.importe,tarjeta:line.idTarjeta||0,cuotas:line.cuotas||0}))});
+    const original=JSON.stringify(payload());
+    consultHasChanges=()=>JSON.stringify(payload())!==original;
+    function finish(){
+      binding?.destroy();customerBinding.destroy?.();closeConsultEditor=null;consultHasChanges=null;consultInvoices=null;
+      $('printReceipt').disabled=false;$('voidReceipt').disabled=false;
+    }
+    q('[data-cancel-receipt]').onclick=()=>{if(!busy){renderReceiptConsult(result);}};
+    q('[data-save-receipt]').onclick=async()=>{
+      if(busy||viewedReceipt!==result||!consultHasChanges())return;
+      const controls=[...body.querySelectorAll('input,select,button')];
+      const disabled=controls.map(control=>control.disabled);
+      busy=true;controls.forEach(control=>control.disabled=true);
+      status.textContent='Guardando recibo…';
+      try{
+        const updated=await api({},payload());
+        finish();await showReceipt(h.id,updated);status.textContent='Recibo actualizado.';
+      }catch(error){status.textContent=error.message;}
+      finally{busy=false;controls.forEach((control,index)=>control.disabled=disabled[index]);}
+    };
+    closeConsultEditor=finish;
+    renderInvoices();
+  }
+  function renderReceiptConsult(result){
+    closeConsultEditor?.();
+    const h=result.recibo,lines=result.facturas||[],payments=result.valores||[],sum=(rows,field)=>rows.reduce((n,r)=>n+(Number(r[field])||0),0);
+
+    const applied=sum(lines,'importe'),received=sum(payments,'importe');
+    const difference=Math.round((Number(h.total)-applied)*100)/100;
+    const canEdit=receiptAdmin()&&!h.anulado;
+    const field=(label,value,cls='')=>`<div class="receipt-consult-field ${cls}"><span>${label}</span><strong>${esc(value??'—')}</strong></div>`;
+    const concept=String(h.concepto||'').replace(/\[(?:WEBRECIBO|HASH):[^\]]*\]/g,'').trim();
+    $('receiptBody').innerHTML=`<section class="receipt-consult-info"><div class="receipt-consult-info-title"><h2>Recibo de cobro X</h2><span class="receipt-state ${h.anulado?'is-voided':''}">${h.anulado?'Anulado':'Vigente'}</span><label>Punto de venta <select aria-label="Punto de venta del recibo" disabled><option>${esc(h.puntoVenta||'')} · ${esc(h.nombrePuntoVenta||'—')}</option></select></label></div><div class="receipt-consult-fields">${field('P.V.',h.puntoVenta)}${field('Nº recibo',h.numero,'receipt-consult-number')}${field('Fecha',h.fecha)}${field('Operador',h.operador??h.idOperador)}${field('ID Caja',h.idCaja)}<label class="receipt-consult-field receipt-consult-annulled"><span>Anulado</span><input type="checkbox" disabled ${h.anulado?'checked':''}></label>${field('Cliente',h.cliente,'receipt-consult-client')}${field('ID cliente',h.idCliente)}${field('Concepto',concept||'—','receipt-consult-concept')}</div></section>
+    <section class="receipt-consult-card receipt-consult-invoices"><div class="receipt-consult-card-title"><h2>Facturas cobradas</h2><button type="button" data-consult-invoice ${lines.length?'':'disabled'}>Ver factura</button></div><div class="receipt-consult-table"><table><colgroup><col style="width:9%"><col style="width:16%"><col style="width:14%"><col style="width:12%"><col style="width:15%"><col style="width:9%"><col style="width:17%"><col style="width:8%"></colgroup><thead><tr><th>Tipo</th><th>Nº factura</th><th>Pagado</th><th>Fecha</th><th>Total</th><th>Anulada</th><th>Factura asociada</th><th>Cuotas</th></tr></thead><tbody>${lines.map((row,i)=>`<tr data-consult-invoice-row="${i}" class="${i===consultInvoiceIndex?'selected':''}" tabindex="0"><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td class="receipt-num">${money(row.importe)}</td><td>${esc(row.fecha)}</td><td class="receipt-num">${row.importeFactura==null?'—':money(row.importeFactura)}</td><td class="receipt-check">${row.anulado==null?'—':row.anulado?'Sí':'No'}</td><td>${esc(row.facturaAsociada||'—')}</td><td class="receipt-check">${esc(row.cuota??0)}</td></tr>`).join('')}</tbody></table>${lines.length?'':'<p class="receipt-empty">'+(h.anulado?'Sin boletas vinculadas.':'Pago a cuenta.')+'</p>'}</div><div class="receipt-consult-card-total"><span>${lines.length} facturas</span><label>Total cobros <output>${money(applied)}</output></label><label>Diferencia <output class="${Math.abs(difference)<.01?'balanced':''}">${money(difference)}</output></label></div></section>
+    <section class="receipt-consult-card receipt-consult-values"><div class="receipt-consult-card-title"><h2>Valores recibidos</h2></div><div class="receipt-consult-table"><table><colgroup><col style="width:15%"><col style="width:11%"><col style="width:13%"><col style="width:14%"><col style="width:22%"><col style="width:18%"><col style="width:7%"></colgroup><thead><tr><th>Tipo de valor</th><th>Valor Nº</th><th>Fecha de vto.</th><th>Importe</th><th>Descripción</th><th>Tarjeta</th><th>Cuotas</th></tr></thead><tbody>${payments.map((row,i)=>`<tr data-consult-value-row="${i}" class="${i===consultValueIndex?'selected':''}" tabindex="0"><td>${esc(row.tipo)}</td><td>${esc(row.numero||'—')}</td><td>${esc(row.vencimiento||'—')}</td><td class="receipt-num">${money(row.importe)}</td><td>${esc(row.descripcion||'—')}</td><td>${esc(row.tarjeta||'—')}</td><td class="receipt-check">${Number(row.cuotas)||0}</td></tr>`).join('')}</tbody></table></div><div class="receipt-consult-card-total"><span>${payments.length} ${payments.length===1?'valor':'valores'}</span><label>Total valores <output>${money(received)}</output></label></div></section><div id="receiptConsultValueDetail" hidden></div>${h.nota?`<p class="receipt-consult-note"><strong>Nota:</strong> ${esc(h.nota)}</p>`:''}`;
+    const list=filteredReceiptHistory(),index=list.findIndex(row=>Number(row.id)===Number(h.id));
+    $('receiptConsultPosition').textContent=index<0?'Recibo consultado':(index+1)+' de '+list.length;
+    $('receiptConsultPrevious').disabled=index<=0;$('receiptConsultNext').disabled=index<0||index>=list.length-1;
+    $('receiptConsultValue').disabled=!payments.length;
+    document.querySelectorAll('[data-consult-invoice]').forEach(button=>button.disabled=!lines.length);
+    $('printReceipt').textContent='Reimprimir';$('receiptStatus').textContent=h.anulado?'Recibo anulado.':'Recibo consultado.';
+    if(canEdit)editConsultReceipt();
+  }
+  async function viewConsultInvoice(){
+    const rows=consultInvoices||viewedReceipt?.facturas;
+    const row=rows?.[consultInvoiceIndex];if(!row)return;
+    try{await window.CorralonInvoiceHistory.openInvoice(Number(row.id),rows,{readOnly:true});}catch(error){$('receiptStatus').textContent=error.message;}
+  }
+  async function navigateConsultReceipt(delta){
+    const list=filteredReceiptHistory(),index=list.findIndex(row=>Number(row.id)===Number(viewedReceipt?.recibo.id));const next=list[index+delta];if(next)await openReceiptConsult(next.id);
+  }
+  async function account(){
+    if(!customer){status('Seleccioná un cliente.',true);return;}
+    try{const data=await api({consulta:'facturas',cliente:customer,puntoVenta:$('point').value});$('accountBody').innerHTML=`<h2>${esc($('customer').value)}</h2><p>Saldo de cuenta corriente: <strong>${money(data.saldo)}</strong></p><h2>Facturas pendientes</h2><table class="dialog-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Factura</th><th>Saldo</th></tr></thead><tbody>${data.facturas.map(row=>`<tr><td>${esc(row.fecha)}</td><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td>${money(row.saldo)}</td></tr>`).join('')}</tbody></table>`;$('accountModal').showModal();}catch(error){status(error.message,true);}
+  }
+  async function initialize(validatedUser){
+    if(ready||initializing||!validatedUser)return;user=validatedUser;initializing=true;
+    try{
+      if(receiptFromCaja){ready=true;options={pagos:[],tarjetas:[],puntosVenta:[]};document.querySelectorAll('[data-close="historyModal"],#rc-receiptConsultBack').forEach(button=>button.textContent='Volver a Caja');$('receiptConsultLoad').hidden=true;$('receiptConsultVoided').hidden=true;$('receiptHistoryVoided').hidden=true;$('receiptEmission').hidden=true;$('historyModal').hidden=false;await initializeReceiptRoute();return;}
+      options=await api({consulta:'opciones'});
+      $('point').innerHTML=options.puntosVenta.map(item=>`<option value="${Number(item.id)}">${item.id} · ${esc(item.nombre)}</option>`).join('');
+      $('point').value=billingDefaultPoint();
+      let saved;try{saved=JSON.parse(localStorage.getItem(key())||'null');}catch(_){}
+      if(saved&&(saved.pending||saved.customer||saved.invoices?.length||saved.values?.some(row=>Number(row.importe))||saved.note)&&options.puntosVenta.some(item=>String(item.id)===String(saved.point))){$('point').value=saved.point;customer=Number(saved.customer)||0;invoices=saved.invoices||[];values=saved.values?.length?saved.values:[blankValue()];$('date').value=saved.date||dateText(today());$('note').value=saved.note||'';pending=saved.pending||null;}
+      else{values=[blankValue()];$('date').value=dateText(today());}
+      syncCustomer();
+      for(const [field,property] of [['customer','nombre'],['customerId','id'],['document','documento']]){
+        const binding=FX.bindTextDropdown({input:$(field),minWidth:0,selectedValue:customer,items:options.clientes.filter(item=>item[property]).map(item=>({value:String(item.id),label:String(item[property])})),emptyValue:'0'});headerCombos[field]=binding;
+        $(field).addEventListener('change',()=>{const id=binding.getValue();if(id===null){$(field).setCustomValidity('Seleccioná un cliente de la lista.');return;}pickCustomer(id).catch(error=>status(error.message,true));});
+      }
+      ready=true;render();status(pending?'Hay un recibo pendiente de verificar. Reintentá la misma confirmación.':'Listo para emitir recibos de cobro.');if(customer)refreshBalance().catch(()=>{});await initializeReceiptRoute();
+    }catch(error){status(error.message,true);}finally{initializing=false;}
+  }
+  $('today').textContent=new Intl.DateTimeFormat('es-AR',{dateStyle:'full'}).format(new Date());
+  FX.bindFlexibleDates({root:$('receiptForm'),selector:'[data-date]'});FX.bindFieldRestore({root:$('receiptForm'),capture:true});FX.bindLinearNavigation({root:$('receiptForm'),selector:'[data-flow]',selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});FX.bindLabelSelect({root:root});FX.bindLiveCurrency({root:$('receiptForm'),selector:'[data-money]'});
+  $('receiptForm').addEventListener('submit',event=>event.preventDefault());
+  $('receiptForm').addEventListener('change',event=>{
+    const invoiceIndex=event.target.dataset.invoiceAmount;
+    if(invoiceIndex!==undefined){const value=number(event.target.value);if(!Number.isFinite(value)){event.target.setCustomValidity('Importe inválido.');return;}invoices[Number(invoiceIndex)].importe=value;event.target.value=money(value);}
+    const tr=event.target.closest('[data-value]'),field=event.target.dataset.field;
+    if(tr&&field&&!['tipo','valor','tarjeta'].includes(field)){
+      const row=values[Number(tr.dataset.value)];
+      try{row[field]=field==='vencimiento'?isoDate(event.target):field==='importe'?number(event.target.value):field==='cuotas'?Number(event.target.value):event.target.value;}catch(error){event.target.setCustomValidity(error.message);return;}
+    }
+    if(ready){totals();save();}
+  });
+  $('invoices').addEventListener('click',event=>{const tr=event.target.closest('[data-invoice]');if(tr){selectedInvoice=Number(tr.dataset.invoice);$('invoices').querySelectorAll('tr').forEach(row=>row.classList.toggle('selected',row===tr));}const remove=event.target.closest('[data-remove-invoice]');if(remove&&!busy&&!pending&&!confirmed){invoices.splice(Number(remove.dataset.removeInvoice),1);selectedInvoice=-1;render();save();}});
+  $('values').addEventListener('click',event=>{const remove=event.target.closest('[data-remove-value]');if(remove&&!busy&&!pending&&!confirmed){values.splice(Number(remove.dataset.removeValue),1);if(!values.length)values.push(blankValue());render();save();}});
+  $('addValue').onclick=()=>{if(busy||pending||confirmed)return;values.push(blankValue());render();save();$('values').lastElementChild.querySelector('input').focus();};
+  $('note').addEventListener('input',save);$('date').addEventListener('change',save);$('point').addEventListener('change',()=>{invoices=[];invoiceChoices=[];requestSequence++;selectedInvoice=-1;render();save();if(customer)refreshBalance().catch(()=>{});});
+  $('loadInvoices').onclick=loadInvoices;$('confirm').onclick=confirmReceipt;$('consult').onclick=history;$('viewReceipts').onclick=history;$('account').onclick=account;$('billing').onclick=()=>{if(canLeaveConsultReceipt())nativeWindow.location.href='gestion.html#facturacion';};
+  function startNewReceipt(){
+    confirmed=null;pending=null;$('point').value=billingDefaultPoint();customer=0;invoices=[];invoiceChoices=[];requestSequence++;values=[blankValue()];selectedInvoice=-1;syncCustomer();$('number').value='';$('balance').value='';$('note').value='';$('date').value=dateText(today());localStorage.removeItem(key());render();save();status('Nuevo recibo listo.');
+  }
+  $('cancel').onclick=()=>{if(busy||pending)return;if(!confirmed&&(invoices.length||values.some(row=>row.importe))&&!confirm('¿Descartar este recibo sin confirmar?'))return;startNewReceipt();};
+  $('receiptModal').addEventListener('close',()=>{
+    if(confirmed&&viewedReceipt&&Number(confirmed.id)===Number(viewedReceipt.recibo.id))startNewReceipt();
+    viewedReceipt=null;
+  });
+  $('historyBody').addEventListener('click',event=>{const row=event.target.closest('[data-receipt-row]');if(row)openReceiptConsult(Number(row.dataset.receiptRow)).catch(receiptConsultError);});
+  $('viewInvoice').onclick=async()=>{
+    const row=invoices[selectedInvoice];
+    if(!row){status('Seleccioná una factura de la grilla.',true);return;}
+    try{
+      status('Consultando factura…');
+      await window.CorralonInvoiceHistory.openInvoice(Number(row.id),invoices);
+      status('');
+    }catch(error){status(error.message,true);}
+  };
+
+  $('voidReceipt').onclick=cancelViewedReceipt;
+  $('printReceipt').onclick=()=>{if(consultHasChanges?.()){$('receiptStatus').textContent='Guardá o descartá los cambios antes de reimprimir.';return;}window.print();};document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>{if(button.dataset.close==='historyModal')receiptReturnToEmission();else $(button.dataset.close).close();});
+  let receiptHistorySearchTimer;
+  $('receiptHistoryQuery').oninput=()=>{
+    renderReceiptHistory();
+    if(receiptFromCaja)return;
+    clearTimeout(receiptHistorySearchTimer);
+    const navigation=++receiptNavigationEpoch;
+    receiptHistorySearchTimer=setTimeout(()=>{
+      if(navigation===receiptNavigationEpoch&&!root.hidden&&!$('historyModal').hidden)history(false);
+    },250);
+  };
+  FX.bindFlexibleDates({root:$('historyModal'),selector:'#rc-receiptHistoryFrom,#rc-receiptHistoryTo'});
+  for(const id of ['receiptHistoryFrom','receiptHistoryTo']){
+    const field=$(id);
+    field.oninput=()=>field.setCustomValidity('');
+    field.onchange=()=>history(false);
+    field.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();field.blur();}};
+  }
+  $('receiptHistoryVoided').onclick=()=>{receiptHistoryVoided=!receiptHistoryVoided;renderReceiptHistory();};
+  $('historyBody').addEventListener('keydown',event=>{if(event.target.matches('[data-receipt-row]')&&['Enter',' '].includes(event.key)){event.preventDefault();event.target.click();}});
+  $('receiptConsultBack').onclick=receiptReturnToEmission;$('receiptConsultLoad').onclick=receiptReturnToEmission;
+  $('receiptConsultSearch').onclick=history;$('receiptConsultVoided').onclick=()=>{receiptHistoryVoided=true;history();};
+  $('receiptConsultPrevious').onclick=()=>navigateConsultReceipt(-1).catch(error=>$('receiptStatus').textContent=error.message);
+  $('receiptConsultNext').onclick=()=>navigateConsultReceipt(1).catch(error=>$('receiptStatus').textContent=error.message);
+  $('receiptConsultPrevious').setAttribute('aria-keyshortcuts','PageUp');
+  $('receiptConsultNext').setAttribute('aria-keyshortcuts','PageDown');
+  nativeDocument.addEventListener('keydown',event=>{
+    if(current!=='receipts'||$('receiptConsultSection').hidden||busy||cancellingReceipt)return;
+    if(event.defaultPrevented||event.ctrlKey||event.altKey||event.metaKey||event.shiftKey)return;
+    if(event.key!=='PageUp'&&event.key!=='PageDown')return;
+    if(event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+    if(nativeDocument.querySelector('dialog[open],.modal-wrap.open')||!menu.hidden)return;
+    event.preventDefault();
+    if(!event.repeat)navigateConsultReceipt(event.key==='PageDown'?1:-1).catch(receiptConsultError);
+  });
+  $('receiptConsultSection').addEventListener('click',event=>{
+    const invoice=event.target.closest('[data-consult-invoice-row]'),value=event.target.closest('[data-consult-value-row]');
+    if(invoice){consultInvoiceIndex=Number(invoice.dataset.consultInvoiceRow);$('receiptBody').querySelectorAll('[data-consult-invoice-row]').forEach(row=>row.classList.toggle('selected',row===invoice));}
+    if(value){consultValueIndex=Number(value.dataset.consultValueRow);$('receiptBody').querySelectorAll('[data-consult-value-row]').forEach(row=>row.classList.toggle('selected',row===value));}
+    if(event.target.closest('[data-consult-invoice]'))viewConsultInvoice();
+  });
+  $('receiptConsultSection').addEventListener('dblclick',event=>{if(event.target.closest('[data-consult-invoice-row]'))viewConsultInvoice();});
+  $('receiptConsultValue').onclick=()=>{const row=viewedReceipt?.valores?.[consultValueIndex];if(!row)return;const box=$('receiptConsultValueDetail');box.hidden=!box.hidden;box.innerHTML='<strong>'+esc(row.tipo)+'</strong> · '+esc(row.numero||'Sin número')+' · '+money(row.importe)+'<br>Banco: '+esc(row.banco||'—')+' · '+esc(row.descripcion||'Sin descripción');};
+  window.addEventListener('resize',fitReceiptSections);fitReceiptSections();
+  lock();
+  window.addEventListener('menu-user-validated',event=>initialize(event.detail.user));
+  root.addEventListener('receipt-navigate',event=>{if(!ready)return;if(event.detail.view==='consulta')history().catch(receiptConsultError);else receiptReturnToEmission();});
+  window.addEventListener('popstate',()=>{if(ready)restoreReceiptRoute().catch(receiptConsultError);});
+  if(document.documentElement.style.visibility!=='hidden'){const current=FX.menuSessionUser();if(current&&FX.menuUserHasAccess(receiptFromCaja?'caja':'recibos_cobro'))initialize(current);}
+})();
+
+
+  })(receiptDocument,receiptWindow,receiptLocation);
+ syncReceiptHeader();
+})();
+</script>
+</body>
+</html>

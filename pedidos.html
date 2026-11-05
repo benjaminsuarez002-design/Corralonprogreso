@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.55"></script>
+<script src="corralon-system.js?v=1.0.56"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -2203,6 +2203,7 @@ function syncCurrentOrderInBackground(){clearTimeout(saveTimer);const key=curren
 async function saveConfirmedPayloadRemote(payload,lockDocId=''){
   const firestore=firebaseDb();
   if(!firestore){stopTopProgress('Sin conexión a Firebase. El pedido sigue en pantalla.');return null}
+  let recoveredDeletedDraft=false;
   try{
     let preferredDocId=String(editingConfirmedDraftDocId||payload._docId||lockDocId||activeOrderDocId||'').trim();
     // La identidad de una revisión se comprueba en Firebase, no en una caché que puede estar atrasada.
@@ -2217,7 +2218,8 @@ async function saveConfirmedPayloadRemote(payload,lockDocId=''){
       orderConfirmationToken=globalThis.crypto?.randomUUID?.()||('pedido_'+Date.now()+'_'+Math.random().toString(36).slice(2));
       els.orderNumber.value=String(nextOrderNumber());
       payload={...payload,id:orderId(),_docId:'',confirmationToken:orderConfirmationToken};
-      preferredDocId='';existing=null;
+      preferredDocId='';existing=null;recoveredDeletedDraft=true;
+      paint();updateOrderCounter();
       await saveLocal();
     }
     if(editingConfirmedDraftDocId&&!existing)throw new Error('No se encontró el pedido original de esta revisión.');
@@ -2240,7 +2242,7 @@ async function saveConfirmedPayloadRemote(payload,lockDocId=''){
     const cursor=Number(await window.CorralonCacheDB.get(ORDER_SYNC_CURSOR_KEY)||0);
     await writeOrderRemoteCache(allRemoteOrders,cursor);
     invalidateMonthlyPedidosCache();
-    return saved;
+    return recoveredDeletedDraft?{...saved,_recoveredDeletedDraft:true}:saved;
   }catch(error){console.warn(error);stopTopProgress('No se pudo guardar en Firebase. El pedido sigue en pantalla.');show('No se pudo guardar el pedido. '+(error.message||'Intentá nuevamente.')+' El borrador sigue en pantalla.');return null}
 }
 async function saveRemote(){if(!hasOrderContent()){pendingRows.clear();paintRowSyncState();return true}await saveLocal();pendingRows.clear();paintRowSyncState();els.status.textContent=editingConfirmedDraft()?'Edición guardada localmente':'Borrador guardado localmente';return true}
@@ -2976,7 +2978,8 @@ async function confirmCurrentOrder({generateExcel=false,generatePdf=false,genera
     pendingRows.clear();localSavePending=false;paintRowSyncState();
     const doneMessage=generateExcel?'Pedido confirmado. Excel generado y faltantes limpiados':generatePdf?'Pedido confirmado. PDF generado y faltantes limpiados':generateShare?'Pedido confirmado. Enlace compartido y faltantes limpiados':'Pedido enviado a revisión';
     stopTopProgress(doneMessage);
-    await newBlankOrder();
+    if(saved._recoveredDeletedDraft){loadOrder(saved,{focus:false});paint();updateOrderCounter();}
+    else await newBlankOrder();
     refreshOrderList().catch(console.warn);
     refreshMonthlyLimit().catch(console.warn);
   }finally{

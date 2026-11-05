@@ -3077,3 +3077,63 @@ el reintento automatico NO fue modificado. Este chat continua con apariencia.
 PUNTO DE CORTE NUEVO: 24/10/2026. Secciones 42 a 46 prevalecen para estos
 flujos; conservan limites de verificacion y no cierran por inferencia el
 incidente de Alexis del 19/10 documentado en seccion 40.
+
+
+47. GESTION Y PEDIDOS - ACTUALIZACION AL 04/11/2026
+=================================================
+
+RECIBOS DE COBRO EN GESTION
+- En gestion.html, Consultar recibo muestra Diferencia = total del recibo
+  menos la suma de las imputaciones. Un pago a cuenta sin facturas puede
+  mostrar todo su total como saldo sin imputar. Ejemplo: $6.300.000
+  recibidos y $1.700.000 imputados dejan $4.600.000.
+- El listado de Consultar recibos trae diferencia desde la API. Los anulados
+  se muestran con un guion. En el detalle, RePag y AvPag recorren el listado
+  filtrado. Los atajos se suspenden al editar un campo o abrir un dialogo.
+- La consigna definitiva reemplaza la imputacion de a una factura mediante
+  un boton independiente. En Editar recibo, el administrador puede cambiar
+  ID de cliente, fecha y nota. Puede agregar, quitar y editar importes de
+  facturas y cambiar tipo de valor, importe, tarjeta/cuenta y cuotas.
+- Facturas cobradas conserva una fila vacia en edicion y reutiliza el
+  desplegable de Emitir recibo. Elegir factura completa sus columnas y
+  enfoca el importe. La diferencia visible se recalcula al salir de la fila,
+  no al seleccionarla ni mientras se teclea el importe.
+- Cambiar el cliente pide confirmar el retiro de las imputaciones del
+  borrador. La API usa el cliente y la empresa del recibo para validar las
+  facturas. El saldo disponible excluye las imputaciones del propio recibo
+  mientras se lo edita, para poder corregir una factura ya vinculada.
+- Guardar cambios llama a editar-recibo en facturacion-copia-api.cs.
+  Requiere administrador de Recibos, recibo vigente y version actual.
+  Usa una transaccion Serializable para cabecera, imputaciones y valores.
+  El total imputado puede quedar por debajo del recibido, pero no superarlo.
+  Conserva numero de recibo. Caja de origen es una consulta de solo lectura.
+- Caja cerrada asignada bloquea la edicion. Para cambiar fecha, el recibo
+  debe estar sin Caja asignada. Los cheques vinculados se corrigen desde su
+  gestion bancaria. Si cambian valores de un recibo con Caja abierta
+  asignada, se recalcula esa Caja en la misma transaccion.
+- Se comprobo compilacion y se ejecutaron 17 pruebas existentes de Recibos.
+  Prueba simulada adicional verifico autocompletado y diferencia al salir
+  de la fila en el editor integrado. No se verifico un guardado SQL real.
+  Para usar los cambios hace falta activar la API compilada con iniciar
+  sistema.bat y recargar Gestion. No asumir que el servicio ya se actualizo.
+
+GESTION: FACTURACION, RECIBOS Y STOCK
+- Facturacion tiene escala de ajuste multiplicada por 1.1.
+- El aviso de Caja cerrada se limita a Facturacion y Recibos de cobro.
+  Cambiar a otra seccion oculta el aviso y libera el bloqueo del formulario.
+- En la ficha del movimiento de Stock, Ver factura abre la compra mediante
+  su ID vinculado. Si falta el vinculo, informa que no hay factura de compra
+  asociada. Se verifico sintaxis en Gestion y respaldo/cargastock.html.
+- Un remito hecho la semana anterior y entregado hoy figura por fecha del
+  comprobante, no por fecha de entrega. Ese caso no era un remito faltante.
+
+PEDIDOS
+- Confirmar y enviar a revision usan la fecha local del dia. Volver a enviar
+  desde el detalle tambien actualiza la fecha.
+- Un borrador asociado a un pedido eliminado ofrece Crear pedido nuevo
+  conservando articulos y nota con numeracion e identidad nuevas. La pregunta
+  queda sobre la animacion de carga. Tras guardar, la pantalla conserva
+  visible el pedido nuevo y sus totales sin navegar a otro y volver.
+- Las pruebas locales de recuperacion y numeracion pasaron. El cambio en
+  corralonprogreso.com depende de subir la actualizacion. El aviso
+  ERR_BLOCKED_BY_CLIENT del beacon de Cloudflare no era el error de guardado.
