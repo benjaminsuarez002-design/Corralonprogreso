@@ -1,4 +1,4 @@
-Add-Type -AssemblyName System.Windows.Forms
+﻿Add-Type -AssemblyName System.Windows.Forms
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -232,7 +232,7 @@ function Show-VersionDetailsDialog {
 
     $label = New-Object Windows.Forms.Label
     $label.Left = 16; $label.Top = 14; $label.Width = 550
-    $label.Text = "Archivos que se subiran: $($UploadFiles.Count) (incluye eliminaciones y dependencias)"
+    $label.Text = "Paginas que cambiaran de version: $($HtmlFiles.Count)"
     $list = New-Object Windows.Forms.TextBox
     $list.Left = 16; $list.Top = 38; $list.Width = 550; $list.Height = 245
     $list.Multiline = $true; $list.ReadOnly = $true; $list.ScrollBars = 'Vertical'
@@ -246,7 +246,8 @@ function Show-VersionDetailsDialog {
         $prefix = if (Test-Path -LiteralPath (Join-Path $repoRoot $path) -PathType Leaf) { 'SUBIR' } else { 'ELIMINAR' }
         "$prefix  $path"
     }
-    $list.Text = (@($fileLines) + @('', 'Paginas que cambiaran de version:') + @($versionLines)) -join "`r`n"
+    if (-not $HtmlFiles.Count) { $versionLines = @('Ninguna: no hay HTML modificados seleccionados.') }
+    $list.Text = (@($versionLines) + @('', "Archivos que se subiran: $($UploadFiles.Count) (incluye manifiestos y dependencias)") + @($fileLines)) -join "`r`n"
 
     $changeLabel = New-Object Windows.Forms.Label
     $changeLabel.Left = 16; $changeLabel.Top = 294; $changeLabel.Width = 550
@@ -365,6 +366,8 @@ try {
         }
         $fullPath.Substring($repoRoot.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
     } | Sort-Object -Unique)
+    # Solo los HTML seleccionados con diferencias reales generan una version.
+    $versionCandidates = @($relativeFiles | Where-Object { $automaticFiles -contains $_ })
     $pedidoShareFiles = @('pedidos.html', 'pedido-compartido.html', 'cloudflare-worker.js', 'wrangler.jsonc', '.assetsignore')
     if (@($relativeFiles | Where-Object { $pedidoShareFiles -contains $_ }).Count) {
         foreach ($dependency in $pedidoShareFiles) {
@@ -383,29 +386,10 @@ try {
         }
         $relativeFiles = @($relativeFiles | Sort-Object -Unique)
     }
-    # Index y su tema deben publicarse junto con las imágenes que utilizan.
-    if ($relativeFiles -contains 'index.html' -or $relativeFiles -contains 'theme-corralon.css') {
-        $indexThemeFiles = @('theme-corralon.css', 'assets/halloween/hero-halloween.png', 'assets/halloween/fondo-index-halloween.png', 'assets/halloween/categorias-halloween-ceramico.png')
-        foreach ($dependency in $indexThemeFiles) {
-            if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $dependency) -PathType Leaf)) {
-                throw "Falta una imagen o archivo del tema de Index: $dependency. No se publicó la actualización."
-            }
-            if ($relativeFiles -notcontains $dependency) { $relativeFiles += $dependency }
-        }
-        $relativeFiles = @($relativeFiles | Sort-Object -Unique)
-    }
-
-    # Los cambios en JS/CSS compartidos tambien actualizan las paginas que los usan.
-    $dependencies = @($relativeFiles | Where-Object { $_ -match '\.(js|css)$' })
-    foreach ($pageFile in @(Get-ChildItem -LiteralPath $repoRoot -Filter '*.html' -File)) {
-        if ($pageFile.Name -match ' - copia|\(\d+\)|-reference') { continue }
-        $source = [IO.File]::ReadAllText($pageFile.FullName)
-        foreach ($dependency in $dependencies) {
-            if ($source.Contains($dependency) -and $relativeFiles -notcontains $pageFile.Name) { $relativeFiles += $pageFile.Name; break }
-        }
-    }
+    # JS/CSS e imagenes se publican como archivos: no reenviar ni versionar
+    # automaticamente todos los HTML que los referencian.
     $relativeFiles = @($relativeFiles | Where-Object { $_ -notmatch '\.(new|next)\.exe$' } | Sort-Object -Unique)
-    $htmlFiles = @($relativeFiles | Where-Object { $_ -match '^[^/]+\.html$' -and $_ -notmatch ' - copia|\(\d+\)|-reference' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
+    $htmlFiles = @($versionCandidates | Where-Object { $_ -match '^[^/]+\.html$' -and $_ -notmatch ' - copia|\(\d+\)|-reference' } | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
     $manifestSource = Join-Path $repoRoot 'version-web.json'
     $manifestForDialog = Get-Content -LiteralPath $manifestSource -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($htmlFiles.Count -and $relativeFiles -notcontains 'version-web.json') { $relativeFiles += 'version-web.json' }

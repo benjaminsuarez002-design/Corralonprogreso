@@ -14,6 +14,33 @@
 <link rel="manifest" href="site.webmanifest">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@splidejs/splide@4.1.4/dist/css/splide.min.css">
+<style>
+html.index-booting body > :not(#loadingOverlay){visibility:hidden!important}
+html.index-booting #loadingOverlay{display:flex!important;background:#f4f8fc!important}
+html.index-booting #loadingOverlay>div:first-child{border-color:#d5e3f1!important;border-top-color:#2364bd!important}
+</style>
+<script>
+(function stableIndexStartup(){
+ const root=document.documentElement;
+ root.classList.add('index-booting');
+ let preparing=false;
+ const observer=new MutationObserver(revealWhenReady);
+ observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class']});
+ async function revealWhenReady(){
+  const loader=document.getElementById('loadingOverlay');
+  if(preparing||!loader||loader.style.display!=='none'||!root.classList.contains('fondo-mundial-listo'))return;
+  preparing=true;
+  try{
+   await document.fonts.ready;
+   await Promise.allSettled([...document.querySelectorAll('.logo-img,.index-welcome-banner img')].map(img=>img.decode()));
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  }finally{
+   observer.disconnect();root.classList.remove('index-booting');
+  }
+ }
+ document.addEventListener('DOMContentLoaded',revealWhenReady,{once:true});
+})();
+</script>
 <script>
 (function fitIndexMobileCanvas(){
   const root=document.documentElement;
@@ -4446,7 +4473,7 @@ window.CORRALON_INDEX_MENU_SESSION_ACTIVE = (() => {
 window.CORRALON_DISABLE_CATALOG_REALTIME = !window.CORRALON_INDEX_MENU_SESSION_ACTIVE;
 </script>
 <script src="corralon-cache-db.js"></script>
-<script src="corralon-system.js?v=1.0.59"></script>
+<script src="corralon-system.js?v=1.0.60"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, getDocFromServer, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp, collection, query, where, orderBy, limit, increment, getDocs, getDocsFromServer, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
