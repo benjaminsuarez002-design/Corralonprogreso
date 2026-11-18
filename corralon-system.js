@@ -7667,7 +7667,8 @@
         options: []
       };
       const before = take(page, 'up', beforeCount);
-      const after = take(page, 'down', afterCount);
+      const initialAfterCount = options.initialRowCount ? Math.max(1, options.initialRowCount - before.length - matches.length) : afterCount;
+      const after = take(page, 'down', initialAfterCount);
       page.focusIndex = before.length;
       page.options = [...before, ...matches, ...after];
       return page;

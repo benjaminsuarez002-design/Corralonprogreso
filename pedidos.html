@@ -8,10 +8,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="vendor/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.57"></script>
+<script src="corralon-system.js?v=1.0.58"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -1728,6 +1728,11 @@ body[data-page-theme="pedidos"][data-pedidos-layout="desktop"] .head,body[data-p
     <div class="modal-head"><h2>Aviso</h2></div>
     <div class="confirm-choice-body">
       <p id="pageMessageText"></p>
+      <div id="orderShareLink" hidden>
+        <label for="orderShareLinkInput">Enlace del pedido</label>
+        <input id="orderShareLinkInput" type="text" readonly style="width:100%;margin:8px 0;box-shadow:none">
+        <button id="copyOrderShareLinkBtn" type="button">Copiar enlace</button>
+      </div>
       <div class="confirm-choice-actions">
         <button class="generate" id="pageMessageOkBtn" type="button">Aceptar</button>
       </div>
@@ -1889,7 +1894,7 @@ els.topProgress=document.getElementById('topProgress');
 const startupCatalogProgress={providers:false,catalog:false,done:false};
 function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function closePageMessage(){els.pageMessageModal?.classList.remove('visible')}
-function show(message){const text=String(message||'').trim();if(!text)return;try{if(typeof els!=='undefined'&&els.status)els.status.textContent=text}catch{}const now=Date.now();if(text===lastPopupMessage&&now-lastPopupAt<2500)return;lastPopupMessage=text;lastPopupAt=now;if(els.pageMessageText&&els.pageMessageModal){els.pageMessageText.textContent=text;els.pageMessageModal.classList.add('visible')}else{console.warn(text)}}
+function show(message){const text=String(message||'').trim();if(!text)return;try{if(typeof els!=='undefined'&&els.status)els.status.textContent=text}catch{}const now=Date.now();if(text===lastPopupMessage&&now-lastPopupAt<2500)return;lastPopupMessage=text;lastPopupAt=now;document.getElementById('orderShareLink').hidden=true;if(els.pageMessageText&&els.pageMessageModal){els.pageMessageText.textContent=text;els.pageMessageModal.classList.add('visible')}else{console.warn(text)}}
 let pageQuestionResolver=null;
 function closePageQuestion(result=false){els.pageQuestionModal?.classList.remove('visible');const resolve=pageQuestionResolver;pageQuestionResolver=null;if(resolve)resolve(Boolean(result))}
 function askPageQuestion(message,{title='Autorización de pedido',accept='Aceptar',cancel='Cancelar'}={}){
@@ -2136,8 +2141,36 @@ function orderShareSlugPart(value){return String(value||'').normalize('NFD').rep
 function newOrderShareKey(){const alphabet='abcdefghjkmnpqrstuvwxyz23456789',bytes=new Uint8Array(8);crypto.getRandomValues(bytes);return Array.from(bytes,value=>alphabet[value%alphabet.length]).join('')}
 function orderShareSlug(order){const current=String(order?.shareSlug||'').trim();if(current)return current;const provider=orderShareSlugPart(displayProviderName(order?.proveedor)||order?.proveedor)||'proveedor';const number=orderShareSlugPart(orderDisplayNumber(order))||'pedido';return`${provider}-${number}-${newOrderShareKey()}`}
 function orderPublicShareUrl(slug){return`https://corralonprogreso.com/pedidos/${encodeURIComponent(slug)}`}
-async function copyOrderShareLink(url){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);return true}}catch(error){}const input=document.createElement('textarea');input.value=url;input.readOnly=true;input.style.cssText='position:fixed;left:-9999px;top:0';document.body.appendChild(input);input.select();let copied=false;try{copied=document.execCommand('copy')}catch(error){}input.remove();return copied}
-async function shareOrder(order){if(!order)return;const firestore=firebaseDb();if(!firestore)throw new Error('Sin conexión a Firebase');const slug=orderShareSlug(order),docId=orderFirebaseDocId(order);if(!String(order.shareSlug||'').trim()){const sync=orderSyncFields();await firestore.collection('pedidos').doc(docId).set({shareSlug:slug,shareEnabled:true,shareCreatedAt:Date.now(),...sync},{merge:true});Object.assign(order,{shareSlug:slug,shareEnabled:true,...sync});upsertOrderList(order)}else if(order.shareEnabled!==true){const sync=orderSyncFields();await firestore.collection('pedidos').doc(docId).set({shareEnabled:true,...sync},{merge:true});Object.assign(order,{shareEnabled:true,...sync});upsertOrderList(order)}const url=orderPublicShareUrl(slug);if(await copyOrderShareLink(url)){show('Enlace del pedido copiado.');els.status.textContent='Enlace copiado'}else window.prompt('Copiá este enlace para compartir el pedido:',url)}
+async function copyOrderShareLink(url){
+  try{
+    if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);return true}
+  }catch(error){}
+  const previousFocus=document.activeElement;
+  const input=document.createElement('textarea');
+  input.value=url;
+  input.readOnly=true;
+  input.style.cssText='position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+  const container=window.PedidosModalFocus?.top()||document.body;
+  container.appendChild(input);
+  let copied=false;
+  try{
+    input.focus({preventScroll:true});
+    input.select();
+    input.setSelectionRange(0,input.value.length);
+    copied=document.execCommand('copy');
+  }catch(error){}finally{
+    input.remove();
+    if(previousFocus?.isConnected&&!previousFocus.closest('[inert]'))previousFocus.focus({preventScroll:true});
+  }
+  return copied;
+}
+function showOrderShareLink(url,copied){
+  show(copied?'Enlace del pedido copiado.':'Enlace del pedido listo para compartir.');
+  document.getElementById('orderShareLinkInput').value=url;
+  document.getElementById('orderShareLink').hidden=false;
+  els.pageMessageModal.classList.add('visible');
+}
+async function shareOrder(order){if(!order)return;const firestore=firebaseDb();if(!firestore)throw new Error('Sin conexión a Firebase');const slug=orderShareSlug(order),docId=orderFirebaseDocId(order);if(!String(order.shareSlug||'').trim()){const sync=orderSyncFields();await firestore.collection('pedidos').doc(docId).set({shareSlug:slug,shareEnabled:true,shareCreatedAt:Date.now(),...sync},{merge:true});Object.assign(order,{shareSlug:slug,shareEnabled:true,...sync});upsertOrderList(order)}else if(order.shareEnabled!==true){const sync=orderSyncFields();await firestore.collection('pedidos').doc(docId).set({shareEnabled:true,...sync},{merge:true});Object.assign(order,{shareEnabled:true,...sync});upsertOrderList(order)}const url=orderPublicShareUrl(slug);const copied=await copyOrderShareLink(url);showOrderShareLink(url,copied);return copied}
 function faltanteKey(item){return[String(item?.localUid||''),cleanProviderId(item?.idProveedor||item?.id_proveedor||''),String(item?.codProv||item?.cod_proveedor||'').trim().toLowerCase(),String(item?.descripcion||item?.articulo||'').trim().toLowerCase(),String(item?.cantidad??'').trim()].join('|')}
 function orderRowFaltanteKey(row){return[String(row?.faltanteUid||''),cleanProviderId(row?.faltanteIdProveedor||row?.idProveedor||row?.id_proveedor||''),String(row?.faltanteCodProv||row?.codProv||'').trim().toLowerCase(),String(row?.faltanteDescripcion||row?.articulo||'').trim().toLowerCase(),String(row?.faltanteCantidad??row?.cantidad??'').trim()].join('|')}
 function orderRowsFromFaltantes(orderOrRows){return(Array.isArray(orderOrRows)?orderOrRows:orderOrRows?.detalles||[]).filter(row=>row?.faltanteUid||row?.faltanteKey||row?.importadoDeFaltantes)}
@@ -2995,6 +3028,13 @@ els.generateOrderBtn.addEventListener('click',()=>{if(hasDuplicateArticles()){sh
 els.cancelConfirmChoiceBtn.addEventListener('click',closeConfirmChoice)
 els.confirmChoiceModal.addEventListener('mousedown',e=>{if(e.target===els.confirmChoiceModal)closeConfirmChoice()})
 els.pageMessageOkBtn?.addEventListener('click',closePageMessage)
+document.getElementById('orderShareLinkInput').addEventListener('click',event=>event.target.select())
+document.getElementById('copyOrderShareLinkBtn').addEventListener('click',async()=>{
+  const input=document.getElementById('orderShareLinkInput');
+  const copied=await copyOrderShareLink(input.value);
+  els.pageMessageText.textContent=copied?'Enlace del pedido copiado.':'Seleccioná el enlace y presioná Ctrl+C para copiarlo.';
+  if(!copied){input.focus();input.select()}
+})
 els.pageMessageModal?.addEventListener('mousedown',e=>{if(e.target===els.pageMessageModal)closePageMessage()})
 els.pageQuestionAcceptBtn?.addEventListener('click',()=>closePageQuestion(true))
 els.pageQuestionCancelBtn?.addEventListener('click',()=>closePageQuestion(false))
@@ -3148,9 +3188,51 @@ els.closeOrderDetailBtn.addEventListener('click',()=>els.orderDetailModal.classL
 els.orderDetailModal.addEventListener('mousedown',e=>{if(e.target===els.orderDetailModal)els.orderDetailModal.classList.remove('visible')})
 els.sendReviewFromDetailBtn.addEventListener('click',()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();return}if(!detailOrderId)return;sendOrderBackToReview(detailOrderId).catch(error=>{console.warn(error);stopTopProgress('No pude enviar a revisión')})})
 els.editOrderDetailBtn.addEventListener('click',async()=>{const order=findOrderByKey(detailOrderId);if(!order)return;const permission=canEditOrderByStatus(order);if(!permission.ok){els.status.textContent=permission.msg;return}els.orderDetailModal.classList.remove('visible');els.historyModal.classList.remove('visible');startTopProgress('Abriendo pedido...');const targetDocId=orderFirebaseDocId(order),previousEditId=editingConfirmedDraftId,previousEditDocId=editingConfirmedDraftDocId;const sourceOrder={...order,id:orderDisplayNumber(order),detalles:Array.isArray(order.detalles)?order.detalles.map(row=>({...row})):[]};try{if(editingConfirmedDraft()&&String(editingConfirmedDraftDocId)!==targetDocId&&hasOrderContent())syncCurrentOrderInBackground();editingConfirmedDraftId=sourceOrder.id;editingConfirmedDraftDocId=targetDocId;const ok=await claimOrderForEdit(order);if(!ok){editingConfirmedDraftId=previousEditId;editingConfirmedDraftDocId=previousEditDocId;stopTopProgress();return}const localDraft=localDraftOrder(targetDocId);const validLocalDraft=localDraft&&orderDisplayNumber(localDraft)===sourceOrder.id&&localDraft.detalles.some(row=>!isBlank(row));loadOrder(validLocalDraft?{...localDraft,id:sourceOrder.id}:sourceOrder);stopTopProgress('Pedido cargado para editar') }catch(error){editingConfirmedDraftId=previousEditId;editingConfirmedDraftDocId=previousEditDocId;console.warn(error);stopTopProgress('No pude abrir el pedido')}})
-els.shareOrderDetailBtn.addEventListener('click',async()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para compartir el pedido';return}const order=findOrderByKey(detailOrderId);if(!order)return;if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}els.shareOrderDetailBtn.disabled=true;els.status.textContent='Preparando enlace...';try{await shareOrder(order);await clearFaltantesForOrder(order);await setHistoryPedido(orderListKey(order),true);renderOrderDetail(order);els.status.textContent='Enlace copiado y pedido marcado'}catch(error){console.warn(error);show('No se pudo generar el enlace del pedido.');els.status.textContent='No se pudo compartir el pedido'}finally{els.shareOrderDetailBtn.disabled=false}})
+els.shareOrderDetailBtn.addEventListener('click',async()=>{
+  if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para compartir el pedido';return}
+  const order=findOrderByKey(detailOrderId);
+  if(!order)return;
+  if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}
+  els.shareOrderDetailBtn.disabled=true;
+  els.status.textContent='Preparando enlace...';
+  try{
+    const copied=await shareOrder(order);
+    try{
+      await clearFaltantesForOrder(order);
+      await setHistoryPedido(orderListKey(order),true);renderOrderDetail(order);
+      els.status.textContent=copied?'Enlace copiado y pedido marcado':'Enlace generado y pedido marcado';
+    }catch(error){
+      console.warn(error);
+      els.status.textContent='Enlace generado. Quedó pendiente actualizar el estado del pedido y los faltantes.';
+    }
+  }catch(error){
+    console.warn(error);
+    show('No se pudo generar el enlace del pedido. '+(error?.message||''));
+  }finally{els.shareOrderDetailBtn.disabled=false}
+})
 els.exportOrderDetailBtn.addEventListener('click',async()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para generar el pedido';return}const order=findOrderByKey(detailOrderId);if(!order)return;if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}try{exportOrderExcel(order);await clearFaltantesForOrder(order);await setHistoryPedido(orderListKey(order),true);els.status.textContent='Excel generado desde historial y faltantes limpiados'}catch(error){console.warn(error);els.status.textContent='No se pudo generar el Excel'}})
-els.pdfOrderDetailBtn.addEventListener('click',async()=>{if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para generar el pedido';return}const order=findOrderByKey(detailOrderId);if(!order)return;if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}try{await exportOrderPdf(order);await clearFaltantesForOrder(order);await setHistoryPedido(orderListKey(order),true);els.status.textContent='PDF generado desde historial y faltantes limpiados'}catch(error){console.warn(error);els.status.textContent='No se pudo generar el PDF'}})
+els.pdfOrderDetailBtn.addEventListener('click',async()=>{
+  if(!activeSessionIsAdmin()){notifyNeedsAdmin();els.status.textContent='Necesitás ser administrador para generar el pedido';return}
+  const order=findOrderByKey(detailOrderId);
+  if(!order)return;
+  if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}
+  els.pdfOrderDetailBtn.disabled=true;
+  els.status.textContent='Generando PDF...';
+  try{
+    await exportOrderPdf(order);
+    try{
+      await clearFaltantesForOrder(order);
+      await setHistoryPedido(orderListKey(order),true);
+      els.status.textContent='PDF generado desde historial y faltantes limpiados';
+    }catch(error){
+      console.warn(error);
+      els.status.textContent='PDF generado. Quedó pendiente actualizar el estado del pedido y los faltantes.';
+    }
+  }catch(error){
+    console.warn(error);
+    show('No se pudo generar el PDF. '+(error?.message||''));
+  }finally{els.pdfOrderDetailBtn.disabled=false}
+})
 els.deleteOrderDetailBtn.addEventListener('click',async()=>{if(!activeSessionIsAdmin()){els.status.textContent='Solo un administrador puede eliminar pedidos';return}if(!detailOrderId)return;const order=findOrderByKey(detailOrderId);if(orderStatus(order)==='revision'){els.status.textContent='Pedido en revisión';return}if(!confirm('Eliminar este pedido?'))return;const ok=await deleteOrder(detailOrderId);if(ok){els.orderDetailModal.classList.remove('visible');renderHistory(orderList);els.status.textContent='Pedido eliminado'}})
 window.addEventListener('beforeunload',()=>{if(editingConfirmedDraftDocId)releaseReviewLock()})
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&window.PedidosModalFocus?.top()===els.orderSearchModal){e.preventDefault();els.orderSearchModal.classList.remove('visible')}})

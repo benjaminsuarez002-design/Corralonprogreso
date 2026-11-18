@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="theme-corralon.css?v=20260820-facturacion1">
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <script src="corralon-system.js?v=1.0.19"></script>
+  <script src="corralon-system.js?v=1.0.20"></script>
   <script src="facturacion-medios-pago.js"></script>
   <script src="menu-auth-guard.js?v=20260820-facturacion1" data-menu-guard="configuracion"></script>
   <style>
@@ -142,10 +142,20 @@ function renderPrinterMachines(){
  const host=$('#printerMachines');host.replaceChildren();if(!printerConfig?.equipo){const empty=document.createElement('p');empty.className='warning';empty.textContent='Este punto de venta todavía no tiene una PC asociada. Actualizá el conector de impresora en esa máquina y abrí Facturación con su punto de venta seleccionado una vez.';host.append(empty);return}
  const rules=printerConfig.reglas||{},machine=printerConfig.puesto||{},card=document.createElement('section');card.className='section';const title=document.createElement('h3');title.textContent='Punto de venta '+selectedPrinterPoint()+' · '+(machine.nombre||printerConfig.equipo);card.append(title);
  const status=document.createElement('p');status.className='muted';status.textContent=machine.consultadoEl?'Última lectura del equipo: '+new Date(machine.consultadoEl).toLocaleString('es-AR'):'Lista registrada por la PC. Actualizá el conector para consultar a distancia.';card.append(status);
- function choice(label,checked,source,name,available=true){const row=document.createElement('label');row.className='printer-choice';const input=document.createElement('input');input.type='checkbox';input.checked=checked;input.dataset.printerSource=source;input.dataset.printerQueue=name;row.append(input,document.createTextNode(label));if(!available){const note=document.createElement('small');note.textContent='No disponible en la última consulta';row.append(note)}card.append(row)}
- choice('Abrir selector de impresión de Windows / navegador',rules.navegador!==false,'browser','');
- function queues(title,source,rows,choices){const h=document.createElement('h4');h.textContent=title;card.append(h);const entries=Object.entries(rows||{}).sort(([a],[b])=>a.localeCompare(b,'es'));for(const [name,row] of entries){const enabled=Object.prototype.hasOwnProperty.call(choices||{},name)?choices[name]!==false:row.visible!==false;choice(name,enabled,source,name,row.disponible!==false)}if(!entries.length){const p=document.createElement('p');p.className='muted';p.textContent='No se informaron impresoras.';card.append(p)}}
- queues('Impresoras de la PC del punto de venta','local',machine.impresoras,rules.locales);queues('Impresoras del servidor disponibles para este punto','server',printerConfig.servidor?.impresoras,rules.servidor);host.append(card);
+ const entries=Object.entries(machine.impresoras||{})
+  .filter(([,row])=>row.disponible!==false)
+  .map(([name,row])=>({name,enabled:Object.hasOwn(rules.locales||{},name)?rules.locales[name]!==false:row.visible!==false}))
+  .sort((a,b)=>Number(b.enabled)-Number(a.enabled)||a.name.localeCompare(b.name,'es'));
+ for(const {name,enabled} of entries){
+  const row=document.createElement('label');row.className='printer-choice';
+  const input=document.createElement('input');input.type='checkbox';input.checked=enabled;input.dataset.printerQueue=name;
+  row.append(input,document.createTextNode(name));card.append(row);
+ }
+ if(!entries.length){
+  const empty=document.createElement('p');empty.className='muted';
+  empty.textContent='No hay impresoras disponibles en la última consulta.';card.append(empty);
+ }
+ host.append(card);
 }
 async function loadPrinterSettings(){
  if(printerConfigBusy)return;if(user().nivel!=='administrador'){setMessage('#printersMessage','Solo los administradores pueden administrar las impresoras.','error');return}
@@ -164,7 +174,9 @@ async function queryPrinterPoint(){
 }
 async function savePrinterSettings(){
  if(printerConfigBusy||!printerConfig?.equipo)return;printerSettingsBusy(true);setMessage('#printersMessage','Guardando impresoras para este punto de venta…');
- try{const locales={},servidor={};let navegador=true;for(const check of $$('#printerMachines [data-printer-source]')){if(check.dataset.printerSource==='browser')navegador=check.checked;else (check.dataset.printerSource==='local'?locales:servidor)[check.dataset.printerQueue]=check.checked}
+ try{
+  const rules=printerConfig.reglas||{},locales={...rules.locales},servidor=rules.servidor||{},navegador=rules.navegador!==false;
+  for(const check of $$('#printerMachines [data-printer-queue]'))locales[check.dataset.printerQueue]=check.checked;
   printerConfig=await printerRequest('',{accion:'guardar-punto',usuarioId:user().id||'',puntoVenta:selectedPrinterPoint(),version:printerConfig.version,locales,servidor,navegador});renderPrinterMachines();setMessage('#printersMessage','Impresoras guardadas para el punto de venta '+selectedPrinterPoint()+'.','ok');localStorage.setItem('corralon_printer_settings_changed',String(Date.now()))
  }catch(error){setMessage('#printersMessage',error.message,'error')}finally{printerSettingsBusy(false)}
 }

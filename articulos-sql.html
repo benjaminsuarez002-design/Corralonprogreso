@@ -47,7 +47,7 @@
   </style>
   <link rel="stylesheet" href="theme-corralon.css">
   <script src="funciones.js"></script>
-  <script src="corralon-system.js?v=0.0.2"></script>
+  <script src="corralon-system.js?v=0.0.3"></script>
 
 </head>
 <body data-page-theme="articulos-sql">
@@ -94,6 +94,8 @@
   els.articlePosition.after(editWeb);
   let articleRows=null;
   let articles = [], filtered = [], selected = null, generation = 0, stockGeneration = 0, catalogs = {}, draft = null, stockDraft = [], dirty = false, saving = false, loadingDetail = false;
+  let classicArticle = null;
+  const isClassic = () => document.documentElement.dataset.corralonTheme === 'classic';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const num = value => value == null ? '—' : Number(value).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   const money = value => value == null ? '—' : Number(value).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -227,19 +229,60 @@
   }
   function syncNumbers(except) {
     els.detail.querySelectorAll('[data-field]').forEach(input=>{if(input.dataset.field!==except&&numericKeys.includes(input.dataset.field))input.value=numericText(draft[input.dataset.field],input.dataset.numberFormat,document.activeElement===input);});
+    syncClassicArticle();
   }
-  function drawForm(a,stock) {
+  function syncClassicArticle(){
+    for(const output of els.detail.querySelectorAll('[data-access-article]'))output.textContent=articleAccessValue(output.dataset.accessArticle);
+  }
+  function syncClassicSheets(){
+    const sheets=els.detail.querySelector('.article-access-sheets');
+    if(sheets)sheets.innerHTML=articleAccessSheets();
+  }
+  function articleAccessValue(key){
+    const value=draft[key]??classicArticle?.[key];
+    if(value==null||value==='')return '—';
+    if(['modificaPrecio','enStock','stockPorLote','enOferta'].includes(key))return flag(value)?'Sí':'No';
+    if(key==='descuentoOferta')return numericText(value,'percent');
+    if(['stockMinimo','stockMaximo'].includes(key))return num(value);
+    if(numericKeys.includes(key)||['precioUltimaCompra','precioOferta'].includes(key))return numericText(value,'money');
+    return String(value);
+  }
+  function articleAccessField(label,key){
+    return `<label class="access-only">${label}<output data-access-article="${key}">${esc(articleAccessValue(key))}</output></label>`;
+  }
+  function articleAccessSheets(){
+    const decimal=value=>value==null?'':num(value);
+    const percentage=value=>value==null?'':numericText(value,'percent');
+    const currency=value=>numericText(value,'money');
+    const text=value=>value??'';
+    const sheets=[
+      ['Descuentos en ventas','descuentosVentas',[['Desde','desde',decimal],['Hasta','hasta',decimal],['% Dto.','descuento',percentage]]],
+      ['Códigos de barra múltiples','codigosBarras',[['Código de barras','codigo',text]]],
+      ['Costos por proveedor','costosProveedores',[['Proveedor','proveedor',text],['Costo c/ IVA','costo',currency],['Modif.','fecha',text]]],
+      ['Descuentos y recargos en costos','bonificaciones',[['% Dto.','porcentaje',percentage],['Fecha act.','fecha',text],['N.º','numero',text]]],
+      ['Descuentos por lista de precios','descuentosLista',[['Lista','lista',text],['% Dto.','porcentaje',percentage],['Fecha act.','fecha',text]]]
+    ];
+    return sheets.map(([title,key,columns])=>{
+      const rows=classicArticle?.[key]||[];
+      return `<section><table><caption>${title}</caption><thead><tr>${columns.map(([label])=>`<th scope="col">${label}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${columns.map(([,field,format])=>`<td>${esc(format(row[field]))}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${columns.length}">—</td></tr>`}</tbody></table></section>`;
+    }).join('');
+  }
+  function drawForm(a,stock,classic) {
+    classicArticle=classic??null;
     draft={...a};for(const type of ['Minorista','Intermedio','Mayorista'])draft['ganancia'+type]=a['ganancia'+type]==null?null:Number(a['ganancia'+type])*100;
     for(const key of ['descripcion','descripcionWeb'])draft[key]=String(draft[key]??'').toUpperCase();
     stockDraft=stock.map(s=>({...s,stockAnterior:s.stock,ubicacionAnterior:s.ubicacion}));
     els.detail.innerHTML=`<form id="articleForm"><fieldset id="articleFields"><div class="fields article-identity">
-      ${field('ID artículo','id',false,20)}${field('Código de proveedor','codigoProveedor',false,30)}
+      ${field('ID artículo','id',false,20)}${field('Código de proveedor','codigoProveedor',false,30)}${articleAccessField('Cód. barra','codigoBarras')}${articleAccessField('Stock p/ N.º lote','stockPorLote')}
       <label class="check"><input type="checkbox" data-field="suspendido" ${flag(draft.suspendido)?'checked':''}>Suspendido</label></div><div class="fields article-main-fields">
       ${field('Descripción','descripcion',true)}
-      ${field('Descripción para web','descripcionWeb',true)}${field('Rubro','idRubro')}${field('Proveedor','idProveedor')}${field('Moneda','idMoneda')}${field('Cantidad por bulto','unidadesBulto')}</div>
-      <h3>Precios de compra</h3><div class="fields money">${field('Costo de lista','costoLista')}${field('IVA','idIva')}${field('Con IVA','costoConIva')}</div>
-      <h3>Precios de venta (IVA incluido)</h3><div class="sales"><table><thead><tr><th>Tipo</th><th>Precio</th><th>Ganancia %</th></tr></thead><tbody>${['Minorista','Intermedio','Mayorista'].map(type=>`<tr><td>${type}</td><td>${numberInput(type.toLowerCase(),draft[type.toLowerCase()],true,'Precio '+type)}</td><td>${numberInput('ganancia'+type,draft['ganancia'+type],false,'Ganancia '+type)}</td></tr>`).join('')}</tbody></table></div>
-      <h3>Stock por sucursal</h3><div class="sales"><table><thead><tr><th>Nº suc.</th><th>Sucursal</th><th>Stock</th><th>Ubicación</th></tr></thead><tbody>${stockDraft.map((s,index)=>`<tr><td>${esc(s.id)}</td><td>${esc(s.sucursal)}</td><td><input type="text" inputmode="decimal" data-number-format="quantity" readonly aria-readonly="true" data-stock="${index}" data-key="stock" value="${esc(numericText(s.stock,'quantity'))}" aria-label="Stock ${esc(s.sucursal)}"></td><td><input maxlength="10" readonly aria-readonly="true" data-stock="${index}" data-key="ubicacion" value="${esc(s.ubicacion)}" aria-label="Ubicación ${esc(s.sucursal)}"></td></tr>`).join('')}</tbody></table></div><div id="stockTotal" class="stock-total">Total: ${num(stockDraft.reduce((sum,s)=>sum+Number(s.stock||0),0))}</div></fieldset>
+      ${field('Descripción para web','descripcionWeb',true)}${field('Rubro','idRubro')}${field('Proveedor','idProveedor')}${articleAccessField('Sección','seccion')}${articleAccessField('Modifica P. Vta.','modificaPrecio')}${field('Moneda','idMoneda')}${field('Cantidad por bulto','unidadesBulto')}${articleAccessField('En stock','enStock')}</div>
+      <h3>Precios de compra</h3><div class="fields money">${field('Costo de lista','costoLista')}${articleAccessField('Descuentos','descuentos')}${articleAccessField('Sin IVA','costoSinIva')}${field('IVA','idIva')}${field('Con IVA','costoConIva')}${articleAccessField('Precio últ. compra','precioUltimaCompra')}${articleAccessField('Fecha últ. compra','fechaUltimaCompra')}${articleAccessField('Alta','fechaAlta')}${articleAccessField('Últ. act.','ultimaActualizacion')}</div>
+      <h3>Precios de venta (IVA incluido)</h3><div class="sales"><table><thead><tr><th>Tipo</th><th>Precio</th><th>Ganancia %</th><th class="access-only access-table-cell">Margen $</th></tr></thead><tbody>${['Minorista','Intermedio','Mayorista'].map(type=>`<tr><td>${type}</td><td>${numberInput(type.toLowerCase(),draft[type.toLowerCase()],true,'Precio '+type)}</td><td>${numberInput('ganancia'+type,draft['ganancia'+type],false,'Ganancia '+type)}</td><td class="access-only access-table-cell"><output data-access-article="margen${type}">${esc(articleAccessValue('margen'+type))}</output></td></tr>`).join('')}</tbody></table></div>
+      <div class="access-only article-access-group" aria-label="Oferta">${articleAccessField('En oferta','enOferta')}${articleAccessField('% Dto. ofer.','descuentoOferta')}${articleAccessField('Oferta','precioOferta')}${articleAccessField('Vig. desde','ofertaDesde')}${articleAccessField('Vig. hasta','ofertaHasta')}</div>
+      <h3>Stock por sucursal</h3><div class="sales"><table><thead><tr><th>Nº suc.</th><th>Sucursal</th><th>Stock</th><th>Ubicación</th></tr></thead><tbody>${stockDraft.map((s,index)=>`<tr><td>${esc(s.id)}</td><td>${esc(s.sucursal)}</td><td><input type="text" inputmode="decimal" data-number-format="quantity" readonly aria-readonly="true" data-stock="${index}" data-key="stock" value="${esc(numericText(s.stock,'quantity'))}" aria-label="Stock ${esc(s.sucursal)}"></td><td><input maxlength="10" readonly aria-readonly="true" data-stock="${index}" data-key="ubicacion" value="${esc(s.ubicacion)}" aria-label="Ubicación ${esc(s.sucursal)}"></td></tr>`).join('')}</tbody></table></div><div id="stockTotal" class="stock-total">Total: ${num(stockDraft.reduce((sum,s)=>sum+Number(s.stock||0),0))}</div>
+      <div class="access-only article-access-group" aria-label="Datos del artículo">${articleAccessField('Stock mín.','stockMinimo')}${articleAccessField('Stock máx.','stockMaximo')}${articleAccessField('Notas','notas')}${articleAccessField('Oper. modif.','operadorModifico')}${articleAccessField('Hora modif.','modificado')}</div>
+      <div class="access-only article-access-sheets">${articleAccessSheets()}</div></fieldset>
       <div class="edit-actions"><button type="submit" id="saveArticle" disabled>Guardar cambios</button><button type="button" id="cancelArticle">Descartar cambios</button><span id="editStatus" role="status"></span></div><p class="note">Importes expresados en la moneda del artículo. El total de stock y los márgenes se calculan a partir de la ficha.</p></form>`;
     els.detail.querySelector('[data-field="idIva"]').value=String(draft.idIva??'');
     markDirty(false);
@@ -248,11 +291,25 @@
     if(!force && !mayDiscard())return;
     const token=++stockGeneration;loadingDetail=true;articleNavigation();const fields=$('articleFields');if(fields)fields.disabled=true;status('Cargando ficha…');
     try {
-      const data=await api({id});if(token!==stockGeneration)return;
-      selected=String(data.articulo.id);if(detailOnly){articles=[{...data.articulo,search:normalize(data.articulo.descripcion)}];filtered=articles;}drawForm(data.articulo,data.stock||[]);render();if(!els.articleDialog.open)els.articleDialog.showModal();els.articleDialog.scrollTop=0;els.detail.querySelector('[data-field="descripcion"]')?.focus({preventScroll:true});status('Ficha lista para editar.');
+      const requestedClassic=isClassic();
+      const data=await api(requestedClassic?{id,vista:'clasico'}:{id});if(token!==stockGeneration)return;
+      selected=String(data.articulo.id);if(detailOnly){articles=[{...data.articulo,search:normalize(data.articulo.descripcion)}];filtered=articles;}drawForm(data.articulo,data.stock||[],data.clasico);render();if(!els.articleDialog.open)els.articleDialog.showModal();els.articleDialog.scrollTop=0;els.detail.querySelector('[data-field="descripcion"]')?.focus({preventScroll:true});status('Ficha lista para editar.');
+      if(!requestedClassic)loadClassicArticle();
     }catch(error){if(token===stockGeneration)status(error.message,true);}
     finally{if(token===stockGeneration){loadingDetail=false;articleNavigation();const fields=$('articleFields');if(fields)fields.disabled=false;}}
   }
+  async function loadClassicArticle(){
+    if(!isClassic()||!selected||!els.articleDialog.open||classicArticle)return;
+    const id=selected,token=stockGeneration;
+    try{
+      const data=await api({id,vista:'clasico'});
+      if(token!==stockGeneration||selected!==id)return;
+      classicArticle=data.clasico??null;
+      syncClassicArticle();
+      syncClassicSheets();
+    }catch(error){console.warn('Datos clásicos del artículo:',error);}
+  }
+  window.addEventListener('corralon-appearance-change',loadClassicArticle);
   function edit(event) {
     if(saving || loadingDetail || !draft)return;
     const input=event.target;
@@ -281,7 +338,7 @@
     draft[key]=input.type==='checkbox'?input.checked:lookupFields[key]?(input.value===''?null:Number(input.value)):numericKeys.includes(key)?value:input.value;
     if(key==='idIva')draft.iva=(catalogs.tasasIva||[]).find(v=>String(v.id)===String(draft.idIva))?.iva||0;
     if(numericKeys.includes(key)||key==='idIva'){recalculate(draft,key,previous);syncNumbers(key);}
-    if(key==='idMoneda')syncNumbers();
+    if(key==='idMoneda'){syncNumbers();syncClassicSheets();}
     markDirty(true);
   }
   async function save(event) {
@@ -289,7 +346,8 @@
     const form=$('articleForm');if(!form.reportValidity())return;
     if(draft.idIva==null){status('Elegí un IVA antes de guardar.',true);return;}
     const stock=[];
-    const body={idOriginal:selected,version:draft.version,articulo:{...draft},stock};
+    if(!FX.menuUserIsAdministrator('articulos_sql')){status('Tu acceso a Artículos SQL es de solo consulta.',true);return;}
+    const body={usuarioId:FX.menuSessionUser()?.id||'',idOriginal:selected,version:draft.version,articulo:{...draft},stock};
     saving=true;articleNavigation();$('articleFields').disabled=true;$('saveArticle').disabled=true;$('cancelArticle').disabled=true;els.reload.disabled=true;status('Guardando cambios…');
     try {
       const data=await api({},body);
@@ -297,6 +355,7 @@
       a.search=normalize([a.id,a.codigoProveedor,a.codigoBarras,a.descripcion,a.descripcionWeb].join(' '));
       if(index>=0)articles[index]=a;else articles.push(a);
       selected=String(a.id);drawForm(a,data.stock||[]);options(els.provider,'proveedor');options(els.category,'rubro');filter();status('Artículo guardado.');
+      loadClassicArticle();
       notifyParent('corralon:article-editor-saved');
     }catch(error){status(error.message,true);}
     finally{saving=false;articleNavigation();const fields=$('articleFields');if(fields)fields.disabled=false;const cancel=$('cancelArticle');if(cancel)cancel.disabled=false;els.reload.disabled=false;markDirty(dirty);}

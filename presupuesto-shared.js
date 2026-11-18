@@ -43,7 +43,13 @@
     const promise = new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
+      const timeout = setTimeout(() => {
+        img.onload = null;
+        img.onerror = null;
+        resolve(null);
+      }, 5000);
       img.onload = () => {
+        clearTimeout(timeout);
         try {
           const canvas = document.createElement('canvas');
           canvas.width = img.width;
@@ -55,7 +61,10 @@
           resolve(null);
         }
       };
-      img.onerror = () => resolve(null);
+      img.onerror = () => {
+        clearTimeout(timeout);
+        resolve(null);
+      };
       img.src = url;
     });
 

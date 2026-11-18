@@ -132,7 +132,15 @@ body.purchase-entry-reference .calculator #importCalculator{position:absolute;le
 /* Las consultas conservan su distribución adaptable. */
 dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid var(--corralon-line);border-radius:10px;padding:0;color:inherit;background:var(--corralon-white);box-shadow:var(--corralon-shadow)}dialog::backdrop{background:rgba(0,0,0,.45)}
 .dialogbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;background:var(--corralon-white);position:sticky;top:0;z-index:3;border-bottom:1px solid var(--corralon-line)}.dialogbar h2{margin-right:auto}
-.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end;padding:12px}.filters input{width:150px;height:31px}.filters select{max-width:360px;height:31px}.report-scroll{overflow:auto;max-height:60dvh}.report-scroll button{padding:3px 6px}.detail-body{padding:16px}.detail-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.detail-fields dt{font-size:11px;color:var(--corralon-muted)}.detail-fields dd{margin:3px 0;font-weight:600;overflow-wrap:anywhere}.detail-note{white-space:pre-wrap}.detail-body table{margin-top:16px}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end;padding:12px}.filters input{width:150px;height:31px}.filters select{max-width:360px;height:31px}.report-scroll{overflow:auto;max-height:60dvh}.report-scroll button{padding:3px 6px}
+#reportBody .purchase-sheet-check input{pointer-events:none}
+#reportBody .purchase-report-sort{appearance:none;display:flex;align-items:center;justify-content:space-between;gap:4px;width:100%;padding:0;border:0;border-radius:0;background:transparent;color:inherit;box-shadow:none;font:inherit;text-align:inherit;cursor:pointer}
+.purchase-report-sort .sort-label{overflow:hidden;text-overflow:ellipsis}
+.purchase-report-sort [aria-hidden]{flex:none}
+#reportBody .purchase-report-sort:focus-visible{outline:1px solid currentColor;outline-offset:-1px}
+#detailDialog #detailBody .purchase-inspect-blue input[data-purchase-tax-amount]{display:block;width:100%;height:1.2em;padding:0;border:0!important;border-radius:0;background:transparent!important;color:inherit!important;box-shadow:none;font:inherit;text-align:right}
+#detailDialog #detailBody input[data-purchase-tax-amount]:focus-visible{outline:1px solid #2680cd;outline-offset:0}
+.detail-body{padding:16px}.detail-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.detail-fields dt{font-size:11px;color:var(--corralon-muted)}.detail-fields dd{margin:3px 0;font-weight:600;overflow-wrap:anywhere}.detail-note{white-space:pre-wrap}.detail-body table{margin-top:16px}
 .actions{display:flex;align-items:end;gap:9px;flex-wrap:wrap;padding:12px 0 0}dialog>.actions,dialog>.status{padding:10px 14px;margin:0}.report-scroll .empty{padding:24px;text-align:center;color:var(--corralon-muted)}
 @media(max-width:800px){.detail-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:500px){.detail-fields{grid-template-columns:1fr}}
@@ -155,12 +163,32 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js" data-menu-guard="cargar_facturas"></script>
   <script src="funciones.js"></script>
-  <script src="corralon-system.js?v=0.0.2"></script>
+  <script src="corralon-system.js?v=0.0.3"></script>
+<style>
+  html[data-corralon-theme="classic"] body.purchase-entry-reference #purchaseComboMenu .purchase-combo-option {
+    background:#fff!important;
+    color:#000!important;
+    box-shadow:none;
+  }
+  html[data-corralon-theme="classic"] body.purchase-entry-reference #purchaseComboMenu .purchase-combo-option:hover {
+    background:#000!important;
+    color:#fff!important;
+  }
+  html[data-corralon-theme="classic"] body.purchase-entry-reference #purchaseComboMenu .purchase-combo-option > span {
+    color:inherit!important;
+  }
+  html[data-corralon-theme="classic"] #taxRows .purchase-combo:not(:hover) > .purchase-combo-drop {
+    visibility:hidden;
+  }
+  html[data-corralon-theme="classic"] #taxRows [data-remove] {display:none}
+  html[data-corralon-theme="classic"] #taxTable #taxRows tr.is-selected-row > td {background:#a5cfef!important}
+  html[data-corralon-theme="classic"] #taxRows tr:focus {outline:none}
+</style>
 </head>
 <body data-page-theme="cargar-facturas" class="purchase-entry-reference">
   <main class="app">
     <header class="topbar">
-      <h1>Cargar facturas</h1><span id="todayLabel"></span>
+      <h1><span class="purchase-web-title">Cargar facturas</span><span class="purchase-classic-title">Compras Varias</span></h1><span id="todayLabel"></span>
       <button id="accountButton" type="button" disabled>Ctas. Ctes.</button>
       <button id="ivaButton" type="button" disabled>IVA Compras</button>
       <button id="freightButton" type="button">Cargar flete</button>
@@ -244,12 +272,57 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
     </form>
     <div class="form-status"><span id="activeUser"></span><p id="status" class="status" role="status" aria-live="polite">Validando usuario…</p></div>
   </main>
+  <dialog id="purchaseConsultMenu" aria-labelledby="purchaseConsultTitle">
+    <header class="purchase-consult-title"><h2 id="purchaseConsultTitle">Consultar Compras a Proveedores</h2><button type="button" data-close="purchaseConsultMenu" aria-label="Cerrar">×</button></header>
+    <form id="purchaseClassicFilters">
+      <div class="purchase-consult-entry"><button type="button" data-close="purchaseConsultMenu" class="purchase-consult-choice" autofocus><span>Cargar Facturas de Proveedores</span></button></div>
+      <h3>CONSULTAS</h3>
+      <div class="purchase-consult-dates">
+        <div><label for="classicFrom">Desde:</label><input id="classicFrom" data-date inputmode="numeric"><label for="classicTo">Hasta:</label><input id="classicTo" data-date inputmode="numeric"></div>
+        <button class="purchase-consult-choice" type="submit" value="fecha"><span>Por Fecha de Fac.</span></button>
+        <button class="purchase-consult-choice" type="submit" value="fecha-carga"><span>Por Fecha de Carga</span></button>
+        <button class="purchase-consult-choice" type="submit" value="sin-remito"><span>Sin Remito de Merc.</span></button>
+      </div>
+      <div class="purchase-consult-filter"><label for="classicNumber">Número:</label><input id="classicNumber" maxlength="15" data-classic-query="numero"><button class="purchase-consult-choice" type="submit" value="numero"><span>Por Nº de Factura</span></button></div>
+      <div class="purchase-consult-filter"><label for="classicPeriod">Período de IVA:</label><input id="classicPeriod" maxlength="7" inputmode="numeric" data-classic-query="periodo"><button class="purchase-consult-choice" type="submit" value="periodo"><span>Por Per. de IVA</span></button></div>
+      <div class="purchase-consult-filter"><label for="classicProvider">Proveedor:</label><input id="classicProvider" data-sql-list="reportProvider" data-classic-query="proveedor"><button class="purchase-consult-choice" type="submit" value="proveedor"><span>Por Proveedor</span></button></div>
+      <p id="purchaseConsultError" role="alert" hidden></p>
+      <footer><button type="button" data-close="purchaseConsultMenu">Cerrar</button></footer>
+    </form>
+  </dialog>
+  <style>
+    @media screen{
+      html:not([data-corralon-theme="classic"]) body:has(>#purchase-standalone-bridge) :is(#detailDialog,#reportDialog[data-purchase-report="buscar"])[open]{
+        position:fixed;inset:0;width:100%;height:100dvh;max-width:none;max-height:none;margin:0;border:0;border-radius:0;
+        display:flex;flex-direction:column;overflow:hidden;
+      }
+      html:not([data-corralon-theme="classic"]) body:has(>#purchase-standalone-bridge) :is(#detailBody,#reportDialog[data-purchase-report="buscar"] #reportBody){
+        flex:1;min-height:0;max-height:none;overflow:auto
+      }
+      html:not([data-corralon-theme="classic"]) body:has(>#purchase-standalone-bridge) :is(#detailDialog,#reportDialog[data-purchase-report="buscar"])>.dialogbar{
+        flex:none
+      }
+      html:not([data-corralon-theme="classic"]) body.purchase-entry-reference:has(>#purchase-standalone-bridge)>main.app>nav.purchase-view-tabs:has(.purchase-tab-item:not([hidden])){
+        display:flex!important
+      }
+      html:not([data-corralon-theme="classic"]) body.purchase-entry-reference:has(>#purchase-standalone-bridge) .purchase-view-tabs{
+        background:var(--corralon-soft,#edf5ff);border-color:var(--corralon-line,#cadcf0)
+      }
+      html:not([data-corralon-theme="classic"]) body.purchase-entry-reference:has(>#purchase-standalone-bridge) .purchase-view-tabs button{
+        background:var(--corralon-white,#fff)!important;color:var(--corralon-heading,#173b65)!important;
+        border-color:var(--corralon-line,#cadcf0)!important;border-radius:4px 4px 0 0!important
+      }
+      html:not([data-corralon-theme="classic"]) body.purchase-entry-reference:has(>#purchase-standalone-bridge) .purchase-view-tabs button[aria-current="page"]{
+        border-top-color:var(--corralon-primary,#176bc5)!important
+      }
+    }
+  </style>
   <dialog id="reportDialog" aria-labelledby="reportTitle">
     <header class="dialogbar"><h2 id="reportTitle">Consultar</h2><button id="printReport" type="button">Imprimir</button><button type="button" data-close="reportDialog">Cerrar ✕</button></header>
     <form id="reportFilters" class="filters">
-      <label>Proveedor<input id="reportProvider" data-sql-list="reportProvider" autocomplete="off" placeholder="Todos · Buscar proveedor"></label>
-      <label>Desde<input id="reportFrom" data-date placeholder="dd/mm/aaaa"></label>
-      <label>Hasta<input id="reportTo" data-date placeholder="dd/mm/aaaa"></label>
+      <label class="purchase-report-provider">Proveedor<input id="reportProvider" data-sql-list="reportProvider" autocomplete="off" placeholder="Todos · Buscar proveedor"></label>
+      <label class="purchase-report-from">Desde<input id="reportFrom" data-date placeholder="dd/mm/aaaa"></label>
+      <label class="purchase-report-to">Hasta<input id="reportTo" data-date placeholder="dd/mm/aaaa"></label>
       <label id="reportSearchLabel">Buscar<input id="reportSearch" maxlength="100"></label>
       <button type="submit">Consultar</button>
     </form>
@@ -257,7 +330,7 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
     <footer class="actions"><span id="reportTotals"></span><button id="loadMore" type="button" hidden>Cargar más</button></footer>
   </dialog>
   <dialog id="detailDialog" aria-labelledby="detailTitle">
-    <header class="dialogbar"><h2 id="detailTitle">Detalle</h2><button id="printDetail" type="button">Imprimir</button><button type="button" data-close="detailDialog">Cerrar ✕</button></header>
+    <header class="dialogbar"><h2 id="detailTitle">Detalle</h2><button id="classicDetailSearch" class="purchase-classic-only" type="button">Buscar…</button><button id="printDetail" type="button">Imprimir</button><button type="button" data-close="detailDialog" aria-label="Cerrar ficha">Cerrar ✕</button></header>
     <div id="detailBody" class="detail-body"></div>
     <footer class="actions"><a id="openStock" href="cargastock.html#sql/stock" target="corralon-carga-stock" hidden>Cargar stock</a><button id="deleteInvoice" type="button" hidden style="color:var(--corralon-red)">Eliminar movimiento</button></footer>
   </dialog>
@@ -297,6 +370,12 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
     <div style="max-height:34vh;overflow:auto"><table style="width:100%"><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>Importe</th></tr></thead><tbody id="detailStockPickerArticles"></tbody></table></div>
     <footer style="display:flex;justify-content:flex-end;margin-top:12px"><button id="detailStockPickerUse" type="button" disabled>Vincular este movimiento</button></footer>
   </dialog>
+  <style>
+    #detailBody .purchase-payment-action{width:1%;white-space:nowrap}
+    #detailBody .purchase-payment-link{display:inline-block;padding:3px 8px;border:1px solid var(--corralon-line-strong,#b7cee8);border-radius:4px;background:#f4f9ff;color:inherit;font-weight:600;text-decoration:none}
+    #detailBody .purchase-payment-link:is(:hover,:focus-visible){background:#dbeaff}
+    html[data-corralon-theme="classic"] #detailBody .purchase-payment-link{border-radius:0;border-color:#fff #777 #777 #fff;background:#eee;color:#111}
+  </style>
   <script id="purchase-entry-layout">
   (()=>{
     const app=document.querySelector('body.purchase-entry-reference>.app');
@@ -377,6 +456,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   }
   const cleanNote = value => String(value || '').replace(/\[WEBFACTURA:[^\]]*\]\[HASH:[^\]]*\]\s*\[USUARIO:[^\]]*\]\s*/, '');
   let user, options, draft, rows = [], busy = false, initialized = false, stockSequence = 0;
+  let reportCriterion = '', reportRequest = 0;
   let reportMode = 'buscar', reportRows = [], reportBalances = false, detailReturnFocus = null;
   let detailInvoiceId = 0, removalPreview = null, removingInvoice = false;
   const fields = ['type', 'number', 'date', 'point', 'provider', 'cuit', 'period', 'due', 'goods', 'account', 'payment', 'concept', 'remito', 'note', 'movement', 'discount', 'quickTotal', 'calculatorRate', 'calculatorIva', 'calculatorNet'];
@@ -408,12 +488,12 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     ['new', 'cancel'].forEach(id => { $(id).disabled = locked || !options; });
     ['consult', 'search', 'accountButton', 'ivaButton'].forEach(id => { $(id).disabled = busy || !options; });
   }
-  async function api(params = {}, body = null) {
+  async function api(params = {}, body = null, { signal } = {}) {
     const url = new URL('/api/facturacion/cargar-facturas', location.href);
     Object.entries({ ...params, usuarioId: user.id }).forEach(([key, value]) => url.searchParams.set(key, value));
-    const response = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, usuarioId: user.id, idOperador: Number(user.idOperador) || null }) } : { cache: 'no-store' });
+    const response = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, usuarioId: user.id, idOperador: Number(user.idOperador) || null }) } : { cache: 'no-store', signal });
     let result;
-    try { result = await response.json(); } catch { throw new Error('El servidor no devolvió una respuesta válida.'); }
+    try { result = await response.json(); } catch (error) { if (signal?.aborted) throw error; throw new Error('El servidor no devolvió una respuesta válida.'); }
     if (!response.ok || !result.ok) {
       const error = new Error(result.error || 'No se pudo completar la consulta SQL.');
       error.definitive = response.status >= 400 && response.status < 500 && result.ok === false;
@@ -446,7 +526,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     return (comboLists.get(id) || []).map(item => ({ value: comboLabel(id, item),
       code: id === 'type' ? item.codigo : id === 'movement' ? item.numero : item.id,
       text: id === 'movement' ? `${item.fecha}${item.remito ? ` · ${item.remito}` : ''}` : item.nombre,
-      detail: id === 'movement' ? money(item.total) : id === 'tax' ? `${decimal(item.porcentaje * 100)}%` : id === 'provider' ? item.cuit || '' : '' }));
+      detail: id === 'movement' ? money(item.total) : id === 'tax' ? `${decimal(item.porcentaje * 100)}%` : (id === 'provider' || id === 'reportProvider') ? item.cuit || '' : '' }));
   }
   function decoratePurchaseCombos(root) {
     for (const input of root.querySelectorAll?.('input[data-sql-list],select:not([data-generate])') || []) {
@@ -482,16 +562,40 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       if (selected < 0) selected = fields.findIndex(values => query.split(/\s+/).every(word => values.some(value => value.includes(word))));
     }
     const createProvider = input.dataset.sqlList === 'provider' && Boolean(query) && selected < 0 && FX.menuUserHasAccess('proveedores_sql');
+    const reuseRows = purchaseCombo.input === input && purchaseCombo.items.length === items.length &&
+      items.every((item,index)=>{const previous=purchaseCombo.items[index];return item.value===previous.value&&item.code===previous.code&&item.text===previous.text&&item.detail===previous.detail;});
     purchaseCombo = { input, items, active: createProvider ? -1 : Math.max(0, selected) };
     const menu = $('purchaseComboMenu'), host = input.closest('dialog') || document.body;
     if (menu.parentNode !== host) host.appendChild(menu);
-    menu.innerHTML = items.map((item, index) => `<div id="purchase-combo-option-${index}" class="combo-option purchase-combo-option ${index === purchaseCombo.active ? 'active' : ''}" role="option" aria-selected="${index === purchaseCombo.active}" data-purchase-option="${index}"><span>${esc(item.code)}</span><span>${esc(item.text)}</span><span class="purchase-combo-value">${esc(item.detail)}</span></div>`).join('') || '<div class="purchase-combo-empty">Sin opciones disponibles</div>';
+    const classic = document.documentElement.dataset.corralonTheme === 'classic';
+    const list = input.dataset.sqlList || '';
+    const columns = classic && ({
+      type: ['Abrev.', 'Descripción'],
+      provider: ['Razón social', 'CUIT', 'ID Proveedor'],
+      reportProvider: ['Razón social', 'CUIT', 'ID Proveedor'],
+      account: ['Cuenta', 'CodCuenta']
+    })[list];
+    menu.dataset.purchaseList = classic ? list : '';
+    const cells = item => {
+      if (!classic) return [item.code, item.text, item.detail];
+      if (list === 'type') return [item.code, item.text];
+      if (list === 'provider' || list === 'reportProvider') return [item.text, item.detail, item.code];
+      if (list === 'account') return [item.text, item.code];
+      return [item.text];
+    };
+    const spans = values => values.map((value, index) => `<span${!classic && index === 2 ? ' class="purchase-combo-value"' : ''}>${esc(value)}</span>`).join('');
+    const heading = columns ? `<div class="purchase-combo-columns" aria-hidden="true">${spans(columns)}</div>` : '';
+    if (!reuseRows) menu.innerHTML = heading + (items.map((item, index) => `<div id="purchase-combo-option-${index}" class="combo-option purchase-combo-option ${index === purchaseCombo.active ? 'active' : ''}" role="option" aria-selected="${index === purchaseCombo.active}" data-purchase-option="${index}">${spans(cells(item))}</div>`).join('') || '<div class="purchase-combo-empty">Sin opciones disponibles</div>');
+    menu.querySelector('[data-create-provider]')?.remove();
     if (createProvider) menu.insertAdjacentHTML('afterbegin', '<button type="button" data-create-provider style="width:100%;padding:10px;color:var(--corralon-red);font-weight:bold">Proveedor no encontrado · Cargar proveedor</button>');
-    const rect = input.getBoundingClientRect(), width = Math.min(Math.max(rect.width, input.dataset.sqlList === 'provider' || input.dataset.sqlList === 'movement' ? 620 : 460), Math.max(1, window.innerWidth - 16));
-    const below = window.innerHeight - rect.bottom - 8, above = rect.top - 8, down = below >= Math.min(280, Math.max(40, items.length * 31)) || below >= above;
+    const rect = input.getBoundingClientRect();
+    const classicWidth = ({type:225,provider:450,reportProvider:450,account:320,payment:165})[list] || 0;
+    const width = Math.min(Math.max(rect.width, classic ? classicWidth : list === 'provider' || list === 'movement' ? 620 : 460), Math.max(1, window.innerWidth - 16));
+    const below = window.innerHeight - rect.bottom - 8, above = rect.top - 8, gap = classic ? 0 : 3;
+    const down = below >= Math.min(280, Math.max(40, items.length * (classic ? 18 : 31))) || below >= above;
     menu.style.width = `${width}px`; menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
     menu.style.maxHeight = `${Math.max(30, Math.min(280, down ? below : above))}px`;
-    menu.style.top = down ? `${rect.bottom + 3}px` : 'auto'; menu.style.bottom = down ? 'auto' : `${window.innerHeight - rect.top + 3}px`;
+    menu.style.top = down ? `${rect.bottom + gap}px` : 'auto'; menu.style.bottom = down ? 'auto' : `${window.innerHeight - rect.top + gap}px`;
     menu.style.paddingBottom = '0px';
     menu.classList.add('visible'); input.setAttribute('aria-expanded', 'true'); input.closest('.purchase-combo')?.classList.add('combo-open');
     markPurchaseComboActive(true);
@@ -499,22 +603,25 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   }
   function markPurchaseComboActive(firstVisible = false) {
     const menu = $('purchaseComboMenu');
-    menu.querySelectorAll('[data-purchase-option]').forEach(item => {
-      const active = Number(item.dataset.purchaseOption) === purchaseCombo.active;
-      item.classList.toggle('active', active); item.setAttribute('aria-selected', String(active));
-    });
+    const previous = menu.querySelector('[data-purchase-option].active');
     const selected = menu.querySelector(`[data-purchase-option="${purchaseCombo.active}"]`);
+    if (previous !== selected) {
+      previous?.classList.remove('active'); previous?.setAttribute('aria-selected', 'false');
+      selected?.classList.add('active'); selected?.setAttribute('aria-selected', 'true');
+    }
     if (selected) {
       purchaseCombo.input.setAttribute('aria-activedescendant', selected.id);
       const top = selected.offsetTop, bottom = top + selected.offsetHeight;
+      const headingHeight = menu.querySelector('.purchase-combo-columns')?.offsetHeight || 0;
       if (firstVisible) {
         menu.style.paddingBottom = '0px';
-        menu.scrollTop = Math.max(0, top);
+        menu.scrollTop = Math.max(0, top - headingHeight);
       }
-      else if (top < menu.scrollTop) menu.scrollTop = top;
+      else if (top < menu.scrollTop + headingHeight) menu.scrollTop = top - headingHeight;
       else if (bottom > menu.scrollTop + menu.clientHeight) menu.scrollTop = bottom - menu.clientHeight;
     }
   }
+  window.addEventListener('corralon-appearance-change', hidePurchaseCombo);
   function movePurchaseCombo(step) {
     if (!purchaseCombo.items.length) return;
     purchaseCombo.active = Math.max(0, Math.min(purchaseCombo.items.length - 1, purchaseCombo.active + step)); markPurchaseComboActive();
@@ -647,7 +754,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if (!appendOnly) hidePurchaseCombo();
     if (!rows.some(row => row.empty)) rows.push(blankRow());
     const generator = '<option value="">Elegir…</option>' + options.impuestos.filter(item => item.id !== 0).map(item => `<option value="${item.id}">${esc(item.nombre)}</option>`).join('');
-    const markup = row => `<tr data-row="${row.key}">
+    const markup = row => `<tr data-row="${row.key}" tabindex="-1">
       <td class="row-marker" aria-hidden="true">${row.importe ? '' : '*'}</td>
       <td><input type="text" data-sql-list="tax" data-field="impuesto" data-flow aria-label="Impuesto" value="${row.empty ? '' : esc(row.invalidTax ? row.taxText : options.impuestos.find(item => item.id === row.impuesto)?.nombre || '')}"></td>
       <td><input data-field="neto" data-flow inputmode="numeric" value="${row.empty ? '' : row.neto}"></td>
@@ -677,6 +784,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     delete row.invalidTax; delete row.taxText;
     if (canonical) input.value = comboLabel('tax', tax);
     if (changed) {
+      delete row.importeManual;
       row.porcentaje = tax.id === 0 ? .21 : Number(tax.porcentaje || 0);
       if (tax.id !== 0 && row.porcentaje) row.importe = calculateTaxAmount(row);
       cell.querySelector('[data-field="neto"]').value = row.neto;
@@ -695,7 +803,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   }
   function updateTotals() {
     if (options) rows.forEach(row => {
-      if (row.empty || row.invalidTax || row.impuesto === 0) return;
+      if (row.empty || row.invalidTax || row.impuesto === 0 || row.importeManual) return;
       row.importe = calculateTaxAmount(row);
       const input = $('taxRows').querySelector(`[data-row="${row.key}"] [data-field="importe"]`);
       if (input && input !== document.activeElement) input.value = money(row.importe);
@@ -726,8 +834,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     $(id).value = parsed.text;
     return parsedDateKey(parsed);
   }
-  function parsePeriod() {
-    const match = /^\s*(\d{1,2})[\s/.-]+(\d{4})\s*$/.exec($('period').value);
+  function parsePeriod(id = 'period') {
+    const match = /^\s*(\d{1,2})[\s/.-]+(\d{4})\s*$/.exec($(id).value);
     if (!match || Number(match[1]) < 1 || Number(match[1]) > 12) throw new Error('Ingresá el período de IVA como mes/año.');
     return `${match[2]}-${match[1].padStart(2, '0')}-01`;
   }
@@ -735,7 +843,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     updateStockEligibility();
     const provider = selectedProvider();
     if (!provider) throw new Error('Seleccioná un proveedor de SQL.');
-    const taxes = rows.filter(row => row.importe !== 0).map(({ key, invalidTax, taxText, ...row }) => {
+    const taxes = rows.filter(row => row.importe !== 0).map(({ key, invalidTax, taxText, importeManual, ...row }) => {
       if (invalidTax) throw new Error('Seleccioná el impuesto de cada renglón de la lista SQL.');
       return { ...row, importe: Math.round(row.importe * 100) / 100 };
     });
@@ -823,7 +931,6 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     detailInvoiceId = 0; $('deleteInvoice').hidden = true;
     detailReturnFocus = document.activeElement;
     $('detailTitle').textContent = title; $('detailBody').innerHTML = content;
-    if (!$('detailDialog').open) $('detailDialog').showModal();
   }
   let detailStockRequest=0,detailStockBusy=false;
   function bindDetailStockMovement(invoice){
@@ -841,7 +948,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       try{
         const result=await api({}, {accion:'editar-stock',id:invoice.IDRecibo,movimiento:movement,movimientoAnterior:Number(invoice.IDMovStk||0)});
         if(picker.open)picker.close();
-        showInvoice(result);if($('reportDialog').open)await loadReport();
+        showInvoice(result);if (recentViews.has('report') && loadedPurchaseReport)await loadReport();
         message(movement?'Carga de stock vinculada.':'Movimiento desvinculado de la factura y factura desvinculada de la carga de stock.');
       }catch(error){input.disabled=false;$('detailStockPickerUse').disabled=!selection;input.value=original;if(picker.open)$('detailStockPickerStatus').textContent=error.message;else await htmlNotice(error.message,false);}
       finally{detailStockBusy=false;}
@@ -902,7 +1009,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const actionSlot=note.querySelector('.purchase-inspect-actions'),noteLabel=note.querySelector('label');noteLabel.classList.add('purchase-reference-note');reference.append(noteLabel);
     totals.classList.add('purchase-totals-card');totals.append(summary.querySelector('.purchase-total'),bottom.querySelector('.purchase-total'),...discount.children);
     const lower=document.createElement('div');lower.className='purchase-detail-lower';lower.append(reference,totals);
-    root.replaceChildren(documentCard,additional,tax,lower,actionSlot);
+    const vat=root.querySelector('.purchase-classic-vat');
+    root.replaceChildren(documentCard,additional,tax,vat,lower,actionSlot);
     const icon=(type)=>`<svg class="purchase-button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${type==='print'?'<path d="M6 9V3h12v6M6 17H3V9h18v8h-3M6 14h12v7H6z"/><path d="M17 11h1"/>':type==='save'?'<path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8"/>':type==='delete'?'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>':'<path d="m5 5 14 14M19 5 5 19"/>'}</svg>`;
     const print=$('printDetail'),close=$('detailDialog').querySelector('[data-close="detailDialog"]'),save=root.querySelector('[data-save-purchase-header]'),remove=$('deleteInvoice');
     print.innerHTML=icon('print')+'<span>Imprimir</span>';close.innerHTML=icon('close')+'<span>Cerrar</span>';
@@ -929,7 +1037,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
         FX.animacionCarga?.('syncing','Generando crédito interno…',{container:popup});
         const updated=await api({}, {accion:'generar-descuento',id:Number(purchase.IDRecibo),descuento:rate,version:result.versionDescuento});
         popup.close();showInvoice(updated);message('Descuento y crédito interno generados en SQL.');FX.animacionCarga?.('success','Crédito interno generado.',{container:$('detailDialog')});
-        if($('reportDialog').open)await loadReport();
+        if (recentViews.has('report') && loadedPurchaseReport)await loadReport();
       }catch(failure){error.textContent=failure.message;FX.animacionCarga?.('error',failure.message,{container:popup.open?popup:$('detailDialog')});}
       finally{busy=false;cancel.disabled=percent.disabled=false;preview();}
     };
@@ -944,37 +1052,68 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const discountAmount = result.credito?.length ? Math.abs(creditAmount) : Math.round(Math.abs(total) * Number(p.ImpDto || 0) * 100) / 100;
     const totalAfterDiscount = result.credito?.length ? total + creditAmount : total - Math.sign(total) * discountAmount;
     const header = [ ['Proveedor', p.Proveedor], ['Tipo', `${p.tipo} · ${p.tipoNombre}`], ['Nº comprobante', p.NroFactura], ['Fecha compra', dateText(sqlDate(p.Fecha))], ['Período IVA', dateText(sqlDate(p.FechaIVA)).slice(3)], ['Vencimiento', dateText(sqlDate(p.FechaVto))], ['CUIT', p.CUIT], ['Cuenta', p.Cuenta], ['Pago', p.pago], ['Tipo de bien', p.TipoBien], ['Sucursal / punto de venta', p.puntoVentaNombre], ['Nº remito', p.NroRemMerc], ['Movimiento de stock', p.stockNumero || p.IDMovStk], ['Concepto', p.Concepto], ['Total', money(p.Total)], ['Descuento', money(discountAmount)], ['Total c/dto.', money(totalAfterDiscount)] ];
-    const taxes = `<div class="purchase-inspect-tax"><strong>Detalle de Impuestos</strong><div class="tax-scroll"><table><thead><tr><th>Impuesto</th><th>Nº Neto</th><th>% Imp.</th><th>Importe</th><th></th><th></th></tr></thead><tbody>${result.impuestos.map(row => `<tr><td>${esc(/^total\s+remito\s*\(iva\s+incluido\)$/i.test(String(row.descripcion||row.nombre||'').trim())?'Neto':(row.descripcion||row.nombre))}</td><td>${esc(row.neto)}</td><td class="numeric">${decimal(row.porcentaje * 100)}%</td><td class="numeric">${money(row.importe)}</td><td></td><td></td></tr>`).join('')}${Array.from({length:Math.max(0,3-result.impuestos.length)},()=>'<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}</tbody></table></div><div class="tax-count">${result.impuestos.length} registros</div></div>`;
-    const payments = result.pagos.length ? `<h3>Órdenes de pago</h3><table><thead><tr><th>Nº OP</th><th>Pago</th><th>Importe</th></tr></thead><tbody>${result.pagos.map(row => `<tr><td>${row.NroOP}</td><td>${esc(row.TipoPago)}</td><td class="numeric">${money(row.Importe)}</td></tr>`).join('')}</tbody></table>` : '';
+    const canEdit = FX.menuUserHasAccess('cargar_facturas');
+    const canEditAmounts = canEdit && !Number(p.IDAsiento) && !Number(p.IDRecImp) && !result.credito.length;
+    const taxColumns = ['Impuesto','Nº Neto','% Imp.','Importe','',''];
+    const taxRows = result.impuestos.map((row, index) => {
+      const rawLabel = row.descripcion || row.nombre;
+      const label = /^total\s+remito\s*\(iva\s+incluido\)$/i.test(String(rawLabel || '').trim()) ? 'Neto' : rawLabel;
+      const amount = money(row.importe);
+      const cell = canEditAmounts
+        ? `<input data-purchase-tax-amount="${index}" inputmode="decimal" autocomplete="off" aria-label="${esc('Importe de '+label+' (neto '+row.neto+')')}" value="${esc(amount)}">`
+        : amount;
+      return `<tr><td>${esc(label)}</td><td>${esc(row.neto)}</td><td class="numeric">${decimal(row.porcentaje * 100)}%</td><td class="numeric">${cell}</td><td></td><td></td></tr>`;
+    });
+    const blankTaxRow = '<tr aria-hidden="true">'+taxColumns.map(() => '<td></td>').join('')+'</tr>';
+    const taxBlanks = Math.max(0, (document.documentElement.dataset.corralonTheme === 'classic' ? 5 : 3) - taxRows.length);
+    const taxes = `<div class="purchase-inspect-tax"><strong>Detalle de Impuestos</strong><div class="tax-scroll"><table><thead><tr>${taxColumns.map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody>${taxRows.join('')}${blankTaxRow.repeat(taxBlanks)}</tbody></table></div><div class="tax-count">${taxRows.length} registros</div></div>`;
+    const paymentOrders = new Map();
+    for (const row of result.pagos) {
+      const orderKey = row.NroOrden ?? row.NroOP;
+      if (!paymentOrders.has(orderKey)) paymentOrders.set(orderKey,row);
+    }
+    const canViewOrders=FX.menuUserHasAccess('pagos_proveedores');
+    const paymentRows=[...paymentOrders.values()].map(row=>{
+      const orderId=Number(row.NroOrden);
+      const action=Number.isSafeInteger(orderId)&&orderId>0
+        ? '<a class="purchase-payment-link" href="pagos-proveedores.html#sql/pagos/detalle/'+orderId+'" target="_blank" rel="noopener" aria-label="Ver orden de pago '+esc(row.NroOP ?? orderId)+'">Ver orden de pago</a>' : '';
+      return '<tr><td>'+esc(row.NroOP ?? row.NroOrden)+'</td><td>'+esc(row.TipoPago)+'</td><td class="numeric">'+money(row.TotalPagos)+'</td>'+
+        (canViewOrders?'<td class="purchase-payment-action">'+action+'</td>':'')+'</tr>';
+    }).join('');
+    const payments=paymentOrders.size?'<h3>Órdenes de pago</h3><table><thead><tr><th>Nº OP</th><th>Pago</th><th>Importe</th>'+
+      (canViewOrders?'<th class="purchase-payment-action" aria-label="Acción"></th>':'')+'</tr></thead><tbody>'+paymentRows+'</tbody></table>':'';
     const credit = result.credito.length ? `<p>Crédito por descuento: ${esc(result.credito[0].NroFactura)} · ${money(result.credito[0].Total)} (registro ${result.credito[0].IDRecibo}).</p>` : '';
     $('openStock').hidden = !(p.EnMovStk && !p.IDMovStk && FX.menuUserHasAccess('carga_stock'));
-    const canEdit = FX.menuUserHasAccess('cargar_facturas');
     const canChangePayment=canEdit&&Number(p.IDFormaPago)===3&&total>0&&!result.pagos.length;
     const field=(label,value,width)=>label==='Forma de Pago'&&canChangePayment?`<label>${esc(label)}:<select id="editPurchasePayment" style="width:${width}px;height:23px;padding:2px 5px;border-radius:0;font-size:12px"><option value="3">${esc(p.pago||'Cta. Cte.')}</option><option value="1">Efectivo</option></select></label>`:`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':label==='Nº Mov. Stock'&&canEdit?'id="editPurchaseMovement" autocomplete="off"':'readonly'} style="--width:${width}px" value="${esc(value??'')}"></label>`;
+    const vatTotals = ['21','105','27'].map(rate => field('ImpNeto'+rate,money(p['ImpNeto'+rate]),92)+field('ImpIVA'+rate,money(p['ImpIVA'+rate]),92)).join('');
     const summary=`<label class="purchase-total">Total:<output>${money(total)}</output></label><label>En Movs. de Stock:<input type="checkbox" disabled ${p.EnMovStk?'checked':''}></label>${field('Nº Mov. Stock',p.stockNumero||p.IDMovStk||'',95)}`;
     openDetail('Consultar Compras a Proveedores', `<div class="purchase-inspect">
       <div class="purchase-inspect-row">${field('Comprobante',p.tipo,70)}${field('Nº',p.NroFactura,105)}${field('Fecha',dateText(sqlDate(p.Fecha)),75)}${field('Período IVA',dateText(sqlDate(p.FechaIVA)).slice(3),75)}${field('Carga',p.FechaCarga?dateText(sqlDate(p.FechaCarga)):'',75)}</div>
-      <div class="purchase-inspect-row">${field('Proveedor',p.Proveedor,300)}${field('ID',p.IDProveedor,50)}</div>
-      <div class="purchase-inspect-columns"><div class="purchase-inspect-left"><div class="purchase-inspect-row">${field('CUIT',p.CUIT,85)}${field('Forma de Pago',p.pago,110)}</div>${field('Concepto',p.Concepto,280)}${field('Cuenta',p.Cuenta,285)}</div><div class="purchase-inspect-right">${field('Operador',p.operadorNombre||'—',165)}${field('Vence',dateText(sqlDate(p.FechaVto)),75)}</div></div>
-      ${taxes}<div class="purchase-inspect-summary">${summary}</div>
+      <div class="purchase-inspect-row">${field('Proveedor',p.Proveedor,300)}${field('ID',p.IDProveedor,50)}<span class="purchase-classic-only">${field('TC',p.tipoNombre,132)}</span></div>
+      <div class="purchase-inspect-columns"><div class="purchase-inspect-left"><div class="purchase-inspect-row">${field('CUIT',p.CUIT,85)}${field('Forma de Pago',p.pago,110)}</div>${field('Concepto',p.Concepto,280)}${field('Cuenta',p.Cuenta,285)}</div><div class="purchase-inspect-right">${field('Operador',p.operadorNombre||'—',165)}${field('Vence',dateText(sqlDate(p.FechaVto)),75)}<span class="purchase-classic-only">${field('Tipo de Bien',p.TipoBien,114)}</span></div></div>
+      ${taxes}<div class="purchase-classic-only purchase-classic-vat">${vatTotals}</div><div class="purchase-inspect-summary">${summary}</div>
       <div class="purchase-inspect-row purchase-inspect-bottom">${field('Nº Remito de Merc.',p.NroRemMerc,125)}<label class="purchase-total" style="margin-left:50px">Total Real:<output>${money(total)}</output></label></div>
       <div class="purchase-inspect-note"><label>Nota:<textarea readonly>${esc(cleanNote(p.Nota))}</textarea></label><div class="purchase-inspect-actions"></div></div>
       <div class="purchase-inspect-discount">${field('Imp. Dto.',`${decimal(Number(p.ImpDto||0)*100)}%`,105)}<label>Total c/Dto.:<output>${money(totalAfterDiscount)}</output></label></div>
       </div>${payments}${credit}`);
     detailInvoiceId = Number(p.IDRecibo); $('deleteInvoice').hidden = false;
+    recordPurchaseView({view:'detail',id:detailInvoiceId});
     bindDetailStockMovement(p);
     const movementLabel=[...$('detailBody').querySelectorAll('.purchase-inspect-summary>label')].find(label=>label.textContent.startsWith('Nº Mov. Stock:'));
     if(movementLabel && (p.stockId||p.IDMovStk)){
       const group=document.createElement('div');group.className='purchase-linked-stock';group.style.cssText='display:flex;align-items:center;gap:10px;min-width:0';
       movementLabel.replaceWith(group);group.append(movementLabel);movementLabel.style.cssText='flex:1;min-width:0';
-      const button=document.createElement('button');button.type='button';button.textContent='Ver carga';button.style.cssText='flex:none;padding:3px 9px;min-height:25px;height:25px;border-radius:0;font:700 12px Arial;white-space:nowrap';group.append(button);
+      const button=document.createElement('button');button.type='button';button.innerHTML='<span class="purchase-web-stock-label">Ver carga</span><span class="purchase-classic-only">Ver Mov. Stock</span>';button.style.cssText='flex:none;padding:3px 9px;min-height:25px;height:25px;border-radius:0;font:700 12px Arial;white-space:nowrap';group.append(button);
       button.onclick=async()=>{
+        const label=button.innerHTML;
         button.disabled=true;
+        button.textContent='Abriendo carga…';
         try{
           if(!window.CorralonSQLModules?.openLinkedStock)throw new Error('El visor integrado de stock no está disponible. Recargá Gestión.');
           await window.CorralonSQLModules.openLinkedStock(p.IDRecibo,{origin:button});
         }catch(error){alert(error.message||'No se pudo abrir la carga de stock.');}
-        finally{button.disabled=false;}
+        finally{button.innerHTML=label;button.disabled=false;}
       };
     }
 
@@ -988,16 +1127,53 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if(canEdit){
       const save=document.createElement('button');save.type='button';save.dataset.savePurchaseHeader='1';save.textContent='Guardar cambios';save.disabled=true;
       $('deleteInvoice').before(save);
-      const track=()=>{save.disabled=numberInput.value.trim()===p.NroFactura&&stockCheck.checked===Boolean(p.EnMovStk)&&(!paymentInput||Number(paymentInput.value)===Number(p.IDFormaPago));};
+      const amountInputs = [...$('detailBody').querySelectorAll('[data-purchase-tax-amount]')];
+      const parseAmount = input => {
+        const value = input.value.trim();
+        return /^\$?\s*[\d.,]+$/.test(value) && /\d/.test(value)
+          ? Math.round(numeric(value)*100)/100 : NaN;
+      };
+      const amountChanges = () => amountInputs.flatMap(input => {
+        const row = result.impuestos[Number(input.dataset.purchaseTaxAmount)];
+        const importe = parseAmount(input);
+        if (importe === Math.round(Number(row.importe)*100)/100) return [];
+        return [{impuesto:row.impuesto,neto:row.neto,importe,anterior:row.importe}];
+      });
+      const track = () => {
+        save.disabled = !amountChanges().length && numberInput.value.trim() === p.NroFactura
+          && stockCheck.checked === Boolean(p.EnMovStk) && (!paymentInput || Number(paymentInput.value) === Number(p.IDFormaPago));
+      };
       numberInput.addEventListener('input',track);numberInput.addEventListener('change',track);stockCheck.addEventListener('change',track);
       paymentInput?.addEventListener('change',track);
+      for (const input of amountInputs) {
+        input.dataset.savedAmount = input.value;
+        input.addEventListener('input', track);
+        input.addEventListener('change', () => {
+          const amount = parseAmount(input);
+          if (Number.isFinite(amount)) input.value = money(amount);
+          track();
+        });
+      }
       save.onclick=async()=>{
+        const cambiosImportes = amountChanges();
+        const invalid = amountInputs.find(input => !Number.isFinite(parseAmount(input)));
+        if (invalid) {
+          await htmlNotice('Ingresá un importe válido mayor o igual a cero.',false);
+          invalid.focus();
+          return;
+        }
         save.disabled=true;numberInput.disabled=true;stockCheck.disabled=true;if(paymentInput)paymentInput.disabled=true;
+        amountInputs.forEach(input => input.disabled = true);
         try{
           const changedPayment=paymentInput&&Number(paymentInput.value)!==Number(p.IDFormaPago);
-          const updated=await api({}, {accion:'editar-cabecera',id:p.IDRecibo,numero:numberInput.value.trim(),enStock:stockCheck.checked,numeroAnterior:p.NroFactura,enStockAnterior:Boolean(p.EnMovStk),...(paymentInput?{pago:Number(paymentInput.value),pagoAnterior:Number(p.IDFormaPago)}:{})});
-          showInvoice(updated);if($('reportDialog').open)await loadReport();message(changedPayment?'Factura pasada a efectivo y orden de pago generada con la fecha de la factura.':'Número de boleta y opción de stock guardados en SQL.');
-        }catch(error){await htmlNotice(error.message,false);numberInput.disabled=false;stockCheck.disabled=Number(p.CodCuentaCpra)===11;if(paymentInput)paymentInput.disabled=false;track();}
+          const updated=await api({}, {accion:'editar-cabecera',id:p.IDRecibo,numero:numberInput.value.trim(),enStock:stockCheck.checked,numeroAnterior:p.NroFactura,enStockAnterior:Boolean(p.EnMovStk),cambiosImportes,...(paymentInput?{pago:Number(paymentInput.value),pagoAnterior:Number(p.IDFormaPago)}:{})});
+          showInvoice(updated);if (recentViews.has('report') && loadedPurchaseReport)await loadReport();
+          message(changedPayment?'Factura pasada a efectivo y orden de pago generada con la fecha de la factura.':'Cambios de la compra guardados en SQL.');
+        }catch(error){
+          await htmlNotice(error.message,false);numberInput.disabled=false;stockCheck.disabled=Number(p.CodCuentaCpra)===11;if(paymentInput)paymentInput.disabled=false;
+          amountInputs.forEach(input => input.disabled = false);
+          track();
+        }
       };
     }
     groupPurchaseDetail();
@@ -1007,6 +1183,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       generate.title=generate.disabled?'Esta compra ya tiene un descuento o crédito vinculado.':'';
       generate.onclick=()=>openPurchaseDiscount(result);$('deleteInvoice').before(generate);
     }
+    showPurchaseView('detail');
   }
   async function previewInvoiceRemoval() {
     if (!detailInvoiceId || removingInvoice) return;
@@ -1057,7 +1234,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       await api({}, { accion: 'eliminar', ...removalPreview });
       removalPreview = null; $('deleteInvoiceDialog').close(); $('detailDialog').close();
       message(`Movimiento ${removedId} eliminado de SQL.`);
-      if ($('reportDialog').open) await loadReport();
+      if (recentViews.has('report') && loadedPurchaseReport) await loadReport();
     } catch (error) {
       $('deleteInvoiceStatus').textContent = error.message + (error.definitive ? ' Cerrá y volvé a consultar las vinculaciones.' : ' Reintentá esta misma solicitud para verificar el resultado.');
       $('confirmDeleteInvoice').disabled = Boolean(error.definitive);
@@ -1073,39 +1250,379 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   function showProvider() {
     openProviderDialog(selectedProvider()?.id || 0);
   }
-  async function openReport(mode, search = '') {
-    reportMode = mode; reportRows = [];
-    $('reportTitle').textContent = ({ buscar: 'Consultar facturas', iva: 'IVA Compras', 'cuenta-corriente': 'Cuenta corriente del proveedor' })[mode];
+  const classicReportTitles = {
+    fecha: 'Por Fecha de Fac.', 'fecha-carga': 'Por Fecha de Carga', 'sin-remito': 'Sin Remito de Merc.',
+    numero: 'Por Nº de Factura', periodo: 'Por Per. de IVA', proveedor: 'Por Proveedor'
+  };
+  const purchaseViews = {menu:'purchaseConsultMenu', report:'reportDialog', detail:'detailDialog'};
+  const purchaseTabs = new Map();
+  const closingPurchaseDialogs = new WeakMap();
+  const reloadingPurchase = performance.getEntriesByType('navigation')[0]?.type === 'reload';
+  const closedPurchaseTabs = {...(reloadingPurchase ? history.state?.purchaseClosed : {})};
+  const recentViews = new Map(Object.entries(reloadingPurchase ? history.state?.purchaseOpen || {} : {}));
+  if(!reloadingPurchase && history.state?.purchaseTrail){
+    history.replaceState({...history.state,purchaseTrail:[],purchaseOpen:{},purchaseClosed:{}},'');
+  }
+  const purchaseTrail = () => (history.state?.purchaseTrail || []).filter(item=>
+    !closedPurchaseTabs[item.view] || item.tabId > closedPurchaseTabs[item.view]);
+  let restoringPurchase = false, purchaseRestoreSequence = 0;
+  let loadedPurchaseReport = null, detailSelection = 0, reportDetailRequest = null;
+  const reportKey = (mode,search,filters) => JSON.stringify([mode,search||'',filters?.criterion||'',filters?.from||'',filters?.to||'',Number(filters?.provider||0)]);
+  function savePurchaseHistory(method,trail){
+    history[method]({...history.state,purchaseTrail:trail,purchaseOpen:Object.fromEntries(recentViews),purchaseClosed:closedPurchaseTabs},'');
+  }
+  function mountPurchaseTabs(view,host){
+    if(purchaseTabs.has(view))return;
+    const nav = document.createElement('nav');
+    nav.className = 'purchase-view-tabs';
+    nav.setAttribute('aria-label','Secciones de Compras');
+    const controls = '<button type="button" data-purchase-nav="back">‹ Volver</button>';
+    nav.innerHTML = controls + '<button type="button" data-purchase-nav="form">Compras Varias</button><span class="purchase-tab-item" data-purchase-tab="report"><button type="button" data-purchase-nav="report">Resultados</button><button type="button" data-purchase-close="report" aria-label="Cerrar Resultados" title="Cerrar Resultados">×</button></span><span class="purchase-tab-item" data-purchase-tab="detail"><button type="button" data-purchase-nav="detail">Ficha de compra</button><button type="button" data-purchase-close="detail" aria-label="Cerrar Ficha de compra" title="Cerrar Ficha de compra">×</button></span>';
+    host.prepend(nav);
+    purchaseTabs.set(view,nav);
+    nav.addEventListener('click',onPurchaseTabClick);
+    syncPurchaseTabs();
+  }
+  mountPurchaseTabs('form',document.querySelector('.app'));
+  mountPurchaseTabs('report',$('reportDialog'));
+  mountPurchaseTabs('detail',$('detailDialog'));
+  function syncPurchaseTabs() {
+    const trail = purchaseTrail();
+    for (const item of trail) if(!recentViews.has(item.view))recentViews.set(item.view,item);
+    const active = $('linkedStockSection')?.open ? 'detail' : trail.at(-1)?.view || 'form';
+    for (const nav of purchaseTabs.values()) for (const button of nav.querySelectorAll('[data-purchase-nav]')) {
+      const key=button.dataset.purchaseNav;
+      if(key==='back')button.disabled=active!=='stock'&&!trail.length;
+      if(key==='report'||key==='detail')button.closest('[data-purchase-tab]').hidden=!recentViews.has(key);
+      if(key===active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
+    }
+  }
+  function recordPurchaseView(item) {
+    if(restoringPurchase)return;
+    const trail=purchaseTrail(), replace=trail.at(-1)?.view===item.view &&
+      (item.view!=='detail'||trail.at(-1).id===item.id);
+    if(item.view==='report'||item.view==='detail'){
+      item.tabId=recentViews.get(item.view)?.tabId || Math.max(Date.now(),(closedPurchaseTabs[item.view]||0)+1);
+      recentViews.set(item.view,item);
+    }
+    savePurchaseHistory(replace?'replaceState':'pushState',[...(replace?trail.slice(0,-1):trail),item]);
+    syncPurchaseTabs();
+  }
+  const menuFieldIds=['classicFrom','classicTo','classicPeriod','classicNumber','classicProvider'];
+  function rememberPurchaseMenu(){
+    const trail=purchaseTrail();
+    if(trail.at(-1)?.view!=='menu')return;
+    recordPurchaseView({view:'menu',fields:Object.fromEntries(menuFieldIds.map(id=>[id,$(id).value]))});
+  }
+  function purchaseBack(){
+    if($('linkedStockSection')?.open){window.CorralonSQLModules.closeLinkedStock();return true;}
+    if(purchaseTrail().length){history.back();return true;}
+    return false;
+  }
+  async function restorePurchaseView(){
+    if(location.hash.startsWith('#sql/compras/carga/'))return;
+    const sequence=++purchaseRestoreSequence, trail=purchaseTrail(), current=trail.at(-1);
+    restoringPurchase=true;
+    try{
+      if(current?.view==='menu'){
+        if(!$('purchaseConsultMenu').open)openPurchaseConsult();
+        for(const id of menuFieldIds)if(current.fields?.[id]!=null)$(id).value=current.fields[id];
+      }else if(current?.view==='report'){
+        const key=reportKey(current.mode,current.search,current.filters);
+        if(loadedPurchaseReport!==key)await openReport(current.mode,current.search,current.filters);
+        else showPurchaseView('report');
+      }else if(current?.view==='detail'){
+        if(detailInvoiceId===current.id)showPurchaseView('detail');
+        else{
+          const result=await api({consulta:'detalle',id:current.id});
+          if(sequence===purchaseRestoreSequence)showInvoice(result);
+        }
+      }else showPurchaseView('form');
+    }catch(error){
+      message(error.message,true);
+    }finally{
+      if(sequence===purchaseRestoreSequence){
+        restoringPurchase=false;syncPurchaseTabs();
+        savePurchaseHistory('replaceState',purchaseTrail());
+      }
+    }
+  }
+  function movePurchaseTab(view){
+    if(!options)return;
+    if($('linkedStockSection')?.open){window.CorralonSQLModules.closeLinkedStock(view);return;}
+    const trail=purchaseTrail(), current=trail.at(-1)?.view||'form';
+    if(current===view){restorePurchaseView();return;}
+    if(view==='menu'){openPurchaseConsult();return;}
+    const item=view==='form'?{view:'form'}:recentViews.get(view);
+    if(item){
+      savePurchaseHistory('pushState',[...trail,item]);
+      restorePurchaseView();
+    }
+  }
+  function onPurchaseTabClick(event){
+    const close=event.target.closest('[data-purchase-close]');
+    if(close){closePurchaseTab(close.dataset.purchaseClose);return;}
+    const button=event.target.closest('[data-purchase-nav]');
+    if(!button)return;
+    const view=button.dataset.purchaseNav;
+    if(view==='back'){purchaseBack();return;}
+    movePurchaseTab(view);
+  }
+  function closePurchaseTab(view){
+    const item=recentViews.get(view);
+    if(!item)return;
+    const trail=purchaseTrail(), active=trail.at(-1)?.view===view;
+    closedPurchaseTabs[view]=Math.max(Date.now(),item.tabId||0);
+    recentViews.delete(view);
+    ++purchaseRestoreSequence;
+    restoringPurchase=false;
+    if(view==='report'){
+      ++reportRequest;
+      ++detailSelection;
+      loadedPurchaseReport=null;
+      reportRows=[];
+      $('reportBody').replaceChildren();
+      $('reportStatus').textContent=$('reportTotals').textContent='';
+      $('loadMore').hidden=true;
+    }else{
+      ++detailSelection;
+      ++detailStockRequest;
+      detailInvoiceId=0;
+      detailReturnFocus=null;
+      const actions=$('detailDialog').querySelector('.actions');
+      if(actions){
+        actions.querySelectorAll('[data-save-purchase-header],[data-generate-purchase-discount]').forEach(button=>button.remove());
+        $('detailDialog').append(actions);
+      }
+      $('detailBody').replaceChildren();
+    }
+    const remaining=trail.filter(entry=>entry.view!==view);
+    if(active){
+      const fallback=recentViews.get(view==='detail'?'report':'detail')||{view:'form'};
+      remaining.push(fallback);
+    }
+    savePurchaseHistory('replaceState',remaining);
+    if($('linkedStockSection')?.open){
+      window.CorralonSQLModules.closeLinkedStock(active ? remaining.at(-1).view : undefined);
+      return;
+    }
+    restorePurchaseView();
+  }
+  window.addEventListener('purchase-stock-view',event=>{
+    const {open,host,tab,id}=event.detail;
+    if(open){
+      if(!recentViews.has('detail'))recentViews.set('detail',{view:'detail',id,tabId:Math.max(Date.now(),(closedPurchaseTabs.detail||0)+1)});
+      mountPurchaseTabs('stock',host);
+    }
+    syncPurchaseTabs();
+    if(!open)restorePurchaseView().then(()=>{if(tab)movePurchaseTab(tab);});
+  });
+  for(const [view,id] of Object.entries(purchaseViews)){
+    const dialog=$(id);
+    dialog.addEventListener('close',()=>{
+      const pending=closingPurchaseDialogs.get(dialog)||0;
+      if(pending){
+        if(pending===1)closingPurchaseDialogs.delete(dialog);
+        else closingPurchaseDialogs.set(dialog,pending-1);
+        return;
+      }
+      if(!dialog.open&&purchaseTrail().at(-1)?.view===view)purchaseBack();
+    });
+  }
+  const purchaseDateRoot=$('purchaseClassicFilters'),purchaseDateFields='#classicFrom,#classicTo';
+  FX.bindFlexibleDates({root:purchaseDateRoot,selector:purchaseDateFields});
+  FX.bindFieldRestore({root:purchaseDateRoot,selector:purchaseDateFields,capture:true});
+  FX.bindLinearNavigation({root:purchaseDateRoot,selector:purchaseDateFields+',button[value="fecha"]',
+    navigateLeftRight:true,smartCaret:true,selectOnAnyFocus:true,selectOnFirstPointerFocus:true});
+  purchaseDateRoot.addEventListener('input',rememberPurchaseMenu);
+  purchaseDateRoot.addEventListener('blur',event=>{
+    if(event.target.matches(purchaseDateFields))rememberPurchaseMenu();
+  },true);
+  window.addEventListener('popstate',()=>{if(options&&!$('linkedStockSection')?.open)restorePurchaseView();});
+  let purchaseMouseBack=false;
+  document.addEventListener('mousedown',event=>{
+    if(event.button!==3||(!purchaseTrail().length&&!$('linkedStockSection')?.open))return;
+    event.preventDefault();
+    purchaseMouseBack=true;
+    if($('systemMenu')&&!$('systemMenu').hidden)FX.initializeSystemMenu().close();
+    else purchaseBack();
+  },true);
+  for(const type of ['mouseup','auxclick'])document.addEventListener(type,event=>{
+    if(event.button!==3||!purchaseMouseBack)return;
+    event.preventDefault();
+    if(type==='auxclick')purchaseMouseBack=false;
+  },true);
+  const restoreAfterReady=new MutationObserver(()=>{
+    if($('purchaseFields').disabled||!options)return;
+    restoreAfterReady.disconnect();
+    if(purchaseTrail().length)restorePurchaseView();
+  });
+  restoreAfterReady.observe($('purchaseFields'),{attributes:true,attributeFilter:['disabled']});
+  syncPurchaseTabs();
+  function showPurchaseView(view){
+    const target=purchaseViews[view]?$(purchaseViews[view]):null;
+    for(const id of Object.values(purchaseViews)){
+      const other=$(id);
+      if(other===target||!other.open)continue;
+      closingPurchaseDialogs.set(other,(closingPurchaseDialogs.get(other)||0)+1);
+      other.close();
+    }
+    if(target&&!target.open)target.showModal();
+  }
+  function openPurchaseConsult(){
+    const current = dateText(today());
+    $('classicFrom').value = $('classicTo').value = current;
+    $('classicPeriod').value = current.slice(3);
+    $('classicNumber').value = $('classicProvider').value = '';
+    $('purchaseConsultError').hidden = true;
+    rememberPurchaseMenu();
+    if(purchaseTrail().at(-1)?.view!=='menu')recordPurchaseView({view:'menu',fields:Object.fromEntries(menuFieldIds.map(id=>[id,$(id).value]))});
+    showPurchaseView('menu');
+  }
+  $('purchaseClassicFilters').addEventListener('submit', event => {
+    event.preventDefault();
+    const criterion = document.activeElement?.dataset.classicQuery && event.submitter?.value === 'fecha'
+      ? document.activeElement.dataset.classicQuery : event.submitter?.value || 'fecha';
+    const errorNode = $('purchaseConsultError');
+    try {
+      let from = today(), to = from, search = '', provider = 0;
+      if (criterion === 'numero') {
+        const number = $('classicNumber').value.trim();
+        search = /^[0-9]{1,8}$/.test(number) ? number : FX.formatComprobanteNumber(number);
+        if (!/^(?:\d{1,8}|\d{4}-\d{8})$/.test(search)) throw new Error('Ingresá un número de factura válido.');
+      } else if (criterion === 'periodo') {
+        from = parsePeriod('classicPeriod');
+        const last = new Date(Number(from.slice(0,4)), Number(from.slice(5,7)), 0).getDate();
+        to = from.slice(0,8) + last;
+      } else if (criterion === 'proveedor') {
+        provider = Number(comboItem('reportProvider', $('classicProvider').value)?.id || 0);
+        if (!provider) throw new Error('Seleccioná un proveedor de la lista.');
+      } else {
+        from = parseFieldDate('classicFrom'); to = parseFieldDate('classicTo');
+        if(from > to) throw new Error('La fecha Desde debe ser anterior o igual a Hasta.');
+      }
+      errorNode.hidden = true;
+      hidePurchaseCombo();
+      openReport('buscar', search, { criterion, from, to, provider });
+    } catch (error) {
+      errorNode.textContent = error.message; errorNode.hidden = false;
+    }
+  });
+  $('purchaseConsultMenu').addEventListener('close', hidePurchaseCombo);
+  function cancelReportDetailRequest(){
+    const request=reportDetailRequest;
+    if(!request)return;
+    reportDetailRequest=null;
+    request.controller.abort();
+    if($('reportStatus').textContent===request.loading)$('reportStatus').textContent=request.previousStatus;
+  }
+  $('reportDialog').addEventListener('close', () => {
+    hidePurchaseCombo();
+    if(!$('reportDialog').open)cancelReportDetailRequest();
+  });
+  async function openReport(mode, search = '', filters = null) {
+    cancelReportDetailRequest();
+    loadedPurchaseReport=reportKey(mode,search,filters);
+    reportMode = mode; reportRows = []; reportCriterion = filters?.criterion || '';
+    $('reportBody').replaceChildren(); $('reportTotals').textContent = '';
+    purchaseReportSorter.reset();
+    $('reportDialog').dataset.purchaseCriterion = reportCriterion;
+    $('reportDialog').dataset.purchaseReport = mode;
+    $('reportDialog').classList.toggle('purchase-classic-sheet', mode === 'buscar' && document.documentElement.dataset.corralonTheme === 'classic');
+    $('reportTitle').textContent = classicReportTitles[reportCriterion] || ({ buscar: 'Consultar facturas', iva: 'IVA Compras', 'cuenta-corriente': 'Cuenta corriente del proveedor' })[mode];
     const from = new Date(`${today()}T12:00:00`); if (mode === 'iva') from.setDate(1); else if(mode!=='buscar') from.setDate(from.getDate() - 90);
     $('reportFrom').value = `${from.getDate()}/${from.getMonth() + 1}/${from.getFullYear()}`; $('reportTo').value = dateText(today());
     setComboValue('reportProvider', mode === 'cuenta-corriente' ? selectedProvider()?.id || 0 : 0);
+    if (filters) {
+      $('reportFrom').value = dateText(filters.from); $('reportTo').value = dateText(filters.to);
+      setComboValue('reportProvider', filters.provider);
+    }
     $('reportSearch').value = search; $('reportSearchLabel').hidden = mode !== 'buscar';
-    if (!$('reportDialog').open) $('reportDialog').showModal();
+    recordPurchaseView({view:'report',mode,search,filters});
+    showPurchaseView('report');
     await loadReport();
   }
   async function loadReport(more = false) {
-    if (reportMode === 'buscar') $('reportSearch').value = FX.formatComprobanteNumber($('reportSearch').value, {defaultPoint:'0001'});
+    cancelReportDetailRequest();
+    const request = ++reportRequest;
+    if (reportMode === 'buscar' && !reportCriterion) $('reportSearch').value = FX.formatComprobanteNumber($('reportSearch').value, {defaultPoint:'0001'});
     $('reportStatus').textContent = 'Consultando SQL…'; $('loadMore').hidden = true;
     try {
       if ($('reportProvider').value.trim() && !comboItem('reportProvider')) throw new Error('Seleccioná un proveedor de la lista.');
       const params = { consulta: reportMode, desde: parseFieldDate('reportFrom'), hasta: parseFieldDate('reportTo'), proveedor: comboId('reportProvider') || 0,
-        buscar: $('reportSearch').value.trim(), antes: more ? reportRows.at(-1)?.id || 0 : 0 };
+        criterio: reportCriterion, buscar: $('reportSearch').value.trim(), antes: more ? reportRows.at(-1)?.id || 0 : 0 };
+      loadedPurchaseReport=reportKey(reportMode,params.buscar,{criterion:reportCriterion,from:params.desde,to:params.hasta,provider:params.proveedor});
+      if(purchaseTrail().at(-1)?.view==='report')recordPurchaseView({view:'report',mode:reportMode,search:params.buscar,filters:{criterion:reportCriterion,from:params.desde,to:params.hasta,provider:params.proveedor}});
       const result = await api(params);
+      if (request !== reportRequest) return;
       const loaded = result.facturas || result.filas || result.movimientos || result.saldos;
       reportBalances = Boolean(result.saldos);
       reportRows = more ? [...reportRows, ...loaded] : loaded;
       $('loadMore').hidden = !result.hayMas;
       renderReport(); $('reportStatus').textContent = `${reportRows.length} registros${result.hayMas ? ' · hay más disponibles' : ''}`;
-    } catch (error) { $('reportStatus').textContent = error.message; }
+    } catch (error) { if (request === reportRequest) $('reportStatus').textContent = error.message; }
   }
+  const purchaseReportCollator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' });
+  function purchaseReportSortValue(row, key) {
+    const value = row[key];
+    if (key === 'fecha' || key === 'periodo') {
+      const [year, month, day = 1] = String(value ?? '').split('/').reverse().map(Number);
+      return year * 10000 + month * 100 + day || 0;
+    }
+    if (key === 'enStock') return Number(Boolean(Number(value)));
+    if (['idProveedor', 'total', 'movimiento', 'operador', 'iva21'].includes(key)) return Number(value) || 0;
+    return String(value ?? '');
+  }
+  const purchaseReportSorter = FX.bindTableSort({
+    root: $('reportBody'),
+    sort: () => {
+      const body = $('reportBody');
+      if (!body.querySelector('table')) return;
+      const focusedKey = body.contains(document.activeElement) ? document.activeElement.dataset.sortKey : '';
+      renderReport();
+      if (focusedKey) body.querySelector(`[data-sort-key="${focusedKey}"]`)?.focus({preventScroll: true});
+    }
+  });
   function renderReport() {
+    const classic = reportMode === 'buscar' && document.documentElement.dataset.corralonTheme === 'classic';
+    $('reportDialog').classList.toggle('purchase-classic-sheet', classic);
+    const sheetColumns = [
+      ['tipo','Comprobante',96],['fecha','Fecha',80],['enStock','En Movs. de Stock',94],['tipoNombre','TC',144],
+      ['numero','Nº',105],['periodo','Período IVA',82],['idProveedor','ID',55],['proveedor','Proveedor',245],
+      ['total','Total Real',102],['remito','Nº Remito de Merc.',124],['movimiento','Nº Mov. Stock',100],['cuit','CUIT',101],
+      ['pago','Forma de Pago',110],['concepto','Concepto',165],['tipoBien','Tipo de Bien',108],['operador','Cargó',68],['iva21','ImpIVA21',93]
+    ];
     const columns = reportBalances ? [['id', 'Código'], ['proveedor', 'Proveedor'], ['saldo', 'Saldo'], ['vencido', 'Saldo vencido']]
+      : classic ? sheetColumns
       : reportMode === 'buscar' ? [['fecha', 'Fecha'], ['tipo', 'Tipo'], ['numero', 'Nº comprobante'], ['proveedor', 'Proveedor'], ['total', 'Total'], ['movimiento', 'Mov. stock']]
       : reportMode === 'iva' ? [['fecha', 'Fecha'], ['periodo', 'Período'], ['tipo', 'Tipo'], ['numero', 'Nº comp.'], ['proveedor', 'Proveedor'], ['CUIT', 'CUIT'], ['neto', 'Neto'], ['iva', 'IVA'], ['otros', 'Otros'], ['total', 'Total']]
       : [['fecha', 'Fecha'], ['tipo', 'Tipo'], ['numero', 'Comprobante'], ['debe', 'Debe'], ['haber', 'Haber'], ['saldo', 'Saldo']];
-    const amountFields = ['total', 'neto', 'iva', 'otros', 'debe', 'haber', 'saldo', 'vencido'];
+    const amountFields = ['total', 'neto', 'iva', 'otros', 'debe', 'haber', 'saldo', 'vencido', 'iva21'];
     const canOpen = reportMode !== 'cuenta-corriente' || reportBalances;
-    $('reportBody').innerHTML = `<table><thead><tr>${columns.map(([, label]) => `<th>${label}</th>`).join('')}</tr></thead><tbody>${reportRows.map(row => `<tr ${canOpen ? `${reportBalances ? 'data-provider' : 'data-invoice'}="${row.id}" style="cursor:pointer"` : ''}>${columns.map(([key]) => `<td class="${amountFields.includes(key) ? 'numeric' : ''}">${esc(amountFields.includes(key) ? money(row[key]) : row[key] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>${reportRows.length ? '' : '<p class="empty">No hay registros en esta consulta.</p>'}`;
+    const sheetCols = classic ? '<colgroup><col style="width:18px">'+columns.map(([, ,width])=>`<col style="width:${width}px">`).join('')+'</colgroup>' : '';
+    const marker = classic ? '<th aria-label="Abrir"></th>' : '';
+    const cell = (row,key) => key==='enStock'
+      ? `<input type="checkbox" disabled aria-label="En movimientos de stock" ${Number(row[key])?'checked':''}>`
+      : esc(amountFields.includes(key) ? money(row[key]) : row[key] ?? '');
+    const emptyRows = classic ? Math.max(0,Math.ceil(innerHeight/18)-5-reportRows.length) : 0;
+    const filler = emptyRows > 0
+      ? '<tr class="purchase-sheet-blank" aria-hidden="true" style="--purchase-sheet-filler-height:'+emptyRows*18+'px">'+ '<td></td>'.repeat(columns.length+1)+'</tr>'
+      : '';
+    const { key: sortKey, dir } = purchaseReportSorter.getState();
+    const sortable = reportMode === 'buscar';
+    const visibleRows = sortable && sortKey ? [...reportRows].sort((a, b) => {
+      const left = purchaseReportSortValue(a, sortKey), right = purchaseReportSortValue(b, sortKey);
+      const compared = typeof left === 'number' ? left - right : purchaseReportCollator.compare(left, right);
+      return dir === 'asc' ? compared : -compared;
+    }) : reportRows;
+    const headers = columns.map(([key, label]) => {
+      if (!sortable) return `<th>${label}</th>`;
+      const direction = sortKey === key ? dir : '';
+      const ariaSort = direction ? ` aria-sort="${direction === 'asc' ? 'ascending' : 'descending'}"` : '';
+      const action = direction === 'asc' ? 'Orden descendente' : direction === 'desc' ? 'Restaurar orden original' : 'Orden ascendente';
+      return `<th${ariaSort}><button type="button" class="purchase-report-sort" data-sort-key="${key}" title="${action}"><span class="sort-label">${label}</span><span aria-hidden="true">${direction === 'asc' ? '▴' : direction === 'desc' ? '▾' : '↕'}</span></button></th>`;
+    }).join('');
+    $('reportBody').innerHTML = `<table>${sheetCols}<thead><tr>${marker}${headers}</tr></thead><tbody>${visibleRows.map(row => `<tr ${canOpen ? `${reportBalances ? 'data-provider' : 'data-invoice'}="${row.id}" style="cursor:pointer"` : ''}>${classic?'<td><button class="purchase-sheet-open" type="button" aria-label="Abrir compra">+</button></td>':''}${columns.map(([key]) => `<td class="${amountFields.includes(key) ? 'numeric' : key==='enStock'?'purchase-sheet-check':''}">${cell(row,key)}</td>`).join('')}</tr>`).join('')}${filler}</tbody></table>${reportRows.length || classic ? '' : '<p class="empty">No hay registros en esta consulta.</p>'}`;
     $('reportTotals').textContent = reportMode === 'cuenta-corriente' && !reportBalances ? `Saldo al último movimiento: ${money(reportRows[0]?.saldo || 0)}`
       : columns.filter(([key]) => amountFields.includes(key)).map(([key, label]) => `${label}: ${money(reportRows.reduce((sum, row) => sum + Number(row[key] || 0), 0))}`).join(' · ');
   }
@@ -1113,7 +1630,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const popup = window.open('', '_blank');
     if (!popup) { message('Permití abrir la ventana de impresión.', true); return; }
     popup.opener = null;
-    popup.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:12mm}body{font:12px Arial}h1{font-size:22px}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #bbb;padding:5px;text-align:left}thead{display:table-header-group}tr{break-inside:avoid}.numeric{text-align:right}button{display:none}.detail-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}dt{font-size:10px;color:#555}dd{margin:3px 0;font-weight:bold}.detail-note{white-space:pre-wrap}</style></head><body><h1>${esc(title)}</h1>${content}<p>Corralón Progreso · ${esc(user.nombre || user.usuario)} · ${dateText(today())}</p>
+    popup.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 landscape;margin:12mm}body{font:12px Arial}h1{font-size:22px}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #bbb;padding:5px;text-align:left}thead{display:table-header-group}tr{break-inside:avoid}.numeric{text-align:right}button,.purchase-sheet-blank,.purchase-payment-action{display:none}button.purchase-report-sort{all:unset;display:inline}button.purchase-report-sort [aria-hidden]{display:none}.detail-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}dt{font-size:10px;color:#555}dd{margin:3px 0;font-weight:bold}.detail-note{white-space:pre-wrap}</style></head><body><h1>${esc(title)}</h1>${content}<p>Corralón Progreso · ${esc(user.nombre || user.usuario)} · ${dateText(today())}</p>
 </body></html>`);
     popup.document.close(); popup.focus(); popup.print();
   }
@@ -1236,7 +1753,16 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   FX.bindLiveLocaleNumber({ root: $('taxTable'), selector: '[data-field="porcentaje"]', decimals: 2, selectOnFocus: false, preserveEmpty: true });
   FX.bindEditableTable({ root: $('taxTable'), readRow: key => rows.find(row => row.key === key),
     restoreRow: (key, previous) => { const index = rows.findIndex(row => row.key === key); if (index < 0) return; rows[index] = previous; renderRows(); saveDraft(); },
-    deleteRows: keys => { rows = rows.filter(row => !keys.includes(row.key)); renderRows(); saveDraft(); },
+    deleteRows: keys => {
+      const index = rows.findIndex(row => keys.includes(row.key));
+      if (index < 0) return;
+      rows = rows.filter(row => !keys.includes(row.key));
+      renderRows();
+      saveDraft();
+      if (document.documentElement.dataset.corralonTheme === 'classic') {
+        $('taxRows').children[Math.min(index, rows.length - 1)]?.focus({ preventScroll: true });
+      }
+    },
     newRowTarget: () => $('taxRows').lastElementChild?.querySelector('[data-field="impuesto"]') });
   const taxSelection = FX.bindTableSelectPaste({ root: $('taxTable'), cellSelector: 'tbody td:has(input[data-field])',
     columnSelector: 'th[data-col]', selectOnCellMouseDown: false, clearOnDelete: false,
@@ -1297,7 +1823,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     } catch (error) { message(`El proveedor se guardó, pero no se pudo actualizar la lista: ${error.message}`, true); }
   });
   $('providerDialog').addEventListener('close', () => $('provider').focus());
-  document.querySelectorAll('[data-date]').forEach(input => input.addEventListener('blur', () => {
+  document.querySelectorAll('[data-date]:not(#classicFrom,#classicTo)').forEach(input => input.addEventListener('blur', () => {
     const parsed = FX.parseFechaFlexible(input.value); if (parsed) input.value = parsed.text;
   }));
   $('purchaseForm').addEventListener('change', event => {
@@ -1322,6 +1848,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
           event.target.closest('[data-row]').querySelector('[data-field="neto"]').value = row.neto;
         }
         row[field] = field === 'importe' ? currencyNumber(event.target.value) : numeric(event.target.value) / (field === 'porcentaje' ? 100 : 1);
+        if (field === 'importe' && row.impuesto !== 0) row.importeManual = true;
+        else if (field === 'porcentaje') delete row.importeManual;
       }
       if (row.empty) { delete row.empty; renderRows(true); }
       updateTotals();
@@ -1345,7 +1873,12 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if (event.target.dataset.field === 'importe' && event.target.value.trim()) event.target.value = money(currencyNumber(event.target.value));
   });
   $('taxRows').addEventListener('click', event => {
-    if (!event.target.closest('[data-remove]')) return;
+    if (!event.target.closest('[data-remove]')) {
+      if (document.documentElement.dataset.corralonTheme === 'classic' && !event.target.closest('input,select,button')) {
+        event.target.closest('tr[data-row]')?.focus({ preventScroll: true });
+      }
+      return;
+    }
     const key = event.target.closest('[data-row]').dataset.row; rows = rows.filter(row => row.key !== key); renderRows(); saveDraft();
   });
   $('purchaseForm').addEventListener('change', event => {
@@ -1422,7 +1955,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   $('deleteInvoice').addEventListener('click', previewInvoiceRemoval);
   $('confirmDeleteInvoice').addEventListener('click', removeInvoice);
   $('deleteInvoiceDialog').addEventListener('cancel', event => { if (removingInvoice) event.preventDefault(); });
-  $('consult').addEventListener('click', () => openReport('buscar'));
+  $('consult').addEventListener('click', openPurchaseConsult);
   $('search').addEventListener('click', () => openReport('buscar', $('searchNumber').value));
   $('searchNumber').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); openReport('buscar', event.target.value); } });
   $('accountButton').addEventListener('click', () => openReport('cuenta-corriente'));
@@ -1569,17 +2102,80 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     loadReport();
   });
   $('loadMore').addEventListener('click', () => loadReport(true));
+  async function openReportInvoice(id) {
+    if(!id||reportDetailRequest?.id===id)return;
+    cancelReportDetailRequest();
+    ++purchaseRestoreSequence;
+    restoringPurchase=false;
+    if(id===detailInvoiceId){
+      recordPurchaseView({view:'detail',id});
+      showPurchaseView('detail');
+      return;
+    }
+    const selection=++detailSelection, status=$('reportStatus');
+    const request={id,controller:new AbortController(),loading:'Abriendo ficha de compra…',previousStatus:status.textContent};
+    reportDetailRequest=request;
+    status.textContent=request.loading;
+    const timeout=setTimeout(()=>request.controller.abort(),15000);
+    try {
+      const result=await api({consulta:'detalle',id},null,{signal:request.controller.signal});
+      if(reportDetailRequest!==request||selection!==detailSelection||(!$('reportDialog').open&&!$('detailDialog').open))return;
+      status.textContent=request.previousStatus;
+      showInvoice(result);
+    } catch (error) {
+      if(reportDetailRequest===request&&selection===detailSelection)status.textContent=request.controller.signal.aborted
+        ? 'La ficha tardó demasiado en cargar. Volvé a hacer clic en la fila.' : error.message;
+    } finally {
+      clearTimeout(timeout);
+      if(reportDetailRequest===request)reportDetailRequest=null;
+    }
+  }
   $('reportBody').addEventListener('click', async event => {
     const providerButton = event.target.closest('[data-provider]');
     if (providerButton) { setComboValue('reportProvider', providerButton.dataset.provider); await loadReport(); return; }
-    const button = event.target.closest('[data-invoice]'); if (!button) return;
-    try { showInvoice(await api({ consulta: 'detalle', id: button.dataset.invoice })); } catch (error) { $('reportStatus').textContent = error.message; }
+    const row = event.target.closest('[data-invoice]');
+    await openReportInvoice(Number(row?.dataset.invoice));
   });
-  document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
+  function navigatePurchaseDetail(event) {
+    if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
+    if(event.key!=='PageDown'&&event.key!=='PageUp')return;
+    if(!$('detailDialog').open||$('linkedStockSection')?.open)return;
+    if(document.querySelector('dialog[open]:not(#detailDialog)'))return;
+    if(event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])'))return;
+    const invoices = [...$('reportBody').querySelectorAll('[data-invoice]')];
+    const currentId = reportDetailRequest?.id || detailInvoiceId;
+    const index = invoices.findIndex(row => Number(row.dataset.invoice) === currentId);
+    if(index < 0)return;
+    event.preventDefault();
+    const next = invoices[index + (event.key === 'PageDown' ? 1 : -1)];
+    if(next)openReportInvoice(Number(next.dataset.invoice));
+  }
+  document.addEventListener('keydown', navigatePurchaseDetail);
+  document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => {
+    const view=button.dataset.close==='reportDialog'?'report':button.dataset.close==='detailDialog'?'detail':null;
+    if(view&&recentViews.has(view))closePurchaseTab(view);
+    else $(button.dataset.close).close();
+  }));
   window.CorralonPurchaseViewer={async open(id){user=FX.menuSessionUser();if(!user)throw new Error('Iniciá sesión para consultar la factura.');if(!options?.pagos)options=await api({consulta:'opciones'});showInvoice(await api({consulta:'detalle',id}));},close(){if($('detailDialog').open)$('detailDialog').close();}};
-  $('detailDialog').addEventListener('close', () => detailReturnFocus?.focus());
-  $('printDetail').addEventListener('click', () => printBody($('detailTitle').textContent, $('detailBody').innerHTML));
-  $('printReport').addEventListener('click', () => printBody($('reportTitle').textContent, `<p>${esc($('reportFrom').value)} al ${esc($('reportTo').value)} · ${esc($('reportProvider').value || 'Todos')}</p>${$('reportBody').innerHTML}<p>${esc($('reportTotals').textContent)}</p>`));
+  $('detailDialog').addEventListener('close', () => {
+    if(!$('detailDialog').open&&$('reportDialog').open&&!$('purchaseConsultMenu').open)detailReturnFocus?.focus({preventScroll:true});
+  });
+  $('classicDetailSearch').addEventListener('click',openPurchaseConsult);
+  window.addEventListener('corralon-appearance-change', () => {if($('reportDialog').open)renderReport();});
+  $('printDetail').addEventListener('click', () => {
+    const printable = $('detailBody').cloneNode(true);
+    printable.querySelectorAll('[data-saved-amount]').forEach(input => input.replaceWith(input.dataset.savedAmount));
+    printBody($('detailTitle').textContent, printable.innerHTML);
+  });
+  $('printReport').addEventListener('click', () => {
+    const provider = $('reportProvider').value || 'Todos';
+    const range = $('reportFrom').value + ' al ' + $('reportTo').value;
+    const summary = reportCriterion === 'numero' ? 'Factura ' + $('reportSearch').value
+      : reportCriterion === 'proveedor' ? provider
+      : reportCriterion === 'periodo' ? $('reportFrom').value.slice(3)
+      : range + ' · ' + provider;
+    printBody($('reportTitle').textContent, `<p>${esc(summary)}</p>${$('reportBody').innerHTML}<p>${esc($('reportTotals').textContent)}</p>`);
+  });
   document.addEventListener('keydown', event => {
     if (!options || document.querySelector('dialog[open]')) return;
     if (event.key === 'F1') { event.preventDefault(); openReport('buscar', $('lastNumber').value); }
@@ -1593,7 +2189,6 @@ const instances=new Map();let active='compras';
 const modules={"stock":{"file":"cargastock.html","permission":"carga_stock","title":"Cargar stock","html":""},"articulos":{"file":"articulos-sql.html","permission":"articulos_sql","title":"Artículos","html":""}};
 const resources={"facturacion-consulta.js":"(function(){\r\n  if(window.CorralonInvoiceHistory)return;\r\n  const button=document.getElementById('consultInvoices');\r\n  const escape=value=>String(value??'').replace(/[&\u003c>\"']/g,c=>({'&':'&amp;','\u003c':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\r\n  const money=value=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'}).format(Number(value)||0);\r\n  const number=value=>new Intl.NumberFormat('es-AR',{maximumFractionDigits:4}).format(Number(value)||0);\r\n  const styles=document.createElement('style');styles.textContent=`\r\n    .receipt-values-scroll{max-height:88px;overflow:auto;scrollbar-gutter:stable}\r\n    .invoice-receipt-detail .receipt-values-scroll .invoice-history-table th{height:24px}\r\n    .invoice-receipt-detail .receipt-values-scroll .invoice-history-table td{height:32px}\r\n    .invoice-history-overlay{position:fixed;inset:0;z-index:95;background:#0009;display:grid;place-items:center;padding:16px}\r\n    .invoice-history-overlay[hidden]{display:none}.invoice-history-card{background:#fff;border-radius:12px;width:min(1200px,100%);height:min(850px,92dvh);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 55px #0005;color:#151515;font:14px Barlow,Arial,sans-serif}\r\n    .invoice-history-head{padding:12px 16px;border-bottom:1px solid #ddd;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.invoice-history-head h2{margin:0;flex:1;font-size:22px}.invoice-history-card button{cursor:pointer;border:1px solid #bbb;border-radius:7px;background:#fff;padding:7px 12px;font:700 14px Barlow,Arial,sans-serif}.invoice-history-card button:disabled{opacity:.45;cursor:default}.invoice-history-card button.primary{background:#ed1019;color:#fff;border-color:#ed1019}\r\n    .invoice-history-filters{padding:12px 16px;display:flex;gap:10px;flex-wrap:wrap;border-bottom:1px solid #ddd;align-items:end}.invoice-history-filters label{display:grid;gap:4px;font-weight:700}.invoice-history-filters input,.invoice-history-filters select{height:33px;padding:4px 7px;border:1px solid #bbb;border-radius:5px;font:14px Barlow,Arial,sans-serif;max-width:100%}.invoice-history-filters input.date{width:130px}.invoice-history-filters .search{flex:1;min-width:180px}.invoice-history-status{padding:8px 16px;color:#666;min-height:30px}.invoice-history-status.error{color:#b00020}\r\n    .invoice-history-scroll{flex:1;min-height:0;overflow:auto;padding:0 16px}.invoice-history-table{width:100%;border-collapse:collapse;font-size:14px}.invoice-history-table th{position:sticky;top:0;background:#eee;text-align:left;z-index:1}.invoice-history-table th,.invoice-history-table td{padding:9px 8px;border-bottom:1px solid #ddd}.invoice-history-table tbody tr:nth-child(even){background:#f6f6f6}.invoice-history-table tbody tr[data-invoice]{cursor:pointer}.invoice-history-table tbody tr[data-invoice]:hover{background:#ffe8e9}.invoice-history-table .money{text-align:right;white-space:nowrap}.invoice-history-table .cancelled{color:#b00020}.invoice-history-footer{padding:10px 16px;border-top:1px solid #ddd;display:flex;align-items:center;justify-content:space-between;gap:10px}.invoice-history-detail-summary{padding:12px 0;display:flex;gap:12px;flex-wrap:wrap}.invoice-history-detail-summary strong{display:block}.invoice-history-detail-summary>div{min-width:125px}.invoice-history-detail h3{margin:16px 0 8px}.invoice-history-detail-total{font-size:20px;font-weight:800;text-align:right;padding:12px 0}\r\n    \r\n    .invoice-history-card .invoice-history-table th button[data-sort]{display:inline-flex;align-items:center;gap:5px;border:0;border-radius:0;background:transparent!important;color:inherit!important;padding:0;font:inherit;font-weight:700;box-shadow:none;text-align:inherit}.invoice-history-table [data-sort-icon]{font-size:10px;color:#777}.invoice-history-table th[aria-sort=\"ascending\"] [data-sort-icon],.invoice-history-table th[aria-sort=\"descending\"] [data-sort-icon]{color:#ed1019}\r\n    @media print{.invoice-history-overlay{display:none!important}}\r\n  `;styles.textContent+='\\n    .invoice-receipt-detail .invoice-history-card{width:min(1330px,100%);font-size:12px;background:#f3f3f3}\\n    .invoice-receipt-detail .invoice-history-head{padding:7px 12px;background:white}.invoice-receipt-detail .invoice-history-head h2{font-size:19px}\\n    .invoice-receipt-detail .invoice-history-detail{padding:8px 12px;overflow:auto}.receipt-layout{min-width:1080px;max-width:1300px}\\n    .receipt-row{display:flex;align-items:center;gap:9px;margin-bottom:5px;white-space:nowrap}.receipt-field{display:flex;align-items:center;gap:3px;font-size:11px;font-weight:700;min-width:0}.receipt-field span{display:block;height:22px;padding:2px 5px;border:1px solid #b9b9b9;background:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;font-weight:600}.receipt-field span.receipt-number{background:#111;color:#ffef66}.receipt-field span.receipt-highlight{background:#fff5ad}.receipt-field input{margin:0;width:14px;height:14px}\\n    .receipt-grid{border:1px solid #999;background:#fff;overflow:auto;margin-top:7px;width:1110px;max-width:100%}.receipt-grid .invoice-history-table{font-size:13px;table-layout:fixed}.receipt-grid .invoice-history-table th,.receipt-grid .invoice-history-table td{padding:2px 5px;height:22px;border-right:1px solid #ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.receipt-grid .invoice-history-table th{font-weight:600;background:#e5e8eb}.receipt-grid .invoice-history-table tr.receipt-empty td{height:22px;background:#fff}.receipt-records{padding:2px 5px;font-size:11px;border-top:1px solid #bbb;background:#ececec}\\n    .receipt-values-area{display:flex;align-items:start;gap:16px;width:1110px;margin:3px 0 7px}.receipt-values-area .receipt-grid{width:835px;margin:0}.receipt-tax-summary{width:265px;display:grid;gap:5px;padding-top:1px}.receipt-tax-summary .receipt-field{justify-content:end}.receipt-tax-summary .receipt-field span{text-align:right;width:115px}\\n    .receipt-totals .receipt-field span{text-align:right}.receipt-totals .receipt-field .receipt-total{color:#fff;background:#111;font-weight:800}.receipt-actions .invoice-history-footer{background:transparent;justify-content:start;border:1px solid #bbb;padding:5px;margin-top:8px;gap:8px}.receipt-actions .invoice-history-footer [data-action-status]:empty{display:none}.receipt-actions .invoice-history-footer button{border-radius:3px;height:34px;font-size:12px}\\n';styles.textContent+=`\r\n    .invoice-receipt-detail .invoice-history-card{height:calc(100vh - 32px);height:calc(100dvh - 32px);max-height:calc(100dvh - 32px);min-height:0}\r\n    .invoice-receipt-detail .invoice-history-head{flex-shrink:0}\r\n    .invoice-receipt-detail .invoice-history-detail{display:flex;min-height:0;overflow-x:auto;overflow-y:hidden}\r\n    .invoice-receipt-detail .receipt-layout{display:flex;flex-direction:column;flex:1;min-height:0;height:100%}\r\n    .invoice-receipt-detail .receipt-layout>*{flex-shrink:0}\r\n    .invoice-receipt-detail .receipt-articles{display:flex;flex-direction:column;flex:1 1 0;min-height:0;overflow:hidden}\r\n    .receipt-articles-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}\r\n    .receipt-articles-scroll thead th{position:sticky;top:0;z-index:1}\r\n    .receipt-articles .receipt-records{flex-shrink:0}\r\n`;document.head.appendChild(styles);\r\n  // Cargar los ajustes de telefono tambien cuando este modulo se reutiliza en Caja.\r\n  const mobileStyles=document.querySelector('link[data-facturacion-mobile]')||document.createElement('link');\r\n  mobileStyles.rel='stylesheet';mobileStyles.href='facturacion-mobile.css';mobileStyles.setAttribute('data-facturacion-mobile','');\r\n  document.head.appendChild(mobileStyles);\r\n  const overlay=document.createElement('div');overlay.className='invoice-history-overlay';overlay.hidden=true;overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','Consultar boletas');\r\n  overlay.innerHTML=`\u003csection class=\"invoice-history-card\">\u003cheader class=\"invoice-history-head\">\u003ch2>Consultar boletas\u003c/h2>\u003cbutton data-close type=\"button\">Cerrar\u003c/button>\u003c/header>\u003cform class=\"invoice-history-filters\">\u003clabel>Sucursal\u003cselect data-branch>\u003coption value=\"0\">Todas las sucursales\u003c/option>\u003c/select>\u003c/label>\u003clabel>Punto de venta\u003cselect data-point>\u003coption value=\"0\">Todos los puntos de venta\u003c/option>\u003c/select>\u003c/label>\u003clabel>Desde\u003cinput class=\"date\" data-from inputmode=\"numeric\" autocomplete=\"off\" placeholder=\"dd/mm/aaaa\" required>\u003c/label>\u003clabel>Hasta\u003cinput class=\"date\" data-to inputmode=\"numeric\" autocomplete=\"off\" placeholder=\"dd/mm/aaaa\" required>\u003c/label>\u003clabel class=\"search\">Cliente o número\u003cinput data-search autocomplete=\"off\" placeholder=\"Buscar cliente o boleta…\" maxlength=\"80\">\u003c/label>\u003clabel class=\"search\">Artículo\u003cinput data-article autocomplete=\"off\" placeholder=\"Descripción, IDArt o código de proveedor…\" maxlength=\"100\">\u003c/label>\u003cbutton class=\"primary\" type=\"submit\">Consultar\u003c/button>\u003c/form>\u003cdiv class=\"invoice-history-status\" data-status role=\"status\" aria-live=\"polite\">\u003c/div>\u003cdiv class=\"invoice-history-scroll\">\u003ctable class=\"invoice-history-table\">\u003cthead>\u003ctr>\u003cth aria-sort=\"none\">\u003cbutton type=\"button\" data-sort=\"numero\">Número \u003cspan data-sort-icon aria-hidden=\"true\">↕\u003c/span>\u003c/button>\u003c/th>\u003cth aria-sort=\"none\">\u003cbutton type=\"button\" data-sort=\"tipo\">Tipo \u003cspan data-sort-icon aria-hidden=\"true\">↕\u003c/span>\u003c/button>\u003c/th>\u003cth aria-sort=\"none\">\u003cbutton type=\"button\" data-sort=\"cliente\">Cliente \u003cspan data-sort-icon aria-hidden=\"true\">↕\u003c/span>\u003c/button>\u003c/th>\u003cth aria-sort=\"none\">\u003cbutton type=\"button\" data-sort=\"sucursal\">Sucursal \u003cspan data-sort-icon aria-hidden=\"true\">↕\u003c/span>\u003c/button>\u003c/th>\u003cth aria-sort=\"none\">\u003cbutton type=\"button\" data-sort=\"fecha\">Fecha \u003cspan data-sort-icon aria-hidden=\"true\">↕\u003c/span>\u003c/button>\u003c/th>\u003cth class=\"money\" aria-sort=\"none\">\u003cbutton type=\"button\" data-sort=\"total\">Total \u003cspan data-sort-icon aria-hidden=\"true\">↕\u003c/span>\u003c/button>\u003c/th>\u003cth aria-sort=\"none\">\u003cbutton type=\"button\" data-sort=\"estado\">Estado \u003cspan data-sort-icon aria-hidden=\"true\">↕\u003c/span>\u003c/button>\u003c/th>\u003cth>\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody data-rows>\u003c/tbody>\u003c/table>\u003c/div>\u003cfooter class=\"invoice-history-footer\">\u003cspan data-position>\u003c/span>\u003cspan data-more-status role=\"status\" aria-live=\"polite\">\u003c/span>\u003cbutton data-retry-more type=\"button\" hidden>Reintentar carga\u003c/button>\u003c/footer>\u003c/section>`;document.body.appendChild(overlay);\r\n  const get=selector=>overlay.querySelector(selector),status=get('[data-status]');\r\n  const detail=document.createElement('div');detail.className='invoice-history-overlay';detail.hidden=true;detail.style.zIndex='96';detail.classList.add('invoice-receipt-detail');detail.setAttribute('role','dialog');detail.setAttribute('aria-modal','true');detail.setAttribute('aria-label','Detalle de boleta');\r\n  detail.innerHTML=`\u003csection class=\"invoice-history-card\">\u003cheader class=\"invoice-history-head\">\u003ch2 data-title>Boleta\u003c/h2>\u003cbutton data-detail-prev type=\"button\" aria-label=\"Boleta anterior\">‹\u003c/button>\u003cspan data-detail-position>\u003c/span>\u003cbutton data-detail-next type=\"button\" aria-label=\"Boleta siguiente\">›\u003c/button>\u003cbutton data-detail-close type=\"button\">Cerrar\u003c/button>\u003c/header>\u003cdiv class=\"invoice-history-scroll invoice-history-detail\" data-detail-body>\u003c/div>\u003cfooter class=\"invoice-history-footer\">\u003cspan data-action-status role=\"status\">\u003c/span>\u003cdiv>\u003cbutton data-preview type=\"button\" disabled>Vista previa\u003c/button> \u003cbutton data-reprint type=\"button\" disabled>Reimprimir\u003c/button> \u003cbutton data-recall class=\"primary\" type=\"button\" disabled>Llamar a facturar\u003c/button>\u003c/div>\u003c/footer>\u003c/section>`;document.body.appendChild(detail);\r\n  let historyConfig=null,returnFocus=null,directOpenSequence=0,detailOptions={};\r\n  const annulButton=document.createElement('button');annulButton.type='button';annulButton.dataset.annul='';annulButton.textContent='Anular boleta';annulButton.hidden=true;annulButton.disabled=true;annulButton.style.cssText='margin-left:8px;color:#b00020;border-color:#e4aab3;background:#fff3f4';\r\n  detail.querySelector('.invoice-history-footer>div').appendChild(annulButton);\r\n  let rows=[],page=0,hasMore=false,listController=null,detailController=null,sequence=0,detailSequence=0,detailIndex=-1,searchTimer=null,actionBusy=false,detailData=null;\r\n  let listLoading=false,moreError=false,listQuery='',totalRecords=null;\r\n  let sortField='',sortDirection='';\r\n  function paintSort(){\r\n    overlay.querySelectorAll('[data-sort]').forEach(button=>{\r\n      const active=button.dataset.sort===sortField;\r\n      button.closest('th').setAttribute('aria-sort',active?(sortDirection==='asc'?'ascending':'descending'):'none');\r\n      button.querySelector('[data-sort-icon]').textContent=active?(sortDirection==='asc'?'▲':'▼'):'↕';\r\n      button.title=active?(sortDirection==='asc'?'Ordenar descendente':'Restaurar orden original'):'Ordenar ascendente';\r\n    });\r\n  }\r\n  overlay.querySelector('thead').addEventListener('click',event=>{\r\n    const button=event.target.closest('[data-sort]');if(!button)return;\r\n    if(sortField!==button.dataset.sort){sortField=button.dataset.sort;sortDirection='asc'}\r\n    else if(sortDirection==='asc')sortDirection='desc';else{sortField='';sortDirection=''}\r\n    paintSort();load(0);\r\n  });\r\n  paintSort();\r\n  let cancellationBusy=false;\r\n  function valuesUser(){return window.CorralonFunciones?.menuSessionUser?.()||{}}\r\n  function isAdministrator(){if(detailOptions.readOnly===true)return false;return typeof detailOptions.allowAnnul==='boolean'?detailOptions.allowAnnul:window.CorralonFunciones.menuUserIsAdministrator('facturacion',valuesUser());}\r\n  function historyActions(){return detailOptions.actions||window.CorralonInvoiceHistoryActions||{}}\r\n  function refreshAnnulButton(){\r\n    annulButton.hidden=!isAdministrator();\r\n    annulButton.disabled=actionBusy||!detailData?.versionAnulacion||!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||Boolean(detailData?.bloqueoAnulacionFiscal)||Boolean(detailData?.valuesDirty);\r\n    annulButton.title=detailData?.bloqueoAnulacionFiscal?'Debe hacer una nota de crédito/débito.':detailData?.valuesDirty?'Guardá los valores antes de anular.':'';\r\n  }\r\n  function valueNumber(value){if(typeof value==='number')return value;const text=String(value??'').replace(/[^\\d,.-]/g,'');return Number(text.includes(',')?text.replace(/\\./g,'').replace(',','.'):text)||0;}\r\n  function receiptValuesBasis(result=detailData){\r\n    if(result.valuesArticleBasis==null){const h=result.comprobante;result.valuesArticleBasis=h.totalArticulos!=null?Math.abs(Number(h.totalArticulos)):result.articulos?.length?Math.abs(result.articulos.reduce((sum,row)=>sum+Number(row.importe||0),0)):Math.abs(Number(h.total))-Number(h.ajusteEmitido??result.valores.reduce((sum,row)=>sum+Number(row.impRec||0),0));}\r\n    return Math.round(result.valuesArticleBasis*100)/100;\r\n  }\r\n  function receiptValuesBalance(values=detailData.valores){\r\n    const round=value=>Math.round(value*100)/100,issued=Math.abs(Number(detailData.comprobante.total)),articles=receiptValuesBasis(),base=values.reduce((sum,row)=>sum+Number(row.importe||0),0),adjustment=values.reduce((sum,row)=>sum+Number(row.impRec||0),0),total=values.reduce((sum,row)=>sum+Number(row.total||0),0),expectedAdjustment=round(issued-articles);\r\n    const cashDifference=round(total-issued),baseDifference=round(articles-base),adjustmentDifference=round(adjustment-expectedAdjustment);\r\n    return {issued,articles,base,adjustment,total,expectedAdjustment,cashDifference,baseDifference,adjustmentDifference,invalid:cashDifference!==0||baseDifference!==0||adjustmentDifference!==0};\r\n  }\r\n  function blankValue(){const type=valueTypes().find(p=>Number(p.clase)===1)||valueTypes()[0],remaining=Math.max(0,Math.round((Math.abs(Number(detailData.comprobante.total))-detailData.valores.reduce((sum,v)=>sum+Number(v.total||0),0))*100)/100);return{orden:null,idTipoPago:type?.id||0,tipo:type?.nombre||'',clase:type?.clase||0,idTarjeta:0,tarjeta:'Ninguna',importe:remaining,coef:0,impRec:0,total:remaining,cuotas:0,descripcion:''};}\r\n  function valueInput(v,i,key,text){return `\u003cinput data-value-index=\"${i}\" data-value-key=\"${key}\" ${key==='descripcion'?'maxlength=\"30\"':'inputmode=\"decimal\" class=\"money\"'} value=\"${escape(text)}\" style=\"width:100%;height:26px;border:0;background:transparent;padding:2px 5px;font:inherit;${key==='descripcion'?'':'text-align:right'}\">`;}\r\n  function editableValuesTable(values){return `\u003cdiv class=\"receipt-grid\" style=\"width:835px\">\u003cdiv class=\"receipt-values-scroll\">\u003ctable class=\"invoice-history-table\" data-edit-values>\u003ccolgroup>${[15,15,14,7,15,10,10,11,3].map(w=>`\u003ccol style=\"width:${w}%\">`).join('')}\u003c/colgroup>\u003cthead>\u003ctr>${['Tipo de valor','Importe','Tarjeta / cuenta','Cuotas','Descripción','% Dto./Rec.','$ Dto./Rec.','Total',''].map(t=>`\u003cth>${t}\u003c/th>`).join('')}\u003c/tr>\u003c/thead>\u003ctbody>${values.map((v,i)=>{const cells=valueCells(v,i);return `\u003ctr data-value-row=\"${i}\">\u003ctd>${cells[0]}\u003c/td>\u003ctd>${valueInput(v,i,'importe',money(v.importe))}\u003c/td>\u003ctd>${cells[1]}\u003c/td>\u003ctd>${cells[2]}\u003c/td>\u003ctd>${valueInput(v,i,'descripcion',v.descripcion||'')}\u003c/td>\u003ctd>${valueInput(v,i,'coef',number(Number(v.coef||0)*100)+' %')}\u003c/td>\u003ctd>${valueInput(v,i,'impRec',money(v.impRec))}\u003c/td>\u003ctd>${valueInput(v,i,'total',money(v.total))}\u003c/td>\u003ctd>\u003cbutton type=\"button\" data-remove-value=\"${i}\" aria-label=\"Quitar valor\" style=\"border:0;padding:0;color:#d00008;background:transparent\">×\u003c/button>\u003c/td>\u003c/tr>`;}).join('')}\u003c/tbody>\u003c/table>\u003c/div>\u003cdiv class=\"receipt-records\" style=\"display:flex;justify-content:space-between\">\u003cspan>${values.length} valores\u003c/span>\u003cbutton type=\"button\" data-add-value style=\"padding:0 5px;font-size:11px\">+ Renglón\u003c/button>\u003c/div>\u003cdiv class=\"receipt-values-difference\" style=\"padding:4px 5px;text-align:right\">Diferencia: \u003cstrong data-values-difference>\u003c/strong>\u003c/div>\u003c/div>`;}\r\n  function updateValueTotals(){\r\n    const h=detailData.comprobante,sign=Number(h.total)\u003c0?-1:1;h.efectivo=0;h.tarjeta=0;h.cuentaCorriente=0;h.cheque=0;\r\n    for(const v of detailData.valores){const kind=Number((historyConfig.tiposPago||[]).find(p=>Number(p.id)===Number(v.idTipoPago))?.clase||v.clase);const bucket=({1:'efectivo',2:'cheque',3:'cheque',5:'tarjeta',6:'cuentaCorriente'})[kind];if(bucket)h[bucket]+=Number(v.total||0)*sign;}\r\n    detailData.valuesDirty=true;\r\n  }\r\n  function reconcileCashDifference(){\r\n    let keptAutomatic=false;\r\n    detailData.valores=detailData.valores.filter(v=>{if(!v.autoDifference)return true;if(keptAutomatic)return false;keptAutomatic=true;return true;});\r\n    const values=detailData.valores,cash=valueTypes().find(p=>Number(p.clase)===1);if(!cash)return;\r\n    const automatic=values.find(v=>v.autoDifference),manual=values.filter(v=>!v.autoDifference),state=receiptValuesBalance(),round=value=>Math.round(value*100)/100;\r\n    const remainingBase=round(state.articles-manual.reduce((sum,v)=>sum+Number(v.importe||0),0)),remainingAdjustment=round(state.expectedAdjustment-manual.reduce((sum,v)=>sum+Number(v.impRec||0),0)),remaining=round(remainingBase+remainingAdjustment);\r\n    if(remainingBase>0&&remaining>0){const row=automatic||{...blankValue(),idTipoPago:cash.id,tipo:cash.nombre,clase:cash.clase,autoDifference:true};row.importe=remainingBase;row.impRec=remainingAdjustment;row.coef=remainingAdjustment/remainingBase;row.total=remaining;if(!automatic)values.push(row);}\r\n    else if(automatic)values.splice(values.indexOf(automatic),1);\r\n    updateValueTotals();\r\n  }\r\n  function refreshValueOutputs(){\r\n    refreshAnnulButton();\r\n    const values=detailData.valores,total=values.reduce((sum,v)=>sum+Number(v.total||0),0),difference=Math.round((total-Math.abs(Number(detailData.comprobante.total)))*100)/100;\r\n    const state=receiptValuesBalance();let output=detail.querySelector('[data-values-difference]');\r\n    if(!output){const line=document.createElement('div');line.className='receipt-values-difference';line.style.cssText='padding:4px 5px;text-align:right';line.innerHTML='Diferencia: \u003cstrong data-values-difference>\u003c/strong>';detail.querySelector('.receipt-values-area .receipt-grid')?.append(line);output=line.querySelector('strong');}\r\n    if(output){output.textContent=money(state.cashDifference||state.baseDifference||state.adjustmentDifference);output.style.color=state.invalid?'#b00020':'#087a20';output.title='Cobro: '+money(state.cashDifference)+' · Base: '+money(state.baseDifference)+' · Ajuste: '+money(state.adjustmentDifference);\r\n      let info=detail.querySelector('[data-values-adjustment-info]');if(!info){info=document.createElement('div');info.dataset.valuesAdjustmentInfo='';info.style.cssText='padding:4px 5px;font-size:12px;line-height:1.4';output.parentElement.after(info);}info.hidden=!state.invalid&&!state.expectedAdjustment;info.style.color=state.invalid?'#b00020':'#173b65';info.textContent='Artículos: '+money(state.articles)+' · Descuento/recargo emitido: '+money(state.expectedAdjustment)+' · En valores: '+money(state.adjustment)+(state.invalid?' · Revisá la base y el ajuste antes de guardar.':'');\r\n      let restore=detail.querySelector('[data-restore-issued-adjustment]');if(!restore&&canEditValues()){restore=document.createElement('button');restore.type='button';restore.dataset.restoreIssuedAdjustment='';restore.textContent='Reasignar ajuste emitido';restore.style.cssText='margin:4px 5px;padding:5px 9px;font-size:12px';info.after(restore);}if(restore)restore.hidden=!canEditValues()||!state.invalid||state.cashDifference!==0;\r\n    }\r\n    for(const [label,value] of [['Efectivo:',detailData.comprobante.efectivo],['Tarjeta:',detailData.comprobante.tarjeta],['Cta. Cte.:',detailData.comprobante.cuentaCorriente],['Cheque:',detailData.comprobante.cheque],['Total Valores:',total],['Dto./Rec.:',values.reduce((sum,v)=>sum+Number(v.impRec||0),0)]]){\r\n      const field=[...detail.querySelectorAll('.receipt-field')].find(el=>el.firstChild.textContent===label)?.querySelector('span');if(field)field.textContent=money(value);\r\n    }\r\n  }\r\n  function canEditValues(){if(detailOptions.readOnly===true)return false;const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return (allowed || detailOptions.allowEditValues===true)&&Number(detailData?.comprobante?.confirmado)!==0&&!Number(detailData?.comprobante?.anulada)&&Boolean(detailData?.versionValores)}\r\n  function canEditHeader(){if(!canEditValues())return false;const user=valuesUser(),isAdministrator=window.CorralonFunciones?.menuUserIsAdministrator;if(typeof isAdministrator==='function')return Boolean(isAdministrator('facturacion',user));return String(user.nivel||'').trim().toLowerCase()==='administrador'||(Array.isArray(user.permisos)&&user.permisos.includes('facturacion')&&Array.isArray(user.permisosEdicion)&&user.permisosEdicion.includes('facturacion'))}\n  function headerState(header){return {idCliente:String(header.idCliente??''),completo:Boolean(Number(header.Completo??header.Pagada??0)),actualizaStock:Boolean(Number(header.stockActualizado)),enInformeVentas:Boolean(Number(header.EnInfVtas))}}\n  function receiptHeaderChanges(){if(!canEditHeader())return {};const current=headerState(detailData.comprobante),original=detailData.headerOriginal||current,changes={};for(const key of Object.keys(current))if(current[key]!==original[key])changes[key]=current[key];if('idCliente' in changes){if(!/^[1-9]\\d*$/.test(changes.idCliente))throw Error('Ingresá un ID de cliente válido.');changes.idCliente=Number(changes.idCliente)}return changes}\n  function markHeaderDirty(){detailData.valuesDirty=true;refreshAnnulButton();for(const key of ['preview','reprint','recall'])detail.querySelector('[data-'+key+']').disabled=true;detail.querySelector('[data-action-status]').textContent='Cambios sin guardar.'}\n  async function resolveReceiptCustomer(){\n    if(!canEditHeader())return false;const data=detailData,id=String(data.comprobante.idCliente??'');\n    if(!/^[1-9]\\d*$/.test(id)){detail.querySelector('[data-action-status]').textContent='Ingresá un ID de cliente válido.';return false}\n    if(data.headerResolvedCustomer===id)return true;\n    if(data.headerCustomerPromise&&data.headerCustomerPending===id)return data.headerCustomerPromise;\n    data.headerCustomerPending=id;data.headerCustomerController?.abort();const controller=data.headerCustomerController=new AbortController();\n    data.headerCustomerPromise=(async()=>{try{detail.querySelector('[data-action-status]').textContent='Consultando cliente…';const result=await sql('clientes?id='+encodeURIComponent(id),controller);if(detailData!==data||String(data.comprobante.idCliente)!==id)return false;const client=result.cliente;if(!client||Number(client.suspendido))throw Error('El cliente no existe o está suspendido.');if(Number(result.unificadoEn)>0)throw Error('La cuenta fue unificada. Usá el cliente principal '+result.unificadoEn+'.');data.headerResolvedCustomer=id;\n      if(!/^\\d{14}$/.test(String(data.comprobante.cae||'')))Object.assign(data.comprobante,{cliente:client.nombre,documento:client.documento,idTipoDoc:client.idTipoDoc,idTipoIva:client.idTipoIva,direccion:client.direccion,telefono:client.telefono,email:client.email});\n      redrawValues();detail.querySelector('[data-action-status]').textContent='Cliente '+id+': '+client.nombre+'. Cambios sin guardar.';return true;\n    }catch(error){if(detailData===data&&String(data.comprobante.idCliente)===id)detail.querySelector('[data-action-status]').textContent=controller.signal.aborted?'La consulta del cliente se interrumpió. Volvé a intentar.':error.message;return false}finally{if(data.headerCustomerPending===id){data.headerCustomerPromise=null;data.headerCustomerPending=''}}})();return data.headerCustomerPromise;\n  }\n  detail.addEventListener('input',event=>{const input=event.target.closest('[data-header-key=\"idCliente\"]');if(!input||!canEditHeader()||actionBusy)return;detailData.comprobante.idCliente=input.value.trim();markHeaderDirty()});\n  detail.addEventListener('change',event=>{const input=event.target.closest('[data-header-key]');if(!input||!canEditHeader()||actionBusy)return;const key=input.dataset.headerKey;if(key==='idCliente'){detailData.comprobante.idCliente=input.value.trim();markHeaderDirty();resolveReceiptCustomer();return}const field={completo:'Completo',actualizaStock:'stockActualizado',enInformeVentas:'EnInfVtas'}[key];if(field){detailData.comprobante[field]=input.checked;markHeaderDirty()}});\n  detail.addEventListener('keydown',async event=>{const input=event.target.closest('[data-header-key=\"idCliente\"]');if(!input||!canEditHeader()||actionBusy)return;if(event.key==='Enter'){event.preventDefault();event.stopPropagation();detailData.comprobante.idCliente=input.value.trim();if(await resolveReceiptCustomer())detail.querySelector('[data-header-key=\"completo\"]')?.focus()}});\r\n\n  function valueRules(){try{return window.CorralonMediosPago?.normalize(JSON.parse(localStorage.getItem('corralon_facturacion_medios_pago_v1')||'null'),historyConfig)}catch{return window.CorralonMediosPago?.normalize(null,historyConfig)}}\r\n  function valueTypes(){const rules=valueRules();return(historyConfig?.tiposPago||[]).filter(p=>[1,3,5,6].includes(Number(p.clase))&&Number(p.id)!==14&&(!window.CorralonMediosPago||window.CorralonMediosPago.allowsVoucher(rules,p.id,detailData.comprobante.idComprobante)))}\r\n  function valueCards(value){const rules=valueRules();return(historyConfig?.tarjetas||[]).filter(c=>!window.CorralonMediosPago||window.CorralonMediosPago.allowsCard(rules,value.idTipoPago,c.id))}\r\n  function valueSelect(value,index,key,choices){return `\u003cselect data-value-index=\"${index}\" data-value-key=\"${key}\" aria-label=\"${key==='idTipoPago'?'Tipo de valor':key==='idTarjeta'?'Tarjeta o cuenta':'Cuotas'}\" style=\"width:100%;font:inherit;border:1px solid #bbb;background:white\">${choices.map(c=>`\u003coption value=\"${Number(c.id)}\" ${Number(c.id)===Number(value[key])?'selected':''}>${escape(c.nombre)}\u003c/option>`).join('')}\u003c/select>`}\r\n  function valueCells(value,index){\r\n    if(!canEditValues())return [escape(value.tipo||value.idTipoPago),escape(value.tarjeta||'Ninguna'),escape(value.cuotas??0)];\r\n    const types=valueTypes();if(!types.some(p=>Number(p.id)===Number(value.idTipoPago)))types.push({id:value.idTipoPago,nombre:value.tipo});\r\n    const cls=Number((historyConfig?.tiposPago||[]).find(p=>Number(p.id)===Number(value.idTipoPago))?.clase||value.clase),cards=[{id:0,nombre:'Ninguna'},...valueCards(value)],plans=[{id:0,nombre:'0'},...(historyConfig?.tarjetasCuotas||[]).filter(p=>Number(p.idTarjeta)===Number(value.idTarjeta)).map(p=>({id:p.cuotas,nombre:p.cuotas}))];\r\n    if(value.idTarjeta&&!cards.some(c=>Number(c.id)===Number(value.idTarjeta)))cards.push({id:value.idTarjeta,nombre:value.tarjeta});\r\n    return [valueSelect(value,index,'idTipoPago',types),[3,5].includes(cls)?valueSelect(value,index,'idTarjeta',cards):escape(value.tarjeta||'Ninguna'),cls===5?valueSelect(value,index,'cuotas',plans):escape(value.cuotas??0)];\r\n  }\r\n  function fitReceiptDetail(){\r\n    if(sectionActive&&detail.parentElement===sectionHost){\r\n      if(window.matchMedia('print').matches)return;\r\n      const card=detail.querySelector('.invoice-history-card');\r\n      // La misma referencia y redondeo que fitInvoiceForm; nunca depende del scroll.\r\n      const width=Math.max(1,window.innerWidth-8),height=Math.max(1,window.innerHeight-8);\r\n      const scale=Math.max(.01,Math.floor(Math.min(width/1760,height/880)*1000)/1000);\r\n      const header=document.querySelector('body > .app > .topbar');\r\n      const top=Math.ceil(header?.getBoundingClientRect().height||70*scale)+8;\r\n      const availableWidth=Math.max(1,window.innerWidth-20);\r\n      const availableHeight=Math.max(1,window.innerHeight-top-10);\r\n      sectionHost.style.setProperty('--receipt-fit-top',top+'px');\r\n      detail.classList.add('receipt-scaled-desktop','receipt-fit-section');\r\n      card.style.setProperty('--receipt-scale',String(scale));\r\n      card.style.setProperty('--receipt-fit-width',Math.floor(availableWidth/scale)+'px');\r\n      card.style.setProperty('--receipt-fit-height',Math.floor(availableHeight/scale)+'px');\r\n      return;\r\n    }\r\n    detail.classList.remove('receipt-fit-section');\r\n    const card=detail.querySelector('.invoice-history-card');\r\n    const desktop=window.innerWidth>700;detail.classList.toggle('receipt-scaled-desktop',desktop);\r\n    if(!desktop){card.style.removeProperty('--receipt-scale');return;}\r\n    const width=detail.clientWidth||window.innerWidth,height=detail.clientHeight||window.innerHeight;\r\n    card.style.setProperty('--receipt-scale',String(Math.max(.01,Math.min((width-28)/1450,(height-28)/850))));\r\n  }\r\n  window.addEventListener('resize',()=>{if(!detail.hidden)fitReceiptDetail();});\r\n  function decorateReceiptDetail(body){\r\n    const layout=body.querySelector('.receipt-layout');if(!layout)return;fitReceiptDetail();\r\n    const heading=(label)=>{const h=document.createElement('h3');h.className='receipt-section-title';h.textContent=label;return h;};\r\n    const card=(label)=>{const section=document.createElement('section');section.className='receipt-section';section.append(heading(label));return section;};\r\n    const main=card('Datos principales');main.classList.add('receipt-main-data');\r\n    const mainRows=[...layout.children].filter(el=>el.classList.contains('receipt-row')&&!el.classList.contains('receipt-totals'));\r\n    if(mainRows.length){layout.insertBefore(main,mainRows[0]);main.append(...mainRows);}\r\n    const articles=layout.querySelector('.receipt-articles');articles.classList.add('receipt-section');\r\n    const articleTitle=heading('Detalle de artículos'),search=document.createElement('input');search.type='search';search.dataset.receiptArticleSearch='';search.placeholder='Buscar artículo…';search.setAttribute('aria-label','Buscar en los artículos del comprobante');articleTitle.append(search);articles.prepend(articleTitle);\r\n    const area=layout.querySelector('.receipt-values-area'),values=area?.querySelector('.receipt-grid'),tax=area?.querySelector('.receipt-tax-summary');\r\n    if(values){values.classList.add('receipt-section','receipt-values-card');values.prepend(heading('Valores recibidos'));}\r\n    if(tax){tax.classList.add('receipt-section');tax.prepend(heading('Resumen de totales'));}\r\n    const totals=card('Totales y otros datos');totals.classList.add('receipt-other-data');\r\n    const totalsRows=[...layout.children].filter(el=>el.classList.contains('receipt-totals'));\r\n    if(totalsRows.length){layout.insertBefore(totals,totalsRows[0]);totals.append(...totalsRows);}\r\n    const footerButtons=detail.querySelector('.invoice-history-footer>div');\r\n    footerButtons.querySelector('[data-save-values]')?.remove();\r\n    const save=layout.querySelector('[data-save-values]');if(save)footerButtons.prepend(save);\r\n  }\r\n  detail.addEventListener('input',event=>{\r\n    if(!event.target.matches('[data-receipt-article-search]'))return;\r\n    const query=event.target.value.normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().trim();\r\n    const panel=event.target.closest('.receipt-articles');let visible=0;\r\n    panel.querySelectorAll('tbody tr[data-warranty-article]').forEach(row=>{row.hidden=!row.textContent.normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().includes(query);if(!row.hidden)visible++;});\r\n    panel.querySelectorAll('tr.receipt-empty').forEach(row=>row.hidden=Boolean(query));\r\n    panel.querySelector('.receipt-records').textContent=query?`${visible} de ${detailData?.articulos?.length||0} artículos`: `Registro: ${visible?'1':'0'} de ${visible}`;\r\n  });\r\n  function redrawValues(){const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.innerHTML=receiptLayout(detailData,rows[detailIndex]);decorateReceiptDetail(body);body.querySelector('.receipt-actions').appendChild(footer);footer.style.display='';refreshValueOutputs();}\r\n  detail.addEventListener('input',event=>{\r\n    const input=event.target.closest('input[data-value-key]');if(!input||!canEditValues()||actionBusy)return;\r\n    const row=detailData.valores[Number(input.dataset.valueIndex)],key=input.dataset.valueKey;\r\n    if(key!=='descripcion')row.autoDifference=false;\r\n    row[key]=key==='descripcion'?input.value:valueNumber(input.value)/(key==='coef'?100:1);\r\n    if(key==='total'&&Number(row.coef)>-1){const target=Math.round(Number(row.total)*100)/100,base=Math.round(target/(1+Number(row.coef||0))*100)/100;row.importe=base;row.impRec=Math.round((target-base)*100)/100;row.coef=base?row.impRec/base:0;row.total=target;}\r\n    else if(key!=='descripcion')window.CorralonMediosPago.adjustValue(row,key,valueNumber);\r\n    updateValueTotals();\r\n    for(const field of input.closest('tr').querySelectorAll('input[data-value-key]')){if(field===input)continue;const k=field.dataset.valueKey;field.value=k==='descripcion'?row[k]:k==='coef'?number(row.coef*100)+' %':money(row[k]);}\r\n    refreshValueOutputs();detail.querySelector('[data-action-status]').textContent='Cambios sin guardar.';\r\n    if(key!=='descripcion'){\r\n      const raw=input.value,start=input.selectionStart,end=input.selectionEnd;reconcileCashDifference();redrawValues();\r\n      const replacement=detail.querySelector(`[data-value-index=\"${detailData.valores.indexOf(row)}\"][data-value-key=\"${key}\"]`);if(replacement){replacement.value=raw;replacement.focus();replacement.setSelectionRange(start,end);}\r\n    }\r\n  });\r\n  detail.addEventListener('keydown',event=>{\r\n    const input=event.target.closest('[data-value-key]');if(!input||!canEditValues()||actionBusy||event.defaultPrevented)return;\r\n    if(event.key==='F2'&&input.select){event.preventDefault();input.select();return;}\r\n    if(event.key==='Enter'){event.preventDefault();const controls=[...detail.querySelectorAll('[data-edit-values] [data-value-key]:not([disabled])')],index=controls.indexOf(input),row=Number(input.dataset.valueIndex),key=input.dataset.valueKey;input.dispatchEvent(new Event('change',{bubbles:true}));const target=detail.querySelector(`[data-value-index=\"${row}\"][data-value-key=\"${key}\"]`),next=[...detail.querySelectorAll('[data-edit-values] [data-value-key]:not([disabled])')];(next[next.indexOf(target)+1]||detail.querySelector('[data-add-value]'))?.focus();}\r\n  });\r\n  detail.addEventListener('change',event=>{\r\n    const input=event.target.closest('[data-value-key]');if(!input||!canEditValues()||actionBusy)return;\r\n    if(input.tagName==='INPUT'){const key=input.dataset.valueKey,row=detailData.valores[Number(input.dataset.valueIndex)];input.value=key==='descripcion'?row[key]:key==='coef'?number(row.coef*100)+' %':money(row[key]);return;}\r\n    const value=detailData.valores[Number(input.dataset.valueIndex)],key=input.dataset.valueKey;value[key]=Number(input.value);\r\n    value.autoDifference=false;\r\n    const type=(historyConfig.tiposPago||[]).find(p=>Number(p.id)===Number(value.idTipoPago)),cls=Number(type?.clase||value.clase);\r\n    if(key==='idTipoPago'){value.tipo=type.nombre;value.clase=cls;value.idTarjeta=0;value.tarjeta='Ninguna';value.cuotas=0;}\r\n    if(key==='idTarjeta'){value.tarjeta=(historyConfig.tarjetas||[]).find(c=>Number(c.id)===value.idTarjeta)?.nombre||'Ninguna';value.cuotas=cls===5?Number((historyConfig.tarjetasCuotas||[]).find(p=>Number(p.idTarjeta)===value.idTarjeta)?.cuotas)||0:0;}\r\n    // Cambiar la clasificacion del pago conserva el descuento/recargo y total emitidos.\r\n    reconcileCashDifference();redrawValues();detail.querySelector('[data-action-status]').textContent='Cambios sin guardar.';\r\n    const index=detailData.valores.indexOf(value),account=detail.querySelector('[data-value-index=\"'+index+'\"][data-value-key=\"idTarjeta\"]');\r\n    if(key==='idTipoPago'&&[3,5].includes(cls)&&account)window.CorralonFunciones.focusField(account,{openDropdown:true});\r\n    else if(key==='idTarjeta'&&account){const controls=[...detail.querySelectorAll('[data-edit-values] [data-value-key]:not([disabled])')],next=controls[controls.indexOf(account)+1];if(next)window.CorralonFunciones.focusField(next,{openDropdown:next.tagName==='SELECT'});}\r\n  });\r\n  detail.addEventListener('click',async event=>{\r\n    if(canEditValues()&&!actionBusy&&event.target.closest('[data-restore-issued-adjustment]')){\r\n      const state=receiptValuesBalance(),active=detailData.valores.filter(row=>Number(row.total)>0),totalCents=Math.round(state.total*100),baseCents=Math.round(state.articles*100);let allocated=0;\r\n      if(state.cashDifference!==0||!active.length||baseCents\u003c=0)return;\r\n      const prepared=active.map((row,index)=>{const base=index===active.length-1?baseCents-allocated:Math.round(baseCents*Math.round(Number(row.total)*100)/totalCents);allocated+=base;const amount=Math.round(Number(row.total)*100),fee=amount-base;return {row,importe:base/100,impRec:fee/100,coef:base?fee/base:0};});\r\n      if(prepared.some(value=>value.importe\u003c=0||value.coef\u003c -1||value.coef>5)){detail.querySelector('[data-action-status]').textContent='No se puede repartir este ajuste automáticamente. Revisá los importes de cada valor.';return;}\r\n      detailData.valores=active;for(const value of prepared)Object.assign(value.row,{importe:value.importe,impRec:value.impRec,coef:value.coef,autoDifference:false});updateValueTotals();redrawValues();detail.querySelector('[data-action-status]').textContent='Ajuste emitido reasignado. Revisá los valores y pulsá Guardar valores.';return;\r\n    }\r\n    if(canEditValues()&&!actionBusy){if(event.target.closest('[data-add-value]')){detailData.valores.push(blankValue());updateValueTotals();redrawValues();detail.querySelector(`[data-value-row=\"${detailData.valores.length-1}\"] input`)?.focus();return;}const remove=event.target.closest('[data-remove-value]');if(remove){detailData.valores.splice(Number(remove.dataset.removeValue),1);reconcileCashDifference();redrawValues();detail.querySelector('[data-action-status]').textContent='Cambios sin guardar.';return;}}\r\n    if(!event.target.closest('[data-save-values]')||!canEditValues()||actionBusy)return;\n    let headerEdits={};try{headerEdits=receiptHeaderChanges()}catch(error){detail.querySelector('[data-action-status]').textContent=error.message;return}\n    if('idCliente' in headerEdits&&!await resolveReceiptCustomer())return;if(actionBusy)return;\r\n    const pending=detailData.valores.filter(v=>Number(v.importe)!==0||Number(v.impRec)!==0||String(v.descripcion||'').trim()),difference=Math.round((pending.reduce((sum,v)=>sum+Number(v.total||0),0)-Math.abs(Number(detailData.comprobante.total)))*100)/100;\r\n    if(!pending.length||pending.some(v=>Number(v.importe)\u003c=0)){detail.querySelector('[data-action-status]').textContent='Cada valor cargado debe tener un importe mayor que cero.';return;}\r\n    const balance=receiptValuesBalance(pending);\r\n    if(balance.invalid){detail.querySelector('[data-action-status]').textContent=balance.cashDifference!==0?'Los valores deben coincidir con el total de la boleta. La diferencia debe ser cero.':'Los valores no conservan la base de artículos y el descuento/recargo emitido. Reasigná el ajuste antes de guardar.';return;}\r\n    actionBusy=true;detail.querySelectorAll('button,select,input[data-value-key],input[data-header-key]').forEach(c=>c.disabled=true);const status=detail.querySelector('[data-action-status]');status.textContent=Object.keys(headerEdits).length?'Guardando cambios…':'Guardando valores…';\r\n    try{const payload={...(Object.keys(headerEdits).length?{cabecera:headerEdits}:{}),usuarioId:valuesUser().id,idRecibo:rows[detailIndex].idRecibo,version:detailData.versionValores,valores:pending.map(v=>({orden:v.orden??null,idTipoPago:v.idTipoPago,idTarjeta:v.idTarjeta||0,cuotas:v.cuotas||0,importe:v.importe,impRec:v.impRec||0,coef:v.coef||0,descripcion:v.descripcion||''}))};\r\n      if(detailOptions.saveValues)await detailOptions.saveValues(payload);\r\n      else {const response=await fetch('/api/facturacion/comprobante-valores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudieron guardar los valores.');}\r\n      actionBusy=false;await openDetail(detailIndex);detail.querySelector('[data-action-status]').textContent=Object.keys(headerEdits).length?'Datos y valores actualizados.':'Valores actualizados.';if(Object.keys(headerEdits).length)Promise.resolve(window.CorralonInvoiceHistoryActions?.refreshAfterAnnul?.(rows[detailIndex]?.idRecibo)).catch(console.warn);}\r\n    catch(error){status.textContent=error.message;detail.querySelectorAll('button,select,input[data-value-key],input[data-header-key]').forEach(c=>c.disabled=false);}\r\n    finally{actionBusy=false;detail.querySelector('[data-detail-close]').disabled=false;detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;detail.querySelector('[data-preview]').disabled=!historyActions().preview||detailData?.valuesDirty;detail.querySelector('[data-reprint]').disabled=!historyActions().reprint||detailData?.valuesDirty;detail.querySelector('[data-recall]').disabled=!historyActions().recall||detailData?.valuesDirty;}\r\n  });\r\n  const warrantyMenu=document.createElement('div');warrantyMenu.hidden=true;\r\n  warrantyMenu.style.cssText='position:fixed;z-index:98;padding:4px;background:var(--corralon-white,#fff);border:1px solid var(--corralon-line-strong,#bbb);border-radius:7px;box-shadow:0 5px 18px #0003';\r\n  warrantyMenu.innerHTML='\u003cbutton type=\"button\" style=\"padding:9px 14px;border:0;background:var(--corralon-white,#fff);color:var(--corralon-text,#222);font:700 14px Barlow,Arial;cursor:pointer\">Generar garantía\u003c/button>';\r\n  document.body.appendChild(warrantyMenu);\r\n  let warrantyArticleIndex=-1,warrantyBridge=null;\r\n  function loadWarrantyBridge(){\r\n    if(warrantyBridge)return warrantyBridge;\r\n    const frame=document.createElement('iframe');frame.hidden=true;frame.title='Generador de garantías';\r\n    warrantyBridge=new Promise((resolve,reject)=>{\r\n      let observer;\r\n      const timer=setTimeout(()=>{observer?.disconnect();reject(new Error('No se pudo cargar Garantías. Revisá la conexión y los permisos de usuario.'));},20000);\r\n      const ready=()=>{\r\n        try{\r\n          const generator=frame.contentWindow.CorralonGarantiaDesdeFacturacion;\r\n          if(typeof generator!=='function'||frame.contentDocument.documentElement.style.visibility==='hidden')return;\r\n          clearTimeout(timer);observer?.disconnect();resolve(generator);\r\n        }catch(error){clearTimeout(timer);reject(error);}\r\n      };\r\n      frame.onload=()=>{\r\n        try{\r\n          observer=new MutationObserver(ready);\r\n          observer.observe(frame.contentDocument.documentElement,{attributes:true,attributeFilter:['style']});\r\n          frame.contentWindow.addEventListener('menu-user-validated',ready);ready();\r\n        }\r\n        catch(error){clearTimeout(timer);reject(error);}\r\n      };\r\n      frame.onerror=()=>{clearTimeout(timer);reject(new Error('No se pudo cargar el generador de garantías.'));};\r\n      frame.src='garant%C3%ADas.html?desdeFacturacion=1';document.body.appendChild(frame);\r\n    }).catch(error=>{frame.remove();warrantyBridge=null;throw error;});\r\n    return warrantyBridge;\r\n  }\r\n  detail.addEventListener('contextmenu',event=>{\r\n    const line=event.target.closest('[data-warranty-article]');\r\n    if(!line||!detailData||actionBusy)return;\r\n    event.preventDefault();warrantyArticleIndex=Number(line.dataset.warrantyArticle);\r\n    const allowed=window.CorralonFunciones?.menuUserHasAccess('garantias');\r\n    const confirmed=Number(detailData.comprobante.confirmado)&&!Number(detailData.comprobante.anulada);\r\n    const action=warrantyMenu.querySelector('button');action.disabled=!allowed||!confirmed;\r\n    action.title=!allowed?'Tu usuario no tiene permiso para Garantías':!confirmed?'La boleta debe estar confirmada y sin anular':'';\r\n    warrantyMenu.hidden=false;\r\n    warrantyMenu.style.left=Math.max(8,Math.min(event.clientX,innerWidth-warrantyMenu.offsetWidth-8))+'px';\r\n    warrantyMenu.style.top=Math.max(8,Math.min(event.clientY,innerHeight-warrantyMenu.offsetHeight-8))+'px';\r\n    action.focus();\r\n  });\r\n  warrantyMenu.querySelector('button').addEventListener('click',async()=>{\r\n    const article=detailData?.articulos?.[warrantyArticleIndex],header=detailData?.comprobante,invoice=rows[detailIndex];\r\n    warrantyMenu.hidden=true;\r\n    if(!article||!header||!invoice||actionBusy||!window.CorralonFunciones?.menuUserHasAccess('garantias'))return;\r\n    const payload={codigo:String(article.idart||''),descripcion:article.descripcion,cliente:String(header.cliente||invoice.cliente||'').toUpperCase(),boleta:invoice.numero,fechaIso:String(header.fechaComprobante||'').slice(0,10)};\r\n    const pdfWindow=window.open('about:blank','_blank');\r\n    if(pdfWindow){pdfWindow.document.title='Garantía';pdfWindow.document.body.textContent='Generando garantía…';pdfWindow.document.body.style.cssText='font:18px Arial;padding:24px';pdfWindow.opener=null;}\r\n    let pdfShown=false,generationTimer;\r\n    const showPdf=blob=>{\r\n      if(pdfShown)return;\r\n      const pdfUrl=URL.createObjectURL(blob);\r\n      if(pdfWindow&&!pdfWindow.closed)pdfWindow.location.replace(pdfUrl);\r\n      else{const link=document.createElement('a');link.href=pdfUrl;link.download=`Garantia-${payload.boleta}-${payload.codigo}.pdf`;document.body.appendChild(link);link.click();link.remove();}\r\n      pdfShown=true;setTimeout(()=>URL.revokeObjectURL(pdfUrl),300000);\r\n    };\r\n    actionBusy=true;const notice=detail.querySelector('[data-action-status]');notice.textContent='Generando garantía y notificación…';\r\n    detail.querySelectorAll('[data-preview],[data-reprint],[data-recall],[data-detail-prev],[data-detail-next]').forEach(control=>control.disabled=true);\r\n    try{\r\n      const generator=await loadWarrantyBridge();\r\n      const result=await Promise.race([\r\n        generator(payload,showPdf),\r\n        new Promise((_,reject)=>{generationTimer=setTimeout(()=>reject(new Error(pdfShown?'El PDF está generado, pero el historial y la notificación siguen pendientes de respuesta.':'La generación del PDF no respondió. Reintentá desde Facturación.')),35000);})\r\n      ]);\r\n      if(!result?.blob)throw new Error('Garantías no devolvió el PDF.');\r\n      showPdf(result.blob);\r\n      notice.textContent=result.historial.existente?'PDF generado. La garantía ya estaba registrada; se conservó su notificación.':'Garantía generada y registrada en Notificaciones.';\r\n    }catch(error){if(!pdfShown&&pdfWindow&&!pdfWindow.closed){pdfWindow.document.body.textContent=error.message;}notice.textContent=error.message;}\r\n    finally{\r\n      clearTimeout(generationTimer);\r\n      actionBusy=false;\r\n      if(!detail.hidden){const unavailable=!Number(header.confirmado)||Boolean(Number(header.anulada));detail.querySelector('[data-preview]').disabled=unavailable||!historyActions().preview;detail.querySelector('[data-reprint]').disabled=unavailable;detail.querySelector('[data-recall]').disabled=!Number((detailData?.comprobante)?.confirmado);detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;}\r\n    }\r\n  });\r\n  document.addEventListener('pointerdown',event=>{if(!warrantyMenu.contains(event.target))warrantyMenu.hidden=true;});\r\n  function dateText(date){return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`}\r\n  function dateInput(field){\r\n    const parsed=window.CorralonFunciones?.parseFechaFlexible(field.value);if(!parsed){field.setCustomValidity('Ingresá una fecha válida.');field.reportValidity();return null}\r\n    field.setCustomValidity('');field.value=parsed.text;const d=parsed.date;return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;\r\n  }\r\n  async function sql(path,controller){\r\n    const timeout=setTimeout(()=>controller.abort(),15000);\r\n    try{const response=await fetch('/api/facturacion/'+path,{cache:'no-store',signal:controller.signal});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar SQL.');return result}finally{clearTimeout(timeout)}\r\n  }\r\n  function message(text,error=false){status.textContent=text;status.classList.toggle('error',error)}\r\n  function pager(){\r\n    get('[data-position]').textContent=`${rows.length} boletas cargadas de ${totalRecords===null?'…':totalRecords}`;\r\n    get('[data-more-status]').textContent=listLoading?'Cargando boletas…':moreError?'No se pudieron cargar más boletas.':hasMore?'Deslizá hacia abajo para cargar más.':rows.length?'No hay más boletas.':'';\r\n    get('[data-retry-more]').hidden=!moreError;\r\n  }\r\n  function loadMore(){if(!overlay.hidden&&detail.hidden&&!listLoading&&!moreError&&hasMore)load(page+1)}\r\n  get('.invoice-history-scroll').addEventListener('scroll',event=>{\r\n    const panel=event.currentTarget;\r\n    if(panel.scrollHeight-panel.scrollTop-panel.clientHeight\u003c=80)loadMore();\r\n  },{passive:true});\r\n  get('[data-retry-more]').addEventListener('click',()=>{moreError=false;loadMore()});\r\n  function normalizeReceiptSearch(value){\r\n    const text=String(value??'').trim();\r\n    const parts=text.match(/^(\\d{1,4})\\s*[-–—]\\s*(\\d{1,8})$/);\r\n    return parts?parts[1].padStart(4,'0')+'-'+parts[2].padStart(8,'0'):text;\r\n  }\r\n  function completeReceiptSearch(){const field=get('[data-search]');field.value=normalizeReceiptSearch(field.value)}\r\n  get('[data-search]').addEventListener('blur',completeReceiptSearch);\r\n  get('[data-search]').addEventListener('keydown',event=>{if(event.key==='Enter')completeReceiptSearch()});\r\n  async function load(targetPage=0){\r\n    const append=targetPage>0;\r\n    if(append&&(listLoading||!hasMore||!listQuery))return;\r\n    let params;\r\n    if(append){params=new URLSearchParams(listQuery);params.set('pagina',String(targetPage))}\r\n    else{\r\n      clearTimeout(searchTimer);\r\n      const search=normalizeReceiptSearch(get('[data-search]').value);\r\n      const specificReceipt=/^\\d{4}-\\d{8}$/.test(search);\r\n      // Una boleta completa se busca en todas las fechas y sucursales sin alterar los filtros visibles.\r\n      const from=specificReceipt?'1753-01-01':dateInput(get('[data-from]'));\r\n      const to=specificReceipt?'9998-12-31':dateInput(get('[data-to]'));\r\n      if(!from||!to)return;\r\n      if(from>to){message('La fecha Desde debe ser anterior o igual a Hasta.',true);return}\r\n      if(specificReceipt)for(const selector of ['[data-from]','[data-to]'])get(selector).setCustomValidity('');\r\n      params=new URLSearchParams({desde:from,hasta:to,sucursal:specificReceipt?'0':get('[data-branch]').value,puntoVenta:specificReceipt?'0':get('[data-point]').value,buscar:search,articulo:specificReceipt?'':get('[data-article]').value.trim(),pagina:'0',orden:sortField,direccion:sortDirection});\r\n      listQuery=params.toString();rows=[];page=0;hasMore=false;totalRecords=null;get('[data-rows]').innerHTML='';get('.invoice-history-scroll').scrollTop=0;\r\n    }\r\n    listController?.abort();const controller=listController=new AbortController(),request=++sequence;\r\n    listLoading=true;moreError=false;pager();if(!append)message('Consultando boletas…');\r\n    try{\r\n      const result=await sql('consultar-comprobantes?'+params,controller);if(request!==sequence||overlay.hidden)return;\r\n      page=result.pagina;hasMore=Boolean(result.hayMas);totalRecords=Number(result.totalComprobantes)||0;\r\n      const seen=new Set(rows.map(row=>Number(row.idRecibo))),added=result.comprobantes.filter(row=>!seen.has(Number(row.idRecibo))),offset=rows.length;\r\n      rows.push(...added);\r\n      get('[data-rows]').insertAdjacentHTML('beforeend',added.map((r,index)=>{const i=offset+index;return `\u003ctr data-invoice=\"${i}\" tabindex=\"0\" aria-label=\"Abrir boleta ${escape(r.numero)}\">\u003ctd>${escape(r.numero)}\u003c/td>\u003ctd>${escape(r.tipo)}\u003c/td>\u003ctd>${escape(String(r.cliente||'').toUpperCase())}\u003c/td>\u003ctd>${escape(r.sucursal||'Sin sucursal')}\u003c/td>\u003ctd>${escape(r.fecha)}\u003c/td>\u003ctd class=\"money\">${escape(money(r.total))}\u003c/td>\u003ctd class=\"${Number(r.anulada)?'cancelled':''}\">${Number(r.anulada)?'Anulada':'Confirmada'}\u003c/td>\u003ctd>\u003cbutton data-invoice=\"${i}\" type=\"button\">Abrir\u003c/button>\u003c/td>\u003c/tr>`}).join(''));\r\n      message(rows.length?'Boletas consultadas en SQL.': 'No hay boletas para esos filtros.');\r\n    }catch(error){if(request===sequence&&!overlay.hidden){moreError=append;message(controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a consultar.':error.message,true)}}\r\n    finally{if(request===sequence){listLoading=false;pager()}}\r\n  }\r\n  function receiptLayout(result,row){\r\n    const h=result.comprobante,items=result.articulos||[],values=result.valores||[];\r\n    const field=(label,value,width=90,style='')=>`\u003clabel class=\"receipt-field\">${escape(label)}\u003cspan style=\"width:${width}px\" class=\"${style}\" title=\"${escape(value??'—')}\">${escape(value??'—')}\u003c/span>\u003c/label>`;\r\n    const check=(label,value,key='')=>`\u003clabel class=\"receipt-field\">${escape(label)}${key?`\u003cinput type=\"checkbox\" data-header-key=\"${key}\" aria-label=\"${escape(label)}\" ${canEditHeader()?'':'disabled'} ${Number(value)?'checked':''}>`:value==null?'—':`\u003cinput type=\"checkbox\" disabled ${Number(value)?'checked':''}>`}\u003c/label>`;\n    const customerId=canEditHeader()?`\u003clabel class=\"receipt-field\">Cliente:\u003cinput data-header-key=\"idCliente\" aria-label=\"ID del cliente\" inputmode=\"numeric\" maxlength=\"10\" value=\"${escape(h.idCliente)}\" style=\"width:55px;height:24px;padding:2px 5px;border:1px solid #b9cde5;border-radius:4px;background:#fff;font:inherit\">\u003c/label>`:field('Cliente:',h.idCliente,55);\r\n    const dateTime=value=>{\r\n      if(!value)return '—';\r\n      const text=String(value),dotNet=text.match(/^\\/Date\\((-?\\d+)(?:[+-]\\d{4})?\\)\\/$/);\r\n      const parsed=new Date(dotNet?Number(dotNet[1]):text);\r\n      if(Number.isNaN(parsed.getTime()))return '—';\r\n      return parsed.toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});\r\n    };\r\n    const date=value=>value?String(value).slice(0,10).split('-').reverse().join('/'):'—';\r\n    const point=(historyConfig?.puntosVenta||[]).find(p=>Number(p.id)===Number(h.idPuntoVenta));\r\n    const seller=(historyConfig?.vendedores||[]).find(v=>Number(v.id)===Number(h.vendedor));\r\n    const type=(historyConfig?.comprobantes||[]).find(t=>Number(t.id)===Number(h.idComprobante));\r\n    const taxName=({1:'Resp. inscripto',2:'Resp. no inscripto',3:'No responsable',4:'Exento',5:'Consumidor final',6:'Monotributista'})[Number(h.idTipoIva)]||'—';\r\n    const taxReady=items.every(a=>a.iva!=null),net={21:0,10.5:0},vat={21:0,10.5:0};let allNet=0,allVat=0,untaxed=0;\r\n    items.forEach(a=>{const rate=Number(a.iva)||0,amount=Number(a.importe)||0,base=amount/(1+rate/100),tax=amount-base;allNet+=base;allVat+=tax;if(!rate)untaxed+=amount;if(rate in net){net[rate]+=base;vat[rate]+=tax}});\r\n    const taxMoney=value=>taxReady?money(value):'—';\r\n    const totalValues=values.reduce((sum,v)=>sum+Number(v.total||0),0),adjustment=values.reduce((sum,v)=>sum+Number(v.impRec||0),0);\r\n    const paidCash=()=>money(values.filter(v=>/^efectivo$/i.test(v.tipo||'')).reduce((sum,v)=>sum+Number(v.total||0),0));\r\n    const blank=(count,cols)=>Array.from({length:Math.max(0,count)},()=>`\u003ctr class=\"receipt-empty\">${'\u003ctd>\u003c/td>'.repeat(cols)}\u003c/tr>`).join('');\r\n    return `\u003cdiv class=\"receipt-layout\">\r\n      \u003cdiv class=\"receipt-row\">${field('P. Vta.:',point?.nombre||h.idPuntoVenta,130)}${field('P.V.:',h.idPuntoVenta,32)}${field('Tipo Comp.:',type?.codigo||row.tipo,65)}${field('Nº:',h.numero,115,'receipt-number')}${field('Fecha:',date(h.fechaComprobante),86)}${field('Vend.:',seller?.nombre||h.vendedor,105)}${field('IDOper:',h.operador,40)}${field('IDCaja:',h.IDCaja,55)}${check('Completo:',h.Completo??h.Pagada??0,'completo')}\u003c/div>\r\n      \u003cdiv class=\"receipt-row\">${customerId}${field('',String(h.cliente||'').toUpperCase(),245,'receipt-highlight')}${field('Tel.:',h.telefono||'',95)}${field('IVA:',taxName,120)}${field('Email:',h.email||h.Email||'',160)}${check('Anulada:',h.anulada)}${check('Actualiza Stock:',h.stockActualizado,'actualizaStock')}${check('En Inf. Vtas.:',h.EnInfVtas??0,'enInformeVentas')}\u003c/div>\r\n      \u003cdiv class=\"receipt-row\">${field('Tipo Doc.:',Number(h.idTipoDoc)===80?'CUIT':Number(h.idTipoDoc)===96?'DNI':h.idTipoDoc,50)}${field('Nº:',h.documento||'',120)}${field('Moneda:',Number(h.IDMoneda)===1?'Pesos':h.IDMoneda,75)}${field('Cotización:',h.ImpCotiz==null?'—':money(h.ImpCotiz),70)}${field('Nº Fac. N.C.:',h.facturaAsociada||'',105)}${field('Nº Ord. Cpra.:',h.NroOrdCpra||'',90)}${field('Nº Rem./Fac.:',h.IDRemito||'',90)}${field('1er. Vto.:',date(h.vencimiento),86)}\u003c/div>\r\n      \u003cdiv class=\"receipt-grid receipt-articles\">\u003cdiv class=\"receipt-articles-scroll\">\u003ctable class=\"invoice-history-table\">\u003ccolgroup>\u003ccol style=\"width:38%\">\u003ccol style=\"width:7%\">\u003ccol style=\"width:7%\">\u003ccol style=\"width:10%\">\u003ccol style=\"width:10%\">\u003ccol style=\"width:7%\">\u003ccol style=\"width:7%\">\u003ccol style=\"width:14%\">\u003c/colgroup>\u003cthead>\u003ctr>\u003cth>Descripción\u003c/th>\u003cth>IDArt\u003c/th>\u003cth class=\"money\">Cantidad\u003c/th>\u003cth class=\"money\">PrecioUni\u003c/th>\u003cth class=\"money\">ImpIVA1\u003c/th>\u003cth class=\"money\">% IVA\u003c/th>\u003cth class=\"money\">% Dto.\u003c/th>\u003cth class=\"money\">Importe\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody>${items.map((a,i)=>`\u003ctr data-warranty-article=\"${i}\">\u003ctd title=\"${escape(a.descripcion)}\">${escape(a.descripcion)}\u003c/td>\u003ctd>${escape(a.idart)}\u003c/td>\u003ctd class=\"money\">${number(a.cantidad)}\u003c/td>\u003ctd class=\"money\">${money(a.precio)}\u003c/td>\u003ctd class=\"money\">${a.iva==null?'—':money(Number(a.importe)-Number(a.importe)/(1+Number(a.iva)/100))}\u003c/td>\u003ctd class=\"money\">${a.iva==null?'—':number(a.iva)+'%'}\u003c/td>\u003ctd class=\"money\">${a.descuento==null?'—':number(a.descuento)+'%'}\u003c/td>\u003ctd class=\"money\">${money(a.importe)}\u003c/td>\u003c/tr>`).join('')}${blank(7-items.length,8)}\u003c/tbody>\u003c/table>\u003c/div>\u003cdiv class=\"receipt-records\">Registro: ${items.length?'1':'0'} de ${items.length}\u003c/div>\u003c/div>\r\n      \u003cdiv class=\"receipt-values-area\">${canEditValues()?editableValuesTable(values):`\u003cdiv class=\"receipt-grid\">\u003cdiv class=\"receipt-values-scroll\">\u003ctable class=\"invoice-history-table\">\u003ccolgroup>\u003ccol style=\"width:15%\">\u003ccol style=\"width:15%\">\u003ccol style=\"width:14%\">\u003ccol style=\"width:7%\">\u003ccol style=\"width:10%\">\u003ccol style=\"width:12%\">\u003ccol style=\"width:15%\">\u003ccol style=\"width:12%\">\u003c/colgroup>\u003cthead>\u003ctr>\u003cth>Tipo de Valor\u003c/th>\u003cth class=\"money\">Importe\u003c/th>\u003cth>Tarjeta\u003c/th>\u003cth>Cuotas\u003c/th>\u003cth class=\"money\">% D/R\u003c/th>\u003cth class=\"money\">$ Rec/Dto\u003c/th>\u003cth class=\"money\">ImpEnt\u003c/th>\u003cth>Fecha Vto.\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody>${values.map((v,i)=>`\u003ctr>\u003ctd>${valueCells(v,i)[0]}\u003c/td>\u003ctd class=\"money\">${money(v.importe)}\u003c/td>\u003ctd title=\"${escape(v.descripcion||'')}\">${valueCells(v,i)[1]}\u003c/td>\u003ctd>${valueCells(v,i)[2]}\u003c/td>\u003ctd class=\"money\">${number(Number(v.coef||0)*100)}%\u003c/td>\u003ctd class=\"money\">${money(v.impRec)}\u003c/td>\u003ctd class=\"money\">${money(v.total)}\u003c/td>\u003ctd>${date(v.fechaVto||h.vencimiento)}\u003c/td>\u003c/tr>`).join('')}${blank(2-values.length,8)}\u003c/tbody>\u003c/table>\u003c/div>\u003cdiv class=\"receipt-records\">Registro: ${values.length?'1':'0'} de ${values.length}\u003c/div>\u003c/div>`}\u003cdiv class=\"receipt-tax-summary\">${field('Neto 21%:',h.neto21==null?taxMoney(net[21]):money(h.neto21),115)}${field('IVA 21%:',h.iva21==null?taxMoney(vat[21]):money(h.iva21),115)}${field('Neto 10,5%:',h.neto105==null?taxMoney(net[10.5]):money(h.neto105),115)}${field('IVA 10,5%:',h.iva105==null?taxMoney(vat[10.5]):money(h.iva105),115)}\u003c/div>\u003c/div>\r\n      \u003cdiv class=\"receipt-row receipt-totals\">${field('Dto./Rec.:',money(adjustment),90)}${field('Total Valores:',money(totalValues),105,'receipt-total')}${field('CAE:',h.cae||'',105)}${field('Fecha y Hora:',dateTime(h.fechaHora),160)}${field('Tickets:',h.Tikets??h.Tickets,40)}${field('ID Rem./Fac.:',h.IDRemito,80)}\u003c/div>\r\n      \u003cdiv class=\"receipt-row receipt-totals\">${field('S.T. s/Dto:',h.subtotalSinDto==null?taxMoney(allNet):money(h.subtotalSinDto),100)}${field('Gravado:',h.gravado==null?taxMoney(allNet-untaxed):money(h.gravado),100)}${field('$ IVA:',h.importeIva==null?taxMoney(allVat):money(h.importeIva),95)}${field('Imp. Int.:',h.ImpInt==null?'—':money(h.ImpInt),70)}${field('No Grav.:',taxMoney(untaxed),80)}${field('Total:',money(h.total),110,'receipt-total')}${field('Total ME:',money(h.totalAbsoluto),110,'receipt-total')}\u003c/div>\r\n      \u003cdiv class=\"receipt-row receipt-totals\">${field('Formato impresión:',h.FormatoImp||'Ticket',150)}${field('Nota:',h.nota||'',300)}${field('Efectivo:',h.efectivo==null?paidCash():money(h.efectivo),80)}${field('Tarjeta:',money(h.tarjeta??values.filter(v=>Number(v.clase)===5).reduce((sum,v)=>sum+Number(v.total||0),0)),80)}${field('Cta. Cte.:',money(h.cuentaCorriente??values.filter(v=>/cta|cuenta corriente/i.test(v.tipo||'')).reduce((sum,v)=>sum+Number(v.total||0),0)),80)}${field('Cheque:',money(h.cheque??values.filter(v=>[2,3].includes(Number(v.clase))).reduce((sum,v)=>sum+Number(v.total||0),0)),80)}\u003c/div>\r\n      \u003cdiv class=\"receipt-actions\">${canEditValues()?'\u003cbutton type=\"button\" data-save-values>Guardar cambios\u003c/button>':''}\u003c/div>\u003c/div>`;\r\n  }\r\n  async function openDetail(index){\r\n    annulButton.hidden=!isAdministrator();annulButton.disabled=true;\r\n    const row=rows[index];if(!row||actionBusy)return;warrantyMenu.hidden=true;detailData=null;detailIndex=index;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;detail.querySelector('[data-action-status]').textContent='';detail.hidden=false;detailController?.abort();const controller=detailController=new AbortController(),request=++detailSequence;\r\n    detail.querySelector('[data-title]').textContent='Boleta '+row.numero+(row.tipo?' · '+row.tipo:'');detail.querySelector('[data-detail-position]').textContent=`${index+1} de ${rows.length}`;detail.querySelector('[data-detail-prev]').disabled=index===0;detail.querySelector('[data-detail-next]').disabled=index===rows.length-1;\r\n    if(sectionActive){\r\n      sectionHost.appendChild(detail);sectionHost.dataset.detailOpen='true';\r\n      detail.removeAttribute('aria-modal');detail.setAttribute('role','region');\r\n      detail.querySelector('[data-detail-close]').textContent='Volver a consultar';\r\n      notifyDetailSection(true);\r\n    }\r\n    const body=detail.querySelector('[data-detail-body]');const footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='Consultando detalle…';\r\n    try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;detailData=result;detailData.headerOriginal=headerState(h);detailData.headerResolvedCustomer=String(h.idCliente??'');receiptValuesBasis(result);const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;\r\n      const typeName=h.tipo||(historyConfig?.comprobantes||[]).find(t=>Number(t.id)===Number(h.idComprobante))?.nombre||row.tipo;\r\n      detail.querySelector('[data-title]').textContent='Boleta '+h.numero+(typeName?' · '+typeName:'');\r\n      if(sectionActive)notifyDetailSection(true);\r\n      detail.querySelector('[data-preview]').hidden=!adapters.preview;detail.querySelector('[data-reprint]').hidden=!adapters.reprint;detail.querySelector('[data-recall]').hidden=!adapters.recall;\r\n      detail.querySelector('.invoice-history-footer').style.display=adapters.preview||adapters.reprint||adapters.recall||canEditValues()||isAdministrator()?'':'none';\r\n      body.innerHTML=receiptLayout(result,row);decorateReceiptDetail(body);\r\n      body.querySelector('.receipt-actions').appendChild(detail.querySelector('.invoice-history-footer'));refreshValueOutputs();\r\n    }catch(error){if(request===detailSequence&&!detail.hidden)body.textContent=controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a abrir la boleta.':error.message}\r\n  }\r\n  async function detailAction(action){\r\n    const row=rows[detailIndex];if(!row||actionBusy)return;const adapter=historyActions()[action],status=detail.querySelector('[data-action-status]');\r\n    if(detailData?.valuesDirty){status.textContent='Guardá los valores antes de ver, reimprimir o llamar la boleta.';return;}\r\n    if(!adapter){status.textContent='Facturación todavía está cargando. Reintentá en unos segundos.';return}\r\n    actionBusy=true;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;status.textContent=action==='preview'?'Preparando vista previa…':action==='reprint'?'Preparando reimpresión…':'Cargando boleta en Facturación…';\r\n    let closeAfterAction=false;\r\n    try{const result=await adapter(Number(row.idRecibo));if(result?.cancelled){status.textContent='Carga cancelada.';}else if(action==='recall'||result?.preview)closeAfterAction=true;else status.textContent='Ticket enviado a la impresora.'}\r\n    catch(error){status.textContent=error.message}\r\n    finally{actionBusy=false;if(!detail.hidden){detail.querySelector('[data-preview]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().preview;detail.querySelector('[data-reprint]').disabled=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||!historyActions().reprint;detail.querySelector('[data-recall]').disabled=!Number(detailData?.comprobante?.confirmado)||!historyActions().recall}if(closeAfterAction)close();}\r\n  }\r\n  detail.querySelector('[data-preview]').addEventListener('click',()=>detailAction('preview'));\r\n  detail.querySelector('[data-reprint]').addEventListener('click',()=>detailAction('reprint'));\r\n  detail.querySelector('[data-recall]').addEventListener('click',()=>detailAction('recall'));\r\n  annulButton.addEventListener('click',async()=>{\r\n    if(actionBusy||!isAdministrator()||annulButton.disabled||!detailData)return;\r\n    const row=rows[detailIndex],index=detailIndex,version=detailData.versionAnulacion;\r\n    if(!confirm(`¿Estás seguro de anular el comprobante ${row.numero}? Se revertirá el stock y se pondrán en cero sus totales, igual que en Access.`))return;\r\n    if(!confirm(`Confirmación final: ANULAR ${row.numero}\\nCliente: ${detailData.comprobante.cliente||row.cliente||'—'}\\nTotal: ${money(detailData.comprobante.total)}\\n\\n¿Confirmás la anulación?`))return;\r\n    actionBusy=true;cancellationBusy=true;refreshAnnulButton();\r\n    const states=[...detail.querySelectorAll('button,input,select')].map(control=>[control,control.disabled]);\r\n    states.forEach(([control])=>control.disabled=true);\r\n    const notice=detail.querySelector('[data-action-status]');notice.textContent='Anulando boleta y revirtiendo el stock…';\r\n    window.CorralonSystem?.articleSync?.set('syncing','Anulando boleta y revirtiendo el stock…');\r\n    try{\r\n      const payload={usuarioId:valuesUser().id,idRecibo:row.idRecibo,version};\r\n      if(detailOptions.cancelInvoice)await detailOptions.cancelInvoice(payload);\r\n      else {\r\n        const response=await fetch('/api/facturacion/comprobante-anular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});\r\n        const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo confirmar la anulación. Volvé a consultar la boleta antes de reintentar.');\r\n      }\r\n      row.anulada=-1;row.total=0;\r\n      const listRow=get('[data-rows]').querySelector(`[data-invoice=\"${index}\"]`);\r\n      if(listRow){listRow.children[5].textContent=money(0);listRow.children[6].textContent='Anulada';listRow.children[6].classList.add('cancelled');}\r\n      actionBusy=false;await openDetail(index);\r\n      detail.querySelector('[data-action-status]').textContent='Boleta anulada en SQL.';\r\n      window.CorralonSystem?.articleSync?.set('success','Boleta anulada en SQL');\r\n      window.CorralonInvoiceHistoryActions?.refreshAfterAnnul?.(row.idRecibo)?.catch(console.warn);\r\n    }catch(error){notice.textContent=error.message;window.CorralonSystem?.articleSync?.set('error',error.message);}\r\n    finally{\r\n      actionBusy=false;cancellationBusy=false;states.forEach(([control,disabled])=>control.disabled=disabled);refreshAnnulButton();\r\n      const unavailable=!Number(detailData?.comprobante?.confirmado)||Boolean(Number(detailData?.comprobante?.anulada))||Boolean(detailData?.valuesDirty);\r\n      detail.querySelector('[data-preview]').disabled=unavailable||!historyActions().preview;\r\n      detail.querySelector('[data-reprint]').disabled=unavailable||!historyActions().reprint;\r\n    }\r\n  });\r\n  function closeDetail(){if(cancellationBusy)return;const wasOpen=!detail.hidden;if(sectionHost?.dataset.detailOpen==='true')notifyDetailSection(false);warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;detailController?.abort();const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='';if(overlay.hidden)returnFocus?.focus();else get('[data-rows]').querySelector(`[data-invoice=\"${detailIndex}\"]`)?.focus();if(wasOpen)detailOptions.onClose?.();}\r\n  let sectionActive=false,sectionExit=null,sectionHost=null;\r\n  function notifyDetailSection(active){\r\n    if(!sectionHost)return;\r\n    sectionHost.dataset.detailOpen=String(active);\r\n    window.dispatchEvent(new CustomEvent('invoice-detail-section',{detail:{active,title:detail.querySelector('[data-title]').textContent,\r\n      controls:[...detail.querySelector('.invoice-history-head').children].filter(node=>!node.matches('h2'))}}));\r\n  }\r\n  function close(){if(sectionActive){if(actionBusy||cancellationBusy||detailData?.valuesDirty){message('Guardá los cambios antes de salir.',true);return;}sectionExit?.();return;}clearTimeout(searchTimer);closeDetail();overlay.hidden=true;sequence++;listController?.abort();rows=[];listLoading=false;hasMore=false;moreError=false;listQuery='';get('[data-rows]').textContent='';button?.focus()}\r\n  window.CorralonInvoiceHistory={\r\n    openSection(host,onExit){\r\n      sectionActive=true;sectionExit=onExit;sectionHost=host;\r\n      host.appendChild(overlay);overlay.removeAttribute('aria-modal');overlay.setAttribute('role','region');\r\n      get('[data-close]').textContent='Volver a Facturación';\r\n      return openList();\r\n    },\r\n    canLeaveSection(){return !actionBusy&&!cancellationBusy&&!detailData?.valuesDirty;},\r\n    suspendSection(){\r\n      sectionActive=false;clearTimeout(searchTimer);closeDetail();overlay.hidden=true;\r\n      sequence++;listController?.abort();listLoading=false;\r\n    },\r\n    async openInvoice(id,context=[],options={}){\r\n      id=Number(id);if(!Number.isInteger(id)||id\u003c=0)throw new Error('Seleccioná una factura válida.');\r\n      if(actionBusy)throw new Error('Esperá a que termine la operación actual.');\r\n      detailOptions=options;\r\n      const host=options.host || document.body;\r\n      detail.setAttribute('role','dialog');detail.setAttribute('aria-modal','true');detail.querySelector('[data-detail-close]').textContent='Cerrar';\r\n      if(detail.parentElement!==host)host.appendChild(detail);\r\n      if(warrantyMenu.parentElement!==host)host.appendChild(warrantyMenu);\r\n      const request=++directOpenSequence;returnFocus=document.activeElement;\r\n      if(!historyConfig)historyConfig=await sql('bootstrap',new AbortController());\r\n      if(request!==directOpenSequence)return;\r\n      listController?.abort();sequence++;overlay.hidden=true;\r\n      rows=context.map(row=>({...row,idRecibo:Number(row.idRecibo??row.id)}));\r\n      let index=rows.findIndex(row=>row.idRecibo===id);\r\n      if(index\u003c0){rows=[{idRecibo:id,numero:''}];index=0;}\r\n      await openDetail(index);detail.querySelector('[data-detail-close]').focus();\r\n    },\r\n    close:closeDetail\r\n  };\r\n  async function openList(){\r\n    if(!overlay.hidden)return;detailOptions={};overlay.hidden=false;get('[data-search]').value='';get('[data-article]').value='';sortField='';sortDirection='';paintSort();page=0;const current=dateText(new Date());get('[data-from]').value=current;get('[data-to]').value=current;get('[data-branch]').innerHTML='\u003coption value=\"0\">Todas las sucursales\u003c/option>';\r\n    const selectedPoint=Number(document.getElementById('pos')?.value)||0;\r\n    message('Consultando la sucursal del punto de venta…');get('[data-search]').focus();const controller=new AbortController();\r\n    try{const config=await sql('bootstrap',controller);historyConfig=config;if(overlay.hidden)return;get('[data-branch]').innerHTML='\u003coption value=\"0\">Todas las sucursales\u003c/option>'+config.sucursales.map(s=>`\u003coption value=\"${Number(s.id)}\">${escape(s.nombre)}\u003c/option>`).join('');\r\n      const branch=Number((config.puntosVenta||[]).find(p=>Number(p.id)===selectedPoint)?.idSucursal)||0;\r\n      get('[data-branch]').value=String(branch);get('[data-point]').innerHTML='\u003coption value=\"0\">Todos los puntos de venta\u003c/option>'+(config.puntosVenta||[]).map(p=>`\u003coption value=\"${Number(p.id)}\">${escape(p.id)} · ${escape(p.nombre)}\u003c/option>`).join('');await load();\r\n    }catch(error){if(!overlay.hidden)message('No se pudieron cargar las sucursales: '+error.message,true)}\r\n  }\r\n  button?.addEventListener('click',()=>window.CorralonInvoiceSections?window.CorralonInvoiceSections.show('invoice-consult'):openList());\r\n  get('form').addEventListener('submit',event=>{event.preventDefault();completeReceiptSearch();load()});get('[data-close]').addEventListener('click',close);get('[data-branch]').addEventListener('change',()=>load());get('[data-point]').addEventListener('change',()=>load());\r\n  for(const selector of ['[data-from]','[data-to]']){const field=get(selector);field.addEventListener('input',()=>field.setCustomValidity(''));field.addEventListener('change',()=>load())}\r\n  for(const selector of ['[data-search]','[data-article]'])get(selector).addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>load(),350)});\r\n  get('[data-rows]').addEventListener('click',event=>{const row=event.target.closest('[data-invoice]');if(row)openDetail(Number(row.dataset.invoice))});get('[data-rows]').addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.matches('tr[data-invoice]')){event.preventDefault();openDetail(Number(event.target.dataset.invoice))}});\r\n  get('form').addEventListener('keydown',event=>{if(event.defaultPrevented)return;const controls=[get('[data-branch]'),get('[data-point]'),get('[data-from]'),get('[data-to]'),get('[data-search]'),get('[data-article]')],index=controls.indexOf(event.target);if(index\u003c0)return;\r\n    if(event.key==='F2'&&event.target.select){event.preventDefault();event.target.select();return}\r\n    if(event.key==='Enter'){event.preventDefault();if(index\u003ccontrols.length-1){if(event.target.classList.contains('date')&&!dateInput(event.target))return;controls[index+1].focus();controls[index+1].select?.()}else load()}\r\n  });\r\n  function navigateDetail(direction){\r\n    if(detail.hidden||actionBusy||cancellationBusy||!detailData)return;\r\n    const nextIndex=detailIndex+direction;\r\n    if(nextIndex\u003c0||nextIndex>=rows.length)return;\r\n    if(detailData.valuesDirty){detail.querySelector('[data-action-status]').textContent='Guardá los valores antes de cambiar de comprobante.';return;}\r\n    openDetail(nextIndex);\r\n  }\r\n  detail.querySelector('[data-detail-close]').addEventListener('click',closeDetail);\r\n  const previousDetail=detail.querySelector('[data-detail-prev]'),nextDetail=detail.querySelector('[data-detail-next]');\r\n  previousDetail.title='Comprobante anterior (RePág)';previousDetail.setAttribute('aria-keyshortcuts','PageUp');\r\n  nextDetail.title='Comprobante siguiente (AvPág)';nextDetail.setAttribute('aria-keyshortcuts','PageDown');\r\n  previousDetail.addEventListener('click',()=>navigateDetail(-1));nextDetail.addEventListener('click',()=>navigateDetail(1));\r\n  document.addEventListener('keydown',event=>{\r\n    if(event.defaultPrevented||event.ctrlKey||event.altKey||event.metaKey||event.shiftKey||!['PageDown','PageUp'].includes(event.key)||detail.hidden)return;\r\n    if(!warrantyMenu.hidden||[...document.querySelectorAll('dialog[open],.modal-wrap.open')].some(modal=>!detail.contains(modal)))return;\r\n    event.preventDefault();event.stopImmediatePropagation();\r\n    if(event.repeat)return;\r\n    navigateDetail(event.key==='PageDown'?1:-1);\r\n  },true);\r\n  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!warrantyMenu.hidden){event.preventDefault();warrantyMenu.hidden=true;}else if(event.key==='Escape'&&!detail.hidden){event.preventDefault();closeDetail()}else if(event.key==='Escape'&&!overlay.hidden){event.preventDefault();close()}});\r\n})();\r\n\r\n","facturacion-medios-pago.js":"(function (root) {\n  'use strict';\n  const key = id => String(Number(id) || 0);\n  const ids = values => [...new Set((Array.isArray(values) ? values : []).map(Number).filter(Number.isInteger))];\n  const text = value => String(value ?? '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();\n  function normalize(source, catalog) {\n    const medios = {};\n    const entries = source?.medios && typeof source.medios === 'object' ? source.medios : {};\n    for (const [id, value] of Object.entries(entries)) {\n      if (!Number(id) || !value || typeof value !== 'object') continue;\n      medios[key(id)] = {\n        comprobantesExcluidos: ids(value.comprobantesExcluidos),\n        tarjetasExcluidas: ids(value.tarjetasExcluidas)\n      };\n    }\n    for (const payment of catalog?.tiposPago || []) {\n      const id = key(payment.id), name = text(payment.nombre);\n      if (medios[id] || ![3, 5].includes(Number(payment.clase))) continue;\n      let compatible = null;\n      if (name === 'mercado pago') compatible = new Set(['mp credito', 'mp debito', 'mp qr']);\n      if (name === 'transf bria') compatible = new Set(['mp transferencia']);\n      if (compatible) medios[id] = {\n        comprobantesExcluidos:[],\n        tarjetasExcluidas:(catalog.tarjetas || []).filter(card => !compatible.has(text(card.nombre))).map(card => Number(card.id))\n      };\n    }\n    return { version:1, medios };\n  }\n  const rule = (rules, paymentId) => rules?.medios?.[key(paymentId)] || { comprobantesExcluidos:[], tarjetasExcluidas:[] };\n  const allowsVoucher = (rules, paymentId, voucherId) => !(rule(rules, paymentId).comprobantesExcluidos || []).includes(Number(voucherId));\n  const allowsCard = (rules, paymentId, cardId) => !(rule(rules, paymentId).tarjetasExcluidas || []).includes(Number(cardId));\n  const usesCards = payment => [3, 5].includes(Number(payment?.clase));\n  function adjustValue(row, source, parse = Number, round = value => Math.round((value + Number.EPSILON) * 100) / 100) {\n    if (source === 'total') {\n      const target = round(parse(row.total));\n      if (!parse(row.importe)) { row.importe = target; row.impRec = 0; row.coef = 0; }\n      else { row.impRec = round(target - parse(row.importe)); row.coef = parse(row.impRec) / parse(row.importe); }\n    } else if (source === 'impRec') row.coef = parse(row.importe) ? parse(row.impRec) / parse(row.importe) : 0;\n    else row.impRec = round(parse(row.importe) * parse(row.coef));\n    row.total = round(parse(row.importe) + parse(row.impRec));\n    return row;\n  }\n  root.CorralonMediosPago = { normalize, rule, allowsVoucher, allowsCard, usesCards, adjustValue };\n})(typeof window !== 'undefined' ? window : globalThis);\n","corralon-cache-db.js":"(function(){\n  'use strict';\n\n  const DB_NAME='corralon_local_cache_v1';\n  const DB_VERSION=1;\n  const STORE_NAME='entries';\n  const memoryFallback=new Map();\n  let dbPromise=null;\n\n  function openDb(){\n    if(dbPromise)return dbPromise;\n    dbPromise=new Promise((resolve,reject)=>{\n      if(!window.indexedDB){reject(new Error('IndexedDB no disponible'));return}\n      const request=window.indexedDB.open(DB_NAME,DB_VERSION);\n      request.onupgradeneeded=()=>{\n        const db=request.result;\n        if(!db.objectStoreNames.contains(STORE_NAME))db.createObjectStore(STORE_NAME,{keyPath:'key'});\n      };\n      request.onsuccess=()=>resolve(request.result);\n      request.onerror=()=>reject(request.error||new Error('No se pudo abrir IndexedDB'));\n    });\n    return dbPromise;\n  }\n\n  async function get(key, options = {}){\n    try{\n      const db=await openDb();\n      return await new Promise((resolve,reject)=>{\n        const request=db.transaction(STORE_NAME,'readonly').objectStore(STORE_NAME).get(String(key));\n        request.onsuccess=()=>resolve(request.result?.value??null);\n        request.onerror=()=>reject(request.error);\n      });\n    }catch(error){\n      if(options.strict)throw error;\n      console.warn('Cache IndexedDB:',error);\n      return memoryFallback.get(String(key))??null;\n    }\n  }\n\n  async function set(key,value){\n    memoryFallback.set(String(key),value);\n    const db=await openDb();\n    return new Promise((resolve,reject)=>{\n      const transaction=db.transaction(STORE_NAME,'readwrite');\n      transaction.objectStore(STORE_NAME).put({key:String(key),value,updatedAt:Date.now()});\n      transaction.oncomplete=()=>resolve(value);\n      transaction.onerror=()=>reject(transaction.error||new Error('No se pudo guardar en IndexedDB'));\n      transaction.onabort=()=>reject(transaction.error||new Error('Guardado abortado en IndexedDB'));\n    });\n  }\n\n  async function remove(key){\n    memoryFallback.delete(String(key));\n    const db=await openDb();\n    return new Promise((resolve,reject)=>{\n      const transaction=db.transaction(STORE_NAME,'readwrite');\n      transaction.objectStore(STORE_NAME).delete(String(key));\n      transaction.oncomplete=()=>resolve();\n      transaction.onerror=()=>reject(transaction.error||new Error('No se pudo borrar de IndexedDB'));\n    });\n  }\n\n  async function migrateLocalStorage(key){\n    const existing=await get(key);\n    if(existing!==null)return existing;\n    let raw=null;\n    try{raw=localStorage.getItem(String(key))}catch{}\n    if(!raw)return null;\n    let value;\n    try{value=JSON.parse(raw)}catch{return null}\n    await set(key,value);\n    try{localStorage.removeItem(String(key))}catch{}\n    return value;\n  }\n\n  async function updateMany(entries, removeKeys = []){\n    const db=await openDb();\n    return new Promise((resolve,reject)=>{\n      const transaction=db.transaction(STORE_NAME,'readwrite'),store=transaction.objectStore(STORE_NAME);\n      try{\n        entries.forEach(([key,value])=>store.put({key:String(key),value,updatedAt:Date.now()}));\n        removeKeys.forEach(key=>store.delete(String(key)));\n      }catch(error){transaction.abort();reject(error);return;}\n      transaction.oncomplete=()=>{entries.forEach(([key,value])=>memoryFallback.set(String(key),value));removeKeys.forEach(key=>memoryFallback.delete(String(key)));resolve();};\n      transaction.onerror=()=>reject(transaction.error||new Error('No se pudieron actualizar las cargas'));\n      transaction.onabort=()=>reject(transaction.error||new Error('Actualización de cargas abortada'));\n    });\n  }\n  async function withLock(key, work){\n    if(navigator.locks?.request)return navigator.locks.request('corralon-cache|'+key,work);\n    let db;try{db=await openDb();}catch(_){return work();}\n    const lockKey='__lease|'+key;\n    const owner=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`;\n    function change(action){return new Promise((resolve,reject)=>{\n      const tx=db.transaction(STORE_NAME,'readwrite'),store=tx.objectStore(STORE_NAME),request=store.get(lockKey);\n      let acquired=false;\n      request.onsuccess=()=>{const lease=request.result,now=Date.now();\n        if(action==='release'){if(lease?.owner===owner)store.delete(lockKey);}\n        else if(lease?.owner===owner || (action==='acquire' && (!lease || lease.expiresAt\u003c=now))){store.put({key:lockKey,owner,expiresAt:now+120000});acquired=true;}\n      };\n      tx.oncomplete=()=>resolve(acquired);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('No se pudo coordinar la caché'));\n    });}\n    while(!await change('acquire'))await new Promise(resolve=>setTimeout(resolve,100));\n    const heartbeat=setInterval(()=>change('renew').catch(console.warn),20000);\n    try{return await work();}finally{clearInterval(heartbeat);await change('release');}\n  }\n  window.CorralonCacheDB={get,set,remove,migrateLocalStorage,updateMany,withLock};\n})();\n"};
 const hasAccess=key=>Boolean(window.CorralonFunciones?.menuUserHasAccess?.(key==='compras'?'cargar_facturas':modules[key]?.permission));
-const purchaseInstance={shadow:document,setActive(){}};
 const routeFiles={};
 function navigate(key,search='',hash='',record=true,view=''){const routes={compras:'cargar-facturas.html',stock:'cargastock.html',proveedores:'proveedores-sql.html',articulos:'articulos-sql.html',tarjetas:'ventas-tarjeta.html',pagos:'pagos-proveedores.html',historial:'historial-movimiento.html'};const target=routes[key];if(!target)return false;location.href=target+search+'#sql/'+key+(view?'/'+view:'');return true;}
  function createSection(key,search='',hash=''){
@@ -1698,26 +2293,41 @@ async function loadArticleSource(){if(modules.articulos.html)return;const respon
  }
 
 
- let linkedStockInstance=null,linkedStockSection=null,linkedStockOrigin=null,linkedStockDialogs=[],linkedStockReturn='#sql/compras';
+ let linkedStockInstance=null,linkedStockSection=null,linkedStockOrigin=null,linkedStockTitle='',linkedStockReturn='#sql/compras';
+ let linkedStockRequest=0;
  function fitLinkedStock(){
   if(!linkedStockSection||linkedStockSection.hidden||!linkedStockInstance)return;
-  const width=window.innerWidth,height=window.innerHeight,scale=Math.min(1,width/1280,height/800);
-  const host=linkedStockInstance.host;host.style.cssText='position:absolute;left:0;top:0;width:'+(width/scale)+'px;height:'+(height/scale)+'px;transform-origin:top left;transform:scale('+scale+');min-height:0';
+  const top=linkedStockSection.querySelector('.purchase-view-tabs')?.offsetHeight||0;
+  const width=window.innerWidth,height=window.innerHeight-top,scale=Math.min(1,width/1280,height/800);
+  const host=linkedStockInstance.host;host.style.cssText='position:absolute;left:0;top:'+top+'px;width:'+(width/scale)+'px;height:'+(height/scale)+'px;transform-origin:top left;transform:scale('+scale+');min-height:0';
  }
+ let tabAfterLinkedStock=null;
  function closeLinkedStock(record=true){
+  if(record&&location.hash.startsWith('#sql/compras/carga/')&&history.state?.linkedStockReturn){history.back();return;}
   if(!linkedStockSection||linkedStockSection.hidden)return;
   if(linkedStockSection.open)linkedStockSection.close();linkedStockSection.hidden=true;linkedStockInstance.setActive(false);
-  const purchase=purchaseInstance;if(linkedStockReturn.startsWith('#sql/compras'))purchase?.setActive(true);
-  for(const dialog of linkedStockDialogs)if(dialog.isConnected&&!dialog.open)dialog.showModal();
-  linkedStockDialogs=[];document.title=modules.compras.title+' — Corralón Progreso';
-  if(linkedStockOrigin?.isConnected)linkedStockOrigin.focus();
-  if(record&&location.hash.startsWith('#sql/compras/carga/')){history.replaceState(history.state,'',linkedStockReturn);}
+  document.title=linkedStockTitle;
+  if(linkedStockOrigin?.isConnected)linkedStockOrigin.focus({preventScroll:true});
+  linkedStockOrigin=null;
+  if(record&&location.hash.startsWith('#sql/compras/carga/'))history.replaceState(history.state,'',linkedStockReturn);
+  const tab=tabAfterLinkedStock;tabAfterLinkedStock=null;
+  window.dispatchEvent(new CustomEvent('purchase-stock-view',{detail:{open:false,tab}}));
  }
  async function openLinkedStock(purchase,{origin=null,record=true}={}){
   if(!hasAccess('stock')||!hasAccess('compras'))throw new Error('No tenés permiso para consultar cargas de stock.');
   if(!Number(purchase))throw new Error('No se encontró el comprobante de compra vinculado.');
+  const request=++linkedStockRequest, startHash=location.hash;
+  const originDialog=origin?.closest('dialog');
+  const startView=history.state?.purchaseTrail?.at(-1);
+  const isCurrent=()=>{
+    const view=history.state?.purchaseTrail?.at(-1);
+    return request===linkedStockRequest&&location.hash===startHash&&
+      (!origin||(origin.isConnected&&(!originDialog||originDialog.open)&&
+        view?.view===startView?.view&&view?.id===startView?.id&&view?.tabId===startView?.tabId));
+  };
   if(!linkedStockInstance){
    if(!modules.stock.html){const response=await fetch('cargastock.html');if(!response.ok)throw new Error('No se pudo cargar el visor de stock.');const source=new DOMParser().parseFromString(await response.text(),'text/html');source.querySelectorAll('[id^="stock-standalone-"],#systemSQLModules').forEach(node=>node.remove());modules.stock.html=source.documentElement.outerHTML;}
+   if(!isCurrent())return false;
    linkedStockSection=document.createElement('dialog');linkedStockSection.id='linkedStockSection';linkedStockSection.setAttribute('aria-label','Compras · Carga de stock vinculada');linkedStockSection.hidden=true;linkedStockSection.style.cssText='position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:#f3f8ff;z-index:1000;overflow:hidden';linkedStockSection.addEventListener('cancel',event=>{event.preventDefault();closeLinkedStock();});
    document.getElementById('systemSQLModules').append(linkedStockSection);
    linkedStockInstance=createSection('stock','?embed=movement');linkedStockInstance.host.dataset.sqlLinkedStock='';linkedStockSection.append(linkedStockInstance.host);
@@ -1725,32 +2335,41 @@ async function loadArticleSource(){if(modules.articulos.html)return;const respon
    linkedStockInstance.shadow.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();closeLinkedStock();}});
    window.addEventListener('resize',fitLinkedStock);
   }
-  const instance=linkedStockInstance;linkedStockOrigin=origin||linkedStockOrigin;instance.setActive(true);
+  const instance=linkedStockInstance;
+  const discard=()=>{if(request===linkedStockRequest&&linkedStockSection.hidden)instance.setActive(false);return false;};
+  instance.setActive(true);
   try{await instance.ready;
+   if(!isCurrent())return discard();
    if(!instance.shadow.getElementById('linkedStockLayout')){const style=document.createElement('style');style.id='linkedStockLayout';style.textContent=':host,html,body{height:100%!important;min-height:0!important;overflow:hidden!important}body.stock-movement-embedded #stockMovementPopup{position:relative!important;inset:auto!important;display:flex;flex-direction:column;width:100%!important;height:100%!important;max-height:none!important;min-width:0!important;box-sizing:border-box;border:0!important;border-radius:0!important;padding:10px;overflow:hidden!important}#stockMovementPopup[hidden]{display:none!important}#stockMovementPopup .stock-popup-table{flex:1 1 0!important;height:auto!important;min-height:80px;overflow:auto}#stockMovementPopup .stock-popup-table table{width:100%!important;min-width:0!important;table-layout:fixed}#stockMovementPopup .stock-movement-header{flex:none;overflow:visible}#stockMovementPopup .movement-header-row{min-width:0!important;gap:12px!important}#stockMovementPopup .stock-movement-bottom{margin-top:0!important}#stockMovementPopup .stock-popup-head{flex:none;display:flex;align-items:center;gap:12px}';instance.shadow.querySelector('head').append(style);}
    const viewer=instance.getStockViewer();if(!viewer)throw new Error('No se pudo iniciar el visor integrado de stock.');await viewer.openPurchase(purchase);
-   const purchaseModule=purchaseInstance;
-   if(linkedStockSection.hidden){linkedStockDialogs=[...(purchaseModule?.shadow.querySelectorAll('dialog[open]')||[])];for(const dialog of linkedStockDialogs)dialog.close();linkedStockReturn=location.hash.startsWith('#sql/compras/carga/')?'#sql/compras':location.hash;}
-   purchaseModule?.setActive(false);document.getElementById('systemSQLModules').hidden=false;linkedStockSection.hidden=false;if(!linkedStockSection.open)linkedStockSection.showModal();instance.setActive(true);fitLinkedStock();
-   const header=instance.shadow.querySelector('#stockMovementPopup .stock-popup-head');if(header&&!header.querySelector('[data-linked-stock-menu]')){const menu=document.createElement('button');menu.type='button';menu.dataset.linkedStockMenu='';menu.textContent='☰ Menú';menu.onclick=()=>window.CorralonSidebarMenu?.open();header.prepend(menu);}
+   if(!isCurrent())return discard();
+   linkedStockOrigin=origin||linkedStockOrigin;
+   if(linkedStockSection.hidden){
+     linkedStockTitle=document.title;
+     linkedStockReturn=location.hash.startsWith('#sql/compras/carga/')?'#sql/compras':location.hash;
+   }
+   document.getElementById('systemSQLModules').hidden=false;
+   linkedStockSection.hidden=false;
+   if(!linkedStockSection.open)linkedStockSection.showModal();
    document.title='Carga de stock vinculada — Compras';
-   if(record)history.pushState({linkedStockReturn},'','#sql/compras/carga/'+Number(purchase));return true;
-  }catch(error){instance.setActive(false);throw error;}
+   if(record)history.pushState({...history.state,linkedStockReturn},'','#sql/compras/carga/'+Number(purchase));
+   window.dispatchEvent(new CustomEvent('purchase-stock-view',{detail:{open:true,host:linkedStockSection,id:Number(purchase)}}));fitLinkedStock();return true;
+  }catch(error){if(!isCurrent())return discard();instance.setActive(false);throw error;}
  }
 
 
 function openProviderFrame(frame,search){frame.removeAttribute('srcdoc');frame.src=new URL('proveedores-sql.html'+search,location.href).href;}
-window.CorralonSQLModules={openProviderFrame,openLinkedStock,openArticle,openPurchase:(id)=>window.CorralonPurchaseViewer.open(id)};
+window.CorralonSQLModules={openProviderFrame,openLinkedStock,closeLinkedStock(tab){tabAfterLinkedStock=tab||null;closeLinkedStock();},openArticle,openPurchase:(id)=>window.CorralonPurchaseViewer.open(id)};
 window.addEventListener('popstate',()=>{if(!location.hash.startsWith('#sql/compras/carga/'))closeLinkedStock(false);});
 })();</script>
 <script id="purchase-standalone-navigation">(()=>{
 const FX=window.CorralonFunciones;FX?.initializeSystemMenu?.();
 let applying=false,last='';
-function follow(){if(applying)return;const path=location.hash.split('/');const view=path[2]||'';if(view==='carga'){window.CorralonSQLModules.openLinkedStock(Number(path[3]),{record:false}).catch(console.warn);return;}if(location.hash===last)return;const selector={consultar:'#consult',iva:'#ivaButton',cuentas:'#accountButton'}[view];if(!selector)return;const control=document.querySelector(selector);if(!control||control.disabled||control.closest('fieldset[disabled]'))return;applying=true;last=location.hash;control.click();applying=false;}
+function follow(){if(applying)return;const path=location.hash.split('/');const view=path[2]||'';if(view==='carga'){if(location.hash===last||document.getElementById('linkedStockSection')?.open)return;last=location.hash;window.CorralonSQLModules.openLinkedStock(Number(path[3]),{record:false}).catch(error=>{last='';console.warn(error);});return;}if(last.startsWith('#sql/compras/carga/'))last='';if(location.hash===last||history.state?.purchaseTrail?.length)return;const selector={consultar:'#consult',iva:'#ivaButton',cuentas:'#accountButton'}[view];if(!selector)return;const control=document.querySelector(selector);if(!control||control.disabled||control.closest('fieldset[disabled]'))return;applying=true;last=location.hash;control.click();applying=false;}
 new MutationObserver(follow).observe(document.querySelector('.app')||document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled']});window.addEventListener('hashchange',follow);window.addEventListener('menu-user-validated',follow);follow();
 let field=null,selection=null,saved=null;const remember=()=>{const input=document.activeElement;if(!input?.matches('input,textarea,select'))return;field=input;selection={start:input.selectionStart,end:input.selectionEnd,direction:input.selectionDirection};};
 for(const type of ['input','keyup','select','pointerup'])document.addEventListener(type,remember);
-for(const type of ['blur','focusout','change'])document.addEventListener(type,event=>{if(event.relatedTarget||document.hasFocus()||!event.target?.matches('input,textarea,select'))return;if(!saved)saved={field:event.target,value:event.target.value,selection:event.target===field?selection:null};event.stopImmediatePropagation();},true);
+for(const type of ['blur','focusout','change'])document.addEventListener(type,event=>{if(event.relatedTarget||document.hasFocus()||!event.target?.matches('input,textarea,select')||event.target.matches('[data-corralon-appearance]'))return;if(!saved)saved={field:event.target,value:event.target.value,selection:event.target===field?selection:null};event.stopImmediatePropagation();},true);
 window.addEventListener('blur',()=>{remember();if(!saved&&field)saved={field,value:field.value,selection};});
 window.addEventListener('focus',()=>{const item=saved;if(!item)return;requestAnimationFrame(()=>{if(saved!==item)return;saved=null;const current=document.activeElement;if(current!==item.field&&current?.matches('input,textarea,select,button,a'))return;if(!item.field.isConnected||item.field.disabled)return;item.field.value=item.value;item.field.focus({preventScroll:true});if(item.selection?.start!=null)try{item.field.setSelectionRange(item.selection.start,item.selection.end,item.selection.direction||'none');}catch{}});});
 })();</script>
