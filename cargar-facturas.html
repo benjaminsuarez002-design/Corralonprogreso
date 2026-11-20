@@ -163,7 +163,7 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js" data-menu-guard="cargar_facturas"></script>
   <script src="funciones.js"></script>
-  <script src="corralon-system.js?v=0.0.3"></script>
+  <script src="corralon-system.js?v=0.0.4"></script>
 <style>
   html[data-corralon-theme="classic"] body.purchase-entry-reference #purchaseComboMenu .purchase-combo-option {
     background:#fff!important;
@@ -245,7 +245,7 @@ dialog{width:min(1200px,calc(100vw - 24px));max-height:94dvh;border:1px solid va
           <label class="last-number">Últ. Nº Comp.:<input id="lastNumber" readonly tabindex="-1"></label>
           <label class="note">Nota:<textarea id="note" rows="2" data-flow></textarea></label>
           <label class="movement">Nº Mov. Stock:<input id="movement" type="text" data-sql-list="movement" data-flow placeholder="Sin movimiento asociado"></label>
-          <label class="check">En Movs. de Stock:<input id="inStock" type="checkbox" checked data-flow></label>
+          <label class="check">En Movs. de Stock:<input id="inStock" type="checkbox" data-flow></label>
           <label class="discount">Imp. Dto.:<input id="discount" inputmode="decimal" data-flow data-number-format="percent" value="0,00%" title="Porcentaje de descuento"></label>
           <label class="discount-amount">Descuento:<output id="discountAmount">$ 0,00</output></label>
           <label class="discount-total">Total c/Dto.:<output id="discountTotal">$ 0,00</output></label>
@@ -674,6 +674,11 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       if (purchaseCombo.input === $('movement')) hidePurchaseCombo();
     }
   }
+  function applyAccountStockDefault() {
+    $('inStock').checked=Number(comboItem('account')?.id)===18;
+    if(!$('inStock').checked)$('movement').value='';
+    updateStockEligibility();
+  }
   let stockPickerSelection = null, stockPickerRequest = 0;
   async function openStockPicker() {
     if ($('stockPicker').open) return;
@@ -824,6 +829,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     if (provider) {
       $('cuit').value = provider.cuit || '';
       setComboValue('account', provider.cuenta);
+      applyAccountStockDefault();
       $('concept').value = comboItem('account')?.nombre || '';
     }
     refreshStock(); saveDraft();
@@ -864,7 +870,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const due = new Date(`${today()}T12:00:00`); due.setDate(due.getDate() + 30);
     $('due').value = `${due.getDate()}/${due.getMonth() + 1}/${due.getFullYear()}`;
     setComboValue('type', ''); setComboValue('payment', 1); $('goods').value = '2';
-    $('discount').value = '0,00%'; $('calculatorRate').value = '1'; $('inStock').checked = true;
+    $('discount').value = '0,00%'; $('calculatorRate').value = '1'; applyAccountStockDefault();
     $('providerCode').value = ''; $('providerName').value = ''; $('lastNumber').value = localStorage.getItem(lastKey()) || '';
     rows = []; rows.push(blankRow()); draft = { id: rowId() };
     renderRows(); refreshStock(); onTypeChange(); setBusy(false); saveDraft();
@@ -900,6 +906,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       const invoice = result.factura[0];
       if (!invoice) throw new Error('No pude verificar la factura guardada. Reintentá la misma confirmación.');
       localStorage.setItem(lastKey(), invoice.NroFactura);
+      localStorage.setItem(lastKey()+':ficha', JSON.stringify({id:Number(invoice.IDRecibo),numero:invoice.NroFactura}));
       resetDraft();
       message(`Factura ${invoice.NroFactura} confirmada. Ya podés cargar la siguiente.`);
       if (sendToStock && !invoice.IDMovStk) {
@@ -1043,6 +1050,38 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     };
     popup.showModal();preview();percent.focus();
   }
+  function previewPurchaseAmounts(p, rows, edits) {
+    const round = value => Math.round(value * 100 + 1e-7) / 100;
+    const amounts = rows.map((row,index) => edits.has(index) ? edits.get(index) : round(Number(row.importe)));
+    const netChanged = new Set(rows.filter((row,index) => Number(row.impuesto) === 0 &&
+      amounts[index] !== round(Number(row.importe))).map(row => row.neto));
+    const bases = new Map(), automatic = new Set();
+    const rates = {1:.21, 8:.27, 10:.105};
+    const fields = {1:'21', 8:'27', 10:'105'};
+    const vat = {ImpNeto21:0,ImpIVA21:0,ImpNeto27:0,ImpIVA27:0,ImpNeto105:0,ImpIVA105:0};
+    rows.forEach((row,index) => {
+      if (Number(row.impuesto) === 0) bases.set(row.neto,(bases.get(row.neto) || 0) + amounts[index]);
+    });
+    const counted = new Set();
+    rows.forEach((row,index) => {
+      const tax = Number(row.impuesto), key = fields[tax];
+      if (!key) return;
+      const base = bases.get(row.neto) || 0;
+      if (netChanged.has(row.neto)) {
+        amounts[index] = round(base * (Math.round(Number(row.porcentaje) * 100000) / 100000 || rates[tax]));
+        automatic.add(index);
+      }
+      const group = key + ':' + row.neto;
+      if (!counted.has(group)) vat['ImpNeto'+key] += base;
+      counted.add(group);
+      vat['ImpIVA'+key] += amounts[index];
+    });
+    const sign = Number(p.IDTipoAcred) === 2 ? -1 : 1;
+    const delta = rows.reduce((sum,row,index) => sum + amounts[index] - round(Number(row.importe)),0);
+    const total = round(Number(p.Total) + sign * delta);
+    const discount = round(Math.abs(total) * Number(p.ImpDto || 0));
+    return {amounts,automatic,vat,total,totalAfterDiscount:round(total - Math.sign(total) * discount),discount};
+  }
   function showInvoice(result) {
     $('detailDialog').querySelector('[data-generate-purchase-discount]')?.remove();
     const p = result.factura[0];
@@ -1053,7 +1092,7 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const totalAfterDiscount = result.credito?.length ? total + creditAmount : total - Math.sign(total) * discountAmount;
     const header = [ ['Proveedor', p.Proveedor], ['Tipo', `${p.tipo} · ${p.tipoNombre}`], ['Nº comprobante', p.NroFactura], ['Fecha compra', dateText(sqlDate(p.Fecha))], ['Período IVA', dateText(sqlDate(p.FechaIVA)).slice(3)], ['Vencimiento', dateText(sqlDate(p.FechaVto))], ['CUIT', p.CUIT], ['Cuenta', p.Cuenta], ['Pago', p.pago], ['Tipo de bien', p.TipoBien], ['Sucursal / punto de venta', p.puntoVentaNombre], ['Nº remito', p.NroRemMerc], ['Movimiento de stock', p.stockNumero || p.IDMovStk], ['Concepto', p.Concepto], ['Total', money(p.Total)], ['Descuento', money(discountAmount)], ['Total c/dto.', money(totalAfterDiscount)] ];
     const canEdit = FX.menuUserHasAccess('cargar_facturas');
-    const canEditAmounts = canEdit && !Number(p.IDAsiento) && !Number(p.IDRecImp) && !result.credito.length;
+    const canEditAmounts = canEdit && !Number(p.IDAsiento) && (!Number(p.IDRecImp) || (result.credito.length === 1 && Number(p.ImpDto) > 0));
     const taxColumns = ['Impuesto','Nº Neto','% Imp.','Importe','',''];
     const taxRows = result.impuestos.map((row, index) => {
       const rawLabel = row.descripcion || row.nombre;
@@ -1082,20 +1121,20 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     }).join('');
     const payments=paymentOrders.size?'<h3>Órdenes de pago</h3><table><thead><tr><th>Nº OP</th><th>Pago</th><th>Importe</th>'+
       (canViewOrders?'<th class="purchase-payment-action" aria-label="Acción"></th>':'')+'</tr></thead><tbody>'+paymentRows+'</tbody></table>':'';
-    const credit = result.credito.length ? `<p>Crédito por descuento: ${esc(result.credito[0].NroFactura)} · ${money(result.credito[0].Total)} (registro ${result.credito[0].IDRecibo}).</p>` : '';
+    const credit = result.credito.length ? `<p>Crédito por descuento: ${esc(result.credito[0].NroFactura)} · <span data-purchase-credit-total>${money(result.credito[0].Total)}</span> (registro ${result.credito[0].IDRecibo}).</p>` : '';
     $('openStock').hidden = !(p.EnMovStk && !p.IDMovStk && FX.menuUserHasAccess('carga_stock'));
     const canChangePayment=canEdit&&Number(p.IDFormaPago)===3&&total>0&&!result.pagos.length;
-    const field=(label,value,width)=>label==='Forma de Pago'&&canChangePayment?`<label>${esc(label)}:<select id="editPurchasePayment" style="width:${width}px;height:23px;padding:2px 5px;border-radius:0;font-size:12px"><option value="3">${esc(p.pago||'Cta. Cte.')}</option><option value="1">Efectivo</option></select></label>`:`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':label==='Nº Mov. Stock'&&canEdit?'id="editPurchaseMovement" autocomplete="off"':'readonly'} style="--width:${width}px" value="${esc(value??'')}"></label>`;
+    const field=(label,value,width)=>label==='Forma de Pago'&&canChangePayment?`<label>${esc(label)}:<select id="editPurchasePayment" style="width:${width}px;height:23px;padding:2px 5px;border-radius:0;font-size:12px"><option value="3">${esc(p.pago||'Cta. Cte.')}</option><option value="1">Efectivo</option></select></label>`:`<label>${esc(label)}:<input ${label==='Nº'&&canEdit?'id="editPurchaseNumber"':label==='Nº Mov. Stock'&&canEdit?'id="editPurchaseMovement" autocomplete="off"':'readonly'} ${/^Imp(?:Neto|IVA)/.test(label)?'data-purchase-vat="'+label+'"':''} style="--width:${width}px" value="${esc(value??'')}"></label>`;
     const vatTotals = ['21','105','27'].map(rate => field('ImpNeto'+rate,money(p['ImpNeto'+rate]),92)+field('ImpIVA'+rate,money(p['ImpIVA'+rate]),92)).join('');
-    const summary=`<label class="purchase-total">Total:<output>${money(total)}</output></label><label>En Movs. de Stock:<input type="checkbox" disabled ${p.EnMovStk?'checked':''}></label>${field('Nº Mov. Stock',p.stockNumero||p.IDMovStk||'',95)}`;
+    const summary=`<label class="purchase-total">Total:<output data-purchase-total>${money(total)}</output></label><label>En Movs. de Stock:<input type="checkbox" disabled ${p.EnMovStk?'checked':''}></label>${field('Nº Mov. Stock',p.stockNumero||p.IDMovStk||'',95)}`;
     openDetail('Consultar Compras a Proveedores', `<div class="purchase-inspect">
       <div class="purchase-inspect-row">${field('Comprobante',p.tipo,70)}${field('Nº',p.NroFactura,105)}${field('Fecha',dateText(sqlDate(p.Fecha)),75)}${field('Período IVA',dateText(sqlDate(p.FechaIVA)).slice(3),75)}${field('Carga',p.FechaCarga?dateText(sqlDate(p.FechaCarga)):'',75)}</div>
       <div class="purchase-inspect-row">${field('Proveedor',p.Proveedor,300)}${field('ID',p.IDProveedor,50)}<span class="purchase-classic-only">${field('TC',p.tipoNombre,132)}</span></div>
       <div class="purchase-inspect-columns"><div class="purchase-inspect-left"><div class="purchase-inspect-row">${field('CUIT',p.CUIT,85)}${field('Forma de Pago',p.pago,110)}</div>${field('Concepto',p.Concepto,280)}${field('Cuenta',p.Cuenta,285)}</div><div class="purchase-inspect-right">${field('Operador',p.operadorNombre||'—',165)}${field('Vence',dateText(sqlDate(p.FechaVto)),75)}<span class="purchase-classic-only">${field('Tipo de Bien',p.TipoBien,114)}</span></div></div>
       ${taxes}<div class="purchase-classic-only purchase-classic-vat">${vatTotals}</div><div class="purchase-inspect-summary">${summary}</div>
-      <div class="purchase-inspect-row purchase-inspect-bottom">${field('Nº Remito de Merc.',p.NroRemMerc,125)}<label class="purchase-total" style="margin-left:50px">Total Real:<output>${money(total)}</output></label></div>
+      <div class="purchase-inspect-row purchase-inspect-bottom">${field('Nº Remito de Merc.',p.NroRemMerc,125)}<label class="purchase-total" style="margin-left:50px">Total Real:<output data-purchase-total>${money(total)}</output></label></div>
       <div class="purchase-inspect-note"><label>Nota:<textarea readonly>${esc(cleanNote(p.Nota))}</textarea></label><div class="purchase-inspect-actions"></div></div>
-      <div class="purchase-inspect-discount">${field('Imp. Dto.',`${decimal(Number(p.ImpDto||0)*100)}%`,105)}<label>Total c/Dto.:<output>${money(totalAfterDiscount)}</output></label></div>
+      <div class="purchase-inspect-discount">${field('Imp. Dto.',`${decimal(Number(p.ImpDto||0)*100)}%`,105)}<label>Total c/Dto.:<output data-purchase-discounted>${money(totalAfterDiscount)}</output></label></div>
       </div>${payments}${credit}`);
     detailInvoiceId = Number(p.IDRecibo); $('deleteInvoice').hidden = false;
     recordPurchaseView({view:'detail',id:detailInvoiceId});
@@ -1133,35 +1172,52 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
         return /^\$?\s*[\d.,]+$/.test(value) && /\d/.test(value)
           ? Math.round(numeric(value)*100)/100 : NaN;
       };
-      const amountChanges = () => amountInputs.flatMap(input => {
-        const row = result.impuestos[Number(input.dataset.purchaseTaxAmount)];
-        const importe = parseAmount(input);
-        if (importe === Math.round(Number(row.importe)*100)/100) return [];
+      const edited = new Map();
+      let automatic = new Set();
+      const amountChanges = () => [...edited].flatMap(([index,importe]) => {
+        const row = result.impuestos[index];
+        if (automatic.has(index) || importe === Math.round(Number(row.importe)*100)/100) return [];
         return [{impuesto:row.impuesto,neto:row.neto,importe,anterior:row.importe}];
       });
       const track = () => {
-        save.disabled = !amountChanges().length && numberInput.value.trim() === p.NroFactura
-          && stockCheck.checked === Boolean(p.EnMovStk) && (!paymentInput || Number(paymentInput.value) === Number(p.IDFormaPago));
+        const changes = amountChanges();
+        save.disabled = [...edited.values()].some(value => !Number.isFinite(value)) ||
+          (!changes.length && numberInput.value.trim() === p.NroFactura
+          && stockCheck.checked === Boolean(p.EnMovStk) && (!paymentInput || Number(paymentInput.value) === Number(p.IDFormaPago)));
+        const generate = $('detailDialog').querySelector('[data-generate-purchase-discount]');
+        if (generate) generate.disabled = Boolean(changes.length || Number(p.IDRecImp) || Number(p.ImpDto) || result.credito.length);
+      };
+      const recalculate = () => {
+        if ([...edited.values()].some(value => !Number.isFinite(value))) { track(); return; }
+        const preview = previewPurchaseAmounts(p,result.impuestos,edited);
+        const modified = amountInputs.some((input,index) => preview.amounts[index] !== Math.round(Number(result.impuestos[index].importe)*100)/100);
+        for (const [index,input] of amountInputs.entries()) {
+          if (preview.automatic.has(index) || automatic.has(index)) input.value = money(preview.amounts[index]);
+          input.readOnly = preview.automatic.has(index);
+        }
+        automatic = preview.automatic;
+        const body = $('detailBody');
+        body.querySelectorAll('[data-purchase-total]').forEach(output => output.textContent = money(modified ? preview.total : total));
+        body.querySelector('[data-purchase-discounted]').textContent = money(modified ? preview.totalAfterDiscount : totalAfterDiscount);
+        body.querySelectorAll('[data-purchase-vat]').forEach(input => input.value = money((modified ? preview.vat : p)[input.dataset.purchaseVat]));
+        const creditTotal = body.querySelector('[data-purchase-credit-total]');
+        if (creditTotal) creditTotal.textContent = money(modified ? -preview.discount : creditAmount);
+        track();
       };
       numberInput.addEventListener('input',track);numberInput.addEventListener('change',track);stockCheck.addEventListener('change',track);
       paymentInput?.addEventListener('change',track);
-      for (const input of amountInputs) {
-        input.dataset.savedAmount = input.value;
-        input.addEventListener('input', track);
+      for (const [index,input] of amountInputs.entries()) {
+        input.addEventListener('input', () => { edited.set(index,parseAmount(input)); recalculate(); });
         input.addEventListener('change', () => {
+          if (input.readOnly) return;
           const amount = parseAmount(input);
+          edited.set(index,amount);
           if (Number.isFinite(amount)) input.value = money(amount);
-          track();
+          recalculate();
         });
       }
       save.onclick=async()=>{
         const cambiosImportes = amountChanges();
-        const invalid = amountInputs.find(input => !Number.isFinite(parseAmount(input)));
-        if (invalid) {
-          await htmlNotice('Ingresá un importe válido mayor o igual a cero.',false);
-          invalid.focus();
-          return;
-        }
         save.disabled=true;numberInput.disabled=true;stockCheck.disabled=true;if(paymentInput)paymentInput.disabled=true;
         amountInputs.forEach(input => input.disabled = true);
         try{
@@ -1246,6 +1302,18 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     $('providerDialog').querySelector('h2').textContent = providerId ? 'Proveedor SQL' : 'Cargar proveedor';
     window.CorralonSQLModules.openProviderFrame($('providerFrame'),providerId ? `?dialogo=1&id=${encodeURIComponent(providerId)}` : `?dialogo=1&nombre=${encodeURIComponent(name)}`);
     $('providerDialog').showModal();
+  }
+  for (const id of ['providerFrame','providerWebFrame']) {
+    const frame=$(id), dialog=frame.closest('dialog');
+    frame.addEventListener('load',()=>{
+      const frameDocument=frame.contentDocument;
+      frameDocument?.addEventListener('keydown',event=>{
+        if(event.key!=='Escape'||!dialog.open||frameDocument.querySelector('dialog[open]'))return;
+        event.preventDefault();
+        event.stopPropagation();
+        dialog.close();
+      },true);
+    });
   }
   function showProvider() {
     openProviderDialog(selectedProvider()?.id || 0);
@@ -1372,6 +1440,8 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
     const item=recentViews.get(view);
     if(!item)return;
     const trail=purchaseTrail(), active=trail.at(-1)?.view===view;
+    closePurchaseDialog($(purchaseViews[view]));
+    cancelReportDetailRequest();
     closedPurchaseTabs[view]=Math.max(Date.now(),item.tabId||0);
     recentViews.delete(view);
     ++purchaseRestoreSequence;
@@ -1419,6 +1489,11 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   });
   for(const [view,id] of Object.entries(purchaseViews)){
     const dialog=$(id);
+    if(view!=='menu')dialog.addEventListener('cancel',event=>{
+      if(!recentViews.has(view))return;
+      event.preventDefault();
+      closePurchaseTab(view);
+    });
     dialog.addEventListener('close',()=>{
       const pending=closingPurchaseDialogs.get(dialog)||0;
       if(pending){
@@ -1459,13 +1534,16 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   });
   restoreAfterReady.observe($('purchaseFields'),{attributes:true,attributeFilter:['disabled']});
   syncPurchaseTabs();
+  function closePurchaseDialog(dialog){
+    if(!dialog?.open)return;
+    closingPurchaseDialogs.set(dialog,(closingPurchaseDialogs.get(dialog)||0)+1);
+    dialog.close();
+  }
   function showPurchaseView(view){
     const target=purchaseViews[view]?$(purchaseViews[view]):null;
     for(const id of Object.values(purchaseViews)){
       const other=$(id);
-      if(other===target||!other.open)continue;
-      closingPurchaseDialogs.set(other,(closingPurchaseDialogs.get(other)||0)+1);
-      other.close();
+      if(other!==target)closePurchaseDialog(other);
     }
     if(target&&!target.open)target.showModal();
   }
@@ -1694,6 +1772,12 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   }
   $('purchaseForm').addEventListener('submit', event => event.preventDefault());
   decoratePurchaseCombos(document);
+  document.addEventListener('keydown',event=>{
+    if(event.key!=='F2'||event.ctrlKey||event.altKey||event.metaKey)return;
+    const input=event.target.closest('input:not([type="checkbox"]):not([type="radio"]),textarea');
+    if(!input||input.disabled||typeof input.select!=='function')return;
+    event.preventDefault();event.stopImmediatePropagation();input.select();
+  },true);
   document.addEventListener('keydown', event => {
     const input = event.target.closest('[data-purchase-combo]');
     if (!input) return;
@@ -1909,9 +1993,14 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
   });
   document.addEventListener('pointerdown', event => { if (!$('providerWebMenu').contains(event.target)) $('providerWebMenu').hidden = true; });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') $('providerWebMenu').hidden = true; });
-  $('point').addEventListener('change', () => { refreshAccounts(); refreshStock(); saveDraft(); });
+  $('point').addEventListener('change', () => {
+    const account=comboItem('account')?.id;
+    refreshAccounts();
+    if(comboItem('account')?.id!==account)applyAccountStockDefault();
+    refreshStock(); saveDraft();
+  });
   $('inStock').addEventListener('change', () => { if (!$('inStock').checked) $('movement').value = ''; refreshStock(); });
-  $('account').addEventListener('change', () => { $('concept').value = comboItem('account')?.nombre || ''; saveDraft(); });
+  $('account').addEventListener('change', () => { $('concept').value = comboItem('account')?.nombre || ''; applyAccountStockDefault(); refreshStock(); saveDraft(); });
   $('addRow').addEventListener('click', addRow);
   function loadQuickTotal(showErrors = false) {
     if (!options || draft.pending) return;
@@ -2176,9 +2265,31 @@ function htmlNotice(text, confirmation = true, onAccept = null) {
       : range + ' · ' + provider;
     printBody($('reportTitle').textContent, `<p>${esc(summary)}</p>${$('reportBody').innerHTML}<p>${esc($('reportTotals').textContent)}</p>`);
   });
+  let openingLastPurchase=false;
+  async function openLastPurchaseDetail() {
+    if(busy||openingLastPurchase)return;
+    const numero=$('lastNumber').value.trim();
+    if(!numero)return message('Todavía no hay un último comprobante para consultar.',true);
+    openingLastPurchase=true;
+    try {
+      let saved=null;
+      try{saved=JSON.parse(localStorage.getItem(lastKey()+':ficha')||'null');}catch{}
+      let id=saved?.numero===numero?Number(saved.id):0;
+      if(!id){
+        if(!/^\d{1,8}$|^\d{4}-\d{8}$/.test(numero)){await openReport('buscar',numero);return;}
+        const result=await api({consulta:'buscar',criterio:'numero',buscar:numero,desde:'1900-01-01',hasta:today(),proveedor:0,antes:0});
+        const matches=(result.facturas||result.filas||result.movimientos||[]).filter(row=>String(row.numero??row.NroFactura??'').trim()===numero);
+        if(matches.length!==1||result.hayMas){await openReport('buscar',numero);return;}
+        id=Number(matches[0].id??matches[0].IDRecibo);
+      }
+      if(!id)throw new Error('No se encontró la ficha del último comprobante.');
+      await window.CorralonPurchaseViewer.open(id);
+    } catch(error){message(error.message,true);}
+    finally{openingLastPurchase=false;}
+  }
   document.addEventListener('keydown', event => {
     if (!options || document.querySelector('dialog[open]')) return;
-    if (event.key === 'F1') { event.preventDefault(); openReport('buscar', $('lastNumber').value); }
+    if (event.key === 'F1') { event.preventDefault(); if(!event.repeat)openLastPurchaseDetail(); }
     if (event.key === 'F3') { event.preventDefault(); openReport('cuenta-corriente'); }
   });
 })();

@@ -1791,7 +1791,7 @@
     if(options.fixedMenu)document.body.append(menu);
     let matches = [], active = 0, selectedItem = items.find(item=>String(item.value)===String(options.selectedValue)) || null;
     const hide = () => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
-    let renderMatches=null,rendered=0;
+    let renderMatches=null,rendered=0,sortColumn=-1,sortDirection='',lastQuery='';
     const pager=options.batchSize?bindIncrementalRendering({root:menu,batchSize:options.batchSize,getTotal:()=>matches.length,renderRange:(from,to)=>{if(renderMatches)for(let index=from;index<to;index++)renderMatches(matches[index],index);rendered=to;}}):null;
     function positionScaledMenu(){
       const value=typeof options.menuScale==='function'?options.menuScale():options.menuScale,scale=Number(value)>0?Number(value):1,rect=input.getBoundingClientRect();
@@ -1817,16 +1817,24 @@
     function show(_, reason) {
       if(options.fixedMenu&&options.menuScale)positionScaledMenu();
       else if(options.fixedMenu){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,options.menuWidth||0),Math.max(1,window.innerWidth-16));menu.style.position='fixed';menu.style.top=rect.bottom+'px';menu.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';menu.style.width=width+'px';menu.style.minWidth=width+'px';menu.style.maxHeight=Math.max(80,Math.min(240,window.innerHeight-rect.bottom-10))+'px';}
-      const query = reason === 'typing' || reason === 'typing-key' ? normalize(input.value) : '';
-      matches = items.filter(item => !query || (options.match?options.match(item,query):normalize(item.searchText||item.label).includes(query)) || normalize(item.value) === query);
+      const query = reason==='sorting'?lastQuery:reason === 'typing' || reason === 'typing-key' ? normalize(input.value) : '';
+      lastQuery=query;
+      matches = items.filter(item => (!options.filterItem||options.filterItem(item))&&(!query || (options.match?options.match(item,query):normalize(item.searchText||item.label).includes(query)) || normalize(item.value) === query));
       if(query&&typeof options.rank==='function'){
         const ranks=new Map(matches.map(item=>[item,Number(options.rank(item,query))||0]));
         matches.sort((a,b)=>ranks.get(a)-ranks.get(b));
       }
+      if(options.sortableColumns&&sortColumn>=0){const sign=sortDirection==='desc'?-1:1;matches.sort((a,b)=>{const x=a.sortValues?.[sortColumn]??a.cells?.[sortColumn]??a.label,y=b.sortValues?.[sortColumn]??b.cells?.[sortColumn]??b.label;return sign*(typeof x==='number'&&typeof y==='number'?x-y:String(x??'').localeCompare(String(y??''),'es',{numeric:true}));});}
       active = 0; menu.replaceChildren();
       const columns=options.columns||[],grid=columns.map(column=>`${column.width||100}px`).join(' '),gridWidth=columns.reduce((sum,column)=>sum+(column.width||100),20);
       function fillColumns(row,cells){row.style.cssText=`display:grid;grid-template-columns:${grid};min-width:${gridWidth}px;padding:6px 10px;white-space:nowrap;font-size:12px;cursor:pointer`;cells.forEach((value,index)=>{const cell=document.createElement('span');cell.textContent=String(value??'');cell.title=cell.textContent;cell.style.cssText=`overflow:hidden;text-overflow:ellipsis;padding:0 5px;text-align:${columns[index]?.align||'left'}`;row.append(cell);});}
-      if(columns.length){const heading=document.createElement('div');fillColumns(heading,columns.map(column=>column.label));heading.style.cssText+=';position:sticky;top:0;z-index:1;font-weight:700;cursor:default;'+(options.headerStyle||'background:#171717;color:white');menu.append(heading);}
+      if(columns.length){const heading=document.createElement('div');fillColumns(heading,columns.map(column=>column.label));heading.style.cssText+=';position:sticky;top:0;z-index:1;font-weight:700;cursor:default;'+(options.headerStyle||'background:#171717;color:white');
+        if(options.sortableColumns)Array.from(heading.children).forEach((cell,index)=>{
+          cell.setAttribute('role','columnheader');cell.setAttribute('aria-sort',sortColumn===index?(sortDirection==='asc'?'ascending':'descending'):'none');cell.style.cursor='pointer';cell.title='Ordenar ascendente, descendente y volver al orden por fecha';
+          cell.textContent=columns[index].label+(sortColumn===index?(sortDirection==='asc'?' ↑':' ↓'):' ↕');
+          cell.addEventListener('mousedown',event=>event.preventDefault());
+          cell.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(sortColumn!==index){sortColumn=index;sortDirection='asc';}else if(sortDirection==='asc')sortDirection='desc';else{sortColumn=-1;sortDirection='';}show(null,'sorting');});
+        });menu.append(heading);}
       renderMatches=(item, index) => {
         const row = document.createElement('div'); row.setAttribute('role', 'option'); row.dataset.index = index;
         if(menu.id)row.id=menu.id+'-'+index;
@@ -1841,7 +1849,7 @@
       if (!options.allowEmptyPick&&!input.value.trim()) { hide(); return false; }
       const item = matches[active]; if (!item) return false;
       selectedItem = item;
-      input.value = item.label; input.setCustomValidity(''); hide(); input.dispatchEvent(new Event('change', { bubbles: true })); return true;
+      input.value = item.label; input.setCustomValidity(''); hide(); const change=new Event('change', { bubbles: true });change.dropdownValue=item.value;input.dispatchEvent(change); return true;
     }
     toggle.addEventListener('mousedown',event=>event.preventDefault());
     const bindings = bindDropdownOnlyWhenTyping({ root: wrapper, inputSelector: 'input', buttonSelector: 'button', buttonEvent:'click', show, hide, isOpen: () => !menu.hidden, advanceOnEnter: options.advanceOnEnter !== false, openOnArrowDown:options.openOnArrowDown,
@@ -2213,7 +2221,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     bindShiftEnterNewLine({root});
     function refreshCombos(){
       for(const [input,record] of combos)if(!(root.body||root).contains(input)){record.binding.destroy();record.wrapper?.replaceWith(input);combos.delete(input);}
-      root.querySelectorAll('select:not([data-combo-source])').forEach(select=>{
+      root.querySelectorAll('select:not([data-combo-source]):not([data-corralon-appearance])').forEach(select=>{
         const input=document.createElement('input');input.type='text';input.dataset.selectProxy='';input.className='shared-combo-input';input.setAttribute('aria-label',select.getAttribute('aria-label')||select.closest('label')?.firstChild?.textContent||select.name||'Seleccionar');
         for(const name of ['billField','valueField','field'])if(select.dataset[name])input.dataset[name]=select.dataset[name];
         select.before(input);select.hidden=true;select.dataset.comboSource='';input._sourceSelect=select;
@@ -2275,6 +2283,12 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
       @media print{.invoice-history-overlay{display:none!important}}
 
     .classic-history-list .invoice-history-filters,.classic-history-list .invoice-history-table thead:not(.classic-history-head),.invoice-history-overlay:not(.classic-history-list) .classic-history-head{display:none}
+    .classic-history-list .invoice-history-status:empty,.invoice-history-loading[hidden]{display:none}
+    .invoice-history-loading{position:fixed;inset:0;z-index:96;display:grid;place-items:center;pointer-events:none}
+    .invoice-history-loading>div{display:grid;justify-items:center;gap:12px;padding:20px 24px;background:var(--corralon-white,#fff);color:var(--corralon-heading,#173b65);border:1px solid var(--corralon-line,#aaa);box-shadow:0 4px 16px #0002;font:700 14px Arial,sans-serif}
+    .invoice-history-loading-ring{width:32px;height:32px;border:3px solid var(--corralon-line,#d6e0eb);border-top-color:var(--corralon-heading,#173b65);border-radius:50%;animation:invoice-history-spin .8s linear infinite}
+    @keyframes invoice-history-spin{to{transform:rotate(360deg)}}
+    @media(prefers-reduced-motion:reduce){.invoice-history-loading-ring{animation:none}}
     .classic-receipt-heading{display:none}
     #systemInvoiceConsult :is(.classic-history-list,.classic-history-detail) .invoice-history-card{border-radius:0;background:#eee;color:#000;font:12px Arial,sans-serif}
     #systemInvoiceConsult .classic-history-list .invoice-history-scroll{padding:0;background:#fff}
@@ -2362,6 +2376,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     .classic-sale-search button[data-criterion]{position:relative;margin-left:33px;width:calc(100% - 33px);height:21px;padding:0;text-align:left;border:1px solid #000;background:#fff}
     .classic-sale-search button[data-criterion]::before{content:'';position:absolute;left:-34px;top:-1px;width:27px;height:21px;background:#eee;border:2px outset #eee;box-sizing:border-box}
     .classic-sale-search button:disabled{cursor:default;color:#555}
+    .classic-sale-search button[data-criterion]:disabled{opacity:.5}
     .classic-sale-search aside{width:112px;display:grid;gap:14px;padding-top:4px}
     .classic-sale-search aside button{padding:5px 4px}
     .classic-sale-search [data-classic-status]{margin:4px 0;font:13px Arial,sans-serif}
@@ -2437,6 +2452,8 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     const overlay=document.createElement('div');overlay.className='invoice-history-overlay';overlay.hidden=true;overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','Consultar boletas');
     overlay.innerHTML=`<section class="invoice-history-card"><header class="invoice-history-head"><h2>Consultar boletas</h2><button data-close type="button">Cerrar</button></header><form class="invoice-history-filters"><label>Sucursal<select data-branch><option value="0">Todas las sucursales</option></select></label><label>Punto de venta<select data-point><option value="0">Todos los puntos de venta</option></select></label><label>Desde<input class="date" data-from inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" required></label><label>Hasta<input class="date" data-to inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" required></label><label class="search">Cliente o número<input data-search autocomplete="off" placeholder="Buscar cliente o boleta…" maxlength="80"></label><label class="search">Artículo<input data-article autocomplete="off" placeholder="Descripción, IDArt o código de proveedor…" maxlength="100"></label><button class="primary" type="submit">Consultar</button></form><div class="invoice-history-status" data-status role="status" aria-live="polite"></div><div class="invoice-history-scroll"><table class="invoice-history-table"><thead><tr><th aria-sort="none"><button type="button" data-sort="numero">Número <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="tipo">Tipo <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="cliente">Cliente <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="sucursal">Sucursal <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="fecha">Fecha <span data-sort-icon aria-hidden="true">↕</span></button></th><th class="money" aria-sort="none"><button type="button" data-sort="total">Total <span data-sort-icon aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" data-sort="estado">Estado <span data-sort-icon aria-hidden="true">↕</span></button></th><th></th></tr></thead><tbody data-rows></tbody></table></div><footer class="invoice-history-footer"><span data-position></span><span data-more-status role="status" aria-live="polite"></span><button data-retry-more type="button" hidden>Reintentar carga</button></footer></section>`;document.body.appendChild(overlay);
     const get=selector=>overlay.querySelector(selector),status=get('[data-status]');
+    status.insertAdjacentHTML('afterend','<div class="invoice-history-loading" role="status" hidden><div><span class="invoice-history-loading-ring" aria-hidden="true"></span>Consultando boletas…</div></div>');
+    const loading=get('.invoice-history-loading');
 
   const classicSearch=document.createElement('section');
   classicSearch.className='classic-sale-search';
@@ -2444,7 +2461,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
   const criterion=(mode,label,available=true)=>'<button type="button" data-criterion="'+mode+'"'+(available?'':' disabled title="Filtro no disponible en la consulta web"')+'>'+label+'</button>';
   classicSearch.innerHTML='<header><h2>Consultar Comprobantes de Ventas</h2><button type="button" data-classic-exit aria-label="Cerrar consulta">↦</button></header>'+
     '<div class="classic-sale-search-layout"><form><div class="classic-sale-dates">'+
-    '<label>Desde:<input data-classic-from inputmode="numeric" autocomplete="off"></label><label>Hasta:<input data-classic-to inputmode="numeric" autocomplete="off"></label>'+
+    '<label>Desde:<input data-classic-from autocomplete="off"></label><label>Hasta:<input data-classic-to autocomplete="off"></label>'+
     '<button type="button" data-shift="-1" aria-label="Día anterior">◂</button><button type="button" data-shift="1" aria-label="Día siguiente">▸</button></div>'+
     '<div class="classic-sale-left">'+
     '<div><label>Sucursal: <select data-classic-branch></select></label>'+criterion('branch','Entre Fecha y Sucursal')+'</div>'+
@@ -2488,6 +2505,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
   }
   classicSearch.addEventListener('click',event=>{
     const button=event.target.closest('button');
+    if(button?.disabled)return;
     if(button?.hasAttribute('data-classic-exit')){close();return;}
     if(button?.dataset.criterion){searchClassic(button.dataset.criterion);return;}
     const shift=Number(button?.dataset.shift);
@@ -2506,6 +2524,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     const mode=[...modes.keys()].find(name=>classicField(name)===document.activeElement);
     searchClassic(modes.get(mode)||'branch');
   });
+  bindFlexibleDates({root:classicSearch,selector:'[data-classic-from],[data-classic-to]'});
   for(const name of ['from','to'])classicField(name).addEventListener('input',()=>classicField(name).setCustomValidity(''));
 
   const detail=document.createElement('div');detail.className='invoice-history-overlay';detail.hidden=true;detail.style.zIndex='96';detail.classList.add('invoice-receipt-detail');detail.setAttribute('role','dialog');detail.setAttribute('aria-modal','true');detail.setAttribute('aria-label','Detalle de boleta');
@@ -2513,8 +2532,9 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     let historyConfig=null,returnFocus=null,directOpenSequence=0,detailOptions={};
     const annulButton=document.createElement('button');annulButton.type='button';annulButton.dataset.annul='';annulButton.textContent='Anular boleta';annulButton.hidden=true;annulButton.disabled=true;annulButton.style.cssText='margin-left:8px;color:#b00020;border-color:#e4aab3;background:#fff3f4';
     detail.querySelector('.invoice-history-footer>div').appendChild(annulButton);
-    let rows=[],page=0,hasMore=false,listController=null,detailController=null,sequence=0,detailSequence=0,detailIndex=-1,searchTimer=null,actionBusy=false,detailData=null;
-    let listLoading=false,moreError=false,listQuery='',totalRecords=null;
+    let rows=[],page=0,hasMore=false,listController=null,sequence=0,detailSequence=0,detailIndex=-1,searchTimer=null,actionBusy=false,detailData=null;
+    const invoiceDetails=new Map(),invoiceDetailTtl=30000,invoiceDetailLimit=20;
+    let listLoading=false,moreError=false,listQuery='',listSnapshot='',snapshotExpired=false,totalRecords=null;
     let sortField='',sortDirection='';
 
     function historyDateTime(value){
@@ -2722,7 +2742,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
       try{const payload={...(Object.keys(headerEdits).length?{cabecera:headerEdits}:{}),usuarioId:valuesUser().id,idRecibo:rows[detailIndex].idRecibo,version:detailData.versionValores,valores:pending.map(v=>({orden:v.orden??null,idTipoPago:v.idTipoPago,idTarjeta:v.idTarjeta||0,cuotas:v.cuotas||0,importe:v.importe,impRec:v.impRec||0,coef:v.coef||0,descripcion:v.descripcion||''}))};
         if(detailOptions.saveValues)await detailOptions.saveValues(payload);
         else {const response=await fetch('/api/facturacion/comprobante-valores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudieron guardar los valores.');}
-        actionBusy=false;await openDetail(detailIndex);detail.querySelector('[data-action-status]').textContent=Object.keys(headerEdits).length?'Datos y valores actualizados.':'Valores actualizados.';if(Object.keys(headerEdits).length)Promise.resolve(window.CorralonInvoiceHistoryActions?.refreshAfterAnnul?.(rows[detailIndex]?.idRecibo)).catch(console.warn);}
+        actionBusy=false;await openDetail(detailIndex,{refresh:true});detail.querySelector('[data-action-status]').textContent=Object.keys(headerEdits).length?'Datos y valores actualizados.':'Valores actualizados.';if(Object.keys(headerEdits).length)Promise.resolve(window.CorralonInvoiceHistoryActions?.refreshAfterAnnul?.(rows[detailIndex]?.idRecibo)).catch(console.warn);}
       catch(error){status.textContent=error.message;detail.querySelectorAll('button,select,input[data-value-key],input[data-header-key]').forEach(c=>c.disabled=false);}
       finally{actionBusy=false;detail.querySelector('[data-detail-close]').disabled=false;detail.querySelector('[data-detail-prev]').disabled=detailIndex===0;detail.querySelector('[data-detail-next]').disabled=detailIndex===rows.length-1;detail.querySelector('[data-preview]').disabled=!historyActions().preview||detailData?.valuesDirty;detail.querySelector('[data-reprint]').disabled=!historyActions().reprint||detailData?.valuesDirty;detail.querySelector('[data-recall]').disabled=!historyActions().recall||detailData?.valuesDirty;}
     });
@@ -2811,20 +2831,60 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     }
     async function sql(path,controller){
       const timeout=setTimeout(()=>controller.abort(),15000);
-      try{const response=await fetch('/api/facturacion/'+path,{cache:'no-store',signal:controller.signal});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo consultar SQL.');return result}finally{clearTimeout(timeout)}
+      try{
+        const response=await fetch('/api/facturacion/'+path,{cache:'no-store',signal:controller.signal});
+        const result=await response.json();
+        if(!response.ok||!result.ok)throw Object.assign(new Error(result.error||'No se pudo consultar SQL.'),{code:result.code});
+        return result;
+      }finally{clearTimeout(timeout)}
+    }
+    function forgetInvoiceDetail(id){
+      invoiceDetails.get(id)?.controller.abort();
+      invoiceDetails.delete(id);
+    }
+    function clearInvoiceDetails(){
+      for(const id of invoiceDetails.keys())forgetInvoiceDetail(id);
+    }
+    function readInvoiceDetail(id){
+      const cached=invoiceDetails.get(id);
+      if(cached&&(!cached.data||cached.expires>Date.now())){
+        invoiceDetails.delete(id);
+        invoiceDetails.set(id,cached);
+        return cached;
+      }
+      const controller=new AbortController();
+      const entry={controller,data:null,expires:0,pending:null};
+      entry.pending=sql('comprobante?id='+encodeURIComponent(id),controller).then(data=>{
+        entry.data=data;
+        entry.expires=Date.now()+invoiceDetailTtl;
+        return data;
+      },error=>{
+        if(invoiceDetails.get(id)===entry)invoiceDetails.delete(id);
+        throw error;
+      });
+      invoiceDetails.delete(id);
+      invoiceDetails.set(id,entry);
+      if(invoiceDetails.size>invoiceDetailLimit)forgetInvoiceDetail(invoiceDetails.keys().next().value);
+      return entry;
     }
     function message(text,error=false){status.textContent=text;status.classList.toggle('error',error)}
     function pager(){
+      const loadingInCenter=sectionActive&&listLoading&&totalRecords===null;
+      loading.hidden=!loadingInCenter;
       get('[data-position]').textContent=`${rows.length} boletas cargadas de ${totalRecords===null?'…':totalRecords}`;
-      get('[data-more-status]').textContent=listLoading?'Cargando boletas…':moreError?'No se pudieron cargar más boletas.':hasMore?'Deslizá hacia abajo para cargar más.':rows.length?'No hay más boletas.':'';
+      get('[data-more-status]').textContent=loadingInCenter?'':listLoading?'Cargando boletas…':snapshotExpired?'La consulta venció.':moreError?'No se pudieron cargar más boletas.':hasMore?'Deslizá hacia abajo para cargar más.':rows.length?'No hay más boletas.':'';
       get('[data-retry-more]').hidden=!moreError;
+      get('[data-retry-more]').textContent=snapshotExpired?'Volver a consultar':'Reintentar';
     }
     function loadMore(){if(!overlay.hidden&&detail.hidden&&!listLoading&&!moreError&&hasMore)load(page+1)}
     get('.invoice-history-scroll').addEventListener('scroll',event=>{
       const panel=event.currentTarget;
       if(panel.scrollHeight-panel.scrollTop-panel.clientHeight<=80)loadMore();
     },{passive:true});
-    get('[data-retry-more]').addEventListener('click',()=>{moreError=false;loadMore()});
+    get('[data-retry-more]').addEventListener('click',()=>{
+      if(snapshotExpired){load();return;}
+      moreError=false;loadMore();
+    });
     function normalizeReceiptSearch(value){
       const text=String(value??'').trim();
       const parts=text.match(/^(\d{1,4})\s*[-–—]\s*(\d{1,8})$/);
@@ -2838,7 +2898,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
       if(append&&(listLoading||!hasMore||!listQuery))return;
       overlay.classList.toggle('classic-history-list',sectionActive);
       let params;
-      if(append){params=new URLSearchParams(listQuery);params.set('pagina',String(targetPage))}
+      if(append){params=new URLSearchParams(listSnapshot?{snapshot:listSnapshot}:listQuery);params.set('pagina',String(targetPage))}
       else{
         clearTimeout(searchTimer);
         const search=normalizeReceiptSearch(get('[data-search]').value);
@@ -2850,19 +2910,22 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
         if(from>to){message('La fecha Desde debe ser anterior o igual a Hasta.',true);return}
         if(specificReceipt)for(const selector of ['[data-from]','[data-to]'])get(selector).setCustomValidity('');
         params=new URLSearchParams({desde:from,hasta:to,sucursal:specificReceipt?'0':get('[data-branch]').value,puntoVenta:specificReceipt?'0':get('[data-point]').value,buscar:search,articulo:specificReceipt?'':get('[data-article]').value.trim(),pagina:'0',orden:sortField,direccion:sortDirection});
-        listQuery=params.toString();rows=[];page=0;hasMore=false;totalRecords=null;get('[data-rows]').innerHTML='';get('.invoice-history-scroll').scrollTop=0;
+        params.set('paginacion','ids');
+        if(sectionActive&&params.get('articulo'))params.set('articuloModo','descripcion');
+        listQuery=params.toString();listSnapshot='';snapshotExpired=false;rows=[];page=0;hasMore=false;totalRecords=null;get('[data-rows]').innerHTML='';get('.invoice-history-scroll').scrollTop=0;
       }
       listController?.abort();const controller=listController=new AbortController(),request=++sequence;
-      listLoading=true;moreError=false;pager();if(!append)message('Consultando boletas…');
+      listLoading=true;moreError=false;pager();if(!append)message(sectionActive?'':'Consultando boletas…');
       try{
         const result=await sql('consultar-comprobantes?'+params,controller);if(request!==sequence||overlay.hidden)return;
+        if(!append)listSnapshot=result.snapshot||'';
         page=result.pagina;hasMore=Boolean(result.hayMas);totalRecords=Number(result.totalComprobantes)||0;
         const seen=new Set(rows.map(row=>Number(row.idRecibo))),added=result.comprobantes.filter(row=>!seen.has(Number(row.idRecibo))),offset=rows.length;
         rows.push(...added);
         get('[data-rows]').insertAdjacentHTML('beforeend',added.map((r,index)=>{const i=offset+index;return `<tr data-invoice="${i}" tabindex="0" aria-label="Abrir boleta ${escape(r.numero)}">${sectionActive?classicHistoryCells(r,i):`<td>${escape(r.numero)}</td><td>${escape(r.tipo)}</td><td>${escape(String(r.cliente||'').toUpperCase())}</td><td>${escape(r.sucursal||'Sin sucursal')}</td><td>${escape(r.fecha)}</td><td class="money">${escape(money(r.total))}</td><td class="${Number(r.anulada)?'cancelled':''}">${Number(r.anulada)?'Anulada':'Confirmada'}</td><td><button data-invoice="${i}" type="button">Abrir</button></td>`}</tr>`}).join(''));
         if(sectionActive)for(const check of get('[data-rows]').querySelectorAll('[data-unknown-flag]'))check.indeterminate=true;
-      message(rows.length?'Boletas consultadas en SQL.': 'No hay boletas para esos filtros.');
-      }catch(error){if(request===sequence&&!overlay.hidden){moreError=append;message(controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a consultar.':error.message,true)}}
+      message(rows.length?(sectionActive?'':'Boletas consultadas en SQL.'): 'No hay boletas para esos filtros.');
+      }catch(error){if(request===sequence&&!overlay.hidden){moreError=append;snapshotExpired=append&&error.code==='invoice_history_expired';message(controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a consultar.':error.message,true)}}
       finally{if(request===sequence){listLoading=false;pager()}}
     }
     function receiptLayout(result,row){
@@ -2906,27 +2969,61 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
         <div class="receipt-row receipt-totals">${field('Formato impresión:',h.FormatoImp||'Ticket',150)}${field('Nota:',h.nota||'',300)}${field('Efectivo:',h.efectivo==null?paidCash():money(h.efectivo),80)}${field('Tarjeta:',money(h.tarjeta??values.filter(v=>Number(v.clase)===5).reduce((sum,v)=>sum+Number(v.total||0),0)),80)}${field('Cta. Cte.:',money(h.cuentaCorriente??values.filter(v=>/cta|cuenta corriente/i.test(v.tipo||'')).reduce((sum,v)=>sum+Number(v.total||0),0)),80)}${field('Cheque:',money(h.cheque??values.filter(v=>[2,3].includes(Number(v.clase))).reduce((sum,v)=>sum+Number(v.total||0),0)),80)}</div>
         <div class="receipt-actions">${canEditValues()?'<button type="button" data-save-values>Guardar cambios</button>':''}</div></div>`;
     }
-    async function openDetail(index){
+    async function openDetail(index,{refresh=false}={}){
+      const row=rows[index];if(!row||actionBusy)return;
+      const request=++detailSequence;
+      const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');
+      const hadDetail=!detail.hidden&&Boolean(body.querySelector('.receipt-layout'));
+      if(refresh)forgetInvoiceDetail(row.idRecibo);
       annulButton.hidden=!isAdministrator();annulButton.disabled=true;
       detail.classList.toggle('classic-history-detail',sectionActive);
-      const row=rows[index];if(!row||actionBusy)return;warrantyMenu.hidden=true;detailData=null;detailIndex=index;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;detail.querySelector('[data-action-status]').textContent='';detail.hidden=false;detailController?.abort();const controller=detailController=new AbortController(),request=++detailSequence;
-      detail.querySelector('[data-title]').textContent='Boleta '+row.numero+(row.tipo?' · '+row.tipo:'');detail.querySelector('[data-detail-position]').textContent=`${index+1} de ${rows.length}`;detail.querySelector('[data-detail-prev]').disabled=index===0;detail.querySelector('[data-detail-next]').disabled=index===rows.length-1;
-      if(sectionActive){
-        sectionHost.appendChild(detail);sectionHost.dataset.detailOpen='true';
+      warrantyMenu.hidden=true;detailData=null;detailIndex=index;
+      for(const action of ['preview','reprint','recall'])detail.querySelector('[data-'+action+']').disabled=true;
+      detail.querySelector('[data-action-status]').textContent='';detail.hidden=false;
+      if(!hadDetail)detail.querySelector('[data-title]').textContent='Boleta '+row.numero+(row.tipo?' · '+row.tipo:'');
+      if(sectionActive&&sectionHost.dataset.detailOpen!=='true'){
+        if(detail.parentNode!==sectionHost)sectionHost.appendChild(detail);
         detail.removeAttribute('aria-modal');detail.setAttribute('role','region');
         detail.querySelector('[data-detail-close]').textContent='Volver a consultar';
         notifyDetailSection(true);
       }
-      const body=detail.querySelector('[data-detail-body]');const footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='Consultando detalle…';
-      try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;detailData=result;detailData.headerOriginal=headerState(h);detailData.headerResolvedCustomer=String(h.idCliente??'');receiptValuesBasis(result);const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
+      const entry=readInvoiceDetail(row.idRecibo);
+      if(sectionActive&&!overlay.hidden)for(const neighbor of [rows[index+1],rows[index-1]]){
+        if(neighbor)readInvoiceDetail(neighbor.idRecibo).pending.catch(()=>{});
+      }
+      if(!entry.data){
+        body.inert=true;
+        body.setAttribute('aria-busy','true');
+        if(!hadDetail)body.textContent='Consultando detalle…';
+      }
+      try{
+        const data=entry.data??await entry.pending;
+        if(request!==detailSequence||detail.hidden)return;
+        // Los controles editan una copia y el detalle precargado conserva los datos de SQL.
+        const result=JSON.parse(JSON.stringify(data));
+        const h=result.comprobante;detailData=result;detailData.headerOriginal=headerState(h);detailData.headerResolvedCustomer=String(h.idCliente??'');receiptValuesBasis(result);const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
         const typeName=h.tipo||(historyConfig?.comprobantes||[]).find(t=>Number(t.id)===Number(h.idComprobante))?.nombre||row.tipo;
         detail.querySelector('[data-title]').textContent='Boleta '+h.numero+(typeName?' · '+typeName:'');
-        if(sectionActive)notifyDetailSection(true);
         detail.querySelector('[data-preview]').hidden=!adapters.preview;detail.querySelector('[data-reprint]').hidden=!adapters.reprint;detail.querySelector('[data-recall]').hidden=!adapters.recall;
-        detail.querySelector('.invoice-history-footer').style.display=adapters.preview||adapters.reprint||adapters.recall||canEditValues()||isAdministrator()?'':'none';
+        footer.style.display=adapters.preview||adapters.reprint||adapters.recall||canEditValues()||isAdministrator()?'':'none';
+        if(body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);
         body.innerHTML=receiptLayout(result,row);decorateReceiptDetail(body);
-        body.querySelector('.receipt-actions').appendChild(detail.querySelector('.invoice-history-footer'));refreshValueOutputs();
-      }catch(error){if(request===detailSequence&&!detail.hidden)body.textContent=controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a abrir la boleta.':error.message}
+        body.querySelector('.receipt-actions').appendChild(footer);refreshValueOutputs();
+      }catch(error){
+        if(request!==detailSequence||detail.hidden)return;
+        if(body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);
+        body.textContent=entry.controller.signal.aborted?'La consulta no respondió a tiempo. Volvé a abrir la boleta.':error.message;
+        detail.querySelector('[data-title]').textContent='Boleta '+row.numero+(row.tipo?' · '+row.tipo:'');
+      }finally{
+        if(request===detailSequence&&!detail.hidden){
+          body.inert=false;
+          body.removeAttribute('aria-busy');
+          detail.querySelector('[data-detail-position]').textContent=`${index+1} de ${rows.length}`;
+          detail.querySelector('[data-detail-prev]').disabled=index===0;
+          detail.querySelector('[data-detail-next]').disabled=index===rows.length-1;
+          if(sectionActive)notifyDetailSection(true);
+        }
+      }
     }
     detail.addEventListener('click',event=>{
       const step=event.target.closest('[data-classic-receipt-step]');
@@ -2940,7 +3037,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
       if(control.hasAttribute('data-classic-receipt-search'))get('[data-close]').click();
     });
     async function detailAction(action){
-      const row=rows[detailIndex];if(!row||actionBusy)return;const adapter=historyActions()[action],status=detail.querySelector('[data-action-status]');
+      const row=rows[detailIndex];if(!row||!detailData||actionBusy)return;const adapter=historyActions()[action],status=detail.querySelector('[data-action-status]');
       if(detailData?.valuesDirty){status.textContent='Guardá los valores antes de ver, reimprimir o llamar la boleta.';return;}
       if(!adapter){status.textContent='Facturación todavía está cargando. Reintentá en unos segundos.';return}
       actionBusy=true;detail.querySelector('[data-preview]').disabled=true;detail.querySelector('[data-reprint]').disabled=true;detail.querySelector('[data-recall]').disabled=true;status.textContent=action==='preview'?'Preparando vista previa…':action==='reprint'?'Preparando reimpresión…':'Cargando boleta en Facturación…';
@@ -2972,7 +3069,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
         row.anulada=-1;row.total=0;
         const listRow=get('[data-rows]').querySelector(`[data-invoice="${index}"]`);
         if(listRow){listRow.children[5].textContent=money(0);listRow.children[6].textContent='Anulada';listRow.children[6].classList.add('cancelled');}
-        actionBusy=false;await openDetail(index);
+        actionBusy=false;await openDetail(index,{refresh:true});
         detail.querySelector('[data-action-status]').textContent='Boleta anulada en SQL.';
         window.CorralonSystem?.articleSync?.set('success','Boleta anulada en SQL');
         window.CorralonInvoiceHistoryActions?.refreshAfterAnnul?.(row.idRecibo)?.catch(console.warn);
@@ -2984,7 +3081,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
         detail.querySelector('[data-reprint]').disabled=unavailable||!historyActions().reprint;
       }
     });
-    function closeDetail(){if(cancellationBusy)return;const wasOpen=!detail.hidden;if(sectionHost?.dataset.detailOpen==='true')notifyDetailSection(false);warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;detailController?.abort();const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='';if(overlay.hidden)returnFocus?.focus();else get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus();if(wasOpen)detailOptions.onClose?.();}
+    function closeDetail(){if(cancellationBusy)return;const wasOpen=!detail.hidden;if(sectionHost?.dataset.detailOpen==='true')notifyDetailSection(false);warrantyMenu.hidden=true;detailData=null;detail.hidden=true;detailSequence++;clearInvoiceDetails();const body=detail.querySelector('[data-detail-body]'),footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.inert=false;body.removeAttribute('aria-busy');body.textContent='';if(overlay.hidden)returnFocus?.focus();else get('[data-rows]').querySelector(`[data-invoice="${detailIndex}"]`)?.focus();if(wasOpen)detailOptions.onClose?.();}
     let sectionActive=false,sectionExit=null,sectionHost=null;
     function notifyDetailSection(active){
       if(!sectionHost)return;
@@ -3017,7 +3114,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
         const request=++directOpenSequence;returnFocus=document.activeElement;
         if(!historyConfig)historyConfig=await sql('bootstrap',new AbortController());
         if(request!==directOpenSequence)return;
-        listController?.abort();sequence++;overlay.hidden=true;closeClassicSearch();
+        listController?.abort();sequence++;overlay.hidden=true;closeClassicSearch();clearInvoiceDetails();
         rows=context.map(row=>({...row,idRecibo:Number(row.idRecibo??row.id)}));
         let index=rows.findIndex(row=>row.idRecibo===id);
         if(index<0){rows=[{idRecibo:id,numero:''}];index=0;}

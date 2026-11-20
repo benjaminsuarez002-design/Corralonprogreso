@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script src="corralon-system.js?v=1.0.29"></script>
+<script src="corralon-system.js?v=1.0.30"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
@@ -1321,6 +1321,8 @@
     const TABLE = CorralonSystem.TABLES.priceList;
     const META_TABLE = CorralonSystem.TABLES.priceListMeta;
     const PROVIDERS_TABLE = CorralonSystem.TABLES.providers;
+    const host = location.hostname;
+    const useSqlArticleImporter = host === 'localhost' || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.startsWith('[');
     const DB_NAME = 'corralon_lista_proveedores_v1';
     let ROW_HEIGHT = window.matchMedia('(max-width:700px)').matches ? 50 : 24;
     const BUFFER = 12;
@@ -3946,7 +3948,8 @@
       hideRowContextMenu();
       copyProviderListPriceForAccess(row);
     });
-    el.importNewArticleContextBtn.addEventListener('mousedown', (event) => {
+    if (useSqlArticleImporter) el.importNewArticleContextBtn.textContent = 'Importar / actualizar artículo';
+    el.importNewArticleContextBtn.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
       const row = rowById(event.currentTarget.dataset.rowId) || state.contextRow || state.selectedRow;
@@ -3955,10 +3958,11 @@
         showToast('Seleccioná un artículo para importar.');
         return;
       }
-      CorralonSystem.newArticlesImporter.open({
-        providerInternalId: row.id_proveedor || row.idProveedor,
+      const providerInternalId = String(row.id_proveedor || row.idProveedor || '').trim();
+      const options = {
+        providerInternalId,
         provider: {
-          id_proveedor: row.id_proveedor || row.idProveedor,
+          id_proveedor: providerInternalId,
           proveedor: row.proveedor
         },
         rows: [{
@@ -3968,12 +3972,30 @@
         }],
         showMessage: showToast,
         onImported(payload) {
-          showToast(`${payload.importados || 1} artículo nuevo importado en Access.`);
+          showToast(payload.directSql
+            ? `${payload.nuevos} artículos nuevos y ${payload.actualizados} actualizados en SQL.`
+            : `${payload.importados || 1} artículo nuevo importado en Access.`);
         }
-      }).catch((error) => {
+      };
+      try {
+        if (useSqlArticleImporter) {
+          if (!providerInternalId) throw new Error('La fila no tiene un proveedor asignado.');
+          const identity = CorralonSystem.providerIdentity;
+          const findProvider = providers => providers.find(provider => identity.internalId(provider) === providerInternalId);
+          const provider = findProvider(await CorralonSystem.getProvidersCache()) || findProvider(await CorralonSystem.syncProvidersCache());
+          const providerId = provider && identity.externalId(provider);
+          if (!providerId || !/^\d+$/.test(providerId) || Number(providerId) <= 0) throw new Error('No se encontró el proveedor SQL de esta lista.');
+          options.provider = { id_proveedor: providerId, proveedor: provider.proveedor || row.proveedor };
+          const importer = await import('./local-article-importer.js');
+          window.CorralonLocalArticleImporter = importer;
+          await importer.open(options);
+        } else {
+          await CorralonSystem.newArticlesImporter.open(options);
+        }
+      } catch (error) {
         console.error(error);
         showToast(`No se pudo abrir el importador: ${error.message}`);
-      });
+      }
     });
     el.sendRowMissingBtn.addEventListener('mousedown', sendTableRowToMissing);
     el.calcContextBtn.addEventListener('mousedown', (event) => {

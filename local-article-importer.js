@@ -1,5 +1,6 @@
-import {enqueue, resumeQueue} from './local-article-sync.js';
+import {enqueue, resumeQueue, recoverDraft, importUnitCost, importDraftKey} from './local-article-sync.js';
 export {resumeQueue};
+
 // Loaded by the SQL importer on localhost or Tailscale. No database credentials reach the browser.
 const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 const normalizeIndexFilter = value => String(value ?? '')
@@ -32,9 +33,9 @@ function indexDescriptionFilterRank(description, queryText, prepared) {
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-AR', { style:'currency', currency:'ARS' });
 let active = false;
-const draftKey = providerId => `corralon_local_article_import_draft_v1_${providerId}`;
 export function hasDraft(providerId) {
-  try { return Boolean(window.localStorage.getItem(draftKey(providerId)) || window.sessionStorage.getItem(draftKey(providerId))); } catch { return false; }
+  const key=importDraftKey(providerId);
+  try { return Boolean(window.localStorage.getItem(key) || window.sessionStorage.getItem(key)); } catch { return false; }
 }
 
 async function api(path, options = {}) {
@@ -44,7 +45,7 @@ async function api(path, options = {}) {
   return data;
 }
 
-export async function open(options) {
+export async function open(options, window = globalThis.window, document = globalThis.document) {
   if (active && document.querySelector('.local-articles-backdrop')) return;
   // Si otra actualización quitó el popup del DOM, no conservar un bloqueo fantasma.
   active = false;
@@ -54,19 +55,21 @@ export async function open(options) {
   backdrop.className = 'local-articles-backdrop';
   backdrop.innerHTML = `<section class="local-articles-dialog" role="dialog" aria-modal="true" aria-labelledby="localArticlesTitle">
     <header><div><h2 id="localArticlesTitle">Importar o actualizar artículos</h2><p data-provider></p><p data-original-description hidden></p></div><button type="button" data-close>Cerrar</button></header>
-    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:115px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:130px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:150px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:130px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
     <div data-status role="status"><span data-status-text>Leyendo artículos de la base local…</span><button type="button" data-reconnect hidden>Restablecer conexión</button></div><footer><span data-summary></span><button type="button" data-cancel>Cancelar</button><button type="button" class="primary" data-apply disabled>Aplicar todos</button></footer>
   </section>`;
   document.body.append(backdrop);
-  const backgroundElements = [...document.body.children].filter(element => element !== backdrop);
+  // La ficha SQL se reutiliza y su diálogo nativo gestiona el foco al abrirse.
+  const backgroundElements = [...document.body.children].filter(element => element !== backdrop && element.id !== 'sqlArticlePopup');
   const backgroundInert = backgroundElements.map(element => [element, element.inert]);
   backgroundElements.forEach(element => { element.inert = true; });
+  let articleEditor = null;
   const focusInside = () => backdrop.querySelector('input:not([disabled]),select:not([disabled]),button:not([disabled])')?.focus({preventScroll:true});
   const guardFocus = event => {
-    if (!backdrop.isConnected || backdrop.inert || backdrop.contains(event.target) || menu?.contains(event.target)) return;
+    if (!backdrop.isConnected || backdrop.inert || articleEditor || backdrop.contains(event.target) || menu?.contains(event.target)) return;
     event.stopImmediatePropagation(); focusInside();
   };
-  const guardKeyup = event => { if (backdrop.isConnected && !backdrop.inert) event.stopImmediatePropagation(); };
+  const guardKeyup = event => { if (backdrop.isConnected && !backdrop.inert && !articleEditor) event.stopImmediatePropagation(); };
   window.addEventListener('focusin', guardFocus, true);
   window.addEventListener('keyup', guardKeyup, true);
   backdrop.querySelector('[data-close]').focus({preventScroll:true});
@@ -74,12 +77,97 @@ export async function open(options) {
   const originalDescription = backdrop.querySelector('[data-original-description]');
   const reconnect = backdrop.querySelector('[data-reconnect]'), apply = backdrop.querySelector('[data-apply]');
   const providerId = Number(options.provider.id_proveedor || options.provider.idProveedor);
+  const draftScope=options.draftScope||'',draftKey=importDraftKey(providerId,draftScope);
+  let retainedRows=[];
   let busy = false, rows = [], catalog = [], catalogSorted = [], rubros = [], token = '', operation = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
   let catalogReady = false, draftSaveTimer = 0;
   const draftCache=window.CorralonSystem.localCache;
   let draftWrite=Promise.resolve();
   let menu = null, menuInput = null, menuIndex = -1, menuKind = '', matches = [];
   let articlePage = null, articleHasMatch = false;
+  let showSuspended = false;
+  let articleContext = null;
+  function hideArticleContext() { articleContext?.remove(); articleContext = null; }
+  function existingImporterArticles(row) {
+    if (!row) return [];
+    const id = row.sqlSaved?.id || (row.mode === 'update' ? row.id : '');
+    if (id) return [catalog.find(article => String(article.id) === String(id)) || {id}];
+    const code = normalize(row.codigo);
+    return code ? catalog.filter(article => Number(article.proveedor) === providerId && normalize(article.codigo) === code) : [];
+  }
+  function openImporterArticleEditor(article) {
+    if (busy || articleEditor) return;
+    hideArticleContext(); hideMenu(); flushDraft();
+    const focus = document.activeElement;
+    if(window.CorralonSQLModules?.openArticle){articleEditor=true;window.CorralonSQLModules.openArticle(article.id,{origin:focus,onSaved:async()=>{try{const fresh=await api(`article?id=${encodeURIComponent(article.id)}`);rows.filter(row=>row.mode==='update'&&String(row.id)===String(article.id)).forEach(row=>{row.original=fresh;row.version=fresh.version;});await refreshConnection();changed();render();setStatus('Ficha actualizada. Se conservaron los datos del lote del importador.');}catch(error){setStatus(error.message,true);}},onClose:()=>{articleEditor=null;if(focus?.isConnected)focus.focus({preventScroll:true});}}).then(opened=>{if(opened===false)articleEditor=null;}).catch(error=>{articleEditor=null;setStatus(error.message,true);});return;}
+    const popup = document.createElement('dialog'); articleEditor = popup;
+    popup.style.cssText = 'width:min(1100px,98vw);height:94dvh;max-width:none;max-height:none;padding:0;border:1px solid #ccc;border-radius:10px;overflow:hidden';
+    const frame = document.createElement('iframe'); frame.title = 'Ficha del artículo'; frame.style.cssText = 'width:100%;height:100%;border:0';
+    frame.src = `articulos-sql.html?embed=stock&articulo=${encodeURIComponent(article.id)}`;
+    popup.append(frame); backdrop.append(popup);
+    const receive = async event => {
+      if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
+      if (event.data?.type === 'corralon:article-editor-close') popup.close();
+      if (event.data?.type === 'corralon:article-editor-saved') {
+        try {
+          const fresh = await api(`article?id=${encodeURIComponent(article.id)}`);
+          rows.filter(row => row.mode === 'update' && String(row.id) === String(article.id)).forEach(row => { row.original = fresh; row.version = fresh.version; });
+          await refreshConnection();
+          changed(); render(); setStatus('Ficha actualizada. Se conservaron los datos del lote del importador.');
+        } catch (error) { setStatus(error.message, true); }
+      }
+    };
+    window.addEventListener('message', receive);
+    popup.addEventListener('cancel', event => { event.preventDefault(); frame.contentDocument?.getElementById('closeArticle')?.click(); });
+    popup.addEventListener('close', () => { window.removeEventListener('message', receive); popup.remove(); articleEditor = null; if (focus?.isConnected) focus.focus({preventScroll:true}); });
+    popup.showModal();
+  }
+  backdrop.addEventListener('contextmenu', event => {
+    const tr = event.target.closest('tr[data-row]');
+    if (!tr || busy || articleEditor) return;
+    const row = rows[Number(tr.dataset.row)];
+    if (!row) return;
+    const articles = existingImporterArticles(row);
+    event.preventDefault(); event.stopPropagation(); hideMenu(); hideArticleContext();
+    articleContext = document.createElement('div'); articleContext.className = 'local-articles-search';
+    articleContext.setAttribute('role', 'menu');
+    articleContext.style.cssText = `position:fixed;left:${Math.max(8,Math.min(event.clientX,innerWidth-300))}px;top:${Math.max(8,Math.min(event.clientY,innerHeight-200))}px;width:290px;max-height:240px;overflow:auto;z-index:10000;background:white;border:1px solid #bbb;box-shadow:0 4px 12px #0003`;
+    articles.forEach(article => {
+      const button = document.createElement('button'); button.type = 'button'; button.setAttribute('role','menuitem');
+      button.textContent = articles.length === 1 ? 'Editar artículo' : `Editar artículo ${article.id} · ${article.descripcion || ''}`;
+      button.onclick = event => { event.stopPropagation(); openImporterArticleEditor(article); };
+      articleContext.append(button);
+    });
+    const action = (label, run) => {
+      const button=document.createElement('button');button.type='button';button.setAttribute('role','menuitem');button.textContent=label;
+      button.onclick=event=>{event.stopPropagation();hideArticleContext();run();};articleContext.append(button);return button;
+    };
+    action('Cargar web', () => openWebEditor(row,tr.querySelector('[data-field="descripcion"]')).catch(error=>{backdrop.inert=false;setStatus(error.message,true);}));
+    if(row.loadWeb) action('Quitar carga web',()=>{row.loadWeb=false;row.webDraft=null;changed();flushDraft();render();});
+    const marginInput=tr.querySelector('[data-field="margen"]');
+    if(event.target.closest('[data-field="margen"]')&&marginInput&&!row.sqlSaved){
+      const margin=parseMargin(marginInput.value);
+      if(Number.isFinite(margin)&&margin>=0)action('Aplicar '+displayMargin(margin)+' a los demás',()=>{
+        let count=0;rows.forEach((item,index)=>{if(item.sqlSaved)return;const input=backdrop.querySelector('tr[data-row="'+index+'"] [data-field="margen"]');if(!input)return;beginFieldEdit(input);item.margen=margin;input.value=displayMargin(margin);finishFieldEdit(input);count++;});
+        changed();flushDraft();marginInput.focus({preventScroll:true});setStatus('Margen aplicado a '+count+' artículos del lote.');
+      });
+    }
+    const bulto=action('Definir cant. x bulto',()=>{
+      const value=window.prompt('Cantidad por bulto (se guarda al aplicar el lote):',String(row.unidadesBulto ?? row.original?.unidadesBulto ?? 1));
+      if(value==null)return;
+      try {
+        const amount=window.CorralonFunciones.evaluateBasicArithmetic(value);
+        if(!Number.isFinite(amount)||amount<=0)throw new Error('La cantidad por bulto debe ser mayor que cero.');
+        const previous=Number(row.divisorBultoAplicado)||1;
+        row.costo=Number(row.costo)*previous/amount;
+        row.costoExpression=null;
+        row.unidadesBulto=amount;row.divisorBultoAplicado=amount;
+        changed();flushDraft();render();
+      } catch(error){setStatus(error.message,true);}
+    });
+    bulto.disabled=Boolean(row.sqlSaved);
+    backdrop.append(articleContext);
+  });
   const fieldSnapshots = new Map(), undoStack = [];
   let movementId = 0, restoring = false, selectedRowUid = '', selectionAnchor = '';
   const setStatus = (text, error = false, recoverable = false) => {
@@ -89,39 +177,41 @@ export async function open(options) {
   };
   function saveDraft(strict = false) {
     if (!catalogReady) return;
-    if (!rows.length) return clearDraft();
-    const snapshot=structuredClone({operation,rows});
+    if (!rows.length&&!retainedRows.length) return clearDraft();
+    const snapshot=structuredClone({operation,rows,retainedRows});
     draftWrite=draftWrite.catch(()=>{}).then(async()=>{
       if (draftCache) {
-        await draftCache.write(draftKey(providerId),snapshot);
+        await draftCache.write(draftKey,snapshot);
         // Only a small marker remains in localStorage; images stay in IndexedDB.
-        try { window.localStorage.setItem(draftKey(providerId),JSON.stringify({indexedDb:true})); }
-        catch(error) { window.sessionStorage.setItem(draftKey(providerId),JSON.stringify({indexedDb:true})); }
-      } else window.localStorage.setItem(draftKey(providerId),JSON.stringify(snapshot));
+        try { window.localStorage.setItem(draftKey,JSON.stringify({indexedDb:true})); }
+        catch(error) { window.sessionStorage.setItem(draftKey,JSON.stringify({indexedDb:true})); }
+      } else window.localStorage.setItem(draftKey,JSON.stringify(snapshot));
     });
     if (strict) return draftWrite.catch(()=>{throw new Error('No se pudo guardar el borrador local. Verificá el espacio disponible en el equipo y volvé a Guardar.');});
     return draftWrite.catch(error=>console.warn('No se pudo guardar el borrador del importador.',error));
   }
   function clearDraft() {
     clearTimeout(draftSaveTimer); draftSaveTimer = 0;
-    try { window.localStorage.removeItem(draftKey(providerId)); window.sessionStorage.removeItem(draftKey(providerId)); } catch (error) { console.warn('No se pudo borrar el borrador del importador.', error); }
+    if(retainedRows.length){rows=[];return saveDraft();}
+    try { window.localStorage.removeItem(draftKey); window.sessionStorage.removeItem(draftKey); } catch (error) { console.warn('No se pudo borrar el borrador del importador.', error); }
     draftWrite=draftWrite.catch(()=>{}).then(async()=>{
-      if (draftCache) await draftCache.remove(draftKey(providerId));
-      window.localStorage.removeItem(draftKey(providerId));
-      window.sessionStorage.removeItem(draftKey(providerId));
+      if (draftCache) await draftCache.remove(draftKey);
+      window.localStorage.removeItem(draftKey);
+      window.sessionStorage.removeItem(draftKey);
     });
     return draftWrite.catch(error=>console.warn('No se pudo borrar el borrador del importador.',error));
   }
   function flushDraft(strict = false) { clearTimeout(draftSaveTimer); draftSaveTimer = 0; return saveDraft(strict); }
   async function loadDraft() {
     try {
-      const draft = (draftCache ? await draftCache.read(draftKey(providerId)) : null) || JSON.parse(window.localStorage.getItem(draftKey(providerId)) || 'null');
-      return draft && Array.isArray(draft.rows) && draft.rows.length && draft.rows.every(row => row && typeof row.codigo === 'string' && typeof row.descripcion === 'string') ? draft : null;
-    } catch { return null; }
+      const draft = await recoverDraft(providerId,draftScope) || JSON.parse(window.localStorage.getItem(draftKey) || 'null');
+      return draft && Array.isArray(draft.rows) && draft.rows.every(row => row && typeof row.codigo === 'string' && typeof row.descripcion === 'string') ? draft : null;
+    } catch(error) { throw new Error(`No se pudo recuperar el borrador del importador. No se reemplazó la carga pendiente: ${error.message}`); }
   }
   function hideMenu() { menu?.remove(); menu = null; menuInput = null; menuIndex = -1; menuKind = ''; }
   function close(discard = false) {
-    if (busy) return;
+    if (busy || articleEditor) return;
+    hideArticleContext();
     clearTimeout(draftSaveTimer); draftSaveTimer = 0;
     if (discard) clearDraft(); else saveDraft();
     window.removeEventListener('pagehide', flushOnPageHide);
@@ -130,6 +220,7 @@ export async function open(options) {
     window.removeEventListener('keyup', guardKeyup, true);
     backgroundInert.forEach(([element, inert]) => { element.inert = inert; });
     backdrop.remove(); active = false; returnFocus?.focus?.({ preventScroll:true });
+    options.onClose?.({discard});
   }
   function changed() {
     operation = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
@@ -194,7 +285,7 @@ export async function open(options) {
     return Number(text.replace(',', '.'));
   }
   function displayMargin(value) {
-    return Number.isFinite(value) ? `${value.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:4 })} %` : '';
+    return Number.isFinite(value) ? `${value.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %` : '';
   }
   function costDifference(row) {
     const oldCost = Number(row.original?.costo);
@@ -203,21 +294,27 @@ export async function open(options) {
     return `${difference > 0 ? '+' : ''}${difference.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %`;
   }
   function summary() {
-    const updates = rows.filter(r => r.mode === 'update').length;
-    backdrop.querySelector('[data-summary]').textContent = `${rows.length - updates} nuevos · ${updates} para actualizar`;
-    apply.disabled = busy || !rows.length || rows.some(r => r.loading || (r.mode === 'update' && !r.id));
+    const updates=rows.filter(row=>row.mode==='update'&&row.id&&row.version).length;
+    const unresolved=rows.filter(row=>row.mode==='update'&&(!row.id||!row.version)).length;
+    backdrop.querySelector('[data-summary]').textContent=`${rows.length-updates-unresolved} nuevos · ${updates} para actualizar${unresolved?` · ${unresolved} por identificar`:''}`;
+    apply.disabled=busy||!rows.length||Boolean(unresolved)||rows.some(row=>row.loading);
   }
   function render() {
     hideMenu();
+    for(const row of rows){
+      if(!row.sqlSaved&&Number(row.unidadesBulto)>0&&Number(row.divisorBultoAplicado)!==Number(row.unidadesBulto)){
+        row.costo=importUnitCost(row);row.divisorBultoAplicado=Number(row.unidadesBulto);row.costoExpression=null;
+      }
+    }
     backdrop.querySelector('tbody').innerHTML = rows.map((r, i) => `<tr data-row="${i}" class="local-import-row${selectedRowUid === r.uid ? ' local-selected' : ''}">
-      <td><input ${options.editableSource?'data-field="id" maxlength="6" placeholder="Automático"':'readonly'} value="${escape(options.editableSource?r.id||'':r.mode === 'new' ? 'Automático' : r.id || 'Elegir →')}"></td>
+      <td><input ${options.editableSource?`data-field="id" maxlength="6" placeholder="${r.mode==='update'?'Elegir IDArt':'Automático'}"`:'readonly'} value="${escape(options.editableSource?r.id||'':r.mode === 'new' ? 'Automático' : r.id || 'Elegir →')}"${r.resolutionMessage?` title="${escape(r.resolutionMessage)}"`:''}></td>
       <td><input ${options.editableSource?'data-field="codigo" maxlength="30"':'readonly'} value="${escape(r.codigo)}"></td>
       <td><div class="local-articles-combo"><input data-field="descripcion" autocomplete="off" maxlength="100" value="${escape(r.descripcion)}" placeholder="Buscar por código o descripción…"${r.original ? ` title="Costo anterior: ${escape(money(r.original.costo))}"` : ''}><button type="button" data-article-toggle tabindex="-1" title="Buscar artículo">▼</button></div></td>
       <td><div class="local-articles-combo"><input data-field="rubro" autocomplete="off" value="${escape(rubros.find(item => Number(item.id) === Number(r.rubro))?.nombre || '')}" placeholder="Elegir rubro"><button type="button" data-rubro-toggle tabindex="-1" title="Buscar rubro">▼</button></div></td>
       <td><select data-field="iva"><option value="0.21">21 %</option><option value="0.105">10,5 %</option>${![.21,.105].some(v => Math.abs(v-r.iva)<.00001) ? `<option value="${Number(r.iva)}">${Number(r.iva)*100} %</option>` : ''}</select></td>
       <td><input data-field="margen" inputmode="decimal" value="${displayMargin(r.margen)}"></td>
       <td class="num"><input data-field="costo" inputmode="text" value="${escape(r.costoExpression??money(r.costo))}"></td><td class="num">${r.original ? money(r.original.costo) : '—'}</td><td class="num" data-difference>${costDifference(r)}</td>
-      <td><label class="local-load-web"><input type="checkbox" data-load-web ${r.loadWeb ? 'checked' : ''}>Cargar web</label><button type="button" data-remove title="Quitar">×</button></td>
+      <td>${r.loadWeb ? '<span title="Se cargará en la web al aplicar el lote" style="color:#087a43;font-weight:bold">Web ✓</span>' : ''}${r.unidadesBulto != null ? `<span title="Cantidad por bulto"> · Bulto: ${escape(r.unidadesBulto)}</span>` : ''}<button type="button" data-remove title="Quitar">×</button></td>
     </tr>`).join('');
     backdrop.querySelectorAll('tr[data-row]').forEach(tr => {
       const row = rows[Number(tr.dataset.row)];
@@ -226,24 +323,90 @@ export async function open(options) {
     });
     summary();
   }
+  function attachExistingArticle(row,article,keepEdits=false){
+    const previous=row.original;
+    const margin=Number(article.margen)*100;
+    if(!keepEdits||row.margen===row.originalMargin)row.margen=margin;
+    if(!keepEdits||row.rubro===Number(previous?.rubro))row.rubro=Number(article.rubro);
+    if(!keepEdits||row.iva===Number(previous?.iva))row.iva=Number(article.iva);
+    if(!keepEdits||row.descripcion===previous?.descripcion)row.descripcion=article.descripcion;
+    Object.assign(row,{mode:'update',id:article.id,version:article.version,original:article,originalMargin:margin,
+      reactivar:article.suspendido===true||Number(article.suspendido)===1,newConfirmed:true,needsNewConfirmation:false});
+    delete row.resolutionMessage;
+  }
+  async function preparePriceRows(sourceRows,seedRow,draft){
+    const legacy=!draft&&draftScope ? await draftCache?.read(importDraftKey(providerId)) : null;
+    const currentIds=new Set(sourceRows.map(source=>source.sourceRowId).filter(Boolean));
+    const savedRows=[...(draft?.rows||legacy?.rows||[]),...(draft?.retainedRows||[])];
+    const bySource=new Map(savedRows.filter(row=>currentIds.has(row.sourceRowId)&&(!legacy||!row.sqlSaved)).map(row=>[row.sourceRowId,row]));
+    retainedRows=draft?savedRows.filter(row=>!currentIds.has(row.sourceRowId)):[];
+    const codeKey=code=>normalize(code).replace(/\s+/g,'');
+    const idKey=id=>String(id||'').trim().replace(/^0+(?=\d)/,'');
+    const byId=new Map(catalog.map(article=>[idKey(article.id),article]));
+    const byCode=new Map();
+    for(const article of catalog){
+      if(Number(article.proveedor)!==providerId||!article.codigo)continue;
+      const code=codeKey(article.codigo),matches=byCode.get(code)||[];
+      matches.push(article);byCode.set(code,matches);
+    }
+    const details=new Map();
+    let next=0;
+    const prepared=sourceRows.map(source=>{
+      const seed=seedRow(source),saved=bySource.get(source.sourceRowId);
+      if(!saved)return seed;
+      const row={...seed,...saved,loading:false,lookup:null};
+      if(saved.sourceCost===saved.costo&&!saved.costoExpression&&!saved.unidadesBulto)row.costo=seed.costo;
+      row.sourceCost=seed.costo;
+      return row;
+    });
+    await Promise.all(Array.from({length:Math.min(4,prepared.length)},async()=>{
+      while(next<prepared.length){
+        const index=next++,row=prepared[index],source=sourceRows[index];
+        if(row.sqlSaved)continue;
+        const savedId=row.mode==='update'?row.id:'';
+        const requestedId=idKey(savedId||source.idart);
+        const matches=byCode.get(codeKey(row.codigo))||[];
+        const match=requestedId?byId.get(requestedId):matches.length===1?matches[0]:null;
+        if(!requestedId&&!matches.length)continue;
+        const unresolved=message=>Object.assign(row,{mode:'update',id:'',version:'',original:null,resolutionMessage:message});
+        if(!match||(!savedId&&Number(match.proveedor)!==providerId)){
+          unresolved(requestedId?'El IDArt no está activo para este proveedor. Elegí el artículo.':'Hay varios artículos para este código. Elegí el IDArt.');
+          continue;
+        }
+        try{
+          if(!details.has(match.id))details.set(match.id,api(`article?id=${encodeURIComponent(match.id)}`));
+          const article=await details.get(match.id);
+          if(!article.version||(!savedId&&Number(article.proveedor)!==providerId))throw new Error('El artículo cambió de proveedor o no se pudo verificar.');
+          attachExistingArticle(row,article,Boolean(savedId&&row.original));
+        }catch(error){unresolved(error.message);}
+      }
+    }));
+    return prepared;
+  }
   async function pick(row, id) {
     const sourceInput = menuInput;
+    let selected=false;
     hideMenu(); row.loading = true; row.mode = 'update'; row.id = ''; row.newConfirmed = true; summary();
     const requestId = row.lookup = (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID());
     setStatus('Leyendo los datos actuales del artículo…');
     try {
-      const article = await api(`article?id=${encodeURIComponent(id)}`);
+      const article = await api(`article?id=${encodeURIComponent(id)}${showSuspended?'&suspendidos=1':''}`);
       if (!backdrop.isConnected || row.lookup !== requestId || row.mode !== 'update') return;
-      row.original = article; row.id = article.id; row.version = article.version;
-      row.descripcion = article.descripcion; row.rubro = Number(article.rubro); row.iva = Number(article.iva);
-      row.margen = Number(article.margen)*100; row.originalMargin = row.margen;
+      attachExistingArticle(row,article);
       if (sourceInput) finishFieldEdit(sourceInput);
+      selected=true;
       changed(); setStatus('Revisá los datos. El proveedor, código y costo nuevos vienen de la lista seleccionada.');
     } catch (error) { setStatus(error.message, true); }
-    finally { row.loading = false; if (backdrop.isConnected) render(); }
-  }
-  function importPayload(selected, op) {
-    return {operation:op,provider:providerId,rows:selected.map(r=>({mode:r.mode,id:r.id,version:r.version,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))};
+    finally {
+      if(row.lookup===requestId){
+        row.loading=false;
+        if(backdrop.isConnected){
+          render();
+          const index=rows.indexOf(row);
+          if(index>=0)focusGrid(index,editableFields.indexOf(selected?'rubro':'descripcion'));
+        }
+      }
+    }
   }
   async function openWebEditor(row, input) {
     if (busy || !confirmNew(row,true)) { input.checked=false; return; }
@@ -276,6 +439,9 @@ export async function open(options) {
       }
     }});
   }
+  function descriptionMatchesOnly(){
+    try{return localStorage.getItem('corralon_stock_description_matches_only_v1')==='1';}catch{return false;}
+  }
   function search(input, row) {
     hideMenu(); menuInput = input; menuKind = 'article';
     const queryText = input.value;
@@ -296,7 +462,7 @@ export async function open(options) {
       return value;
     };
     const isMatch = article => Number.isFinite(filterRank(article));
-    articlePage = window.CorralonSystem.articleOptionPager.create(catalogSorted, {
+    articlePage = window.CorralonSystem.articleOptionPager.create(descriptionMatchesOnly() && query ? catalogSorted.filter(isMatch) : catalogSorted, {
       key: article => String(article.id),
       description: article => article.descripcion,
       isMatch,
@@ -315,7 +481,23 @@ export async function open(options) {
     if (openUp) menu.style.bottom = `${innerHeight-rect.top+3}px`; else menu.style.top = `${rect.bottom+3}px`;
     renderArticleMenu(query);
     menu.addEventListener('mousedown', e => e.preventDefault());
-    menu.addEventListener('click', e => { const button=e.target.closest('[data-match]'); if(button) pick(row,matches[Number(button.dataset.match)].id); });
+    menu.addEventListener('click', e => {
+      if(e.target.closest('[data-show-suspended]')){
+        if(busy)return;
+        const previous=showSuspended;showSuspended=!showSuspended;
+        refreshConnection().then(ok=>{
+          if(!ok){showSuspended=previous;return;}
+          const refreshedInput=backdrop.querySelector(`tr[data-row="${rows.indexOf(row)}"] [data-field="descripcion"]`);
+          if(refreshedInput){refreshedInput.focus({preventScroll:true});search(refreshedInput,row);}
+        });return;
+      }
+      if(e.target.closest('[data-description-filter]')){
+        if(!normalize(input.value))return;
+        try{localStorage.setItem('corralon_stock_description_matches_only_v1',descriptionMatchesOnly()?'0':'1');}catch{}
+        search(input,row);return;
+      }
+      const button=e.target.closest('[data-match]');if(button)pick(row,matches[Number(button.dataset.match)].id);
+    });
     menu.addEventListener('scroll', () => {
       if (menuKind !== 'article' || !articlePage) return;
       if (menu.scrollTop < 16 && articlePage.beforeCursor >= 0) {
@@ -344,7 +526,7 @@ export async function open(options) {
     if (!menu) return;
     matches = articlePage?.options || [];
     menuIndex = query && articleHasMatch ? matches.findIndex(article => article.id === selectedId) : -1;
-    menu.innerHTML = '<div class="local-articles-search-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Proveedor</span></div>' + (matches.length ? matches.map((article,index) => `<button type="button" data-match="${index}" role="option"${index === menuIndex ? ' class="active"' : ''}><span>${escape(article.id)}</span><span title="${escape(article.codigo)}">${escape(article.codigo)}</span><span title="${escape(article.descripcion)}">${escape(article.descripcion)}</span><span title="${escape(article.proveedorNombre || 'Sin nombre')}">${escape(article.proveedorNombre || 'Sin nombre')}</span></button>`).join('') : '<p>Sin coincidencias en la base local.</p>');
+    menu.innerHTML = '<div class="local-articles-search-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Proveedor</span><span>Suspendido SQL</span></div>' + (matches.length ? matches.map((article,index) => `<button type="button" data-match="${index}" role="option"${index === menuIndex ? ' class="active"' : ''}><span>${escape(article.id)}</span><span title="${escape(article.codigo)}">${escape(article.codigo)}</span><span title="${escape(article.descripcion)}">${escape(article.descripcion)}</span><span title="${escape(article.proveedorNombre || 'Sin nombre')}">${escape(article.proveedorNombre || 'Sin nombre')}</span><span>${article.suspendido===true||Number(article.suspendido)===1?'Sí':'No'}</span></button>`).join('') : '<p>Sin coincidencias en la base local.</p>') + `<div class="stock-description-footer"><button type="button" class="stock-description-filter" data-description-filter aria-pressed="${descriptionMatchesOnly()}" ${query?'':'disabled'}>${descriptionMatchesOnly()?'▾ Mostrar lista':'▴ Filtrar'}</button><button type="button" class="stock-description-filter" data-show-suspended aria-pressed="${showSuspended}">Mostrar suspendidos</button></div>`;
   }
   function showActiveArticle(alignTop = false) {
     if (!menu || menuKind !== 'article') return;
@@ -366,14 +548,17 @@ export async function open(options) {
     const index = rows.findIndex(item => item.uid === row.uid);
     focusGrid(index,editableFields.indexOf('iva'));
   }
-  function searchRubro(input,row) {
-    hideMenu(); menuInput = input; menuKind = 'rubro';
-    const query = normalize(input.value);
+  function rubroMatchesForText(value) {
+    const query = normalize(value);
     const firstWord = query.split(/\s+/)[0];
-    matches = rubros.filter(item => normalize(item.nombre).includes(query))
+    return rubros.filter(item => normalize(item.nombre).includes(query))
       .map((item,index) => ({item,index,priority: normalize(item.nombre).split(/\s+/)[0].startsWith(firstWord) ? 0 : 1}))
       .sort((a,b) => a.priority - b.priority || a.index - b.index)
       .slice(0,80).map(({item}) => item);
+  }
+  function searchRubro(input,row) {
+    hideMenu(); menuInput = input; menuKind = 'rubro';
+    matches = rubroMatchesForText(input.value);
     menu = document.createElement('div'); menu.className = 'local-articles-search'; menu.setAttribute('role','listbox');
     const rect = input.getBoundingClientRect();
     menu.style.left = `${Math.max(8,Math.min(rect.left,innerWidth-320))}px`;
@@ -386,21 +571,9 @@ export async function open(options) {
     menu.addEventListener('click', e => { const button=e.target.closest('[data-rubro-match]'); if(button) pickRubro(row,matches[Number(button.dataset.rubroMatch)].id); });
     document.body.append(menu);
   }
-  let marginContextMenu=null;
-  backdrop.addEventListener('pointerdown',event=>{if(marginContextMenu&&!marginContextMenu.contains(event.target)){marginContextMenu.remove();marginContextMenu=null;}},true);
-  backdrop.addEventListener('contextmenu',event=>{
-    const input=event.target.closest('[data-field="margen"]');if(!input||busy||input.disabled||rowAt(input)?.sqlSaved)return;
-    event.preventDefault();event.stopPropagation();hideMenu();marginContextMenu?.remove();
-    const value=parseMargin(input.value);if(!Number.isFinite(value)||value<0){setStatus('Ingresá un margen válido antes de aplicarlo a los demás.',true);return;}
-    const menu=document.createElement('div');menu.dataset.marginContext='';menu.style.cssText='position:fixed;z-index:2147483647;background:white;border:1px solid #bad3ee;border-radius:7px;padding:5px;box-shadow:0 5px 18px #0003;left:'+Math.max(4,Math.min(event.clientX,innerWidth-250))+'px;top:'+Math.max(4,Math.min(event.clientY,innerHeight-60))+'px';
-    const action=document.createElement('button');action.type='button';action.textContent='Aplicar '+displayMargin(value)+' a los demás';action.style.cssText='padding:9px 12px;background:#f3f8ff;border:0;color:#12395e;cursor:pointer';
-    action.onclick=()=>{
-      let count=0;rows.forEach((row,index)=>{if(row.sqlSaved)return;const field=backdrop.querySelector('tr[data-row="'+index+'"] [data-field="margen"]');if(!field)return;beginFieldEdit(field);row.margen=value;field.value=displayMargin(value);finishFieldEdit(field);count++;});
-      changed();flushDraft();menu.remove();marginContextMenu=null;input.focus({preventScroll:true});setStatus('Margen aplicado a '+count+' artículos del lote.');
-    };menu.append(action);backdrop.append(menu);marginContextMenu=menu;
-  });
   backdrop.addEventListener('click', e => {
-    if (e.target.closest('[data-cancel]')) { close(); return; }
+    hideArticleContext();
+    if (e.target.closest('[data-cancel]')) { close(true); return; }
     if (e.target.closest('[data-close]')) { close(); return; }
     const articleToggle=e.target.closest('[data-article-toggle]');
     const rubroToggle=e.target.closest('[data-rubro-toggle]');
@@ -466,6 +639,15 @@ export async function open(options) {
   backdrop.addEventListener('focusout', e => {
     if (!e.target.matches('[data-field]') || busy || restoring) return;
     const row = rows[Number(e.target.closest('[data-row]').dataset.row)];
+    if (row && e.target.dataset.field === 'rubro') {
+      const selected = rubroMatchesForText(e.target.value)[0];
+      if(selected) {
+        row.rubro = Number(selected.id);
+        e.target.value = selected.nombre;
+        changed();
+      }
+      if(menuInput === e.target) hideMenu();
+    }
     if (row && e.target.dataset.field === 'descripcion') confirmNew(row);
     if (row && e.target.dataset.field === 'margen') {
       row.margen = parseMargin(e.target.value);
@@ -481,6 +663,7 @@ export async function open(options) {
       row.descripcion = input.value;
       row.mode = 'new'; row.id = ''; row.original = null; row.version = ''; row.lookup = null;
       row.needsNewConfirmation = true; row.newConfirmed = false; row.declinedDescription = '';
+      delete row.resolutionMessage;
       search(input,row); summary();
       tr.querySelector('td:first-child input').value = options.editableSource?'':'Automático';
     }
@@ -493,6 +676,9 @@ export async function open(options) {
     if(field==='codigo')row.codigo=input.value.trim();
     if(field==='id'){
       row.id=input.value.trim();row.mode='new';row.original=null;row.version='';row.lookup=null;
+      if(options.applyPrices&&row.id){row.mode='update';row.resolutionMessage='Elegí un IDArt existente.';}
+      else delete row.resolutionMessage;
+      summary();
     }
     if(field==='costo'){
       row.costoExpression=input.value;
@@ -502,19 +688,15 @@ export async function open(options) {
     changed();
   });
   backdrop.addEventListener('change', e => {
-    if (e.target.matches('[data-load-web]')) {
-      const row=rowAt(e.target);
-      if (!row || busy) return;
-      if (e.target.checked || row.sqlSaved) openWebEditor(row,e.target).catch(error=>{backdrop.inert=false;setStatus(error.message,true);});
-      else { row.loadWeb=false; changed(); }
-      return;
-    }
     const input = e.target.closest('[data-field]'); if (!input || busy) return;
     const row = rows[Number(input.closest('[data-row]').dataset.row)], field = input.dataset.field;
     if (field === 'iva') {
       row[field]=Number(input.value); changed();
     }
-    if(field==='id' && row.id && catalog.some(article=>String(article.id)===row.id))pick(row,row.id);
+    if(field==='id'&&row.id){
+      const id=options.applyPrices&&/^\d{1,6}$/.test(row.id)?row.id.padStart(6,'0'):row.id;
+      if(catalog.some(article=>String(article.id)===id))pick(row,id);
+    }
   });
   function finishCost(input,row){
     try{const cost=window.CorralonFunciones.evaluateBasicArithmetic(input.value);if(cost<=0)throw new Error('El costo debe ser mayor que cero.');row.costo=cost;delete row.costoExpression;input.value=money(cost);input.setCustomValidity('');changed();return true;}
@@ -552,6 +734,8 @@ export async function open(options) {
   function handleDialogKeydown(e) {
     if (backdrop.inert) return;
     if (!backdrop.isConnected) return;
+    if (articleEditor) return;
+    if (e.key === 'Escape' && articleContext) { e.preventDefault(); e.stopImmediatePropagation(); hideArticleContext(); return; }
     const inDialog = backdrop.contains(e.target) || menu?.contains(e.target);
     const undo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
     e.stopImmediatePropagation();
@@ -594,10 +778,9 @@ export async function open(options) {
       else searchRubro(input,rowAt(input));
       return;
     }
-    if (menu && input === menuInput && (['ArrowDown','ArrowUp','Enter'].includes(e.key) || (e.key === 'Tab' && !e.shiftKey))) {
+    if (menu && input === menuInput && ['ArrowDown','ArrowUp','Enter'].includes(e.key)) {
       e.preventDefault();
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        if (e.key === 'Tab' && matches.length) menuIndex = 0;
+      if (e.key === 'Enter') {
         if (menuIndex >= 0 && matches[menuIndex]) {
           if (menuKind === 'article') pick(rowAt(input),matches[menuIndex].id);
           else pickRubro(rowAt(input),matches[menuIndex].id);
@@ -636,7 +819,7 @@ export async function open(options) {
     }
     const sqlRows=rows.filter(r=>!r.sqlSaved);
     for (const row of sqlRows) if (!confirmNew(row, true)) return;
-    const invalid = rows.find(r => (r.mode==='update'&&!r.id) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
+    const invalid = rows.find(r => (r.mode==='update'&&(!r.id||!r.version)) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
     if(invalid) { setStatus('Completá artículo, rubro, costo y margen en todas las filas.',true); return; }
     const descriptions = new Set();
     for (const row of sqlRows.filter(row => row.mode !== 'update')) {
@@ -652,7 +835,7 @@ export async function open(options) {
     try { await flushDraft(true); } catch(error) { setStatus(error.message,true); return; }
     busy=true; apply.disabled=true;
     try {
-      await enqueue({operation,provider:providerId,rows},options.onImported,token);
+      await enqueue({operation,provider:providerId,providerName:options.provider.proveedor||options.provider.nombre||'',draftScope,rows},options.onImported,token,()=>open(options,window,document));
       busy=false; close(true);
       try { options.showMessage?.('Carga en cola. Continúa en segundo plano.'); } catch(error) { console.warn(error); }
     } catch(error) {
@@ -663,7 +846,7 @@ export async function open(options) {
     if (busy) return;
     busy=true; reconnect.disabled=true; setStatus('Restableciendo la conexión con SQL Server…');
     try {
-      const data=await api('catalog');
+      const data=await api(`catalog${showSuspended?'?suspendidos=1':''}`);
       if (!backdrop.isConnected) return;
       token=data.token; catalog=data.articles.map(a=>{
         const searchDescription=normalizeIndexFilter(a.descripcion);
@@ -679,19 +862,33 @@ export async function open(options) {
         const importedRows = Array.isArray(options.rows) ? options.rows : [];
         const importedText = source => String(source?.descripcion || source?.articulo || '').trim().toLocaleUpperCase('es-AR');
         const importedCode = source => String(source?.codigo || source?.cod_proveedor || source?.codProveedor || '').trim();
-        rows=draft ? draft.rows.map(row=>({ ...row,
+        const seedRow=source=>{
+          const costo=Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0);
+          return {uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),sourceRowId:source.sourceRowId||'',mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo,sourceCost:costo,rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:60,newConfirmed:true,needsNewConfirmation:false};
+        };
+        if(options.applyPrices&&importedRows.length){
+          setStatus('Identificando artículos existentes y leyendo sus costos en SQL…');
+          rows=await preparePriceRows(importedRows,seedRow,draft);
+        }else if(draft){
+          retainedRows=draft.retainedRows||[];
+          rows=draft.rows.map(row=>({ ...row,
             importedDescription:row.importedDescription || importedText(row.codigo && importedRows.find(source=>importedCode(source)===row.codigo)) || row.descripcion,
-            uid:row.uid || (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()), loading:false, lookup:null }))
-          : importedRows.map(source=>({uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),sourceRowId:source.sourceRowId||'',mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo:Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0),rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:60,newConfirmed:true,needsNewConfirmation:false}));
-        if (draft?.operation) operation = draft.operation;
+            uid:row.uid || (window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()), loading:false, lookup:null }));
+          if(draft.operation)operation=draft.operation;
+        }else rows=importedRows.map(seedRow);
         catalogReady=true;
+        render();
         await saveDraft();
-        render(); setStatus(draft ? 'Borrador recuperado. Podés seguir donde lo dejaste.' : 'Conexión restablecida. Podés continuar y aplicar el lote.');
+        const unresolved=rows.some(row=>row.resolutionMessage);
+        if(unresolved)setStatus('Elegí el IDArt de las filas por identificar antes de aplicar.',true);
+        else setStatus(draft ? 'Borrador recuperado. Podés seguir donde lo dejaste.' : 'Conexión restablecida. Podés continuar y aplicar el lote.');
       } else {
         render(); setStatus('Conexión restablecida. Podés continuar y aplicar el lote.');
       }
+      return true;
     } catch(error) {
       setStatus(`${error.message} Cerrá y abrí Corralón Local si tampoco responde al reintentar.`,true,true);
+      return false;
     } finally {
       busy=false; reconnect.disabled=false; summary();
     }

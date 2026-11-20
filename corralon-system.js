@@ -2539,6 +2539,9 @@
       };
       ui.divide.addEventListener('input', update);
       ui.multiply.addEventListener('input', update);
+      ui.inverse.addEventListener('change', () => {
+        if (state?.inverseOption) state.onInverseChange?.(ui.inverse.checked);
+      });
       ui.cancel.addEventListener('click', close);
       ui.apply.addEventListener('click', apply);
       ui.restore.addEventListener('click', restore);
@@ -2584,6 +2587,7 @@
         onApply: options.onApply,
         onRestore: options.onRestore,
         inverseOption: Boolean(options.inverseLabel),
+        onInverseChange: options.onInverseChange,
         returnFocus: options.returnFocus || document.activeElement
       };
       elements.title.textContent = options.title || 'Dividir / multiplicar';

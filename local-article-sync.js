@@ -3,6 +3,13 @@ const key='corralon_local_article_sync_queue_v1';
 let jobs=[],ready,writing=Promise.resolve(),running=false,token='';
 const callbacks=new Map(),recoveryCallbacks=new Map();
 const cache=()=>window.CorralonSystem.localCache;
+export function importDraftKey(provider,scope='') {
+  return `corralon_local_article_import_draft_v1_${provider}${scope?'_'+scope:''}`;
+}
+export function importUnitCost(row) {
+  const units=Number(row.unidadesBulto),applied=Number(row.divisorBultoAplicado)||1;
+  return units>0?Number(row.costo)*applied/units:Number(row.costo);
+}
 function persist() {
   const snapshot=structuredClone(jobs);
   writing=writing.catch(()=>{}).then(()=>cache().write(key,snapshot));
@@ -29,7 +36,7 @@ function progress(message,percent) {
 async function load() {
   if(!ready)ready=(async()=>{
     jobs=await cache().read(key) || [];
-    jobs.forEach(job=>{if(job.state!=='error')job.state='queued';else try{window.localStorage.setItem(`corralon_local_article_import_draft_v1_${job.provider}`,JSON.stringify({indexedDb:true}));}catch{}});
+    jobs.forEach(job=>{if(job.state!=='error')job.state='queued';else try{window.localStorage.setItem(importDraftKey(job.provider,job.draftScope),JSON.stringify({indexedDb:true}));}catch{}});
   })();
   return ready;
 }
@@ -37,10 +44,10 @@ function selectionConflict(job) {
   return /cambio en la base|cambió en la base|volve a seleccionarlo|volvé a seleccionarlo|suspendido/i.test(job.error||'');
 }
 async function recoverJob(job) {
-  const draftKey=`corralon_local_article_import_draft_v1_${job.provider}`;
+  const draftKey=importDraftKey(job.provider,job.draftScope);
   const existing=await cache().read(draftKey);
   if(existing?.rows?.length && existing.operation!==job.operation)throw new Error('Hay otro borrador del proveedor. Conservalo antes de recuperar la carga pendiente.');
-  const draft=structuredClone({operation:job.operation,rows:job.rows});
+  const draft=structuredClone({operation:job.operation,rows:job.rows,retainedRows:existing?.retainedRows});
   await cache().write(draftKey,draft);
   try{window.localStorage.setItem(draftKey,JSON.stringify({indexedDb:true}));}catch{}
   const previous=jobs;jobs=jobs.filter(item=>item!==job);
@@ -48,12 +55,12 @@ async function recoverJob(job) {
   callbacks.delete(job.id);
   return draft;
 }
-export async function recoverDraft(provider) {
+export async function recoverDraft(provider,scope='') {
   await load();
-  const existing=await cache().read(`corralon_local_article_import_draft_v1_${provider}`);
-  const failed=jobs.find(job=>String(job.provider)===String(provider)&&job.state==='error');
+  const existing=await cache().read(importDraftKey(provider,scope));
+  const failed=jobs.find(job=>String(job.provider)===String(provider)&&(job.draftScope||'')===scope&&job.state==='error');
   if(failed&&(!existing?.rows?.length||existing.operation===failed.operation))return recoverJob(failed);
-  return existing?.rows?.length ? existing : null;
+  return existing?.rows?.length || existing?.retainedRows?.length ? existing : null;
 }
 async function retry() {
   const failed=jobs.filter(job=>job.state==='error');
@@ -64,7 +71,7 @@ async function retry() {
       const reopen=recoveryCallbacks.get(conflict.id);recoveryCallbacks.delete(conflict.id);
       window.CorralonSystem.articleSync.set('success','Lote recuperado. Volvé a seleccionar el artículo que cambió y aplicá los cambios.');
       if(reopen)await reopen();
-      else await window.CorralonLocalArticleImporter?.open({localSql:true,editableSource:true,provider:{id_proveedor:conflict.provider,proveedor:conflict.providerName||`Proveedor SQL ${conflict.provider}`},rows:[]});
+      else await window.CorralonLocalArticleImporter?.open({localSql:true,editableSource:true,applyPrices:Boolean(conflict.draftScope),draftScope:conflict.draftScope,provider:{id_proveedor:conflict.provider,proveedor:conflict.providerName||`Proveedor SQL ${conflict.provider}`},rows:[]});
     }catch(error){window.CorralonSystem.articleSync.set('error',error.message,{retry,cancel:cancelFailed});}
     return;
   }
@@ -80,10 +87,10 @@ async function cancelFailed() {
   const saved=canceled.some(job=>job.rows.some(row=>row.sqlSaved));
   // Cancelar detiene el envío, pero conserva las filas para corregir y reabrir.
   for (const job of canceled) {
-    const draftKey=`corralon_local_article_import_draft_v1_${job.provider}`;
+    const draftKey=importDraftKey(job.provider,job.draftScope);
     const existing=await cache().read(draftKey);
     if (!existing?.rows?.length) {
-      await cache().write(draftKey,structuredClone({operation:job.operation,rows:job.rows}));
+      await cache().write(draftKey,structuredClone({operation:job.operation,rows:job.rows,retainedRows:existing?.retainedRows}));
       try { window.localStorage.setItem(draftKey,JSON.stringify({indexedDb:true})); } catch {}
     } else {
       await cache().write(`${draftKey}_canceled_${job.id}`,structuredClone({operation:job.operation,rows:job.rows}));
@@ -99,7 +106,7 @@ async function process(job) {
   const sqlRows=job.rows.filter(row=>!row.sqlSaved);
   if(sqlRows.length){
     progress('Guardando artículos en SQL…',5);
-    const result=await sqlRequest('apply',{operation:job.operation,provider:job.provider,rows:sqlRows.map(r=>({mode:r.mode,id:r.id,version:r.version,reactivar:r.reactivar===true,codigo:r.codigo,descripcion:r.descripcion,costo:r.costo,rubro:r.rubro,iva:r.iva,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))});
+    const result=await sqlRequest('apply',{operation:job.operation,provider:job.provider,rows:sqlRows.map(r=>({mode:r.mode,id:r.id,version:r.version,reactivar:r.reactivar===true,codigo:r.codigo,descripcion:r.descripcion,costo:importUnitCost(r),rubro:r.rubro,iva:r.iva,unidadesBulto:r.unidadesBulto ?? null,margen:r.mode==='update' && Math.abs(r.margen-r.originalMargin)<.000001 ? null : r.margen}))});
     sqlRows.forEach((row,index)=>{row.sqlSaved={id:result.rows[index]?.id || row.id};});
     await persist();
     try{callbacks.get(job.id)?.({...result,importados:result.nuevos+result.actualizados,directSql:true},structuredClone(sqlRows));}catch(error){console.warn('SQL guardado; no se pudo refrescar la pantalla.',error);}
