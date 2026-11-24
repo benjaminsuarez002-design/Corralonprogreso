@@ -1868,6 +1868,9 @@
         </div>
       </div>`;
     document.body.appendChild(aridosBudgetHost);
+    if (window.CorralonFunciones?.bindLiveCurrency) {
+      window.CorralonFunciones.bindLiveCurrency({root: aridosBudgetHost, selector: '[data-arid-custom-rate]', preserveCaret: true, fixedOnBlur: false});
+    }
 
     aridosBudgetHost.addEventListener('input', (event) => {
       const meters = event.target.closest('[data-arid-row-meters]');

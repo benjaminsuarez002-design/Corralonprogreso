@@ -178,6 +178,21 @@
     return normalizeUser({ id: snapshot.id, ...snapshot.data() });
   }
 
+  function showCachedAccess(id, persistent) {
+    let cachedUser = null;
+    if (persistent) {
+      if (!keepLogged() || activeUserId() !== id) return false;
+      try { cachedUser = JSON.parse(localStorage.getItem(ACTIVE_USER_SNAPSHOT_KEY) || 'null'); } catch (_) {}
+    } else {
+      cachedUser = temporarySession()?.usuario || null;
+    }
+    cachedUser = normalizeUser(cachedUser || {});
+    if (cachedUser.id !== id || !canAccess(cachedUser)) return false;
+    window.dispatchEvent(new CustomEvent('menu-user-validated', { detail: { user: cachedUser, offline: true } }));
+    document.documentElement.style.visibility = '';
+    return true;
+  }
+
   async function validate() {
     if (!pageId) {
       clearSession();
@@ -192,6 +207,12 @@
       redirectTo(loginPage);
       return;
     }
+    let cachedAccessShown = false;
+    const validationTimer = setTimeout(() => {
+      cachedAccessShown = showCachedAccess(id, persistent);
+      if (!cachedAccessShown) redirectTo(loginPage);
+    }, 8000);
+
     try {
       const user = await getRemoteUser(id);
       if (!user) {
@@ -215,18 +236,12 @@
       document.documentElement.style.visibility = '';
     } catch (error) {
       console.warn('No se pudo validar el usuario', error);
-      let cachedUser = temporary?.usuario || null;
-      if (persistent) {
-        try { cachedUser = JSON.parse(localStorage.getItem(ACTIVE_USER_SNAPSHOT_KEY) || 'null'); } catch (_) {}
+      if (!cachedAccessShown && !showCachedAccess(id, persistent)) {
+        clearSession();
+        redirectTo(loginPage);
       }
-      cachedUser = normalizeUser(cachedUser || {});
-      if (cachedUser.id === id && canAccess(cachedUser)) {
-        window.dispatchEvent(new CustomEvent('menu-user-validated', { detail: { user: cachedUser, offline: true } }));
-        document.documentElement.style.visibility = '';
-        return;
-      }
-      clearSession();
-      redirectTo(loginPage);
+    } finally {
+      clearTimeout(validationTimer);
     }
   }
 

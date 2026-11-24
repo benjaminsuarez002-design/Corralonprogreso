@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.61"></script>
+<script src="corralon-system.js?v=1.0.62"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -482,10 +482,10 @@ body[data-page-theme="cargastock"].stock-additional-open .stock-footer{flex-shri
     > header #stockArticleReportsBtn {font-size:0}
     > header #stockArticleReportsBtn::after {font:bold 13px Arial,sans-serif}
 
-    .stock-entry {position:static;margin-left:18px;height:43px;grid-template-columns:172px 109px 161px 131px 223px 215px}
+    .stock-entry {position:static;margin-left:18px;height:43px;grid-template-columns:172px 117px 161px 151px 223px 215px}
     .stock-entry label:has(#stockIngresoSucursal) {position:absolute;left:275px;top:7px;width:207px}
-    .stock-entry #stockOperador {max-width:52px;text-align:right}
-    .stock-entry #stockNumero {max-width:65px;text-align:right}
+    :is(.stock-entry,.stock-provider) label > .stock-default-title {display:none}
+    .stock-entry :is(#stockOperador,#stockNumero) {text-align:right}
     .stock-provider {margin-left:18px;height:39px;grid-template-columns:344px 92px 257px 243px minmax(0,1fr);gap:6px 14px}
     .stock-provider label:has(#providerInput) {grid-column:1}
     .stock-provider .stock-classic-filter-toggle {grid-column:2;grid-row:1;gap:4px}
@@ -1418,6 +1418,7 @@ document.addEventListener('keydown', (event) => {
 let rowsSaveTimer = null;
 let rowsSavePromise = Promise.resolve();
 let STOCK_WORKSPACE_KEY = 'corralon_stock_two_drafts_v1';
+const STOCK_ADDITIONAL_ARTICLE_FILTER = 'listas';
 let stockActiveWorkspace = Math.max(1, Number(localStorage.getItem(STOCK_WORKSPACE_KEY + '_active')) || 1);
 let stockWorkspaceCount = Math.max(1, stockActiveWorkspace, Number(localStorage.getItem(STOCK_WORKSPACE_KEY + '_count')) || 1);
 let stockWorkspaceReady = false;
@@ -1482,12 +1483,12 @@ function stockScheduleReloadSnapshot(){
   clearTimeout(stockReloadTimer);
   stockReloadTimer=setTimeout(()=>stockSaveReloadSnapshot().catch(console.warn),1000);
 }
-function stockDraftForRestore(workspace,{confirmed=false,pending=null}={}){
+function stockDraftForRestore(workspace,{confirmed=false,pending=null,additional=false}={}){
   if(workspace?.pending?.status==='uncertain')return workspace;
   const sameConfirmed=pending?.status==='confirmed'&&workspace?.pending?.id&&workspace.pending.id===pending.id;
   if(!confirmed&&!workspace?.confirmed&&workspace?.pending?.status!=='confirmed'&&!sameConfirmed)return workspace;
   return {rows:[],provider:null,providerText:'',costsOpen:false,pending:null,confirmed:false,
-    header:{stockIngresoSucursal:workspace?.header?.stockIngresoSucursal||'1',stockTipoMovimiento:'23',stockFecha:stockToday(),stockArticleFilter:'sql'}};
+    header:{stockIngresoSucursal:workspace?.header?.stockIngresoSucursal||'1',stockTipoMovimiento:'23',stockFecha:stockToday(),stockArticleFilter:additional ? STOCK_ADDITIONAL_ARTICLE_FILTER : 'sql'}};
 }
 async function stockRestoreReloadView(){
   const invoiceTransfer=JSON.parse(localStorage.getItem(`corralon_stock_factura_${FX.menuSessionUser()?.id||''}`)||'null');
@@ -1504,7 +1505,7 @@ async function stockRestoreReloadView(){
       document.querySelector('.header-actions').append(stockField('stockAdditionalClose'));
       stockAdditionalPopup.classList.add('visible');document.body.classList.add('stock-additional-open');
     }
-    const recoveredWorkspace=stockDraftForRestore(state.workspace,{confirmed:state.confirmed||Boolean(Number(state.fields.find(item=>item.id==='stockNumero')?.value)),pending:JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null')});
+    const recoveredWorkspace=stockDraftForRestore(state.workspace,{additional:state.additional,confirmed:state.confirmed||Boolean(Number(state.fields.find(item=>item.id==='stockNumero')?.value)),pending:JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null')});
     const discardedConfirmed=recoveredWorkspace!==state.workspace;
     if(discardedConfirmed){
       state.workspace=recoveredWorkspace;state.receipt='';
@@ -1519,6 +1520,7 @@ async function stockRestoreReloadView(){
     stockSqlArticles.forEach(article=>{stockSqlById.set(String(article.idart),article);const key=`${article.proveedor}:${codeKey(article.codProv)}`;const matches=stockSqlByCode.get(key)||[];matches.push(article);stockSqlByCode.set(key,matches);});
     state.options.forEach(item=>{const node=stockField(item.id);if(node)node.innerHTML=item.html;});
     state.fields.forEach(item=>{const node=stockField(item.id);if(node)node.value=item.value;});
+    if(state.additional)stockField('stockArticleFilter').value=STOCK_ADDITIONAL_ARTICLE_FILTER;
     stockSqlLoadedBranch=Number(stockField('stockIngresoSucursal').value);
     rowsData=state.workspace.rows.map(normalizeRow);provider=state.workspace.provider;
     el.providerInput.value=state.workspace.providerText||'';renderProviderInfo();
@@ -2088,7 +2090,7 @@ function stockSyncAdditionalProvider(nextProvider,{clear=false,workspace=null}={
   stockAdditionalSqlSync=stockAdditionalSqlSync.catch(()=>{}).then(async()=>{
     await rowsSavePromise;
     const key='corralon_stock_two_drafts_v1_additional_'+number;
-    const saved=clear?stockBlankWorkspace():(await window.CorralonCacheDB.get(key)||stockBlankWorkspace());
+    const saved=clear?stockBlankWorkspace(true):(await window.CorralonCacheDB.get(key)||stockBlankWorkspace(true));
     saved.provider=chosen;saved.providerText=text;
     if(clear){saved.rows=[];saved.pending=null;saved.costsOpen=true;}
     await window.CorralonCacheDB.set(key,saved);
@@ -2117,8 +2119,7 @@ async function stockSetAdditionalContext(additional){
   STOCK_INGRESO_DRAFT_KEY='corralon_stock_ingreso_sql_v1'+suffix;
   stockActiveWorkspace=Math.max(1,Number(localStorage.getItem(STOCK_WORKSPACE_KEY+'_active'))||1);
   stockWorkspaceCount=Math.max(1,stockActiveWorkspace,Number(localStorage.getItem(STOCK_WORKSPACE_KEY+'_count'))||1);
-  providerArticlesLoadSeq++;
-  await stockSwitchWorkspace(stockActiveWorkspace,{discardCurrent:true,restoring:true,reuseLoaded:true});
+  await stockSwitchWorkspace(stockActiveWorkspace,{discardCurrent:true,restoring:true,reuseLoaded:true,resetArticleFilter:additional});
 }
 const stockAdditionalProvider = document.getElementById('providerCombo').closest('label');
 const stockAdditionalProviderAnchor = document.createComment('Proveedor de carga SQL');
@@ -5382,11 +5383,11 @@ function stockHeaderSave() {
   localStorage.setItem(STOCK_HEADER_KEY, JSON.stringify(header));
   if (stockWorkspaceReady && !stockWorkspaceSwitching) saveRows();
 }
-function stockBlankWorkspace() {
+function stockBlankWorkspace(additional = stockCostOptionsActive()) {
   return {rows: [], provider: null, providerText: '', costsOpen: false, pending: null,
-    header: {stockIngresoSucursal: stockField('stockIngresoSucursal').value, stockTipoMovimiento: '23', stockFecha: stockToday(), stockArticleFilter: 'sql'}};
+    header: {stockIngresoSucursal: stockField('stockIngresoSucursal').value, stockTipoMovimiento: '23', stockFecha: stockToday(), stockArticleFilter: additional ? STOCK_ADDITIONAL_ARTICLE_FILTER : 'sql'}};
 }
-async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitching=false, fresh=false, nextSnapshot=null, restoring=false, reuseLoaded=false, checkedPendingId=null} = {}) {
+async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitching=false, fresh=false, nextSnapshot=null, restoring=false, reuseLoaded=false, resetArticleFilter=false, checkedPendingId=null} = {}) {
   if ((number === stockActiveWorkspace && !discardCurrent) || stockIngresoBusy || stockPedidoBusy || (stockWorkspaceSwitching && !alreadySwitching) || !stockWorkspaceReady) return;
   document.activeElement?.blur();
   await Promise.resolve();
@@ -5398,7 +5399,11 @@ async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitch
     await rowsSavePromise;
     if (!discardCurrent) await window.CorralonCacheDB.set(STOCK_WORKSPACE_KEY + '_' + stockActiveWorkspace, stockWorkspaceSnapshot());
     const next = nextSnapshot || (fresh ? null : await window.CorralonCacheDB.get(STOCK_WORKSPACE_KEY + '_' + number)) || stockBlankWorkspace();
-    localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(next.header||{}));
+    const header = {...next.header};
+    if(resetArticleFilter || (header.stockArticleFilter == null && stockCostOptionsActive())){
+      header.stockArticleFilter = STOCK_ADDITIONAL_ARTICLE_FILTER;
+    }
+    localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(header));
     if(fresh)await window.CorralonCacheDB.set(STOCK_WORKSPACE_KEY+'_'+number,next);
     stockActiveWorkspace = number;
     localStorage.setItem(STOCK_WORKSPACE_KEY + '_active', String(number));
@@ -5407,9 +5412,11 @@ async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitch
     stockConfirmed = next.pending?.status === 'confirmed';
     rowsData = (next.rows || []).map(normalizeRow);
     document.querySelectorAll('[data-stock-header]').forEach(field => {
-      if (field.type === 'checkbox') field.checked = Boolean(next.header[field.id]);
-      else field.value = next.header[field.id] ?? (field.id === 'stockArticleFilter' ? 'sql' : '');
+      if (field.type === 'checkbox') field.checked = Boolean(header[field.id]);
+      else field.value = header[field.id] ?? (field.id === 'stockArticleFilter' ? 'sql' : '');
     });
+    providerArticlesLoadSeq++;
+    stockProviderListArticles = [];
     setProvider(next.provider, { skipUndo: true, skipProviderArticles: true, skipRowDiscount: true, preserveDocumentLinks: true });
     el.providerInput.value = next.providerText || '';
     stockField('stockCostOptions').open = stockAdditionalPopup.classList.contains('visible');
@@ -5423,9 +5430,9 @@ async function stockSwitchWorkspace(number, {discardCurrent=false, alreadySwitch
       reuseLoaded && stockSqlLoadedBranch===Number(stockField('stockIngresoSucursal').value) ? Promise.resolve() : stockRefreshSql(),
       reuseLoaded && stockAdditionalPopup.classList.contains('visible') ? Promise.resolve() : stockRefreshRelations({preferCache:reuseLoaded})
     ]);
-    if(reuseLoaded)loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));
-    stockField('stockCompra').value = next.header.stockCompra || '';
-    stockField('stockRelacionado').value = next.header.stockRelacionado || '';
+    if(reuseLoaded || stockUsesProviderList())loadProviderArticles().catch(error=>stockIngresoMessage(error.message,'error'));
+    stockField('stockCompra').value = header.stockCompra || '';
+    stockField('stockRelacionado').value = header.stockRelacionado || '';
     render();
     stockIngresoMessage(`Carga ${number} lista.`, 'ok');
   } catch (error) { stockIngresoMessage(error.message, 'error'); }
@@ -6196,7 +6203,7 @@ function stockMovementFields({suggestProvider=false}={}) {
       stockField('stockDestino').value=destinations[0]?.value||'';
     }
     if(!stockConfirmed){
-      stockField('stockArticleFilter').value='sql';
+      if(!stockCostOptionsActive())stockField('stockArticleFilter').value='sql';
       if(suggestProvider&&!provider&&!el.providerInput.value.trim()){
         const transferProvider=providers.find(item=>norm(providerLabel(item))===norm('CORRALON PROGRESO'));
         if(transferProvider)setProvider(transferProvider,{skipUndo:true,skipProviderArticles:true,preserveDocumentLinks:true});
@@ -6390,10 +6397,20 @@ function stockRenderConsultForm(panel){
   stockConsultProviderCombo=FX.bindTextDropdown({input:stockField('stockClassicProvider'),items:providerOptions,emptyValue:'0',minWidth:0,fixedMenu:true,menuWidth:282,visibleToggle:true});
   FX.bindFlexibleDates({root:form,selector:'#stockConsultFrom,#stockConsultTo'});
   form.onsubmit=event=>{event.preventDefault();stockRunConsult(event.submitter?.value||'date');};
-  stockField('stockClassicArticle').addEventListener('keydown',event=>{
-    if(event.key!=='Enter'||event.isComposing)return;
+  const enterFocus={
+    stockClassicProvider:'button[value="provider"]',
+    stockClassicArticle:'button[value="article-date"]',
+    stockClassicInternal:'button[value="number"]',
+    stockClassicDocument:'button[value="document"]',
+    stockConsultFrom:'#stockConsultTo',
+    stockConsultTo:'button[value="date"]'
+  };
+  form.addEventListener('keydown',event=>{
+    if(event.key!=='Enter'||event.isComposing||event.defaultPrevented)return;
+    const selector=enterFocus[event.target.id];
+    if(!selector)return;
     event.preventDefault();
-    stockRunConsult('article-date');
+    form.querySelector(selector)?.focus();
   });
   form.addEventListener('input',event=>event.target.setCustomValidity?.(''));
   form.addEventListener('click',event=>{

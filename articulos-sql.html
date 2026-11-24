@@ -58,6 +58,8 @@
     #articleNewRow button{min-height:0;max-width:100%;padding:0 4px;font:inherit}
     #articleViewToggle{grid-area:find;justify-self:start;margin:0;width:48px;min-height:23px;padding:1px 3px;font:700 12px Arial,sans-serif}
     @media(min-width:761px){body.article-workspace #articleViewToggle{grid-area:1/4;justify-self:end;width:55px;transform:translateX(1px)}}
+    html:not([data-corralon-theme="classic"]) #articleViewToggle{color:#174675!important}
+    #articlePricePesos[aria-pressed="true"]{outline:2px solid #167cc5;outline-offset:-2px}
     html[data-corralon-theme="classic"] #articleViewToggle{background:#eee!important;border:1px solid!important;border-color:#fff #777 #777 #fff!important;border-radius:0!important;color:#000080!important;text-decoration:underline}
     #articleRowMenu{position:fixed;z-index:1000;margin:0;padding:3px;border:1px solid var(--corralon-line,#aaa);background:var(--corralon-white,#fff);box-shadow:0 3px 12px #0002}
     #articleRowMenu button{display:block;width:100%;border:0;border-radius:0;background:transparent;text-align:left}
@@ -97,7 +99,7 @@
   </style>
   <link rel="stylesheet" href="theme-corralon.css">
   <script src="funciones.js"></script>
-  <script src="corralon-system.js?v=0.0.4"></script>
+  <script src="corralon-system.js?v=0.0.5"></script>
 
 </head>
 <body data-page-theme="articulos-sql">
@@ -119,7 +121,7 @@
       <a id="articleStockReport" href="historial-movimiento.html#sql/historial" target="_blank" rel="noopener" hidden>Inf. de Stock</a>
       <button id="reload" type="button">Act. Precios</button>
       <button id="exportArticles" type="button" title="Publicar el catálogo SQL en Index">Export Arts</button>
-      <button id="articleLabels" type="button" disabled title="Impresión de etiquetas disponible en Access">Etiquetas</button>
+      <button id="articlePricePesos" type="button" aria-pressed="false" disabled>Ver en pesos</button>
       <a id="articleCatalog" href="index.html" target="_blank" rel="noopener">Catálogo web</a>
       <a id="articleStockEntry" href="cargastock.html#sql/stock/consultar" target="_blank" rel="noopener" hidden>Movs. de Stock</a>
       <button id="articleDeposits" type="button" disabled title="Actualización de depósitos disponible en Access">Act. Dep.</button>
@@ -178,6 +180,9 @@
   let creatingArticle=false, newListRequest=null, newListValues={};
   let sheetArticleIds=null;
   const articleViewToggle=$('articleViewToggle');articleViewToggle.hidden=!workspace;
+  const articlePricePesos=$('articlePricePesos');
+  let showArticlePesos=false, loadingArticleRates=false, articleRatesLoadedAt=0;
+  let articleRates=new Map();
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const num = value => value == null ? '—' : articleNumber.format(Number(value));
   const money = num;
@@ -260,7 +265,7 @@
   }
   function indexArticle(article){
     const description=normalize(article.descripcion),barcode=normalize(article.codigoBarras),supplierCode=normalize(article.codigoProveedor);
-    article.listSearch={description,barcode,supplierCode,id:normalizeArticleId(article.id),text:[normalize(article.id),supplierCode,barcode,description,normalize(article.descripcionWeb)].join(' ')};
+    article.listSearch={description,firstWord:description.match(/[\p{L}\p{N}]+/u)?.[0]??'',barcode,supplierCode,id:normalizeArticleId(article.id),text:[normalize(article.id),supplierCode,barcode,description,normalize(article.descripcionWeb)].join(' ')};
     return article;
   }
   function filter(keepViewport=false) {
@@ -282,6 +287,16 @@
         && search.barcode.includes(barcode) && search.supplierCode.includes(supplierCode) && terms.every(term=>search.text.includes(term));
     });
     if(tableSortKey)filtered.sort((a,b)=>{const key=tableSortKey,comparison=key==='costoLista'?Number(a[key]||0)-Number(b[key]||0):key==='suspendido'?Number(flag(a[key]))-Number(flag(b[key])):articleSort.compare(String(a[key]??''),String(b[key]??''));return tableSortDir==='desc'?-comparison:comparison;});
+    const firstTerm=terms[0];
+    if(firstTerm){
+      const exact=[],prefix=[],other=[];
+      for(const article of filtered){
+        const firstWord=article.listSearch.firstWord;
+        const group=firstWord===firstTerm?exact:firstWord.startsWith(firstTerm)?prefix:other;
+        group.push(article);
+      }
+      filtered=exact.concat(prefix,other);
+    }
     render(true,top,keepViewport);
     if(focusedId)els.articles.querySelector(`tr[data-article-id="${CSS.escape(focusedId)}"] td[data-list-key="${focusedKey}"]`)?.focus({preventScroll:true});
   }
@@ -318,6 +333,7 @@
     articleViewToggle.setAttribute('aria-label',sheetOpen?'Ver lista':'Ver formulario');
     articleViewToggle.title=sheetOpen?'Ver lista':'Ver formulario de los artículos seleccionados';
     articleViewToggle.disabled=loadingDetail||(!sheetOpen&&!filtered.length);
+    updateArticlePesoButton(sheetOpen);
     els.articlePosition.textContent=creatingArticle?'Artículo nuevo':index<0?(selected?'Fuera del filtro actual':'Sin artículo seleccionado'):`${index+1} / ${count}`;
     els.prevArticle.disabled=loadingDetail||index<=0;
     els.nextArticle.disabled=loadingDetail||index<0||index>=count-1;
@@ -342,6 +358,54 @@
   const numericKeys=[...stockNumbers,'costoLista','descuentos','costoSinIva','costoConIva','minorista','intermedio','mayorista','gananciaMinorista','gananciaIntermedio','gananciaMayorista','margenMinorista','margenIntermedio','margenMayorista'];
   const lookupFields={idProveedor:'proveedores',idRubro:'rubros',idSeccion:'secciones',idMoneda:'monedas',idIva:'tasasIva'};
   const round = value => Math.round((value+Number.EPSILON)*100)/100;
+  function articlePesoRate() {
+    const rate=articleRates.get(Number(draft?.idMoneda));
+    return showArticlePesos&&Number(draft?.idMoneda)>1&&rate>0?rate:0;
+  }
+  function updateArticlePesoButton(sheetOpen) {
+    const converted=articlePesoRate();
+    articlePricePesos.disabled=!sheetOpen||loadingDetail||loadingArticleRates||(!showArticlePesos&&!(Number(draft?.idMoneda)>1));
+    articlePricePesos.setAttribute('aria-pressed',String(showArticlePesos));
+    articlePricePesos.title=converted
+      ? 'Volver a la moneda original · Cotización SQL $ '+num(converted)
+      : showArticlePesos?'Volver a la moneda original':'Ver importes en pesos con la cotización de SQL';
+    articlePricePesos.textContent=loadingArticleRates?'Consultando…':showArticlePesos?'Ver original':'Ver en pesos';
+  }
+  async function toggleArticlePesos() {
+    if(articlePricePesos.disabled)return;
+    if(showArticlePesos) {
+      showArticlePesos=false;
+      syncNumbers();
+      return;
+    }
+    const original=draft;
+    loadingArticleRates=true;
+    articleNavigation();
+    try {
+      if(Date.now()-articleRatesLoadedAt>60000||!articleRates.has(Number(original.idMoneda))){
+        const response=await fetch('/api/facturacion/stock-ingreso?consulta=articulos&sucursal=0',{
+          cache:'no-store',signal:AbortSignal.timeout(15000)
+        });
+        const data=await response.json();
+        if(!response.ok||!data.ok)throw new Error(data.error||'No se pudo consultar la cotización en SQL.');
+        articleRates=new Map(data.articulos.filter(row=>Number(row.cotizacion)>0).map(row=>[Number(row.idMoneda),Number(row.cotizacion)]));
+        articleRatesLoadedAt=Date.now();
+      }
+      if(draft!==original||loadingDetail||!document.body.classList.contains('article-sheet-open'))return;
+      if(!articleRates.get(Number(draft.idMoneda))){
+        status('Falta la cotización de esta moneda en SQL.',true);
+        return;
+      }
+      showArticlePesos=true;
+      syncNumbers();
+    }catch(error){
+      if(draft===original)status(error.message||'No se pudo consultar la cotización en SQL.',true);
+    }finally{
+      loadingArticleRates=false;
+      articleNavigation();
+    }
+  }
+  articlePricePesos.addEventListener('click',toggleArticlePesos);
   function currencyPrefix() {
     const name=String((catalogs.monedas||[]).find(v=>String(v.id)===String(draft?.idMoneda))?.nombre||'');
     return /d[oó]lar|usd/i.test(name)?'US$ ':/euro|eur/i.test(name)?'€ ':'$ ';
@@ -349,7 +413,8 @@
   function numericText(value,format,raw=false) {
     if(value==null)return '';
     if(raw)return Number(value).toFixed(2).replace('.',',');
-    return (format==='money'?currencyPrefix():'')+num(value)+(format==='percent'?' %':'');
+    const rate=format==='money'?articlePesoRate():0;
+    return (format==='money'?(rate?'$ ':currencyPrefix()):'')+num(rate?Number(value)*rate:value)+(format==='percent'?' %':'');
   }
   function readNumber(input,originalValue) {
     if(input.dataset.numberFormat==='money'&&(/[+xX×*/%]/.test(input.value)||/\d\s*-/.test(input.value))){
@@ -374,7 +439,7 @@
   function field(label,key,wide=false,max=100) {
     let control;
     if(lookupFields[key]) {
-      const list=(catalogs[lookupFields[key]]||[]).filter(v=>key!=='idIva'||([0.105,0.21].some(rate=>Math.abs(Number(v.iva)-rate)<0.000001)&&!Number(v.iva2)));
+      const list=(catalogs[lookupFields[key]]||[]).filter(v=>key!=='idIva'||String(v.id)===String(draft.idIva)||([0.105,0.21].some(rate=>Math.abs(Number(v.iva)-rate)<0.000001)&&!Number(v.iva2)));
       if(key==='idRubro'||key==='idProveedor'){
         const name=list.find(v=>String(v.id)===String(draft[key]))?.nombre||'';
         control=`<span class="article-combo"><input data-field="${key}" data-article-combo autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="article-options-${key}" value="${esc(name)}" aria-label="${esc(label)}"><button type="button" data-combo-toggle="${key}" tabindex="-1" aria-label="Desplegar ${esc(label)}">▾</button><span id="article-options-${key}" class="article-combo-options" role="listbox" hidden></span></span>`;
@@ -405,8 +470,17 @@
     }
   }
   function syncNumbers(except) {
-    els.detail.querySelectorAll('[data-field]').forEach(input=>{if(input.dataset.field!==except&&numericKeys.includes(input.dataset.field))input.value=numericText(draft[input.dataset.field],input.dataset.numberFormat,document.activeElement===input);});
+    const rate=articlePesoRate();
+    for(const input of els.detail.querySelectorAll('[data-number-format][data-field]')){
+      const moneyField=input.dataset.numberFormat==='money';
+      if(moneyField){
+        input.readOnly=Boolean(rate);
+        input.title=rate?'Volvé a la moneda original para editar este importe.':'';
+      }
+      if(input.dataset.field!==except)input.value=numericText(draft[input.dataset.field],input.dataset.numberFormat,!input.readOnly&&document.activeElement===input);
+    }
     syncClassicArticle();
+    updateArticlePesoButton(document.body.classList.contains('article-sheet-open'));
   }
   function syncClassicArticle(){
     for(const output of els.detail.querySelectorAll('[data-access-article]'))output.textContent=articleAccessValue(output.dataset.accessArticle);
@@ -468,7 +542,7 @@
         <div class="article-stock-controls">
           <fieldset class="article-box"><legend>Stock</legend><div class="article-field-row">${creatingArticle?field('Mín.','stockMinimo')+field('Máx.','stockMaximo'):articleAccessField('Mín.','stockMinimo')+articleAccessField('Máx.','stockMaximo')}${field('Cant. p/Bulto','unidadesBulto')}${articleCheck('En Stock','enStock')}</div></fieldset>
           <div class="edit-actions"><button type="submit" id="saveArticle" disabled>Guardar</button><button type="button" id="cancelArticle">Descartar cambios</button><button type="button" id="newArticle" ${canEditArticleList()?'':'disabled'}>Nuevo</button><button type="button" disabled title="Baja SQL disponible en Access">Eliminar</button></div>
-          <button class="article-template" type="button" disabled title="Plantilla disponible en Access">Plantilla</button><a class="article-extra-catalog" href="index.html" target="_blank" rel="noopener">Catálogo web</a><span id="editStatus" role="status"></span>
+          <button id="articleTemplate" class="article-template" type="button" title="${creatingArticle?'Pegar plantilla (Ctrl + Shift + V)':'Copiar ficha (Ctrl + Shift + C)'}">Plantilla</button><a class="article-extra-catalog" href="index.html" target="_blank" rel="noopener">Catálogo web</a><span id="editStatus" role="status"></span>
         </div>
         <section class="article-data-sheet article-branch-stock"><table><caption>Stock por sucursal <span id="stockTotal">Total: ${stockDraft.length?num(stockDraft.reduce((sum,s)=>sum+Number(s.stock||0),0)):'—'}</span></caption><thead><tr><th>Nº suc.</th><th>Sucursal</th><th>Stock</th><th>Ubicación</th></tr></thead><tbody>${stockDraft.map(s=>`<tr><td>${esc(s.id)}</td><td>${esc(s.sucursal)}</td><td class="numeric">${esc(num(s.stock))}</td><td>${esc(s.ubicacion)}</td></tr>`).join('')}${Array.from({length:Math.max(0,4-stockDraft.length)},()=>'<tr aria-hidden="true"><td></td><td></td><td></td><td></td></tr>').join('')}</tbody></table><div class="article-records">Registros: ${stockDraft.length}</div></section>
       </div>
@@ -478,6 +552,7 @@
     if(workspace)els.detail.querySelector('.article-ficha-actions').append(els.articlePosition,els.prevArticle,els.nextArticle,editWeb,els.closeArticle);
     const deleteButton=els.detail.querySelector('button[title="Baja SQL disponible en Access"]');
     deleteButton.id='deleteArticle';deleteButton.title='Eliminar solo si no tiene movimientos';deleteButton.disabled=creatingArticle||!canEditArticleList();
+    syncNumbers();
     fitArticleReference();
     markDirty(false);
   }
@@ -543,7 +618,7 @@
   function edit(event) {
     if(loadingDetail||!draft)return;
     const input=event.target;
-    if(input.matches('[data-stock]')) return;
+    if(input.readOnly||input.matches('[data-stock]')) return;
     const key=input.dataset.field;if(!key||key==='id')return;
     if(key==='descripcion'||key==='descripcionWeb'){
       const start=input.selectionStart,end=input.selectionEnd;
@@ -813,13 +888,13 @@
     if(event.key==='Enter'&&event.target.matches('button')){event.preventDefault();event.target.click();}
   },true);
   els.detail.addEventListener('focusin',event=>{
-    const input=event.target;if(!input.dataset.numberFormat)return;
+    const input=event.target;if(input.readOnly||!input.dataset.numberFormat)return;
     const value=input.dataset.field?draft?.[input.dataset.field]:stockDraft[Number(input.dataset.stock)]?.stock;
     input.value=numericText(value,input.dataset.numberFormat,true);input.select();
   });
   els.detail.addEventListener('focusout',event=>{
     const input=event.target;
-    if(input.dataset.numberFormat&&readNumber(input)!==undefined){
+    if(!input.readOnly&&input.dataset.numberFormat&&readNumber(input)!==undefined){
       const value=input.dataset.field?draft?.[input.dataset.field]:stockDraft[Number(input.dataset.stock)]?.stock;
       input.value=numericText(value,input.dataset.numberFormat);
     }
@@ -1263,6 +1338,10 @@
   els.detail.addEventListener('click',async event=>{
     if(event.target.closest('#deleteArticle')){await deleteCurrentArticle();return;}
     if(event.target.closest('#newArticle')){await openNewArticle();return;}
+    if(event.target.closest('#articleTemplate')){
+      if(creatingArticle)await pasteArticleTemplate(true);else copyArticleTemplate();
+      return;
+    }
     if(event.target.closest('[data-article-back]')){
       if(await mayLeaveArticle()){
         if(creatingArticle)markDirty(false);
@@ -1280,8 +1359,85 @@
   els.nextArticle.addEventListener('click',()=>moveArticle(1));
   els.closeArticle.addEventListener('click',closeArticle);
   els.articleDialog.addEventListener('cancel',event=>{event.preventDefault();closeArticle();});
+  const articleTemplateHeader='CORRALON_PLANTILLA_ARTICULO_V1';
+  const isArticleTemplate=text=>text.startsWith(articleTemplateHeader+'\n')||text.startsWith(articleTemplateHeader+'\r\n');
+  let articleTemplateText='', pastingArticleTemplate=false;
+  function copyArticleTemplate(){
+    if(!draft||creatingArticle||loadingDetail||!$('articleForm')?.reportValidity())return;
+    const values=blankArticle(null);
+    delete values.id;
+    delete values.solicitud;
+    for(const key of Object.keys(values)){
+      const value=draft[key]??classicArticle?.[key];
+      if(value!=null)values[key]=typeof values[key]==='boolean'?flag(value):value;
+    }
+    articleTemplateText=articleTemplateHeader+'\n'+JSON.stringify(values);
+    status('Plantilla copiada.');
+    const text=articleTemplateText;
+    const copyFallback=()=>{
+      const previous=document.activeElement,field=document.createElement('textarea');
+      field.value=text;field.style.cssText='position:fixed;opacity:0;pointer-events:none';
+      els.articleDialog.append(field);field.select();
+      try{document.execCommand('copy');}
+      catch(_){}
+      finally{field.remove();previous?.focus({preventScroll:true});}
+    };
+    if(navigator.clipboard?.writeText)navigator.clipboard.writeText(text).catch(copyFallback);
+    else copyFallback();
+  }
+  function applyArticleTemplate(text){
+    const values=JSON.parse(text.slice(articleTemplateHeader.length+1));
+    if(!values||typeof values!=='object'||Array.isArray(values)||typeof values.descripcion!=='string'){
+      throw new Error('La plantilla del artículo no es válida.');
+    }
+    const original=savedDraft,article=blankArticle(draft.solicitud);
+    for(const key of Object.keys(article)){
+      if(key==='id'||key==='solicitud'||!Object.hasOwn(values,key))continue;
+      const value=values[key];
+      if(value===null||['string','boolean','number'].includes(typeof value))article[key]=value;
+    }
+    const suffix=' - COPIA';
+    const copiedName=value=>(String(value??'').trimEnd().slice(0,100-suffix.length).trimEnd()+suffix).trimStart();
+    article.descripcion=copiedName(article.descripcion);
+    article.descripcionWeb=values.descripcionWeb?copiedName(values.descripcionWeb):article.descripcion;
+    recalculate(article);
+    closeCombo();
+    drawForm(article,[],null);
+    savedDraft=original;
+    articleNavigation();
+    markDirty(true);
+    status('Plantilla pegada. Revisá el artículo y guardalo para darle de alta.');
+    els.detail.querySelector('[data-field="descripcion"]').focus({preventScroll:true});
+  }
+  async function pasteArticleTemplate(fromButton=false,clipboardText=''){
+    if(!creatingArticle||!canEditArticleList()||!draft||saving||loadingDetail||pastingArticleTemplate)return;
+    const initialDraft=draft;
+    pastingArticleTemplate=true;
+    try{
+      let text=clipboardText||(fromButton?articleTemplateText:'');
+      if(!text&&navigator.clipboard?.readText){
+        try{text=await navigator.clipboard.readText();}catch(_){}
+      }
+      if(!text)text=articleTemplateText||await FX.requestClipboardText();
+      if(!text||draft!==initialDraft||!creatingArticle||saving||loadingDetail||!els.articleDialog.open)return;
+      if(!fromButton&&text.startsWith('CORRALON_PRECIO_ARTICULO_V1')){await pasteProviderPrice(text);return;}
+      if(dirty){status('Abrí un formulario nuevo y vacío para pegar la plantilla.',true);return;}
+      if(!isArticleTemplate(text)){
+        throw new Error('Copiá primero una ficha con Plantilla o Ctrl + Shift + C.');
+      }
+      applyArticleTemplate(text);
+    }catch(error){status(error instanceof SyntaxError?'La plantilla del artículo no es válida.':error.message,true);}
+    finally{pastingArticleTemplate=false;}
+  }
+  els.detail.addEventListener('paste',event=>{
+    if(!creatingArticle)return;
+    const text=event.clipboardData?.getData('text/plain')||'';
+    if(!isArticleTemplate(text))return;
+    event.preventDefault();
+    pasteArticleTemplate(false,text);
+  });
   let pastingProviderPrice=false;
-  async function pasteProviderPrice(){
+  async function pasteProviderPrice(clipboardText){
     if(pastingProviderPrice||saving||loadingDetail||!draft)return;
     if(!FX.menuUserIsAdministrator('articulos_sql')&&!FX.menuUserIsAdministrator('facturacion')){
       status('Solo los administradores pueden editar artículos.',true);return;
@@ -1289,7 +1445,7 @@
     const currentDraft=draft,currentId=selected;
     pastingProviderPrice=true;
     try{
-      const text=await FX.requestClipboardText();
+      const text=clipboardText??await FX.requestClipboardText();
       if(!text)return;
       if(draft!==currentDraft||selected!==currentId||saving||loadingDetail||!els.articleDialog.open)return;
       const lines=String(text).trim().split(/\r?\n/);
@@ -1311,9 +1467,14 @@
     finally{pastingProviderPrice=false;}
   }
   document.addEventListener('keydown',event=>{
-    if(!els.articleDialog.open||!(event.ctrlKey||event.metaKey)||!event.shiftKey||event.altKey||String(event.key||'').toLowerCase()!=='v')return;
+    if(!els.articleDialog.open||!els.articleDialog.contains(event.target)||!(event.ctrlKey||event.metaKey)||!event.shiftKey||event.altKey||event.isComposing)return;
+    const key=event.key.toLowerCase();
+    if(key!=='c'&&key!=='v')return;
     event.preventDefault();event.stopImmediatePropagation();
-    if(!event.repeat)pasteProviderPrice();
+    if(event.repeat)return;
+    if(key==='c')copyArticleTemplate();
+    else if(creatingArticle)pasteArticleTemplate();
+    else pasteProviderPrice();
   },true);
   document.addEventListener('keydown',event=>{
     if(!els.articleDialog.open)return;

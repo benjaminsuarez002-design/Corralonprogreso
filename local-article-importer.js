@@ -299,6 +299,9 @@ export async function open(options, window = globalThis.window, document = globa
     backdrop.querySelector('[data-summary]').textContent=`${rows.length-updates-unresolved} nuevos · ${updates} para actualizar${unresolved?` · ${unresolved} por identificar`:''}`;
     apply.disabled=busy||!rows.length||Boolean(unresolved)||rows.some(row=>row.loading);
   }
+  function canEditSupplierCode(row) {
+    return options.editableSource || row.codigoManual === true || !row.codigo.trim();
+  }
   function render() {
     hideMenu();
     for(const row of rows){
@@ -308,7 +311,7 @@ export async function open(options, window = globalThis.window, document = globa
     }
     backdrop.querySelector('tbody').innerHTML = rows.map((r, i) => `<tr data-row="${i}" class="local-import-row${selectedRowUid === r.uid ? ' local-selected' : ''}">
       <td><input ${options.editableSource?`data-field="id" maxlength="6" placeholder="${r.mode==='update'?'Elegir IDArt':'Automático'}"`:'readonly'} value="${escape(options.editableSource?r.id||'':r.mode === 'new' ? 'Automático' : r.id || 'Elegir →')}"${r.resolutionMessage?` title="${escape(r.resolutionMessage)}"`:''}></td>
-      <td><input ${options.editableSource?'data-field="codigo" maxlength="30"':'readonly'} value="${escape(r.codigo)}"></td>
+      <td><input ${canEditSupplierCode(r)?'data-field="codigo" maxlength="30" aria-label="Código de proveedor"':'readonly'} value="${escape(r.codigo)}"></td>
       <td><div class="local-articles-combo"><input data-field="descripcion" autocomplete="off" maxlength="100" value="${escape(r.descripcion)}" placeholder="Buscar por código o descripción…"${r.original ? ` title="Costo anterior: ${escape(money(r.original.costo))}"` : ''}><button type="button" data-article-toggle tabindex="-1" title="Buscar artículo">▼</button></div></td>
       <td><div class="local-articles-combo"><input data-field="rubro" autocomplete="off" value="${escape(rubros.find(item => Number(item.id) === Number(r.rubro))?.nombre || '')}" placeholder="Elegir rubro"><button type="button" data-rubro-toggle tabindex="-1" title="Buscar rubro">▼</button></div></td>
       <td><select data-field="iva"><option value="0.21">21 %</option><option value="0.105">10,5 %</option>${![.21,.105].some(v => Math.abs(v-r.iva)<.00001) ? `<option value="${Number(r.iva)}">${Number(r.iva)*100} %</option>` : ''}</select></td>
@@ -673,7 +676,11 @@ export async function open(options, window = globalThis.window, document = globa
       searchRubro(input,row);
     }
     if (field === 'margen') row.margen = parseMargin(input.value);
-    if(field==='codigo')row.codigo=input.value.trim();
+    if (field === 'codigo') {
+      if (row.sqlSaved || !canEditSupplierCode(row)) return;
+      if (!row.codigo.trim()) row.codigoManual = true;
+      row.codigo = input.value.trim();
+    }
     if(field==='id'){
       row.id=input.value.trim();row.mode='new';row.original=null;row.version='';row.lookup=null;
       if(options.applyPrices&&row.id){row.mode='update';row.resolutionMessage='Elegí un IDArt existente.';}
@@ -702,29 +709,30 @@ export async function open(options, window = globalThis.window, document = globa
     try{const cost=window.CorralonFunciones.evaluateBasicArithmetic(input.value);if(cost<=0)throw new Error('El costo debe ser mayor que cero.');row.costo=cost;delete row.costoExpression;input.value=money(cost);input.setCustomValidity('');changed();return true;}
     catch(error){input.setCustomValidity(error.message);setStatus(error.message,true);return false;}
   }
-  const editableFields = options.editableSource?['id','codigo','descripcion','rubro','iva','margen','costo']:['descripcion','rubro','iva','margen','costo'];
+  const editableFields = [...(options.editableSource ? ['id'] : []), 'codigo', 'descripcion', 'rubro', 'iva', 'margen', 'costo'];
   function focusGrid(rowIndex, fieldIndex) {
     if (!rows.length) return;
     if (rowIndex >= rows.length) { apply.focus(); return; }
     if (rowIndex < 0) rowIndex = 0;
     const field = editableFields[Math.max(0, Math.min(editableFields.length-1, fieldIndex))];
-    backdrop.querySelector(`tr[data-row="${rowIndex}"] [data-field="${field}"]`)?.focus({ preventScroll:true });
+    const target = field === 'codigo' && !canEditSupplierCode(rows[rowIndex]) ? 'descripcion' : field;
+    backdrop.querySelector(`tr[data-row="${rowIndex}"] [data-field="${target}"]`)?.focus({ preventScroll:true });
   }
   function moveGrid(input, direction, edge = false) {
     const rowIndex = Number(input.closest('[data-row]').dataset.row);
-    const fieldIndex = editableFields.indexOf(input.dataset.field);
-    let nextRow = rowIndex, nextField = fieldIndex;
-    if (direction === 'up') nextRow = edge ? 0 : rowIndex - 1;
-    if (direction === 'down') nextRow = edge ? rows.length-1 : rowIndex + 1;
-    if (direction === 'right') {
-      if (edge) nextField = editableFields.length-1;
-      else if (++nextField >= editableFields.length) { nextField = 0; nextRow++; }
+    const field = input.dataset.field;
+    hideMenu();
+    if (direction === 'up' || direction === 'down') {
+      const nextRow = direction === 'up' ? (edge ? 0 : rowIndex - 1) : (edge ? rows.length - 1 : rowIndex + 1);
+      focusGrid(nextRow, editableFields.indexOf(field));
+      return;
     }
-    if (direction === 'left') {
-      if (edge) nextField = 0;
-      else if (--nextField < 0) { nextField = editableFields.length-1; nextRow--; }
-    }
-    hideMenu(); focusGrid(nextRow, nextField);
+    const fields = canEditSupplierCode(rows[rowIndex]) ? editableFields : editableFields.filter(name => name !== 'codigo');
+    const forward = direction === 'right';
+    const nextField = edge ? (forward ? fields.length - 1 : 0) : fields.indexOf(field) + (forward ? 1 : -1);
+    if (nextField >= fields.length) focusGrid(rowIndex + 1, 0);
+    else if (nextField < 0) focusGrid(rowIndex - 1, editableFields.length - 1);
+    else focusGrid(rowIndex, editableFields.indexOf(fields[nextField]));
   }
   function atTextEdge(input, direction) {
     if (typeof input.selectionStart !== 'number') return true;

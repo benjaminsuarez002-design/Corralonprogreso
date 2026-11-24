@@ -299,7 +299,7 @@ body:is([data-system-section="invoice-consult"],[data-system-section="customers"
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
 <div id="classicVoucherOptions" popover="manual" role="listbox" aria-label="Comprobantes"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.62"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.63"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 function invoiceDocumentEvent(type, callback, options){
  document.addEventListener(type,function(event){
   if(document.querySelector('#systemNotifications .review-modal.visible')&&['keydown','keyup','click','mousedown','pointerdown','paste','copy'].includes(type))return;
@@ -1499,9 +1499,13 @@ async function addBillingAridos(payload) {
     const loaded=selected.map(item=>{
       const found=catalog.find(row=>String(row.idart)===item.idart);
       if(!found)throw new Error(`El árido ${item.idart} no está disponible en el catálogo SQL actualizado.`);
+      const pMat=payload.materials.find(m=>String(m.code)===item.idart);
+      const hasFreight=(pMat?.freightCostShare??0)>0&&(pMat?.materialCostTotal??0)>0;
       return {...blankArticle(),idart:item.idart,codProv:found.codProv||'',descripcion:found.descripcion,
         cantidad:item.cantidad,precio:roundMoney(n(found.precioFinal)),precioBase:roundMoney(n(found.precioFinal)),costoFinal:n(found.costoFinal),
-        idMoneda:Number(found.idMoneda)||1,cotizacion:n(found.cotizacion),stock:n(found.stock),iva:n(found.iva)};
+        idMoneda:Number(found.idMoneda)||1,cotizacion:n(found.cotizacion),stock:n(found.stock),iva:n(found.iva),
+        ...(hasFreight?{_aridMaterialCostTotal:pMat.materialCostTotal,_aridFreightCostShare:pMat.freightCostShare,
+          _aridFreightCode:payload.freight?.code||'012025',_aridFreightName:payload.freight?.name||'FLETE'}:{})};
     });
     const index=targetIndex();
     if(index<0||issuedReceipt||issueInProgress)throw new Error('Los precios se actualizaron en SQL, pero la fila original ya no está disponible. Volvé a abrir el presupuesto.');
@@ -3360,12 +3364,20 @@ async function chooseAridosDelivery(data,deliveryType=null){
         const response=await fetch(SQL_PREPARACION+'/catalogo?'+new URLSearchParams({puntoVenta:data.idPuntoVenta,lista:data.listaPrecios}),{cache:'no-store',signal:AbortSignal.timeout(15000)});
         const result=await response.json();
         if(!response.ok||!result.ok)throw new Error(result.error||'No se pudieron consultar los costos actuales.');
-        const items=lines.map(line=>{
+        const materialItems=[];let totalFreight={code:null,name:null,costTotal:0};
+        for(const line of lines){
           const article=(result.catalogo||[]).find(row=>String(row.idart)===line.idart);
           const cost=Number(article?.costoFinal);
           if(!Number.isFinite(cost)||cost<=0)throw new Error('Falta el costo con IVA actualizado de '+line.desc+'.');
-          return {...line,precio:cost};
-        });
+          const srcArt=data.articulos.find(a=>String(a.idart)===line.idart);
+          if(srcArt?._aridFreightCostShare>0&&srcArt?._aridMaterialCostTotal>0){
+            materialItems.push({...line,precio:roundMoney(srcArt._aridMaterialCostTotal/line.cant)});
+            totalFreight.code=totalFreight.code||srcArt._aridFreightCode||'012025';
+            totalFreight.name=totalFreight.name||srcArt._aridFreightName||'FLETE';
+            totalFreight.costTotal=roundMoney(totalFreight.costTotal+srcArt._aridFreightCostShare);
+          }else{materialItems.push({...line,precio:cost});}
+        }
+        const items=[...materialItems,...(totalFreight.costTotal>0?[{idart:totalFreight.code,cant:1,precio:totalFreight.costTotal,desc:totalFreight.name}]:[])];
         finish({tipo:deliveryType,provider:{id_proveedor:provider.id_proveedor,nombre:provider.proveedor,sqlId:Number(CorralonSystem.providerIdentity.externalId(provider))},items,complete:false});
       }catch(error){
         note.textContent='No se pudo confirmar la entrega. '+error.message;
