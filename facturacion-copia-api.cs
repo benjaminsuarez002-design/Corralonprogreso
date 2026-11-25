@@ -4355,10 +4355,131 @@ HAVING SUM(v.cantidad)<>0 AND SUM(v.venta)<>0 ORDER BY cantidad DESC,codigo",fro
         throw new InvalidOperationException("La consulta de cuentas corrientes no existe.");
     }
 
+    private static void EnsureCollectionStatus(SqlConnection c)
+    {
+        object table=Scalar(c,null,"SELECT OBJECT_ID(N'dbo.WebEstadoCobranza',N'U')");
+        if (table!=null && table!=DBNull.Value) return;
+        using (var tx=c.BeginTransaction())
+        {
+            Execute(c,tx,@"
+DECLARE @lock int;
+EXEC @lock=sys.sp_getapplock @Resource=N'WebEstadoCobranza',@LockMode=N'Exclusive',@LockOwner=N'Transaction',@LockTimeout=5000;
+IF @lock<0 THROW 50001,'No se pudo preparar el estado de cobranza.',1;
+IF OBJECT_ID(N'dbo.WebEstadoCobranza',N'U') IS NULL
+    CREATE TABLE dbo.WebEstadoCobranza (
+        IDCliente int NOT NULL PRIMARY KEY,
+        Irrecuperable bit NOT NULL,
+        Modificado datetime2(0) NOT NULL,
+        Usuario nvarchar(150) NOT NULL
+    );");
+            tx.Commit();
+        }
+    }
+
+    private static object SaveCollectionStatus(SqlConnection c, Dictionary<string,object> input)
+    {
+        string user=Text(Value(input,"usuarioId"));
+        AssertPurchasePermission(user,"cuentas_corrientes");
+        int customer=RequiredId(Value(input,"cliente"),"un cliente");
+        object requested=Value(input,"irrecuperable"), prior=Value(input,"anterior");
+        if (!(requested is bool) || !(prior is bool)) throw new InvalidOperationException("El estado de cobranza no es válido.");
+        bool next=(bool)requested;
+        EnsureCollectionStatus(c);
+        using(var tx=c.BeginTransaction(IsolationLevel.Serializable))
+        {
+            if (Scalar(c,tx,"SELECT IDCliente FROM dbo.Clientes WHERE IDCliente=@p0",customer)==null)
+                throw new InvalidOperationException("La cuenta del cliente ya no existe.");
+            object stored=Scalar(c,tx,"SELECT Irrecuperable FROM dbo.WebEstadoCobranza WITH (UPDLOCK,HOLDLOCK) WHERE IDCliente=@p0",customer);
+            bool current=stored!=null && Convert.ToBoolean(stored);
+            if(current!=next)
+            {
+                if(current!=(bool)prior) throw new InvalidOperationException("Otro usuario cambió el estado de cobranza. Actualizá los saldos y reintentá.");
+                if(next && CollectionBalance(c,tx,customer,1)<=.01m)
+                    throw new InvalidOperationException("La cuenta debe tener saldo pendiente para marcarla como irrecuperable.");
+                if(stored==null)
+                    Execute(c,tx,"INSERT dbo.WebEstadoCobranza(IDCliente,Irrecuperable,Modificado,Usuario) VALUES(@p0,@p1,SYSDATETIME(),@p2)",customer,next,user);
+                else
+                    Execute(c,tx,"UPDATE dbo.WebEstadoCobranza SET Irrecuperable=@p1,Modificado=SYSDATETIME(),Usuario=@p2 WHERE IDCliente=@p0",customer,next,user);
+            }
+            tx.Commit();
+        }
+        return new {ok=true,cliente=customer,irrecuperable=next};
+    }
+
+    private static List<Dictionary<string,object>> CollectionReminderRows(SqlConnection c, int customer=0)
+    {
+        EnsureCollectionStatus(c);
+        return Rows(c,CustomerAccountCtes+@"
+, boletasConAviso AS (
+    SELECT IDCliente, saldo,
+           CONVERT(date,CASE WHEN Vence>'19000101' THEN Vence ELSE DATEADD(day,@p2,Fecha) END) vencimiento,
+           CASE WHEN (CASE WHEN Vence>'19000101' THEN Vence ELSE Fecha END)>=@p1 THEN 1 ELSE 0 END vigente
+    FROM pendientes
+    WHERE Fecha<DATEADD(day,1,@p0) AND total>0 AND saldo>.01
+      AND (@p4=0 OR IDCliente=@p4)
+), avisos AS (
+    SELECT IDCliente,
+           SUM(CASE WHEN vigente=1 AND vencimiento<@p0 THEN saldo ELSE 0 END) vencido,
+           SUM(CASE WHEN vigente=1 AND vencimiento BETWEEN @p0 AND DATEADD(day,@p3,@p0) THEN saldo ELSE 0 END) porVencer,
+           MIN(CASE WHEN vigente=1 AND vencimiento<@p0 THEN vencimiento END) primerVto,
+           MIN(CASE WHEN vigente=1 AND vencimiento BETWEEN @p0 AND DATEADD(day,@p3,@p0) THEN vencimiento END) proximoVto,
+           MAX(CASE WHEN vigente=1 AND vencimiento BETWEEN @p0 AND DATEADD(day,@p3,@p0) THEN vencimiento END) ultimoVto,
+           SUM(CASE WHEN vencimiento<@p0 THEN saldo ELSE 0 END) saldoVencido,
+           SUM(CASE WHEN vencimiento BETWEEN @p0 AND DATEADD(day,@p5,@p0) THEN saldo ELSE 0 END) saldoProximo,
+           SUM(CASE WHEN vencimiento>DATEADD(day,@p5,@p0) THEN saldo ELSE 0 END) saldoPosterior
+    FROM boletasConAviso
+    GROUP BY IDCliente
+), cargos AS (
+    SELECT IDCliente,SUM(total) total FROM ventasPorBoleta GROUP BY IDCliente
+), cobros AS (
+    SELECT IDCliente,SUM(Total) total FROM recibos GROUP BY IDCliente
+)
+SELECT c.IDCliente id,c.[RazónSocial] cliente,telefono.numero telefono,telefono.digitos,
+       CONVERT(decimal(19,2),vencidas.importe) vencido, CONVERT(decimal(19,2),proximas.importe) porVencer,
+       CONVERT(char(10),v.primerVto,23) primerVto, CONVERT(char(10),v.proximoVto,23) proximoVto,
+       DATEDIFF(day,@p0,v.proximoVto) diasParaVencer, CONVERT(char(10),v.ultimoVto,23) ultimoVto,
+       mensaje.total saldoTotal,mensajeVencido.importe saldoVencido,
+       mensajeProximo.importe saldoProximo,mensajePosterior.importe saldoPosterior,
+       mensaje.total-mensajeVencido.importe-mensajeProximo.importe-mensajePosterior.importe saldoSinFecha,
+       CONVERT(char(10),@p0,23) avisoDesde,CONVERT(char(10),DATEADD(day,@p5,@p0),23) avisoHasta
+FROM dbo.Clientes c LEFT JOIN avisos v ON c.IDCliente=v.IDCliente
+LEFT JOIN cargos a ON a.IDCliente=c.IDCliente
+LEFT JOIN cobros r ON r.IDCliente=c.IDCliente
+LEFT JOIN dbo.WebEstadoCobranza w ON w.IDCliente=c.IDCliente
+CROSS APPLY (SELECT ISNULL(c.SaldoCC,0)+ISNULL(a.total,0)-ISNULL(r.total,0) actual) saldo
+CROSS APPLY (SELECT CASE WHEN ISNULL(v.vencido,0)<saldo.actual THEN ISNULL(v.vencido,0) ELSE saldo.actual END importe) vencidas
+CROSS APPLY (SELECT CASE WHEN ISNULL(v.porVencer,0)<saldo.actual-vencidas.importe THEN ISNULL(v.porVencer,0) ELSE saldo.actual-vencidas.importe END importe) proximas
+CROSS APPLY (SELECT CONVERT(decimal(19,2),saldo.actual) total,
+                    CONVERT(decimal(19,2),ISNULL(v.saldoVencido,0)) vencido,
+                    CONVERT(decimal(19,2),ISNULL(v.saldoProximo,0)) proximo,
+                    CONVERT(decimal(19,2),ISNULL(v.saldoPosterior,0)) posterior) mensaje
+CROSS APPLY (SELECT CASE WHEN mensaje.vencido<mensaje.total THEN mensaje.vencido ELSE mensaje.total END importe) mensajeVencido
+CROSS APPLY (SELECT CASE WHEN mensaje.proximo<mensaje.total-mensajeVencido.importe THEN mensaje.proximo ELSE mensaje.total-mensajeVencido.importe END importe) mensajeProximo
+CROSS APPLY (SELECT CASE WHEN mensaje.posterior<mensaje.total-mensajeVencido.importe-mensajeProximo.importe THEN mensaje.posterior ELSE mensaje.total-mensajeVencido.importe-mensajeProximo.importe END importe) mensajePosterior
+OUTER APPLY (
+    SELECT TOP (1) t.numero, limpio.digitos
+    FROM (VALUES (1,LTRIM(RTRIM(c.[Teléfono]))),(2,LTRIM(RTRIM(c.Fax)))) t(orden,numero)
+    CROSS APPLY (SELECT REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(t.numero,' ',''),'-',''),'(',''),')',''),'+',''),'.','') digitos) limpio
+    WHERE LEN(limpio.digitos) BETWEEN 7 AND 15 AND limpio.digitos NOT LIKE '%[^0-9]%' AND limpio.digitos LIKE '%[1-9]%'
+    ORDER BY t.orden
+) telefono
+WHERE saldo.actual>.01
+  AND ((@p4>0 AND c.IDCliente=@p4)
+    OR (@p4=0 AND ISNULL(c.Suspendido,0)=0 AND ISNULL(w.Irrecuperable,0)=0 AND telefono.numero IS NOT NULL
+        AND (CONVERT(decimal(19,2),vencidas.importe)>.01 OR CONVERT(decimal(19,2),proximas.importe)>.01)))
+ORDER BY CASE WHEN vencidas.importe>.01 THEN 0 ELSE 1 END, COALESCE(v.primerVto,v.proximoVto),
+         vencidas.importe+proximas.importe DESC,c.IDCliente",DateTime.Today,new DateTime(2026,1,1),30,15,customer,5);
+    }
+
     private static object CustomerAccountQuery(SqlConnection c, HttpListenerRequest request)
     {
-        AssertPurchasePermission(request.QueryString["usuarioId"],"cuentas_corrientes");
         string query=Text(request.QueryString["consulta"]);
+        if(query=="alertas-cobranza")
+        {
+            AssertPurchasePermission(request.QueryString["usuarioId"],"facturacion");
+            return new {ok=true,filas=CollectionReminderRows(c)};
+        }
+        AssertPurchasePermission(request.QueryString["usuarioId"],"cuentas_corrientes");
         if (query=="opciones") return new {ok=true,
             clientes=Rows(c,CustomerAccountCtes+@"
 , clientesConMovimientos AS (
@@ -4369,7 +4490,16 @@ FROM dbo.Clientes c LEFT JOIN clientesConMovimientos m ON m.IDCliente=c.IDClient
             vendedores=Rows(c,"SELECT IDEmpleado id,Nombre nombre FROM dbo.Empleados ORDER BY IDEmpleado"),
             puntos=Rows(c,"SELECT IDDepósito id,[Descripción] nombre FROM dbo.[Depósitos] WHERE IDEmp=1 ORDER BY [Descripción]"),
             desde=DateTime.Today.AddDays(-365).ToString("yyyy-MM-dd"),hasta=DateTime.Today.ToString("yyyy-MM-dd")};
-        if (query=="saldos") return new {ok=true,filas=CustomerAccountReport(c,query,DateTime.Today,DateTime.Today,0,0)};
+        if (query=="saldos")
+        {
+            EnsureCollectionStatus(c);
+            var rows=CustomerAccountReport(c,query,DateTime.Today,DateTime.Today,0,0);
+            var excluded=new HashSet<int>();
+            foreach(var row in Rows(c,"SELECT IDCliente FROM dbo.WebEstadoCobranza WHERE Irrecuperable=1"))
+                    excluded.Add(Convert.ToInt32(row["IDCliente"]));
+            foreach(var row in rows) row["irrecuperable"]=excluded.Contains(Convert.ToInt32(row["id"]));
+            return new {ok=true,filas=rows};
+        }
         if (query=="movimientos-cliente")
         {
             int id=RequiredId(request.QueryString["cliente"],"un cliente");
@@ -4401,7 +4531,14 @@ WHERE (@p2=1 AND RIGHT(r.NroFactura,LEN(@p3))=@p3 OR @p2<>1 AND r.Fecha>=@p0 AND
   AND (@p2<>2 OR (r.IDCaja IS NULL AND r.Anulado=0))
 ORDER BY r.Fecha DESC,r.IDRecibo DESC",from,to.AddDays(1),query=="recibos-numero"?1:query=="recibos-rendicion"?2:0,number)};
         }
-        return new {ok=true,filas=CustomerAccountReport(c,query,from,to.AddDays(1),customer,seller)};
+        var report=CustomerAccountReport(c,query,from,to.AddDays(1),customer,seller);
+        if(query=="detalle" || query=="pendientes")
+        {
+            var contact=Rows(c,"SELECT [Teléfono] telefono,Fax celular FROM dbo.Clientes WHERE IDCliente=@p0",customer);
+            var reminder=CollectionReminderRows(c,customer);
+            return new {ok=true,filas=report,contacto=contact.Count>0?contact[0]:null,recordatorio=reminder.Count>0?reminder[0]:null};
+        }
+        return new {ok=true,filas=report};
     }
 
     private static object CollectionReceiptQuery(SqlConnection c, HttpListenerRequest request)
@@ -5054,6 +5191,29 @@ DROP TABLE #StockGeneral;DROP TABLE #CambiosStock;DROP TABLE #AntesSucursales;";
     }
 
     private static string ReviewResolutionPath(Guid draft) { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "venta-resuelta-" + draft.ToString("N") + ".bin"); }
+    private static object PendingInvoiceBAlerts(SqlConnection connection)
+    {
+        var ids=new List<string>();
+        foreach(string path in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory,"wsfe-draft-*.bin"))
+        {
+            Guid id;
+            if(!Guid.TryParseExact(Path.GetFileNameWithoutExtension(path).Substring(11),"N",out id) ||
+                File.Exists(RecoveryPath(id)) || File.Exists(ReviewResolutionPath(id))) continue;
+            Dictionary<string,object> saved;
+            try { saved=ReadReview(path); }
+            catch (IOException) { continue; }
+            catch (System.Security.Cryptography.CryptographicException) { continue; }
+            catch (ArgumentException) { continue; }
+            var invoice=Object(Value(saved,"comprobante"));
+            Guid savedId;
+            if(Text(Value(invoice,"idComprobante"))!="2" || !Guid.TryParse(Text(Value(invoice,"id")),out savedId) || savedId!=id ||
+                !System.Text.RegularExpressions.Regex.IsMatch(Text(Value(saved,"numero")),@"^\d{4}-\d{8}$")) continue;
+            if(Scalar(connection,null,"SELECT TOP 1 IDRecibo FROM dbo.FacturasATP WHERE NroOTrab=@p0 AND Confirmado=-1",DraftMarker(id))!=null) continue;
+            ids.Add(id.ToString());
+        }
+        return new {ok=true,pendientes=ids};
+    }
+
     private static Dictionary<string, object> ReviewEmissionState(SqlConnection c, Guid id, int requestedType, bool consult)
     {
         var result = new Dictionary<string, object> { {"ok",true},{"estado","incierto"},{"sql","sinConfirmar"},{"arca","sinVerificar"} };
@@ -5270,6 +5430,15 @@ DROP TABLE #StockGeneral;DROP TABLE #CambiosStock;DROP TABLE #AntesSucursales;";
         {
             try
             {
+                if(request.QueryString["pendientesB"]=="1")
+                {
+                    using (var connection=Connect())
+                    {
+                        AssertPurchasePermission(request.QueryString["usuarioId"],"facturacion");
+                        Reply(context,200,PendingInvoiceBAlerts(connection));
+                    }
+                    return;
+                }
                 var drafts = new List<object>();
                 foreach (string path in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory, "wsfe-draft-*.bin"))
                 {
@@ -5612,6 +5781,11 @@ DROP TABLE #StockGeneral;DROP TABLE #CambiosStock;DROP TABLE #AntesSucursales;";
                     using (var reader = new StreamReader(request.InputStream, Encoding.UTF8)) body = reader.ReadToEnd();
                     if (body.Length > 20000) throw new InvalidOperationException("La ficha de cliente es demasiado grande.");
                     var customerData = Object(Json.DeserializeObject(body));
+                    if(Text(Value(customerData,"accion"))=="estado-cobranza")
+                    {
+                        Reply(context,200,SaveCollectionStatus(connection,customerData));
+                        return;
+                    }
                     if(Text(Value(customerData,"accion"))=="unificar"){
                         AssertPurchasePermission(Text(Value(customerData,"usuarioId")),"facturacion");
                         Reply(context,200,CustomerMergeCommit(connection,customerData));return;

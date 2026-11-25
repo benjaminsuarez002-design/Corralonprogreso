@@ -148,6 +148,48 @@
     }).join('\t')).join('\n');
   }
 
+  function whatsappNumber(phone,digits){
+    if(typeof phone!=='string'||!/^\+?[\d\s().-]+$/.test(phone.trim()))return '';
+    digits=digits??phone.replace(/\D/g,'');
+    const international=/^(?:\+|00)/.test(phone.trim());
+    let number=digits.replace(/^00/,'');
+    if(international&&!number.startsWith('54'))return /^[1-9]\d{6,14}$/.test(number)?number:'';
+    if(number.startsWith('54')&&(international||number.length>=12))number=number.slice(2);
+    number=number.replace(/^0/,'');
+    if(/^9[1-3]\d{9}$/.test(number))return '54'+number;
+    if(number.length===12){
+      const mobile=number.match(/^((?:11|[23]\d{2,3}))15(\d+)$/);
+      if(mobile)number=mobile[1]+mobile[2];
+    }
+    return /^[1-3]\d{9}$/.test(number)?'549'+number:'';
+  }
+
+  function collectionWhatsAppReminder(account){
+    const total=Number(account?.saldoTotal);
+    if(!Number.isFinite(total)||total<=0)return '';
+    const fmt=new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'});
+    const money=value=>fmt.format(value).replace(/\u00a0/g,' ');
+    const [startYear,startMonth,startDay]=String(account.avisoDesde||'').split('-');
+    const [endYear,endMonth,endDay]=String(account.avisoHasta||'').split('-');
+    if(!startDay||!endDay)return '';
+    const asOf=`${startDay}/${startMonth}/${startYear}`;
+    const start=startYear!==endYear?asOf:startMonth!==endMonth?`${startDay}/${startMonth}`:startDay;
+    const end=startYear!==endYear?`${endDay}/${endMonth}/${endYear}`:`${endDay}/${endMonth}`;
+    const overdue=Number(account.saldoVencido||0);
+    const balances=[];
+    for(const [label,amount] of [
+      ['Saldo vencido',overdue],
+      [`Facturas por vencer del ${start} al ${end}`,account.saldoProximo],
+      ['Vencimientos posteriores',account.saldoPosterior],
+      ['Saldo sin fecha de vencimiento informada',account.saldoSinFecha]
+    ]){
+      if(Number(amount)>0)balances.push(`• *${label}* — ${money(amount)}`);
+    }
+    const opening=`Hola, te escribimos de Corralón Progreso por tu cuenta corriente. Al ${asOf}, tu *saldo total pendiente es de ${money(total)}*.`;
+    const reminder=overdue>0?'¿Nos confirmás cuándo podrías abonar el saldo vencido?':'Te lo recordamos para que puedas programar el pago.';
+    return [opening,balances.join('\n'),reminder+' Si ya hiciste algún pago, podés mandarnos el comprobante por acá. Gracias.'].filter(Boolean).join('\n\n');
+  }
+
   function parseFechaFlexible(value, now = new Date()) {
     const weekday=String(value||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),weekdays=['domingo','lunes','martes','miercoles','jueves','viernes','sabado'];
     if(weekdays.includes(weekday)){const recent=new Date(now.getFullYear(),now.getMonth(),now.getDate());recent.setDate(recent.getDate()-(recent.getDay()-weekdays.indexOf(weekday)+7)%7);return parseFechaFlexible(recent.getDate()+'/'+(recent.getMonth()+1)+'/'+recent.getFullYear(),now);}
@@ -3379,6 +3421,8 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     parseClipboardTable,
     formatClipboardTable,
     parseFechaFlexible,
+    whatsappNumber,
+    collectionWhatsAppReminder,
     isPrintableTypingKey,
     bindDropdownOnlyWhenTyping,
     bindDropdownF4,

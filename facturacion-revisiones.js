@@ -8,12 +8,36 @@
   const isBenja=()=>String(user().nivel||'').trim().toLowerCase()==='administrador';
   const inBilling=()=>{const url=new URL(location.href);return ['gestion.html','facturacion.html'].includes(url.pathname.split('/').pop())&&(!url.hash||url.hash==='#facturacion')&&!['receipts','invoice-consult','caja','sql'].includes(document.body.dataset?.systemSection);};
   let requestedOpened=false,adapters=null,busy=false,unsubscribe=null,starting=false,notifications=[],localPendingDrafts=[],firebaseTools=null,flushBusy=false;
+  let pendingInvoiceIds=new Set(),pendingInvoiceRequest,lastPendingInvoiceCheck=0;
+  const isPendingInvoiceB=id=>pendingInvoiceIds.has(String(id||'').toLowerCase());
+  function removePendingInvoice(id){
+    pendingInvoiceIds.delete(String(id||'').toLowerCase());renderNotifications();
+  }
+  async function refreshPendingInvoices(force=false){
+    if(!inBilling())return;
+    if(pendingInvoiceRequest)return pendingInvoiceRequest;
+    if(!force&&((!localPendingDrafts.length&&!notifications.length)||Date.now()-lastPendingInvoiceCheck<15000))return;
+    const userId=window.CorralonFunciones?.menuSessionUser?.()?.id||user().id||user().usuario;
+    if(!userId)return;
+    pendingInvoiceRequest=(async()=>{
+      try{
+        const query=new URLSearchParams({pendientesB:'1',usuarioId:userId});
+        const response=await fetch('/api/facturacion/borradores-fiscales?'+query,{cache:'no-store',signal:AbortSignal.timeout(10000)});
+        const result=await response.json();
+        if(!response.ok||!result.ok||!Array.isArray(result.pendientes))throw Error('No se pudieron verificar las solicitudes fiscales.');
+        pendingInvoiceIds=new Set(result.pendientes.map(id=>id.toLowerCase()));
+        if(adapters)void flush();
+      }catch(error){pendingInvoiceIds.clear();console.warn(error.message);}
+      finally{lastPendingInvoiceCheck=Date.now();renderNotifications();}
+    })();
+    try{await pendingInvoiceRequest;}finally{pendingInvoiceRequest=null;}
+  }
   const style=document.createElement('style');style.textContent=`.sale-review-overlay{position:fixed;inset:0;z-index:2147483000;background:#000b;display:flex;align-items:center;justify-content:center;padding:24px}.sale-review-panel{background:white;color:#151515;border:8px solid #e00000;border-radius:18px;padding:28px;width:min(920px,94vw);max-height:90vh;overflow:auto;font:18px Arial}.sale-review-panel h2{color:#d00000;font-size:clamp(30px,4vw,52px);margin:0 0 20px}.sale-review-panel p{line-height:1.4}.sale-review-panel button,.sale-review-panel a{display:inline-block;font:bold 18px Arial;padding:14px;margin:8px;border:1px solid #bbb;border-radius:8px;cursor:pointer}.sale-review-panel button.primary{background:#df0000;color:white}.sale-review-panel table{border-collapse:collapse;width:100%;font-size:15px}.sale-review-panel td,.sale-review-panel th{border:1px solid #ddd;padding:7px}.sale-review-bell{position:fixed;right:16px;top:12px;z-index:2147482999;background:#d00000;color:white;padding:8px 12px;border:1px solid #ffb0b0;border-radius:6px;font:bold 13px Arial;cursor:pointer}.topbar>.sale-review-bell{position:static;flex:0 0 auto;align-self:center;white-space:nowrap;min-height:32px;margin:0 6px;padding:6px 10px}`;document.head.appendChild(style);
   style.textContent+='.sale-review-panel{border:1px solid #ccd7e5;border-top:5px solid #e6a31a;border-radius:12px;padding:26px;font-size:16px;color:#172b49}.sale-review-panel h2{font-size:27px;color:#172b49;margin-bottom:12px}.sale-review-panel button{font-size:14px;padding:10px 14px;margin:8px 8px 0 0;min-height:38px}.sale-review-panel button.primary{background:#0767ce;border-color:#0767ce}.review-summary{background:#edf5ff;padding:14px;border-radius:8px;line-height:1.8}.review-different{background:#fff2cf}.review-actions{display:flex;flex-wrap:wrap;gap:4px;margin-top:16px}.sale-review-panel details{margin-top:16px;color:#65758d}.sale-review-panel input{padding:9px;border:1px solid #bbcbe0;border-radius:5px;margin:5px;max-width:100%}#recoveryAlert{width:min(900px,94vw);max-height:88vh;overflow:auto;background:white;color:#172b49;border:1px solid #ccd7e5;border-top:5px solid #e6a31a;border-radius:12px;padding:22px;box-shadow:0 10px 40px #0004}#recoveryAlert strong{font-size:25px}#recoveryAlert button{min-height:38px;border:1px solid #b8cce3;border-radius:5px;background:#f4f8ff;color:#174574}#recoveryAlert table{border-collapse:collapse;width:100%;margin-top:14px}#recoveryAlert th,#recoveryAlert td{border:1px solid #d8e3ef;padding:10px;text-align:left}#recoveryAlert details{margin-top:15px;color:#64748b}';
   style.textContent+='@media print{.sale-review-overlay,.sale-review-bell{display:none!important}}';
   function panel(title){const overlay=document.createElement('div');overlay.className='sale-review-overlay';overlay.setAttribute('role','alertdialog');overlay.setAttribute('aria-modal','true');const box=document.createElement('div');box.className='sale-review-panel';box.innerHTML=`<h2>${escape(title)}</h2>`;overlay.appendChild(box);document.body.appendChild(overlay);return{overlay,box};}
   async function post(entry){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);try{const response=await fetch('/api/facturacion/revision-venta',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({idRevision:entry.id,comprobante:entry.data,motivo:entry.reason,url:entry.url})});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'No se pudo guardar la revisión central.');return result;}finally{clearTimeout(timer)}}
-  async function flush(){if(flushBusy)return;flushBusy=true;try{const rows=read(KEY);for(const entry of Object.values(rows)){if(entry.central)continue;try{await post(entry);const current=read(KEY);if(current[entry.id]){current[entry.id].central=true;localStorage.setItem(KEY,JSON.stringify(current));}}catch{break}}}finally{flushBusy=false}}
+  async function flush(){if(flushBusy)return;flushBusy=true;try{const rows=read(KEY);for(const entry of Object.values(rows)){if(entry.central||!isPendingInvoiceB(entry.data?.id))continue;try{await post(entry);const current=read(KEY);if(current[entry.id]){current[entry.id].central=true;localStorage.setItem(KEY,JSON.stringify(current));}}catch{break}}}finally{flushBusy=false}}
   function hasSaleDetails(data){return Array.isArray(data?.articulos)&&data.articulos.some(row=>String(row.idart||'').trim()&&Number(row.cantidad)>0);}
   async function queue(data,reason){
     if(!hasSaleDetails(data))throw new Error('El borrador está vacío. No se envió como venta pendiente de revisión.');
@@ -96,22 +120,30 @@
     const later=document.createElement('button');later.textContent='Revisar después';later.onclick=()=>ui.overlay.remove();ui.box.appendChild(later);
   }
   function pendingEntries(){
-    const items=new Map();for(const item of notifications){const key=item.borradorId||item.id;if(!items.has(key))items.set(key,{remote:item});}
-    for(const draft of localPendingDrafts){const remote=notifications.find(item=>item.borradorId===draft.id||item.id===draft.revisionPendiente);if(remote)continue;if(!items.has(draft.id))items.set(draft.id,{local:draft});}
+    const items=new Map();for(const item of notifications){const key=item.borradorId||item.id;if(isPendingInvoiceB(key)&&!items.has(key))items.set(key,{remote:item});}
+    for(const draft of localPendingDrafts){if(isPendingInvoiceB(draft.id)&&!items.has(draft.id))items.set(draft.id,{local:draft});}
     return [...items.values()];
   }
-  function showPendingList(){
+  async function showPendingList(){
     if(!isBenja()||!inBilling())return;
-    const ui=panel('Ventas pendientes');ui.overlay.dataset.saleReviewAdmin='1';
+    await refreshPendingInvoices(true);
+    if(!isBenja()||!inBilling())return;
+    const ui=panel('Facturas B pendientes de autorización');ui.overlay.dataset.saleReviewAdmin='1';
     const items=pendingEntries();if(!items.length)ui.box.insertAdjacentHTML('beforeend','<p>No hay ventas pendientes.</p>');
     for(const item of items){const b=document.createElement('button');const data=item.remote||item.local;b.textContent=(item.remote?data.cliente:data.cliente?.nombre||'Sin cliente')+' · '+money(item.remote?data.total:data.totales?.total)+' · '+(data.usuario||'')+' · '+(data.fecha||'');b.style.display='block';b.style.width='100%';b.style.textAlign='left';b.onclick=async()=>{b.disabled=true;try{if(item.remote){ui.overlay.remove();await showNotification(item.remote);}else{await adapters?.openLocal?.(item.local.id);ui.overlay.remove();}}catch(error){const p=document.createElement('p');p.textContent=error.message;ui.box.appendChild(p);}finally{b.disabled=false;}};ui.box.appendChild(b);}
     const close=document.createElement('button');close.textContent='Cerrar';close.onclick=()=>ui.overlay.remove();ui.box.appendChild(close);
   }
   function renderNotifications(){
-    const shared=document.getElementById('openDrafts');if(shared&&isBenja()){document.getElementById('saleReviewGlobalBell')?.remove();const count=pendingEntries().length;shared.hidden=!inBilling()||count===0;shared.textContent='Pendientes ('+count+')';if(!inBilling())document.querySelectorAll('[data-sale-review-admin]').forEach(el=>el.remove());return;}
-    let bell=document.getElementById('saleReviewGlobalBell');if(!notifications.length||!isBenja()||!inBilling()){bell?.remove();document.querySelectorAll('[data-sale-review-admin]').forEach(el=>el.remove());return;}
-    if(!bell){bell=document.createElement('button');bell.id='saleReviewGlobalBell';bell.className='sale-review-bell';bell.onclick=()=>showPendingList();const navigation=document.querySelector('main.app>.topbar .sale-navigation');if(navigation)navigation.before(bell);else document.body.appendChild(bell);}bell.textContent=`Ventas en revisión (${notifications.length})`;
-    const requested=new URLSearchParams(location.search).get('revision'),requestedItem=notifications.find(item=>item.id===requested);if(requestedItem&&!requestedOpened){requestedOpened=true;showNotification(requestedItem);return;}
+    const shared=document.getElementById('openDrafts');
+    const entries=pendingEntries();
+    if(shared){
+      const count=isBenja()?entries.length:localPendingDrafts.filter(draft=>isPendingInvoiceB(draft.id)).length;
+      shared.hidden=!inBilling()||count===0;
+      shared.textContent='Pendientes ('+count+')';
+    }
+    if(!inBilling()){document.querySelectorAll('[data-sale-review-admin]').forEach(el=>el.remove());return;}
+    const requested=new URLSearchParams(location.search).get('revision'),requestedItem=entries.find(item=>item.remote?.id===requested)?.remote;
+    if(requestedItem&&!requestedOpened){requestedOpened=true;showNotification(requestedItem);}
     // Las revisiones se abren desde el botón, sin interrumpir cada pantalla.
   }
   async function listen(){
@@ -120,13 +152,13 @@
     try{const [app,f]=await Promise.all([import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')]);
       if(!isBenja()||!inBilling())return;const config={apiKey:'AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0',projectId:'corralon-progreso',appId:'1:466583614632:web:42cb839f83e97475fabe9d'};
       const named=app.getApps().find(a=>a.name==='sale-reviews')||app.initializeApp(config,'sale-reviews'),db=f.getFirestore(named);firebaseTools={...f,db};
-      unsubscribe=f.onSnapshot(f.query(f.collection(db,'facturacionRevisiones'),f.where('estado','==','pendiente')),snapshot=>{notifications=snapshot.docs.map(d=>({...d.data(),id:d.id}));renderNotifications();},error=>console.warn('No se pudieron recibir revisiones de ventas:',error));
+      unsubscribe=f.onSnapshot(f.query(f.collection(db,'facturacionRevisiones'),f.where('estado','==','pendiente')),snapshot=>{notifications=snapshot.docs.map(d=>({...d.data(),id:d.id}));renderNotifications();refreshPendingInvoices();},error=>console.warn('No se pudieron recibir revisiones de ventas:',error));
     }catch(e){console.warn('No se pudo iniciar el aviso de revisiones:',e)}finally{starting=false}
   }
-  window.CorralonSaleReviews={configure:options=>{adapters=options;flush();},handle,queue,isBenja,statusView,requestReview,findCompletedSale,showPendingList,setLocalDrafts:drafts=>{localPendingDrafts=drafts;renderNotifications();}};
+  window.CorralonSaleReviews={configure:options=>{adapters=options;flush();},handle,queue,isBenja,statusView,requestReview,findCompletedSale,showPendingList,refreshPendingInvoices,isPendingInvoiceB,removePendingInvoice,setLocalDrafts:drafts=>{localPendingDrafts=drafts;renderNotifications();refreshPendingInvoices();}};
   window.dispatchEvent(new Event('corralon-sale-reviews-ready'));
   window.addEventListener('online',()=>{flush();listen()});window.addEventListener('storage',()=>{listen();renderNotifications()});
-  window.addEventListener('hashchange',()=>{listen();renderNotifications()});
+  window.addEventListener('hashchange',()=>{listen();renderNotifications();refreshPendingInvoices();});
   if(typeof MutationObserver!=='undefined')new MutationObserver(()=>{listen();renderNotifications()}).observe(document.body,{attributes:true,attributeFilter:['data-system-section']});
   setInterval(()=>{if(adapters)flush();},60000);
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',listen,{once:true});else listen();

@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="theme-corralon.css">
 <script src="menu-auth-guard.js" data-menu-guard="recibos_cobro" data-menu-login="menu.html"></script>
 <script src="funciones.js"></script>
-<script src="corralon-system.js?v=0.0.3"></script>
+<script src="corralon-system.js?v=0.0.4"></script>
 <style>
 body{margin:0;background:#edf5fd}
 .receipts-page-header{height:58px;display:flex;align-items:center;gap:16px;padding:0 16px;background:linear-gradient(100deg,#1260b4,#22a7dd);color:white}
@@ -161,7 +161,7 @@ body:is([data-system-section="receipts"],[data-system-section="invoice-consult"]
 @media (max-width:900px) {#systemReceipts main{min-width: 940px; padding: 10px;}
 #systemReceipts header{gap: 12px;}}
 @media print {#systemReceipts{background: white;}
-#systemReceipts>main,#systemReceipts #rc-historyModal,#systemReceipts #rc-accountModal,#systemReceipts #rc-receiptModal .dialog-header button,#systemReceipts #rc-receiptActions{display: none !important;}
+#systemReceipts>main,#systemReceipts #rc-historyModal,#systemReceipts #rc-receiptModal .dialog-header button,#systemReceipts #rc-receiptActions{display: none !important;}
 #systemReceipts #rc-receiptModal{position: static; display: block; border: 0px; width: 100%; max-height: none;}
 #systemReceipts #rc-receiptModal::backdrop{display: none;}}
 @media screen {#systemReceipts:not([data-page-theme="soloadmin"]){background: rgb(255, 255, 255) !important;}
@@ -2254,7 +2254,6 @@ body:is([data-system-section="receipts"],[data-system-section="invoice-consult"]
 <header class="receipt-consult-header"><img src="logo-corralon.png" alt="Corralón Progreso"><h1>Consultar recibos de cobro</h1><nav><button type="button" id="rc-receiptConsultSearch">Buscar recibo</button><button type="button" id="rc-receiptConsultVoided">Filtrar anulados</button><button type="button" id="rc-receiptConsultBack">Volver a emitir</button></nav></header>
 <div id="rc-receiptConsultContent"></div><footer class="receipt-consult-footer"><button type="button" id="rc-receiptConsultValue">Ver valor</button><button type="button" data-consult-invoice="">Ver factura</button><div id="rc-receiptConsultActions"></div><button type="button" id="rc-receiptConsultLoad" class="receipt-consult-primary" title="Volver al borrador de emisión">＋ Cargar</button><div class="receipt-consult-navigation"><button id="rc-receiptConsultPrevious" type="button">‹ Anterior</button><span id="rc-receiptConsultPosition"></span><button id="rc-receiptConsultNext" type="button">Siguiente ›</button></div></footer><div id="rc-receiptConsultStatusSlot"></div>
 </section>
-<dialog id="rc-accountModal"><div class="dialog-header"><h2>Cuenta corriente del cliente</h2><button type="button" data-close="accountModal">Cerrar</button></div><div id="rc-accountBody"></div></dialog>
 
 
 
@@ -2867,9 +2866,10 @@ body:is([data-system-section="receipts"],[data-system-section="invoice-consult"]
   async function navigateConsultReceipt(delta){
     const list=filteredReceiptHistory(),index=list.findIndex(row=>Number(row.id)===Number(viewedReceipt?.recibo.id));const next=list[index+delta];if(next)await openReceiptConsult(next.id);
   }
-  async function account(){
-    if(!customer){status('Seleccioná un cliente.',true);return;}
-    try{const data=await api({consulta:'facturas',cliente:customer,puntoVenta:$('point').value});$('accountBody').innerHTML=`<h2>${esc($('customer').value)}</h2><p>Saldo de cuenta corriente: <strong>${money(data.saldo)}</strong></p><h2>Facturas pendientes</h2><table class="dialog-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Factura</th><th>Saldo</th></tr></thead><tbody>${data.facturas.map(row=>`<tr><td>${esc(row.fecha)}</td><td>${esc(row.tipo)}</td><td>${esc(row.numero)}</td><td>${money(row.saldo)}</td></tr>`).join('')}</tbody></table>`;$('accountModal').showModal();}catch(error){status(error.message,true);}
+  function account(){
+    if(!canLeaveConsultReceipt())return;
+    save();
+    nativeWindow.location.href='cuentas-corrientes.html#sql/cuentas';
   }
   async function initialize(validatedUser){
     if(ready||initializing||!validatedUser)return;user=validatedUser;initializing=true;
@@ -2881,12 +2881,22 @@ body:is([data-system-section="receipts"],[data-system-section="invoice-consult"]
       let saved;try{saved=JSON.parse(localStorage.getItem(key())||'null');}catch(_){}
       if(saved&&(saved.pending||saved.customer||saved.invoices?.length||saved.values?.some(row=>Number(row.importe))||saved.note)&&options.puntosVenta.some(item=>String(item.id)===String(saved.point))){$('point').value=saved.point;customer=Number(saved.customer)||0;invoices=saved.invoices||[];values=saved.values?.length?saved.values:[blankValue()];$('date').value=saved.date||dateText(today());$('note').value=saved.note||'';pending=saved.pending||null;}
       else{values=[blankValue()];$('date').value=dateText(today());}
+      const linkedCustomer=Number(receiptEntry.get('cliente'));
+      let customerEntryMessage;
+      if(linkedCustomer>0&&linkedCustomer!==customer){
+        if(!options.clientes.some(item=>Number(item.id)===linkedCustomer)){
+          customerEntryMessage='El cliente del enlace no está disponible para emitir recibos.';
+        }else if(pending||invoices.length||values.some(row=>Number(row.importe))||$('note').value.trim()){
+          customerEntryMessage='Hay un recibo guardado para otro cliente. Terminá ese recibo antes de cambiar de cliente.';
+        }else customer=linkedCustomer;
+      }
       syncCustomer();
       for(const [field,property] of [['customer','nombre'],['customerId','id'],['document','documento']]){
         const binding=FX.bindTextDropdown({input:$(field),minWidth:0,selectedValue:customer,items:options.clientes.filter(item=>item[property]).map(item=>({value:String(item.id),label:String(item[property])})),emptyValue:'0'});headerCombos[field]=binding;
         $(field).addEventListener('change',()=>{const id=binding.getValue();if(id===null){$(field).setCustomValidity('Seleccioná un cliente de la lista.');return;}pickCustomer(id).catch(error=>status(error.message,true));});
       }
-      ready=true;render();status(pending?'Hay un recibo pendiente de verificar. Reintentá la misma confirmación.':'Listo para emitir recibos de cobro.');if(customer)refreshBalance().catch(()=>{});await initializeReceiptRoute();
+      ready=true;render();status(pending?'Hay un recibo pendiente de verificar. Reintentá la misma confirmación.':customerEntryMessage||'Listo para emitir recibos de cobro.',Boolean(customerEntryMessage));
+      if(customer)refreshBalance().catch(()=>{});await initializeReceiptRoute();
     }catch(error){status(error.message,true);}finally{initializing=false;}
   }
   $('today').textContent=new Intl.DateTimeFormat('es-AR',{dateStyle:'full'}).format(new Date());

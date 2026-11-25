@@ -4,12 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cuentas Corrientes de Clientes — Corralón Progreso</title>
+  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="theme-corralon.css">
   <script src="menu-auth-guard.js" data-menu-guard="cuentas_corrientes" data-menu-login="menu.html"></script>
   <script src="funciones.js"></script>
+  <script defer src="vendor/jspdf.umd.min.js"></script>
+  <script defer src="presupuesto-shared.js"></script>
   <style>
     *{box-sizing:border-box}
     [hidden]{display:none!important}
+    body.embedded-customer-account>.account-toolbar{display:none}
     body.customer-accounts{--paper:var(--corralon-white);--surface:var(--corralon-soft-2);--border:var(--corralon-line-strong);--text:var(--corralon-text);--shade:var(--corralon-soft);--radius:9px;margin:0;background:var(--corralon-bg);color:var(--text);font:14px Barlow,Arial,sans-serif}
     .customer-accounts button,.customer-accounts input,.customer-accounts select,.account-link{font:inherit;color:inherit;border:1px solid var(--border);border-radius:var(--radius);background:var(--paper);padding:6px 10px;min-height:30px}
     .customer-accounts button,.account-link{cursor:pointer;font-weight:700;text-decoration:none}
@@ -56,6 +60,14 @@
     .movement-client .movement-balance{margin-left:-5px;background:var(--movement-balance-bg);width:134px;text-align:right;padding:0 10px;font:bold 18px/22px 'Times New Roman',serif}
     .movement-view .movement-exit{position:absolute;left:797px;top:3px;width:53px;height:43px;display:grid;place-items:center;padding:0;font:bold 19px Arial,sans-serif}
     .movement-exit span{position:relative;padding-left:2px}.movement-exit span::before{content:'';position:absolute;z-index:0;left:1px;top:5px;width:4px;height:12px;border-left:2px solid #111;border-right:2px solid #111;background:#ffeb36;transform:skewY(15deg);pointer-events:none}
+    .movement-actions{flex:none;padding:7px 12px;background:var(--surface);border-top:1px solid var(--movement-line)}
+    .movement-actions-row{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px 18px}
+    .movement-collection,.movement-phone{display:flex;align-items:center;gap:6px}
+    .movement-collection:has(> :not([hidden])){display:flex}
+    .movement-collection:not(:has(> :not([hidden]))){display:none}
+    .movement-actions :is(button,.account-link){min-height:27px;padding:4px 10px;font:bold 12px Arial,sans-serif}
+    .movement-phone a{color:inherit;font-weight:700;text-underline-offset:2px}
+    .movement-actions .movement-status{text-align:center;margin:5px 0 0}
     .movement-scroll{flex:1;min-height:0;overflow:auto}
     .movement-grid{min-width:876px}.movement-table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0}
     .movement-table :is(th,td){padding:0;border-bottom:1px solid var(--movement-line);vertical-align:top}
@@ -89,7 +101,7 @@
     [data-corralon-theme="classic"] .movement-view :is(.movement-exit,.movement-voucher){background:#eee;border:2px solid;border-color:white #888 #888 white;box-shadow:none}
     [data-corralon-theme="classic"] .movement-nav{border-top-color:#aaa}
     .statement-view{background:#e9e9e9;min-height:calc(100vh - 52px);padding:12px 16px 24px;color:#111}
-    .statement-toolbar{display:flex;justify-content:center;gap:8px;margin-bottom:12px}
+    .statement-toolbar{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:12px}
     .statement-sheet{page:account-statement;background:white;color:black;width:216mm;max-width:100%;min-height:279mm;margin:auto;padding:9mm 14mm;border:1px solid #222;box-shadow:0 2px 8px #0005;font:12px Arial,sans-serif}
     .statement-company{display:grid;grid-template-columns:minmax(80px,1fr) 1.45fr 1.2fr;align-items:start;gap:4px 12px;border-bottom:1px solid;padding-bottom:4px;font-size:11px;line-height:1.35}
     .statement-company img{width:100%;max-width:170px;height:48px;object-fit:contain;object-position:left center;grid-row:span 2}
@@ -100,6 +112,15 @@
     .statement-grid th,.statement-grid td{padding:2px 4px;text-align:left}.statement-grid th{text-decoration:underline}
     .statement-grid tbody tr{border-bottom:1px dotted #bdbdbd}.statement-grid .number{text-align:right;white-space:nowrap}
     .statement-grid tfoot td{font-weight:700}.statement-grid tfoot .number{font-size:14px}
+    @media screen{.pending-statement .statement-sheet{width:180mm;min-height:233mm}}
+    .pending-statement .statement-grid tbody tr{border-bottom-color:#777}
+    .pending-statement .statement-grid tfoot td{font-size:11px;padding-top:5px}
+    .pending-statement .statement-grid tfoot th{text-align:right;padding-top:5px}
+    .pending-balance-total{display:flex;justify-content:space-between;gap:5px;flex-wrap:wrap}
+    .pending-statement .pending-balance-total .number{font-size:inherit}
+    .pending-statement #statement-cuit{text-align:right}
+    .customer-accounts .statement-grid .statement-voucher{min-height:0;border:0;padding:0;background:transparent;box-shadow:none;color:inherit;font:inherit;text-align:left}
+    .statement-voucher:hover,.statement-voucher:focus-visible{text-decoration:underline}
     @media(max-width:520px){.statement-sheet{padding:12px 6px}.statement-grid{font-size:9px}.statement-grid th,.statement-grid td{padding:2px}.statement-company{gap:3px}}
     @page account-statement{size:letter portrait;margin:9mm 14mm}
     html[data-corralon-theme="classic"] .customer-accounts{--paper:#fff;--surface:#eee;--border:#9a9a9a;--text:#000;--shade:#f6f6f6;--radius:0px;background:#e6e6e6;font:13px Tahoma,Arial,sans-serif}
@@ -118,7 +139,7 @@
     [data-corralon-theme="classic"] .account-table-wrap{background:#ddd}
     [data-corralon-theme="classic"] .account-table tbody tr{background:white}
     [data-corralon-theme="classic"] .account-table tbody tr[aria-selected="true"]{background:#d6e8f6}
-    #accounts-home{--home-edge:var(--border);--home-gridline:var(--corralon-line-strong);--home-gridhead:var(--corralon-soft-2);--home-selector:var(--corralon-line);--home-selected:var(--corralon-selection-strong);--home-odd:var(--paper);--home-even:var(--shade);--home-client:var(--paper);--home-total:var(--paper);--home-date-green:#22b14c;--home-date-lime:#a7da4e;--home-date-yellow:#fff200;--home-date-red:#ed1c24;grid-template-columns:368px minmax(0,863px);gap:15px;margin:0;max-width:none;padding:8px 20px 0 47px;border:0;font:12px Arial,sans-serif}
+    #accounts-home{--home-edge:var(--border);--home-gridline:var(--corralon-line-strong);--home-gridhead:var(--corralon-soft-2);--home-selector:var(--corralon-line);--home-selected:var(--corralon-selection-strong);--home-odd:var(--paper);--home-even:var(--shade);--home-client:var(--paper);--home-total:var(--paper);--home-date-green:#22b14c;--home-date-lime:#a7da4e;--home-date-yellow:#fff200;--home-date-red:#ed1c24;grid-template-columns:368px minmax(0,994px);gap:15px;margin:0;max-width:none;padding:8px 20px 0 47px;border:0;font:12px Arial,sans-serif}
     #accounts-home .account-panel{margin:0;padding:0;border-color:var(--home-edge)}
     #accounts-home .home-title{height:25px;margin:5px 0;display:grid;place-items:center}
     #accounts-home .home-title h1{font:bold 16px Tahoma,Arial,sans-serif}
@@ -150,7 +171,7 @@
     #accounts-home .account-shortcuts>*{display:grid;place-content:center;min-width:0;height:43px;padding:0 4px;font:bold 11px/12px Arial,sans-serif}
     #accounts-home .home-right{min-width:0}.home-balance-label{display:block;height:15px;font-size:11px;line-height:14px}
     #accounts-home #balance-table{height:414px;min-height:0;max-height:none;background:var(--home-odd);border:1px solid var(--home-gridline);overflow:auto;scrollbar-gutter:stable}
-    .balance-sheet{table-layout:fixed;min-width:843px;width:100%;border-collapse:separate;border-spacing:0;font:13px Arial,sans-serif}
+    .balance-sheet{table-layout:fixed;min-width:974px;width:100%;border-collapse:separate;border-spacing:0;font:13px Arial,sans-serif}
     .balance-sheet :is(th,td){height:20px;padding:0 3px;line-height:19px;border-right:1px solid var(--home-gridline);border-bottom:1px solid var(--home-gridline);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .balance-sheet th{position:sticky;top:0;background:var(--home-gridhead);z-index:1;text-align:center;font-weight:400}
     #accounts-home .balance-sheet th button{display:block;width:100%;height:19px;min-height:0;border:0;padding:0 12px 0 0;background:none;box-shadow:none;font:inherit;position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -160,6 +181,11 @@
     .balance-sheet td:first-child{background:var(--home-selector);font-size:10px;text-align:center;color:#555}
     .balance-sheet tr[aria-selected="true"] td{background:var(--home-selected)}.balance-sheet tr[aria-selected="true"] td:nth-child(2){background:var(--home-odd)}
     .balance-sheet td:nth-child(3){text-align:right}.balance-sheet td:nth-child(4),.balance-sheet td:nth-child(5),.balance-sheet td:nth-child(7){text-align:center}
+    #accounts-home .balance-sheet .collection-state{text-align:center}
+    .collection-state span{display:inline-block;padding:0 6px;border-radius:4px;background:#ffebba;color:#734700;font-weight:700;line-height:16px}
+    #accounts-home .account-controls #collection-status{display:inline-flex;align-items:center;gap:6px}
+    #accounts-home #collection-status[hidden]{display:none!important}
+    #accounts-home #collection-status svg{width:14px;height:14px;flex:none}
     .balance-sheet td.date-red{background:var(--home-date-red)!important;color:white}.balance-sheet td.date-green{background:var(--home-date-green)!important;color:#000}
     .balance-sheet td.date-lime{background:var(--home-date-lime)!important;color:#000}.balance-sheet td.date-yellow{background:var(--home-date-yellow)!important;color:#000}
     .balance-nav{height:17px;padding:0 4px;display:flex;align-items:center;gap:3px;background:var(--home-gridhead);border:1px solid var(--home-gridline);border-top:0;font:11px Arial,sans-serif;white-space:nowrap}
@@ -238,6 +264,7 @@
           <button id="reload" type="button" title="Actualizar" aria-label="Actualizar"><img class="home-action-icon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAkklEQVR4nJ2SDQ6AIAiFOTpH42Y2SOwJlBrbG9Pg4ydJRMjFzG1HmGNJxDQ+qvlZfTS7JxoQ8iBMQl8BLL5Dehs1pDJNnPTM8t6JiDS+K5rU1A9AnDlCNNmVAFVFhGCyawJUi1tB0gj4DsavQujXCBUAgwwYqm8BUA6J8O0OfgFQxztIz/dkB7E6dhHvSkB66wtd+b98a9bolEIAAAAASUVORK5CYII=" alt=""><span class="home-action-label" aria-hidden="true">↻</span></button>
           <button data-report="facturas" type="button">Ver Facturas</button>
           <button data-report="recibos" type="button">Ver Recibos</button>
+          <button type="button" id="collection-status" hidden disabled><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-8-5.7M6 9c0 5-2 6-2 8h13M10 21h4M3 3l18 18"/></svg><span>Marcar irrecuperable</span></button>
           <div class="home-total"><strong>Total de Saldos:</strong><output id="balance-total" aria-live="polite"></output></div>
         </div>
       </div>
@@ -267,20 +294,41 @@
       </div>
       <p id="movements-status" class="account-status movement-status" role="status"></p>
     </div>
+    <footer class="movement-actions" aria-label="Acciones de la cuenta">
+      <div class="movement-actions-row">
+        <div class="movement-collection">
+          <button id="movement-collection-action" type="button" hidden disabled>Marcar irrecuperable</button>
+          <span class="collection-state" id="movement-collection-state" hidden><span>Irrecuperable</span></span>
+        </div>
+        <div id="movement-phone" class="movement-phone" hidden><span>Tel.:</span><a id="movement-whatsapp" target="_blank" rel="noopener noreferrer" title="Abrir chat en WhatsApp" hidden></a><output id="movement-phone-text" hidden></output></div>
+        <a class="account-link" id="movement-generate-receipt" target="_blank" rel="noopener" hidden>Generar recibo</a>
+      </div>
+      <p id="movement-collection-message" class="account-status movement-status" role="status"></p>
+    </footer>
     <div class="movement-footer-viewport" id="movement-footer"><div class="movement-footer"><span class="movement-count"><span id="movement-count"></span><strong>Movs.</strong></span><strong class="movement-footer-label">Totales:</strong><output id="movement-debit"></output><output id="movement-credit"></output></div></div>
     <nav class="movement-nav" id="movement-navigation" aria-label="Navegar movimientos"><span>Registro:</span><button data-record="first" type="button" aria-label="Primer registro">⏮</button><button data-record="previous" type="button" aria-label="Registro anterior">◂</button><output id="movement-record" class="movement-record"></output><button data-record="next" type="button" aria-label="Registro siguiente">▸</button><button data-record="last" type="button" aria-label="Último registro">⏭</button><span class="movement-filter-status">Sin filtro</span><input id="movement-search" type="search" placeholder="Buscar" aria-label="Buscar en movimientos"></nav>
   </section>
   <section id="movements-print" class="statement-view" aria-labelledby="statement-title" hidden>
-    <div class="statement-toolbar"><button id="statement-print" type="button" disabled>Imprimir</button><button id="statement-back" type="button">Cerrar vista previa</button></div>
+    <div class="statement-toolbar">
+      <button id="statement-print" type="button" disabled>Imprimir</button><button id="statement-download" type="button" disabled>Descargar PDF</button>
+      <div id="statement-contact-phone" class="movement-phone" hidden><span>Tel.:</span><a id="statement-contact-whatsapp" target="_blank" rel="noopener noreferrer" title="Abrir chat en WhatsApp" hidden></a><output id="statement-contact-phone-text" hidden></output></div>
+      <button id="statement-back" type="button">Cerrar vista previa</button>
+    </div>
     <article class="statement-sheet">
       <div class="statement-company"><img src="logo-corralon.png" alt="Corralón Progreso"><div><strong id="statement-activity"></strong><br><span id="statement-address"></span></div><strong id="statement-cuit"></strong><small><span id="statement-phone"></span><span id="statement-email"></span></small></div>
       <div class="statement-line"><h1 id="statement-title" tabindex="-1">Estado de Cuenta Corriente de Clientes</h1><time id="statement-date"></time></div>
       <div class="statement-line"><span><strong>Desde</strong> <time id="statement-from"></time> &nbsp; <strong>Hasta</strong> <time id="statement-to"></time></span></div>
       <div class="statement-line"><strong id="statement-client"></strong><strong id="statement-id"></strong></div>
-      <table class="statement-grid">
+      <table id="statement-grid" class="statement-grid">
         <thead><tr><th scope="col">Fecha</th><th scope="col">Tipo Comp</th><th scope="col">N.º Comprobante</th><th scope="col">Días Pago</th><th scope="col" class="number">Debe</th><th scope="col" class="number">Haber</th><th scope="col" class="number">Saldo</th></tr></thead>
         <tbody id="statement-rows"></tbody>
         <tfoot><tr><td id="statement-count" colspan="2"></td><td colspan="4">Totales (S.E.U.O.)</td><td id="statement-total" class="number"></td></tr></tfoot>
+      </table>
+      <table id="pending-grid" class="statement-grid" hidden>
+        <colgroup><col style="width:13%"><col style="width:41%"><col style="width:20%"><col style="width:26%"></colgroup>
+        <thead><tr><th scope="col">Fecha</th><th scope="col">Tipo-N.º Comprobante</th><th scope="col" class="number">Importe</th><th scope="col" class="number">Saldo</th></tr></thead>
+        <tbody id="pending-rows"></tbody>
+        <tfoot><tr><td id="pending-count"></td><th scope="row">Total Fac.</th><td id="pending-total-amount" class="number"></td><td><div class="pending-balance-total"><span>Saldo Total</span><strong id="pending-total-balance" class="number"></strong></div></td></tr></tfoot>
       </table>
       <p id="statement-status" class="account-status" role="status"></p>
     </article>
@@ -305,7 +353,7 @@
     const date=value=>String(value).split('-').reverse().join('/');
     const currency=value=>fmtMoney.format(value);
     const number=value=>fmtNumber.format(value);
-    const balanceCols=[['cliente','RazónSocial','Razón Social',397],['saldo','SaldoAct','Saldo',94],['diasUltimoPago','DiasU','D.U.P.',51],['ultimoPago','ÚltimoDeFe','Últ. Pago',94],['telefono','Teléfono','Teléfono',94],['primerVto','UltVta','Primer VTO',95]];
+    const balanceCols=[['cliente','RazónSocial','Razón Social',397],['saldo','SaldoAct','Saldo',94],['diasUltimoPago','DiasU','D.U.P.',51],['ultimoPago','ÚltimoDeFe','Últ. Pago',94],['telefono','Teléfono','Teléfono',94],['primerVto','UltVta','Primer VTO',95],['irrecuperable','Estado de cobro','Estado de cobro',131]];
     const movementCols=[['fecha','Fecha',date],['tipo','Tipo'],['numero','N.º Comprobante'],['debe','Debe',currency],['haber','Haber',currency],['saldo','Saldo',currency]];
     const summaryCols=[['id','ID'],['cliente','Razón Social'],['inicial','Saldo inicial',currency],['anterior','Saldo anterior',currency],['debe','Ventas',currency],['haber','Cobros',currency],['saldo','Saldo actual',currency]];
     const invoiceCols=[['fecha','Fecha',date],['tipo','Tipo'],['numero','N.º comprobante'],['cliente','Cliente'],['total','Total',currency],['anulada','Estado',value=>value?'Anulada':'']];
@@ -313,7 +361,7 @@
     const totalsReport=(title,label,extra=[])=>({title,cols:[...extra,['grupo',label],['total','Total',currency]],sum:['total']});
     const chartReport=(title,label)=>({...totalsReport(title,label),chart:[['total','Ventas']]});
     const reports={
-      pendientes:{title:'Facturas Pendientes por Cliente',cols:[['vendedor','Vendedor'],['fecha','Fecha',date],['tipo','Tipo'],['numero','N.º comprobante'],['pago','Tipo de pago'],['vence','Vence',date],['atraso','Atraso',number],['total','Importe',currency],['pagado','Pagado',currency],['saldo','Saldo',currency]],customer:true,sum:['total','pagado','saldo']},
+      pendientes:{title:'Facturas Pendientes Cliente (Entre Fechas)',customer:true},
       resumen:{title:'Resumen de Saldos de Clientes',cols:summaryCols,sum:['debe','haber','saldo']},
       'resumen-vendedor':{title:'Resumen de Saldos por Vendedor',cols:[['vendedor','Vendedor'],...summaryCols],sum:['debe','haber','saldo']},
       'detalle-vendedor':{title:'Detalle de Movimientos por Vendedor',cols:[['cliente','Cliente'],...movementCols],seller:true,sum:['debe','haber','saldo']},
@@ -360,6 +408,52 @@
     let balanceRows=[],orderedBalances=[],balanceIndex=-1,sortKey='cliente',sortDirection=1,balanceRequest=0,reportRequest=0,selectedId=0,selectedLabel='',started=false;
     const status=(node,message,error=false)=>{node.textContent=message;node.dataset.error=String(error);};
     const access=permission=>window.CorralonFunciones?.menuUserHasAccess?.(permission)===true;
+    const embeddedAccount=window.parent!==window&&new URLSearchParams(location.search).get('origen')==='cobranza';
+    document.body.classList.toggle('embedded-customer-account',embeddedAccount);
+    let changingCollectionStatus=false,movementCustomerId=0;
+    const canChangeCollectionStatus=()=>access('cuentas_corrientes');
+    function updateCollectionButton(){
+      const detailRow=balanceRows.find(row=>Number(row.id)===movementCustomerId);
+      const controls=[[el('collection-status'),orderedBalances[balanceIndex]],[el('movement-collection-action'),detailRow]];
+      const allowed=canChangeCollectionStatus();
+      for(const [control,row] of controls){
+        control.hidden=!allowed;
+        control.disabled=changingCollectionStatus||!row||(!row.irrecuperable&&Number(row.saldo)<=.01);
+        const label=control.querySelector('span')||control;
+        label.textContent=row?.irrecuperable?'Reactivar avisos':'Marcar irrecuperable';
+      }
+      el('movement-collection-state').hidden=!detailRow?.irrecuperable;
+      const receipt=el('movement-generate-receipt');
+      receipt.hidden=!movementCustomerId||!access('recibos_cobro');
+      if(receipt.hidden)receipt.removeAttribute('href');
+      else receipt.href='recibos-cobro.html?'+new URLSearchParams({cliente:movementCustomerId})+'#recibos/emitir';
+    }
+    async function changeCollectionStatus(row,message){
+      if(!row||changingCollectionStatus||!canChangeCollectionStatus()||(!row.irrecuperable&&Number(row.saldo)<=.01))return;
+      const next=!row.irrecuperable;
+      const question=next?'¿Marcar como irrecuperable la cuenta de '+row.cliente+'? Se quitará de los avisos de Facturación.':'¿Reactivar los avisos de cobro de '+row.cliente+'?';
+      if(!window.confirm(question))return;
+      changingCollectionStatus=true;updateCollectionButton();
+      try{
+        const user=window.CorralonFunciones.menuSessionUser();
+        const response=await fetch('/api/facturacion/clientes',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({accion:'estado-cobranza',usuarioId:user?.id||'',cliente:Number(row.id),anterior:Boolean(row.irrecuperable),irrecuperable:next}),
+          signal:AbortSignal.timeout(15000)
+        });
+        const result=await response.json();
+        if(!response.ok||!result.ok)throw Error(result.error||'No se pudo guardar el estado de cobranza.');
+        const current=balanceRows.find(item=>Number(item.id)===Number(result.cliente));
+        if(current)current.irrecuperable=result.irrecuperable;
+        paintBalances();
+        try{localStorage.setItem('corralon.estado-cobranza',String(Date.now()));}catch{}
+        status(message,next?'Cuenta marcada como irrecuperable.':'Avisos de cobro reactivados.');
+      }catch(error){status(message,error.message,true);}
+      finally{changingCollectionStatus=false;updateCollectionButton();}
+    }
+    el('collection-status').onclick=()=>changeCollectionStatus(orderedBalances[balanceIndex],el('status'));
+    el('movement-collection-action').onclick=()=>changeCollectionStatus(
+      balanceRows.find(row=>Number(row.id)===movementCustomerId),el('movement-collection-message'));
     function customerId(){
       const label=el('client').value.trim();
       return Number(clients.get(label))||(label===selectedLabel?selectedId:0)||customerIdsByName.get(label.toLocaleUpperCase('es-AR'))||(customerNames.has(Number(label))?Number(label):0);
@@ -447,6 +541,7 @@
         if(choose)chooseCustomer(Number(selected.id),selected.cliente);
       }
       el('balance-record').textContent=`${balanceIndex+1} de ${orderedBalances.length}`;
+      updateCollectionButton();
       for(const control of el('balance-nav').querySelectorAll('[data-balance-record]')){
         const backwards=['first','previous'].includes(control.dataset.balanceRecord);
         control.disabled=balanceIndex<0||(backwards?balanceIndex===0:balanceIndex===orderedBalances.length-1);
@@ -486,6 +581,11 @@
         for(const [key] of balanceCols){
           const td=tr.insertCell(),value=row[key];
           if(key==='ultimoPago'||key==='primerVto'){td.textContent=value?dateWithoutZeros(value):'';td.className=balanceDateColor(key,value);}
+          else if(key==='irrecuperable'){
+            td.className='collection-state';
+            if(value){const badge=document.createElement('span');badge.textContent='Irrecuperable';td.append(badge);}
+            else td.textContent='—';
+          }
           else td.textContent=value==null?'':key==='saldo'?currency(value):value;
         }
       });
@@ -522,7 +622,7 @@
         control.disabled=!rows.length||(backwards?movementIndex===0:movementIndex===rows.length-1);
       }
     }
-    function paintMovementScreen(rows){
+    function paintMovementScreen(rows,selectLatest=false){
       movementRows=rows;movementIndex=-1;
       const fragment=document.createDocumentFragment();let debit=0,credit=0,count=0;
       rows.forEach((row,index)=>{
@@ -535,13 +635,14 @@
         action.disabled=!action.onclick;
         action.classList.add('movement-voucher');tr.insertCell().append(action);tr.insertCell();fragment.append(tr);
       });
-      el('movement-rows').replaceChildren(fragment);selectMovement(0);
+      el('movement-rows').replaceChildren(fragment);
+      selectMovement(selectLatest?rows.length-1:0);
       el('movement-count').textContent=count;
       el('movement-debit').textContent=movementMoney(debit/100);el('movement-credit').textContent=movementMoney(credit/100);
       el('movements-balance').textContent=moneyParens((debit-credit)/100);
     }
     function closeMovements(){
-      ++movementRequest;activeMovementView='';el('movements-screen').hidden=true;el('movements-print').hidden=true;
+      ++movementRequest;activeMovementView='';movementCustomerId=0;el('movements-screen').hidden=true;el('movements-print').hidden=true;
       document.body.classList.remove('movement-open');
       el('accounts-home').hidden=false;movementFocus?.focus();
     }
@@ -563,22 +664,189 @@
       if(!response.ok||!data.ok||!company)throw Error('No se pudieron cargar los datos del corralón.');
       return company;
     }
-    async function openMovements(mode,trigger){
+    function prepareStatement(title, pending, customerName, canPrint=true){
+      el('statement-title').textContent=title;
+      el('movements-print').classList.toggle('pending-statement',pending);
+      el('statement-grid').hidden=pending;
+      el('pending-grid').hidden=!pending;
+      el('statement-id').hidden=pending;
+      for(const field of ['activity','address','cuit','phone','email','date','count','total'])el('statement-'+field).textContent='';
+      for(const field of ['count','total-amount','total-balance'])el('pending-'+field).textContent='';
+      el('statement-rows').replaceChildren();
+      el('pending-rows').replaceChildren();
+      paintAccountPhone(null,null,'statement-contact');
+      el('statement-print').hidden=!canPrint;
+      el('statement-print').disabled=true;
+      const download=el('statement-download');
+      download.hidden=!canPrint;download.disabled=true;download.dataset.customer=customerName;
+    }
+    function paintStatementCompany(company){
+      el('statement-activity').textContent=company.actividad||company.nombre;
+      el('statement-address').textContent=company.domicilio||'';
+      for(const [field,label,key] of [['cuit','CUIT','cuit'],['phone','Tel.','telefono'],['email','Email','email']])el('statement-'+field).textContent=company[key]?label+': '+company[key]:'';
+      el('statement-date').textContent=businessDate?new Intl.DateTimeFormat('es-AR',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(businessDate)):'';
+    }
+    async function downloadStatement(){
+      const download=el('statement-download');
+      const message=el('statement-status'),seq=movementRequest;
+      download.disabled=true;
+      try{
+        const Pdf=window.jspdf?.jsPDF;
+        if(!Pdf)throw Error('Generador de PDF no disponible');
+        const preview=el('movements-print'),pending=!el('pending-grid').hidden;
+        const table=el(pending?'pending-grid':'statement-grid');
+        const text=id=>el(id).textContent.trim();
+        const customer=download.dataset.customer.replace(/[<>:"/\\|?*\u0000-\u001f]/g,' ').replace(/\s+/g,' ').trim().slice(0,140)||'Cliente';
+        const title=text('statement-title'),client=text('statement-client');
+        const clientLabel=pending?client:client+'  '+text('statement-id');
+        const period='Desde '+text('statement-from')+'    Hasta '+text('statement-to');
+        const [activity,address,cuit,phone,email,date]=['activity','address','cuit','phone','email','date'].map(field=>text('statement-'+field));
+        const columns=Array.from(table.tHead.rows[0].cells,th=>({text:th.textContent,right:th.classList.contains('number')}));
+        const rows=Array.from(table.tBodies[0].rows,row=>Array.from(row.cells,cell=>cell.textContent.trim()));
+        const footer=pending
+          ?[text('pending-count'),'Total Fac.',text('pending-total-amount'),'Saldo Total  '+text('pending-total-balance')]
+          :[text('statement-count'),'','Totales (S.E.U.O.)','','','',text('statement-total')];
+        const emptyMessage=rows.length?'':message.textContent.trim();
+        const logo=await window.PresupuestoShared?.ensureLogoDataUrl(preview.querySelector('.statement-company img').src);
+        if(seq!==movementRequest)return;
+        const pdf=new Pdf({orientation:'portrait',unit:'mm',format:'letter',putOnlyUsedFonts:true});
+        pdf.setProperties({title:customer+' - Resumen de cuenta corriente'});
+        const margin=14,pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight();
+        const right=pageWidth-margin,width=right-margin;
+        const widths=(pending?[.13,.41,.20,.26]:[.12,.12,.21,.13,.14,.14,.14]).map(ratio=>ratio*width);
+        function write(value,x,y,available,align='left',size=9){
+          pdf.setFontSize(size);
+          const textWidth=pdf.getTextWidth(value);
+          if(textWidth>available)pdf.setFontSize(size*available/textWidth);
+          pdf.text(value,x,y,{align});
+        }
+        function writeRow(values,y){
+          let x=margin;
+          values.forEach((value,index)=>{
+            const align=columns[index].right?'right':'left';
+            write(value,align==='right'?x+widths[index]-1:x+1,y,widths[index]-2,align);
+            x+=widths[index];
+          });
+        }
+        function startPage(){
+          pdf.setFont('helvetica','bold');
+          if(logo)pdf.addImage(logo,'PNG',margin,10,42,16);
+          write(activity,margin+50,15,86,'left',8);
+          write(cuit,right,15,48,'right',8);
+          pdf.setFont('helvetica','normal');
+          write(address,margin+50,19,86,'left',8);
+          write(phone,margin+50,23,42,'left',8);
+          write(email,right,23,85,'right',8);
+          pdf.setLineDashPattern([],0);
+          pdf.line(margin,26,right,26);
+          pdf.setFont('helvetica','bold');
+          write(title,margin,31,width-42,'left',12);
+          pdf.setFont('helvetica','normal');
+          write(date,right,31,41,'right',8);
+          write(period,margin,36,width,'left',9);
+          pdf.setFont('helvetica','bold');
+          write(clientLabel,margin,41,width,'left',10);
+          writeRow(columns.map(column=>column.text),47);
+          pdf.setFont('helvetica','normal');
+          return 52;
+        }
+        let y=startPage();
+        for(const row of rows){
+          if(y>pageHeight-23){pdf.addPage();y=startPage();}
+          writeRow(row,y);
+          pdf.setDrawColor(100);pdf.setLineWidth(.12);pdf.setLineDashPattern([.25,.55],0);
+          pdf.line(margin,y+1.2,right,y+1.2);
+          y+=4.6;
+        }
+        if(emptyMessage){write(emptyMessage,margin,y,width);y+=5;}
+        pdf.setFont('helvetica','bold');
+        writeRow(footer,y+1.5);
+        const pages=pdf.getNumberOfPages();
+        for(let page=1;page<=pages;page++){
+          pdf.setPage(page);pdf.setFont('helvetica','normal');
+          write(`${page} / ${pages}`,right,pageHeight-7,25,'right',8);
+        }
+        pdf.save(customer+' - Resumen de cuenta corriente.pdf');
+      }catch(error){
+        console.warn('No se pudo descargar el resumen de cuenta corriente:',error);
+        if(seq===movementRequest)status(message,'No se pudo descargar el PDF.',true);
+      }finally{if(seq===movementRequest)download.disabled=false;}
+    }
+    function pendingStatementRows(rows){
+      const fragment=document.createDocumentFragment();
+      let total=0,balance=0;
+      const chronologicalRows=[...rows].sort((a,b)=>(a.fecha||'9999-12-31').localeCompare(b.fecha||'9999-12-31'));
+      for(const row of chronologicalRows){
+        const tr=document.createElement('tr');
+        tr.insertCell().textContent=row.fecha?dateWithoutZeros(row.fecha):'';
+        const voucher=tr.insertCell(),label=[row.tipo,row.numero].filter(Boolean).join('  ');
+        const control=voucherButton(row,label);
+        if(control){control.className='statement-voucher';control.title='Ver factura';voucher.append(control);}
+        else voucher.textContent=label;
+        for(const field of ['total','saldo']){
+          const td=tr.insertCell();td.className='number';td.textContent=currency(Number(row[field])||0);
+        }
+        total+=cents(row.total);balance+=cents(row.saldo);
+        fragment.append(tr);
+      }
+      el('pending-rows').replaceChildren(fragment);
+      el('pending-count').textContent=rows.length+' Movs.';
+      el('pending-total-amount').textContent=currency(total/100);
+      el('pending-total-balance').textContent=currency(balance/100);
+    }
+    async function openPendingStatement(filters, canPrint){
+      const id=customerId(), seq=++movementRequest;
+      movementFocus=document.activeElement;
+      activeMovementView='pending';movementCustomerId=0;
+      if(el('report').open)el('report').close();
+      el('accounts-home').hidden=true;el('movements-screen').hidden=true;el('movements-print').hidden=false;
+      document.body.classList.remove('movement-open');
+      prepareStatement(reports.pendientes.title,true,customerNames.get(id)||'',canPrint);
+      el('statement-from').textContent=date(filters.desde);el('statement-to').textContent=date(filters.hasta);
+      el('statement-client').textContent='Cliente: '+number(id)+'  '+(customerNames.get(id)||'');
+      const message=el('statement-status');
+      status(message,'Consultando SQL…');el('statement-title').focus();
+      try{
+        const [result,company]=await Promise.all([request('pendientes',{...filters,cliente:String(id)}),statementCompany().catch(()=>null)]);
+        if(seq!==movementRequest)return;
+        if(company)paintStatementCompany(company);
+        pendingStatementRows(result.filas);
+        paintAccountPhone(result.contacto,result.recordatorio,'statement-contact');
+        el('statement-print').disabled=false;el('statement-download').disabled=false;
+        status(message,result.filas.length?'':'No hay facturas pendientes para este cliente y período.');
+      }catch(error){if(seq===movementRequest)status(message,error.message,true);}
+    }
+    function paintAccountPhone(contact,account,prefix='movement'){
+      const label=el(prefix+'-phone'),link=el(prefix+'-whatsapp'),plain=el(prefix+'-phone-text');
+      const phones=[contact?.telefono,contact?.celular].map(phone=>String(phone||'').trim()).filter(Boolean);
+      const options=phones.map(phone=>({phone,number:window.CorralonFunciones?.whatsappNumber?.(phone)}));
+      const contactPhone=options.find(option=>option.number)||options[0];
+      label.hidden=!contactPhone;
+      link.hidden=!contactPhone?.number;plain.hidden=link.hidden===false||!contactPhone;
+      if(link.hidden){link.removeAttribute('href');link.textContent='';}
+      else{
+        const reminder=window.CorralonFunciones?.collectionWhatsAppReminder?.(account);
+        link.href='https://wa.me/'+contactPhone.number+(reminder?'?text='+encodeURIComponent(reminder):'');
+        link.textContent=contactPhone.phone;
+      }
+      plain.textContent=plain.hidden?'':contactPhone.phone;
+    }
+    async function openMovements(mode,trigger,fullHistory=false){
       const id=customerId();
       if(!id){status(el('status'),'Elegí un cliente.',true);el('client').focus();return;}
-      const dates=reportDates();if(!dates)return;
+      const dates=fullHistory?{desde:'1900-01-01',hasta:businessDate}:reportDates();if(!dates)return;
       const seq=++movementRequest,printing=mode==='print';
       const {desde:from,hasta:to}=dates,name=customerNames.get(id)||'';
       const prefix=printing?'statement':'movements',message=el(prefix+'-status');
-      movementFocus=trigger;activeMovementView=mode;
+      movementFocus=trigger;activeMovementView=mode;movementCustomerId=printing?0:id;
+      status(el('movement-collection-message'),'');updateCollectionButton();
       el('accounts-home').hidden=true;el('movements-screen').hidden=printing;el('movements-print').hidden=!printing;
       document.body.classList.toggle('movement-open',!printing);
-      el(prefix+'-from').textContent=date(from);el(prefix+'-to').textContent=date(to);
+      el(prefix+'-from').textContent=fullHistory?'—':date(from);el(prefix+'-to').textContent=date(to);
       el(prefix+'-id').textContent=(printing?'N.º  ':'')+number(id);el(prefix+'-client').textContent=(printing?'Cliente: ':'')+name;
       if(printing){
-        for(const field of ['activity','address','cuit','phone','email','date','count','total'])el('statement-'+field).textContent='';
-        el('statement-rows').replaceChildren();el('statement-print').disabled=true;
-      }else{paintMovementScreen([]);el('movement-search').value='';el('movement-scroll').scrollTo(0,0);}
+        prepareStatement('Estado de Cuenta Corriente de Clientes',false,name);
+      }else{paintAccountPhone();paintMovementScreen([]);el('movement-search').value='';el('movement-scroll').scrollTo(0,0);}
       status(message,'Consultando movimientos en SQL…');el(prefix+'-title').focus();
       try{
         const [result,company]=await Promise.all([request('detalle',{cliente:String(id),desde:from,hasta:to}),printing?statementCompany():null]);
@@ -589,15 +857,19 @@
         }
         if(seq!==movementRequest)return;
         if(printing){
-          el('statement-activity').textContent=company.actividad||company.nombre;
-          el('statement-address').textContent=company.domicilio||'';
-          for(const [field,label,key] of [['cuit','CUIT','cuit'],['phone','Tel.','telefono'],['email','Email','email']])el('statement-'+field).textContent=company[key]?label+': '+company[key]:'';
-          el('statement-date').textContent=businessDate?new Intl.DateTimeFormat('es-AR',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(businessDate)):'';
-          statementRows(rows);el('statement-print').disabled=false;
+          paintStatementCompany(company);
+          paintAccountPhone(result.contacto,result.recordatorio,'statement-contact');
+          statementRows(rows);el('statement-print').disabled=false;el('statement-download').disabled=false;
         }else{
-          paintMovementScreen(rows);
+          paintAccountPhone(result.contacto,result.recordatorio);
+          paintMovementScreen(rows,fullHistory);
+          if(fullHistory){const first=rows.find(row=>row.fecha)?.fecha;el('movements-from').textContent=first?date(first):'—';}
         }
         status(message,rows.length?'':'No hay movimientos para este cliente y período.');
+        if(fullHistory&&!printing&&rows.length){
+          const scroll=el('movement-scroll');
+          scroll.scrollTop=scroll.scrollHeight;
+        }
       }catch(error){if(seq===movementRequest)status(message,error.message,true);}
     }
     function openDialog(title,canPrint,back){
@@ -629,6 +901,7 @@
       const filters=key==='comparativo'?{desde:year+'-01-01',hasta:year+'-12-31'}:reportDates();
       if(!filters){if(el('report').open){el('report').close();reportDates();}return;}
       Object.assign(filters,overrides);
+      if(key==='pendientes')return openPendingStatement(filters,print);
       const seq=++reportRequest;
       openDialog(report.title,print,back);status(el('report-status'),'Consultando SQL…');
       try{
@@ -663,7 +936,12 @@
     }
     el('report-print').onclick=()=>window.print();
     el('statement-print').onclick=()=>window.print();
-    el('movements-back').onclick=el('statement-back').onclick=closeMovements;
+    el('statement-download').onclick=downloadStatement;
+    el('statement-back').onclick=closeMovements;
+    el('movements-back').onclick=()=>{
+      if(embeddedAccount)window.parent.postMessage({type:'corralon:hide-customer-account'},location.origin);
+      else closeMovements();
+    };
     el('movement-scroll').onscroll=()=>{el('movement-footer').scrollLeft=el('movement-scroll').scrollLeft;};
     el('movement-navigation').addEventListener('click',event=>{
       const command=event.target.closest('[data-record]')?.dataset.record;
@@ -722,6 +1000,18 @@
     el('seller-id').onchange=()=>{el('seller').value=el('seller-id').value;};
     document.querySelectorAll('[data-report]').forEach(control=>control.onclick=()=>showReport(control.dataset.report,control.hasAttribute('data-print')));
     document.querySelectorAll('[data-menu]').forEach(control=>control.onclick=()=>showMenu(control.dataset.menu));
+    async function openLinkedAccount(id,view){
+      if(!access('cuentas_corrientes')||!customerNames.has(id))return;
+      chooseCustomer(id,customerNames.get(id));
+      const index=orderedBalances.findIndex(row=>Number(row.id)===id);
+      if(index>=0)setBalanceCursor(index,{reveal:true});
+      if(view==='movimientos')await openMovements('screen',document.querySelector('[data-movement-view="screen"]'),true);
+      else await showReport('pendientes',false,{desde:'1900-01-01',hasta:businessDate});
+    }
+    window.addEventListener('message',event=>{
+      if(!embeddedAccount||!businessDate||event.origin!==location.origin||event.source!==window.parent)return;
+      if(event.data?.type==='corralon:show-customer-account')openLinkedAccount(Number(event.data.customer),'movimientos');
+    });
     async function init(){
       if(started||!access('cuentas_corrientes'))return;started=true;
       document.querySelectorAll('[data-access]').forEach(control=>control.hidden=!access(control.dataset.access));
@@ -739,9 +1029,15 @@
         for(const row of options.vendedores)el('seller-id').append(new Option(row.id,row.id));
         for(const row of options.vendedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')))el('seller').append(new Option(row.nombre,row.id));
         await loadBalances();
+        const linkParams=new URLSearchParams(location.search),linkedCustomer=Number(linkParams.get('cliente'));
+        const linkedView=linkParams.get('vista');
+        if(['movimientos','pendientes'].includes(linkedView))await openLinkedAccount(linkedCustomer,linkedView);
+        if(embeddedAccount)window.parent.postMessage({type:'corralon:customer-account-ready'},location.origin);
       }catch(error){started=false;status(el('status'),error.message,true);}
     }
-    window.addEventListener('menu-user-validated',init);init();
+    window.addEventListener('menu-user-validated',()=>{updateCollectionButton();init();});
+    window.addEventListener('storage',event=>{if(event.key==='corralon.estado-cobranza'&&started)loadBalances();});
+    init();
   })();
   </script>
 </body>

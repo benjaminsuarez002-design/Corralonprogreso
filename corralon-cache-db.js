@@ -86,6 +86,26 @@
       transaction.onabort=()=>reject(transaction.error||new Error('Actualización de cargas abortada'));
     });
   }
+  async function update(key, change){
+    const db=await openDb();
+    const entryKey=String(key);
+    return new Promise((resolve,reject)=>{
+      const transaction=db.transaction(STORE_NAME,'readwrite');
+      const store=transaction.objectStore(STORE_NAME);
+      const request=store.get(entryKey);
+      let value;
+      request.onsuccess=()=>{
+        try{
+          const current=request.result?.value??null;
+          value=change(current);
+          if(value!==current)store.put({key:entryKey,value,updatedAt:Date.now()});
+        }catch(error){reject(error);transaction.abort();}
+      };
+      transaction.oncomplete=()=>{memoryFallback.set(entryKey,value);resolve(value);};
+      transaction.onerror=transaction.onabort=()=>reject(transaction.error||new Error('No se pudo actualizar la caché'));
+    });
+  }
+
   async function withLock(key, work){
     if(navigator.locks?.request)return navigator.locks.request('corralon-cache|'+key,work);
     let db;try{db=await openDb();}catch(_){return work();}
@@ -104,5 +124,5 @@
     const heartbeat=setInterval(()=>change('renew').catch(console.warn),20000);
     try{return await work();}finally{clearInterval(heartbeat);await change('release');}
   }
-  window.CorralonCacheDB={get,set,remove,migrateLocalStorage,updateMany,withLock};
+  window.CorralonCacheDB={get,set,remove,migrateLocalStorage,updateMany,update,withLock};
 })();
