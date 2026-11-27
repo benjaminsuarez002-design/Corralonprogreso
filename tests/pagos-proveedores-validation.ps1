@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot
 $taskOutput=Join-Path $taskRoot '.codex-staging/FacturacionCopiaApi.payment-test.exe'
-& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe "/out:$taskOutput" /reference:System.Data.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll (Join-Path $taskRoot 'facturacion-copia-api.cs') (Join-Path $taskRoot 'caja-sql-api.cs')
+& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe "/out:$taskOutput" /reference:System.Data.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll (Join-Path $taskRoot 'facturacion-copia-api.cs') (Join-Path $taskRoot 'caja-sql-api.cs') (Join-Path $taskRoot 'PrintLinkTicket.cs')
 if($LASTEXITCODE -ne 0){throw 'No compiló la API de pagos.'}
 $taskType=([Reflection.Assembly]::LoadFrom($taskOutput)).GetType('FacturacionCopiaApi',$true)
 $taskAmount=$taskType.GetMethod('SupplierValidateAmount',[Reflection.BindingFlags]'NonPublic, Static')

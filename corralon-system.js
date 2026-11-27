@@ -7827,14 +7827,16 @@
       const style = document.createElement('style');
       style.id = 'corralon-version-style';
       style.textContent = `
-        #corralon-version-toast{position:fixed;left:50%;bottom:18px;z-index:2147483000;display:flex;align-items:center;gap:12px;width:min(660px,calc(100% - 24px));padding:13px 15px;border:1px solid rgba(0,0,0,.15);border-radius:14px;box-shadow:0 16px 45px rgba(0,0,0,.28);font-family:Barlow,Arial,sans-serif;font-weight:800;transform:translate(-50%,calc(100% + 45px));opacity:0;transition:transform .24s ease,opacity .24s ease}
-        #corralon-version-toast.visible{transform:translate(-50%,0);opacity:1}
-        #corralon-version-toast.normal{background:#e7f8ed;color:#075f2c;border-color:#6bc68e}
+        :is(#corralon-version-toast,#corralon-chat-toast){position:fixed;left:50%;bottom:18px;z-index:2147483000;display:flex;align-items:center;gap:12px;width:min(660px,calc(100% - 24px));padding:13px 15px;border:1px solid rgba(0,0,0,.15);border-radius:14px;box-shadow:0 16px 45px rgba(0,0,0,.28);font-family:Barlow,Arial,sans-serif;font-weight:800;transform:translate(-50%,calc(100% + 45px));opacity:0;transition:transform .24s ease,opacity .24s ease}
+        :is(#corralon-version-toast,#corralon-chat-toast).visible{transform:translate(-50%,0);opacity:1}
+        :is(#corralon-version-toast,#corralon-chat-toast).normal{background:#e7f8ed;color:#075f2c;border-color:#6bc68e}
         #corralon-version-toast.medium{background:#fff5cc;color:#664b00;border-color:#e8bd36}
         #corralon-version-toast.important{background:#e71920;color:#fff;border-color:#9f0005}
-        #corralon-version-toast .version-copy{display:grid;gap:2px;min-width:0;flex:1}
-        #corralon-version-toast strong{font-size:15px;line-height:1.15}#corralon-version-toast small{font-size:12px;opacity:.86}
+        :is(#corralon-version-toast,#corralon-chat-toast) .version-copy{display:grid;gap:2px;min-width:0;flex:1}
+        :is(#corralon-version-toast,#corralon-chat-toast) strong{font-size:15px;line-height:1.15}#corralon-version-toast small{font-size:12px;opacity:.86}
         #corralon-version-toast button{flex:0 0 auto;border:1px solid currentColor;border-radius:9px;background:#fff;color:#151515;padding:8px 12px;font:900 13px Barlow,Arial,sans-serif;cursor:pointer}
+        #corralon-chat-toast a{flex:0 0 auto;border:1px solid currentColor;border-radius:9px;background:#fff;color:#151515;padding:8px 12px;font:900 13px Barlow,Arial,sans-serif;text-align:center;text-decoration:none}
+        body:has(#corralon-version-toast.visible) #corralon-chat-toast{bottom:var(--chat-toast-bottom,108px)}
         #corralon-version-modal{width:min(540px,calc(100% - 28px));max-width:none;max-height:calc(100% - 28px);margin:auto;padding:0;border:0;border-radius:20px;background:#fff;color:#191919;box-shadow:0 28px 90px #0009;font-family:Barlow,Arial,sans-serif;overflow:auto}
         #corralon-version-modal::backdrop{background:rgba(15,15,15,.78);backdrop-filter:blur(5px)}
         #corralon-version-modal .version-modal-head{padding:25px 28px 20px;background:#e71920;color:#fff}
@@ -7843,7 +7845,7 @@
         #corralon-version-modal .version-modal-body p{margin:0;font-size:16px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
         #corralon-version-modal .version-modal-body button{width:100%;min-height:48px;border:0;border-radius:10px;background:#e71920;color:#fff;font:900 17px Barlow,Arial,sans-serif;cursor:pointer}
         #corralon-version-modal .version-modal-body button:focus-visible{outline:3px solid #191919;outline-offset:3px}
-        @media(max-width:560px){#corralon-version-toast{align-items:stretch;flex-direction:column}#corralon-version-toast button{width:100%}}
+        @media(max-width:560px){:is(#corralon-version-toast,#corralon-chat-toast){align-items:stretch;flex-direction:column}#corralon-version-toast button{width:100%}}
       `;
       document.head.appendChild(style);
     }
@@ -7955,6 +7957,70 @@
         () => { realtimeActive = false; check(); }
       );
     }
+    function startChatNotices() {
+      if (location.port !== '8080') return;
+      const seenKey = 'corralon_chat_importantes_vistos_v1';
+      let checking=false,attemptedUser="",lastAttempt=0;
+      const activeUser=()=>{
+        try{
+          const shared=JSON.parse(localStorage.getItem('corralon_menu_shared_session_v1')||'null');
+          const id=window.CorralonFunciones?.menuSessionUser?.()?.id;
+          if(localStorage.getItem('historial_keep_logged_v1')==='1')return String(localStorage.getItem('corralon_menu_active_user_v1')||id||'');
+          return shared?.expiresAt>Date.now()?String(shared.usuario?.id||shared.id||id||''):'';
+        }catch(_){return '';}
+      };
+      const clear=()=>document.getElementById('corralon-chat-toast')?.remove();
+      async function checkChat(){
+        const invoice=/\/gestion\.html$/i.test(location.pathname)&&(document.body.dataset.systemSection||'invoice')==='invoice';
+        const user=activeUser();
+        if(invoice||!user){clear();return;}
+        if(checking||document.hidden)return;
+        checking=true;
+        try{
+          const requestHeaders={'X-Chat-Usuario':encodeURIComponent(user)};
+          const route='/api/chat/avisos?'+new URLSearchParams({puesto:localStorage.getItem('corralon_chat_puesto_v1')||''});
+          const read=()=>fetch(route,{headers:requestHeaders,cache:'no-store',signal:AbortSignal.timeout(7000)});
+          let response=await read();
+          if(response.status===401&&(attemptedUser!==user||Date.now()-lastAttempt>=30000)){
+            attemptedUser=user;lastAttempt=Date.now();
+            const candidates=[];
+            for(const [storage,key] of [[localStorage,'corralon_catalogo_editor_session_v1'],[sessionStorage,'corralon_catalogo_editor_session_temp_v1']]){
+              try{const entry=JSON.parse(storage.getItem(key)||'null');if(String(entry?.user?.id??entry?.userId??entry?.user_id??'')===user&&entry.token)candidates.push(entry.token);}catch(_){}
+            }
+            for(const sesion of new Set(candidates)){
+              const bind=await fetch('/api/chat/identidad',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(8500),
+                body:JSON.stringify({usuario:user,sesion,recordar:localStorage.getItem('historial_keep_logged_v1')==='1'})});
+              if(bind.ok){response=await read();break;}
+              if(bind.status!==401)break;
+            }
+          }
+          if(!response.ok||activeUser()!==user){clear();return;}
+          const {avisos}=await response.json();
+          const notice=avisos?.find(item=>{
+            const key=item.chat?seenKey+":"+JSON.stringify([user,item.chat]):seenKey;
+            return item.revision>(Number(localStorage.getItem(key))||0);
+          });
+          if(!notice||activeUser()!==user){clear();return;}
+          ensureStyle();
+          let toast=document.getElementById('corralon-chat-toast');
+          if(!toast){
+            toast=document.createElement('div');toast.id='corralon-chat-toast';toast.className='normal visible';toast.setAttribute('role','status');
+            document.body.append(toast);
+          }
+          const update=document.getElementById('corralon-version-toast');
+          if(update)toast.style.setProperty('--chat-toast-bottom',(28+update.offsetHeight)+'px');
+          if(toast.dataset.notification===String(notice.revision))return;
+          toast.dataset.notification=String(notice.revision);
+          const title=document.createElement('strong');title.className='version-copy';title.textContent=notice.nombre?'Tenés un mensaje de '+notice.nombre:'Tenés un mensaje importante';
+          const link=document.createElement('a');link.textContent='Ver mensaje';
+          link.href='gestion.html?mensajeChat='+encodeURIComponent(notice.id)+'#facturacion';link.target='_blank';link.rel='noopener';
+          toast.replaceChildren(title,link);
+        }catch(_){clear();}finally{checking=false;}
+      }
+      window.addEventListener('storage',event=>{if(event.key?.startsWith(seenKey)||event.key?.includes('corralon_menu_')||event.key==='historial_keep_logged_v1')checkChat();});
+      window.addEventListener('focus',checkChat);
+      setInterval(checkChat,5000);checkChat();
+    }
     let started = false;
     function start() {
       if (started) return;
@@ -7963,6 +8029,7 @@
       started = true;
       const begin = () => {
         recordExecutedVersion();
+        startChatNotices();
         if (!globalThis.CORRALON_DISABLE_VERSION_REALTIME) startRealtime().catch(() => { realtimeActive = false; check(); });
         else check();
         // Sin sondeo paralelo. Si no hay listener, revisar sólo al volver a la página.

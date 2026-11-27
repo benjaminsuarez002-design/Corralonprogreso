@@ -164,17 +164,22 @@
     return /^[1-3]\d{9}$/.test(number)?'549'+number:'';
   }
 
-  function collectionWhatsAppReminder(account){
-    const total=Number(account?.saldoTotal);
-    if(!Number.isFinite(total)||total<=0)return '';
-    const fmt=new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'});
-    const money=value=>fmt.format(value).replace(/\u00a0/g,' ');
-    const [startYear,startMonth,startDay]=String(account.avisoDesde||'').split('-');
-    const [endYear,endMonth,endDay]=String(account.avisoHasta||'').split('-');
-    if(!startDay||!endDay)return '';
+  function collectionReminderDates(account){
+    const [startYear,startMonth,startDay]=String(account?.avisoDesde||'').split('-');
+    const [endYear,endMonth,endDay]=String(account?.avisoHasta||'').split('-');
+    if(!startDay||!endDay)return null;
     const asOf=`${startDay}/${startMonth}/${startYear}`;
     const start=startYear!==endYear?asOf:startMonth!==endMonth?`${startDay}/${startMonth}`:startDay;
     const end=startYear!==endYear?`${endDay}/${endMonth}/${endYear}`:`${endDay}/${endMonth}`;
+    return {asOf,start,end};
+  }
+
+  function collectionWhatsAppReminder(account){
+    const total=Number(account?.saldoTotal),dates=collectionReminderDates(account);
+    if(!Number.isFinite(total)||total<=0||!dates)return '';
+    const {asOf,start,end}=dates;
+    const fmt=new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'});
+    const money=value=>fmt.format(value).replace(/\u00a0/g,' ');
     const overdue=Number(account.saldoVencido||0);
     const balances=[];
     for(const [label,amount] of [
@@ -185,9 +190,13 @@
     ]){
       if(Number(amount)>0)balances.push(`• *${label}* — ${money(amount)}`);
     }
-    const opening=`Hola, te escribimos de Corralón Progreso por tu cuenta corriente. Al ${asOf}, tu *saldo total pendiente es de ${money(total)}*.`;
     const reminder=overdue>0?'¿Nos confirmás cuándo podrías abonar el saldo vencido?':'Te lo recordamos para que puedas programar el pago.';
-    return [opening,balances.join('\n'),reminder+' Si ya hiciste algún pago, podés mandarnos el comprobante por acá. Gracias.'].filter(Boolean).join('\n\n');
+    return [
+      'Hola, te escribimos de Corralón Progreso por tu cuenta corriente.',
+      `Al ${asOf}, tu *saldo total pendiente es de ${money(total)}*.`,
+      ...balances,
+      reminder+' Si ya hiciste algún pago, podés mandarnos el comprobante por acá. Gracias.'
+    ].join('\n');
   }
 
   function parseFechaFlexible(value, now = new Date()) {
@@ -269,7 +278,8 @@
       focusedInput = input;
       setFocused(input, true);
       if (selectOnFocus && typeof input.select === 'function') input.select();
-      hideDropdown(input, 'focus', event);
+      if(options.openOnFocus)showDropdown(input,'focus',event);
+      else hideDropdown(input, 'focus', event);
     }
 
     function handleFocusOut(event) {
@@ -337,6 +347,7 @@
         return;
       }
 
+      if((options.verticalArrowsNavigateGrid||(options.modifiedArrowsNavigateGrid&&(event.ctrlKey||event.metaKey)))&&['ArrowDown','ArrowUp'].includes(event.key))return;
       if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && isOpen && isOpen(input) && moveActive) {
         event.preventDefault();
         if (suppressEnterAfterDelete) deletedInputs.delete(input);
@@ -369,7 +380,7 @@
       event.preventDefault();
       event.stopPropagation();
       input.focus();
-      if (buttonOnlyWhenFocused && !wasFocused) return;
+      if (!wasFocused&&(buttonOnlyWhenFocused||(options.openOnFocus&&isOpen?.(input))))return;
       if (isOpen && isOpen(input)) {
         hideDropdown(input, 'button', event);
       } else {
@@ -1391,6 +1402,7 @@
     function handleClick(event) {
       const header = event.target.closest?.(headerSelector);
       if (!header || !root.contains(header)) return;
+      if(options.ignoreModifiedClick&&(event.shiftKey||event.ctrlKey||event.metaKey))return;
       event.preventDefault();
       setSort(header.dataset.sortKey);
     }
@@ -1585,11 +1597,18 @@
     const states=new WeakMap();
     const field=event=>{const input=states.has(event.target)?event.target:event.target?.closest?.(selector);return input&&!input.readOnly&&!input.disabled&&!input.matches('[type="date"],[type="tel"],[data-date],[data-number-expression="off"]')?input:null;};
     const hasExpression=value=>/[+xX×*/]/.test(String(value))||/\d\s*-/.test(String(value))||/^\s*-.*%/.test(String(value));
+    const expressionText=input=>{
+      const value=input.value,suffix=options.literalSuffix;
+      if(!suffix||!value.endsWith(suffix))return value;
+      const text=value.slice(0,-suffix.length);
+      return /^\s*\+[\d.,]+$/.test(text)?value:text;
+    };
     function remember(event){const input=field(event);if(input)states.set(input,{base:input.type==='number'?Number(input.value):parseLocaleNumber(input.value),value:input.value,type:input.type});}
     function commit(input){
-      if(!hasExpression(input.value)){input.setCustomValidity('');return true;}
+      const expression=expressionText(input);
+      if(!hasExpression(expression)){input.setCustomValidity('');return true;}
       const state=states.get(input)||{base:0,value:'',type:input.type};
-      const value=evaluatePriceAdjustment(input.value.replace(/US\$|\$|€/g,'').trim(),state.base);
+      const value=evaluatePriceAdjustment(expression.replace(/US\$|\$|€/g,'').trim(),state.base);
       if(!Number.isFinite(value)){input.setCustomValidity('Cuenta inválida. Usá +3%, x 1.03 o 100*1.03.');input.reportValidity();return false;}
       input.setCustomValidity('');
       const localized=state.type!=='number'&&/[,€$%]/.test(state.value);
@@ -1597,7 +1616,7 @@
       if(state.type==='number')input.type='number';
       input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true;
     }
-    function onInput(event){const input=field(event);if(!input)return;input.setCustomValidity('');if(hasExpression(input.value)){event.stopImmediatePropagation();}}
+    function onInput(event){const input=field(event);if(!input)return;input.setCustomValidity('');if(hasExpression(expressionText(input))){event.stopImmediatePropagation();}}
     function onKey(event){
       const input=field(event);if(!input)return;
       if(input.type==='number'&&['+','x','X','*','/','%'].includes(event.key)){if(!states.has(input))remember(event);input.type='text';}
@@ -1680,13 +1699,14 @@
 
   function bindLiveCurrency(options = {}) {
     const root = options.root || document, selector = options.selector || '[data-number-format="currency"]';
+    const decimals=options.decimals??2,prefix=options.prefix??'$ ',suffix=options.suffix??'';
     root.addEventListener('input', event => {
       const input = event.target.closest?.(selector); if (!input || input.disabled || input.readOnly) return;
       const original=input.value,caret=input.selectionStart;
       const tokensBeforeCaret=(original.slice(0,caret??original.length).match(/[\d,-]/g)||[]).length;
       const text = input.value.replace(/[^\d,-]/g, ''), negative = text.startsWith('-') ? '-' : '';
       const parts = text.replace(/-/g, '').split(','), integer = parts[0].replace(/^0+(?=\d)/, '');
-      input.value = integer || parts.length > 1 ? `$ ${negative}${(integer || '0').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${parts.length > 1 ? ',' + parts[1].slice(0, 2) : ''}` : negative;
+      input.value = integer || parts.length > 1 ? `${prefix}${negative}${(integer || '0').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${parts.length > 1 ? ',' + parts[1].slice(0, decimals) : ''}${suffix}` : negative;
       if(options.preserveCaret&&caret!=null){
         let position=0,tokens=0;
         while(position<input.value.length&&tokens<tokensBeforeCaret){if(/[\d,-]/.test(input.value[position]))tokens++;position++;}
@@ -1696,7 +1716,9 @@
     });
     if(options.fixedOnBlur)root.addEventListener('blur',event=>{
       const input=event.target.closest?.(selector);
-      if(input&&!input.disabled&&!input.readOnly&&input.value.trim())input.value=new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'}).format(parseLocaleNumber(input.value));
+      if(!input||input.disabled||input.readOnly||!input.value.trim())return;
+      const number=parseLocaleNumber(input.value);
+      input.value=suffix?number.toLocaleString('es-AR',{maximumFractionDigits:decimals})+suffix:new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'}).format(number);
     },true);
     root.addEventListener('keydown', event => {
       const input = event.target.closest?.(selector);
@@ -1710,7 +1732,9 @@
   function bindEditableTable(options = {}) {
     const root = options.root, selector = options.selector || 'input[data-field]', rowSelector = options.rowSelector || 'tbody tr';
     const selected = new Set(), history = []; let anchor = null, session = null, restoring = false, movement = 0;
-    const rowKey = row => row?.dataset.row;
+    const rowKey = options.rowKey || (row => row?.dataset.row);
+    const fieldKey = options.fieldKey || (field => field.dataset.field);
+    const columnIndex = options.columnIndex;
     const rowNodes = () => Array.from(root.querySelectorAll(rowSelector));
     const fields = row => Array.from(row.querySelectorAll(selector)).filter(field => !field.disabled && !field.closest('[hidden]'));
     const snapshot = key => deepClone(options.readRow(key));
@@ -1725,7 +1749,7 @@
       try {
         options.restoreRow(state.key, deepClone(state.before));
         const row = rowNodes().find(item => rowKey(item) === state.key);
-        const field = row && fields(row).find(item => item.dataset.field === state.column);
+        const field = row && fields(row).find(item => fieldKey(item) === state.column);
         if (field) { field.focus(); field.select?.(); session = { ...state, before: snapshot(state.key), movement: ++movement }; }
         paint();
       } finally { restoring = false; }
@@ -1733,13 +1757,14 @@
     root.addEventListener('focusin', event => {
       const field = event.target.closest(selector); if (!field || restoring) return;
       finish(); const key = rowKey(field.closest(rowSelector));
-      session = { key, column: field.dataset.field, before: snapshot(key), movement: ++movement };
+      session = { key, column: fieldKey(field), before: snapshot(key), value:field.value, movement: ++movement };
+      if(options.selectFields)field.select?.();
     });
     root.addEventListener('focusout', event => {
       if (event.target.matches(selector)) { event.target.classList.remove('table-text-editing'); finish(); }
     });
     root.addEventListener('mousedown', event => {
-      if (event.button !== 0 || event.target.closest('button')) return;
+      if (event.button !== 0 || (!options.selectFields&&event.target.closest('button'))) return;
       const row = event.target.closest(rowSelector); if (!row) return;
       const key = rowKey(row), list = rowNodes().map(rowKey);
       if (event.shiftKey && anchor !== null) {
@@ -1750,43 +1775,81 @@
         if (selected.has(key)) selected.delete(key); else selected.add(key);
         anchor = key;
       } else { selected.clear(); selected.add(key); anchor = key; }
-      paint(); event.target.closest(selector)?.classList.add('table-text-editing');
+      paint();
+      const field=event.target.closest(selector);
+      if(options.selectFields&&field&&!field.disabled&&!field.readOnly&&field.getRootNode().activeElement!==field){
+        event.preventDefault();field.focus();field.select?.();
+      }else field?.classList.add('table-text-editing');
     });
     root.addEventListener('keydown', event => {
       if (event.defaultPrevented || event.target.disabled) return;
       if(event.target.readOnly&&(event.key==='Escape'||isUndoShortcut(event)))return;
       const field = event.target.closest(selector);
-      if (event.key === 'Escape' && session) { event.preventDefault(); event.stopPropagation(); restore(session); return; }
+      if (event.key === 'Escape' && session) {
+        event.preventDefault();event.stopPropagation();
+        if(!options.selectFields||!statesEqual(session.before,options.readRow(session.key)))restore(session);
+        else if(field&&field.value!==session.value){field.value=session.value;field.setCustomValidity?.('');field.select?.();}
+        return;
+      }
       if (isUndoShortcut(event)) {
         event.preventDefault(); event.stopPropagation();
         if (session && !statesEqual(session.before, options.readRow(session.key))) restore(session);
+        else if(options.selectFields&&session&&field&&field.value!==session.value){field.value=session.value;field.setCustomValidity?.('');field.select?.();}
         else { finish(); const previous = history.pop(); if (previous) restore(previous); }
         return;
       }
-      if (event.key === 'Delete' && (selected.size || event.target.closest(rowSelector))) {
-        event.preventDefault(); event.stopPropagation(); session = null;
+      const deleting=event.key==='Delete'||(options.deleteWithSupr&&event.key==='Supr');
+      if (deleting && (selected.size || event.target.closest(rowSelector))) {
+        event.preventDefault(); event.stopPropagation();
+        if(options.deleteWithSupr&&(event.repeat||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey))return;
+        session = null;
         const current = rowKey(event.target.closest(rowSelector));
-        const keys = selected.has(current) ? Array.from(selected) : current ? [current] : Array.from(selected);
-        options.deleteRows(keys); selected.clear(); return;
+        const keys = selected.has(current)||(options.selectFields&&selected.size) ? Array.from(selected) : current ? [current] : Array.from(selected);
+        if(options.deleteWithSupr){selected.clear();anchor=null;}
+        options.deleteRows(keys,field); selected.clear();paint(); return;
       }
-      if (!field || !['Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-      const list = rowNodes(), row = field.closest(rowSelector), cells = fields(row), r = list.indexOf(row), c = cells.indexOf(field);
-      const complete = field.selectionStart === 0 && field.selectionEnd === field.value.length;
-      if (event.key === 'ArrowLeft' && !complete && field.selectionStart !== 0) return;
-      if (event.key === 'ArrowRight' && !complete && field.selectionEnd !== field.value.length) return;
+      if(options.selectFields&&field){
+        const all=field.selectionStart===0&&field.selectionEnd===String(field.value||'').length;
+        if(event.key==='F2'&&typeof field.select==='function'){
+          event.preventDefault();
+          if(all){const end=field.value.length;field.setSelectionRange(end,end);field.classList.add('table-text-editing');}
+          else{field.select();field.classList.remove('table-text-editing');}
+          return;
+        }
+        if(event.key.length===1&&!event.ctrlKey&&!event.metaKey&&!event.altKey)field.classList.add('table-text-editing');
+      }
+      const vertical=['ArrowUp','ArrowDown'].includes(event.key);
+      const newField=vertical&&options.navigateNewRowVertically?options.newRowTarget?.():null;
+      const fromNewRow=Boolean(newField&&event.target===newField);
+      if((!field&&!fromNewRow)||!['Enter','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
+      const source=field||newField;
+      const newRow=newField?.closest('tr');
+      const row=fromNewRow?newRow:field.closest(rowSelector);
+      const rowFields=node=>newRow&&node===newRow?[newField]:fields(node);
+      const list=rowNodes(),cells=rowFields(row),c=cells.indexOf(source);
+      if(newRow&&(fromNewRow||!columnIndex||columnIndex(source)===columnIndex(newField)))list.push(newRow);
+      const navigable=vertical&&options.navigateNewRowVertically?list.filter(node=>rowFields(node).length):list;
+      const r=navigable.indexOf(row);
+      const complete=source.selectionStart===0&&source.selectionEnd===source.value.length;
+      if(event.key==='ArrowLeft'&&!complete&&source.selectionStart!==0)return;
+      if(event.key==='ArrowRight'&&!complete&&source.selectionEnd!==source.value.length)return;
       let target;
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-        const next = event.ctrlKey ? (event.key === 'ArrowUp' ? 0 : list.length - 1) : r + (event.key === 'ArrowUp' ? -1 : 1);
-        target = list[next] && fields(list[next])[c];
+        const next=event.ctrlKey?(event.key==='ArrowUp'?0:navigable.length-1):r+(event.key==='ArrowUp'?-1:1);
+        const targets=navigable[next]?rowFields(navigable[next]):[];
+        target=columnIndex?(targets.find(cell=>columnIndex(cell)===columnIndex(source))||targets.find(cell=>columnIndex(cell)>columnIndex(source))||targets.at(-1)):targets[c];
       } else if (event.ctrlKey && event.key.startsWith('Arrow')) target = cells[event.key === 'ArrowLeft' ? 0 : cells.length - 1];
       else {
         const step = event.key === 'ArrowLeft' || event.shiftKey ? -1 : 1;
         target = cells[c + step];
         if (!target) { const next = list[r + step]; target = next ? fields(next)[step > 0 ? 0 : fields(next).length - 1] : step > 0 ? options.newRowTarget?.() : null; }
       }
-      if (target) { event.preventDefault(); event.stopPropagation(); target.focus(); target.select?.(); target.scrollIntoView?.({ block: 'nearest' }); }
+      if (target) {
+        if(options.selectFields&&selected.size<=1){selected.clear();anchor=rowKey(target.closest(rowSelector))??null;if(anchor!==null)selected.add(anchor);paint();}
+        event.preventDefault();event.stopPropagation();target.focus();target.select?.();target.scrollIntoView?.({block:'nearest'});
+      }
     });
-    return { clearSelection() { selected.clear(); paint(); }, resetHistory(){session=null;history.length=0;selected.clear();paint();}, finish };
+    return { clearSelection() { selected.clear();anchor=null;paint(); }, resetHistory(){session=null;history.length=0;selected.clear();anchor=null;paint();}, finish, paint };
   }
 
   function bindFlexibleDates(options = {}) {
@@ -1832,6 +1895,7 @@
     wrapper.append(toggle, menu);
     if(options.fixedMenu)document.body.append(menu);
     let matches = [], active = 0, selectedItem = items.find(item=>String(item.value)===String(options.selectedValue)) || null;
+    let pendingExitPick=false,committedLabel=input.value;
     const hide = () => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
     let renderMatches=null,rendered=0,sortColumn=-1,sortDirection='',lastQuery='';
     const pager=options.batchSize?bindIncrementalRendering({root:menu,batchSize:options.batchSize,getTotal:()=>matches.length,renderRange:(from,to)=>{if(renderMatches)for(let index=from;index<to;index++)renderMatches(matches[index],index);rendered=to;}}):null;
@@ -1857,17 +1921,22 @@
       selected?.scrollIntoView({ block: 'nearest', inline:'nearest' });
     }
     function show(_, reason) {
+      if(options.pickFirstOnExit){
+        if(reason==='typing-key'&&input.getRootNode().activeElement!==input)return;
+        if(reason!=='focus'||!input.value.trim())pendingExitPick=true;
+      }
       if(options.fixedMenu&&options.menuScale)positionScaledMenu();
       else if(options.fixedMenu){const rect=input.getBoundingClientRect(),width=Math.min(Math.max(rect.width,options.menuWidth||0),Math.max(1,window.innerWidth-16));menu.style.position='fixed';menu.style.top=rect.bottom+'px';menu.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';menu.style.width=width+'px';menu.style.minWidth=width+'px';menu.style.maxHeight=Math.max(80,Math.min(240,window.innerHeight-rect.bottom-10))+'px';}
       const query = reason==='sorting'?lastQuery:reason === 'typing' || reason === 'typing-key' ? normalize(input.value) : '';
       lastQuery=query;
       matches = items.filter(item => (!options.filterItem||options.filterItem(item))&&(!query || (options.match?options.match(item,query):normalize(item.searchText||item.label).includes(query)) || normalize(item.value) === query));
       if(query&&typeof options.rank==='function'){
-        const ranks=new Map(matches.map(item=>[item,Number(options.rank(item,query))||0]));
+        const ranks=new Map(matches.map(item=>[item,Number(options.rank(item,query,normalize(item.label)))||0]));
         matches.sort((a,b)=>ranks.get(a)-ranks.get(b));
       }
       if(options.sortableColumns&&sortColumn>=0){const sign=sortDirection==='desc'?-1:1;matches.sort((a,b)=>{const x=a.sortValues?.[sortColumn]??a.cells?.[sortColumn]??a.label,y=b.sortValues?.[sortColumn]??b.cells?.[sortColumn]??b.label;return sign*(typeof x==='number'&&typeof y==='number'?x-y:String(x??'').localeCompare(String(y??''),'es',{numeric:true}));});}
-      active = 0; menu.replaceChildren();
+      active = reason==='focus'?Math.max(0,matches.indexOf(selectedItem)):0;
+      menu.replaceChildren();
       const columns=options.columns||[],grid=columns.map(column=>`${column.width||100}px`).join(' '),gridWidth=columns.reduce((sum,column)=>sum+(column.width||100),20);
       function fillColumns(row,cells){row.style.cssText=`display:grid;grid-template-columns:${grid};min-width:${gridWidth}px;padding:6px 10px;white-space:nowrap;font-size:12px;cursor:pointer`;cells.forEach((value,index)=>{const cell=document.createElement('span');cell.textContent=String(value??'');cell.title=cell.textContent;cell.style.cssText=`overflow:hidden;text-overflow:ellipsis;padding:0 5px;text-align:${columns[index]?.align||'left'}`;row.append(cell);});}
       if(columns.length){const heading=document.createElement('div');fillColumns(heading,columns.map(column=>column.label));heading.style.cssText+=';position:sticky;top:0;z-index:1;font-weight:700;cursor:default;'+(options.headerStyle||'background:#171717;color:white');
@@ -1887,28 +1956,39 @@
       menu.hidden = false; input.setAttribute('aria-expanded', 'true'); mark();
       if(options.fixedMenu&&options.menuScale)positionScaledMenu();
     }
-    function pick() {
+    function pick(index=active,leaving=false) {
       if (!options.allowEmptyPick&&!input.value.trim()) { hide(); return false; }
-      const item = matches[active]; if (!item) return false;
+      const item = matches[index]; if (!item) return false;
+      pendingExitPick=false;
       selectedItem = item;
-      input.value = item.label; input.setCustomValidity(''); hide(); const change=new Event('change', { bubbles: true });change.dropdownValue=item.value;input.dispatchEvent(change); return true;
+      input.value=committedLabel=item.label; input.setCustomValidity(''); hide();
+      const change=new Event('change', { bubbles: true });change.dropdownValue=item.value;change.dropdownExit=leaving;input.dispatchEvent(change); return true;
     }
     toggle.addEventListener('mousedown',event=>event.preventDefault());
-    const bindings = bindDropdownOnlyWhenTyping({ root: wrapper, inputSelector: 'input', buttonSelector: 'button', buttonEvent:'click', show, hide, isOpen: () => !menu.hidden, advanceOnEnter: options.advanceOnEnter !== false, openOnArrowDown:options.openOnArrowDown,
-      pickActive: pick, enterPicksFirst: false, moveActive: (_, step) => { active = Math.max(0, Math.min(matches.length - 1, active + step)); mark(); } });
+    const bindings = bindDropdownOnlyWhenTyping({ root: wrapper, inputSelector: 'input', buttonSelector: 'button', buttonEvent:'click', show, hide, isOpen: () => !menu.hidden, advanceOnEnter: options.advanceOnEnter !== false, openOnArrowDown:options.openOnArrowDown, openOnFocus:options.openOnFocus, modifiedArrowsNavigateGrid:options.modifiedArrowsNavigateGrid, verticalArrowsNavigateGrid:options.verticalArrowsNavigateGrid,
+      pickActive: () => pick(), enterPicksFirst: false, moveActive: (_, step) => { active = Math.max(0, Math.min(matches.length - 1, active + step)); mark(); } });
     wrapper.onmouseenter = () => { toggle.style.opacity = '1'; };
     if(!options.visibleToggle)wrapper.onmouseleave = () => { toggle.style.opacity = '0'; };
-    wrapper.addEventListener('focusout', event => { if (!wrapper.contains(event.relatedTarget)) hide(); });
+    wrapper.addEventListener('keydown',event=>{
+      if(event.key!=='Escape'||!pendingExitPick)return;
+      event.preventDefault();event.stopPropagation();
+      pendingExitPick=false;input.value=committedLabel;hide();
+    },true);
+    wrapper.addEventListener('focusout',event=>{
+      if(wrapper.contains(event.relatedTarget))return;
+      if(pendingExitPick){pendingExitPick=false;if(!pick(0,true))input.value=committedLabel;}
+      hide();
+    });
     menu.addEventListener('mousedown', event => {
       const row = event.target.closest('[data-index]'); if (!row) return;
       event.preventDefault(); active = Number(row.dataset.index); input.value = matches[active].label; pick(); input.focus();
     });
-    const outside = event => { if (!wrapper.contains(event.target) && !menu.contains(event.target)) hide(); };
+    const outside = event => { const path=event.composedPath(); if (!path.includes(wrapper)&&!path.includes(menu))hide(); };
     document.addEventListener('pointerdown', outside);
     return {
-      setValue(value) { selectedItem = items.find(item=>String(item.value)===String(value)) || null; input.value=selectedItem?.label || ''; },
+      setValue(value) { selectedItem = items.find(item=>String(item.value)===String(value)) || null; input.value=committedLabel=selectedItem?.label || '';pendingExitPick=false; },
       getValue() { const query = normalize(input.value); if (!query) return options.emptyValue ?? ''; if(selectedItem && normalize(selectedItem.label)===query)return selectedItem.value; return items.find(item => normalize(item.label) === query || normalize(item.value) === query)?.value ?? null; },
-      destroy() { pager?.destroy(); bindings.destroy(); document.removeEventListener('pointerdown', outside); if(options.fixedMenu&&options.menuScale)window.removeEventListener('resize',repositionScaledMenu); if(options.fixedMenu)menu.remove(); }
+      destroy() { pendingExitPick=false;pager?.destroy(); bindings.destroy(); document.removeEventListener('pointerdown', outside); if(options.fixedMenu&&options.menuScale)window.removeEventListener('resize',repositionScaledMenu); if(options.fixedMenu)menu.remove(); }
     };
   }
 
@@ -2660,7 +2740,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
         const field=[...detail.querySelectorAll('.receipt-field')].find(el=>el.firstChild.textContent===label)?.querySelector('span');if(field)field.textContent=money(value);
       }
     }
-    function canEditValues(){if(detailOptions.readOnly===true)return false;const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return (allowed || detailOptions.allowEditValues===true)&&Number(detailData?.comprobante?.confirmado)!==0&&!Number(detailData?.comprobante?.anulada)&&Boolean(detailData?.versionValores)}
+    function canEditValues(data=detailData){if(data?.valueRulesUnavailable)return false;if(detailOptions.readOnly===true)return false;const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return (allowed || detailOptions.allowEditValues===true)&&Number(data?.comprobante?.confirmado)!==0&&!Number(data?.comprobante?.anulada)&&Boolean(data?.versionValores)}
     function canEditHeader(){if(!canEditValues())return false;const user=valuesUser(),isAdministrator=window.CorralonFunciones?.menuUserIsAdministrator;if(typeof isAdministrator==='function')return Boolean(isAdministrator('facturacion',user));return String(user.nivel||'').trim().toLowerCase()==='administrador'||(Array.isArray(user.permisos)&&user.permisos.includes('facturacion')&&Array.isArray(user.permisosEdicion)&&user.permisosEdicion.includes('facturacion'))}
     function headerState(header){return {idCliente:String(header.idCliente??''),completo:Boolean(Number(header.Completo??header.Pagada??0)),actualizaStock:Boolean(Number(header.stockActualizado)),enInformeVentas:Boolean(Number(header.EnInfVtas))}}
     function receiptHeaderChanges(){if(!canEditHeader())return {};const current=headerState(detailData.comprobante),original=detailData.headerOriginal||current,changes={};for(const key of Object.keys(current))if(current[key]!==original[key])changes[key]=current[key];if('idCliente' in changes){if(!/^[1-9]\d*$/.test(changes.idCliente))throw Error('Ingresá un ID de cliente válido.');changes.idCliente=Number(changes.idCliente)}return changes}
@@ -2680,15 +2760,15 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     detail.addEventListener('change',event=>{const input=event.target.closest('[data-header-key]');if(!input||!canEditHeader()||actionBusy)return;const key=input.dataset.headerKey;if(key==='idCliente'){detailData.comprobante.idCliente=input.value.trim();markHeaderDirty();resolveReceiptCustomer();return}const field={completo:'Completo',actualizaStock:'stockActualizado',enInformeVentas:'EnInfVtas'}[key];if(field){detailData.comprobante[field]=input.checked;markHeaderDirty()}});
     detail.addEventListener('keydown',async event=>{const input=event.target.closest('[data-header-key="idCliente"]');if(!input||!canEditHeader()||actionBusy)return;if(event.key==='Enter'){event.preventDefault();event.stopPropagation();detailData.comprobante.idCliente=input.value.trim();if(await resolveReceiptCustomer())detail.querySelector('[data-header-key="completo"]')?.focus()}});
 
-    function valueRules(){try{return window.CorralonMediosPago?.normalize(JSON.parse(localStorage.getItem('corralon_facturacion_medios_pago_v1')||'null'),historyConfig)}catch{return window.CorralonMediosPago?.normalize(null,historyConfig)}}
+    function valueRules(){if(detailData?.paymentRules)return detailData.paymentRules;try{return window.CorralonMediosPago?.normalize(JSON.parse(localStorage.getItem('corralon_facturacion_medios_pago_v1')||'null'),historyConfig)}catch{return window.CorralonMediosPago?.normalize(null,historyConfig)}}
     function valueTypes(){const rules=valueRules();return(historyConfig?.tiposPago||[]).filter(p=>[1,3,5,6].includes(Number(p.clase))&&Number(p.id)!==14&&(!window.CorralonMediosPago||window.CorralonMediosPago.allowsVoucher(rules,p.id,detailData.comprobante.idComprobante)))}
     function valueCards(value){const rules=valueRules();return(historyConfig?.tarjetas||[]).filter(c=>!window.CorralonMediosPago||window.CorralonMediosPago.allowsCard(rules,value.idTipoPago,c.id))}
-    function valueSelect(value,index,key,choices){return `<select data-value-index="${index}" data-value-key="${key}" aria-label="${key==='idTipoPago'?'Tipo de valor':key==='idTarjeta'?'Tarjeta o cuenta':'Cuotas'}" style="width:100%;font:inherit;border:1px solid #bbb;background:white">${choices.map(c=>`<option value="${Number(c.id)}" ${Number(c.id)===Number(value[key])?'selected':''}>${escape(c.nombre)}</option>`).join('')}</select>`}
+    function valueSelect(value,index,key,choices){return `<select data-value-index="${index}" data-value-key="${key}" aria-label="${key==='idTipoPago'?'Tipo de valor':key==='idTarjeta'?'Tarjeta o cuenta':'Cuotas'}" style="width:100%;font:inherit;border:1px solid #bbb;background:white">${choices.map(c=>`<option value="${Number(c.id)}" ${Number(c.id)===Number(value[key])?'selected':''} ${c.disabled?'disabled':''}>${escape(c.nombre)}</option>`).join('')}</select>`}
     function valueCells(value,index){
       if(!canEditValues())return [escape(value.tipo||value.idTipoPago),escape(value.tarjeta||'Ninguna'),escape(value.cuotas??0)];
-      const types=valueTypes();if(!types.some(p=>Number(p.id)===Number(value.idTipoPago)))types.push({id:value.idTipoPago,nombre:value.tipo});
+      const types=valueTypes();if(!types.some(p=>Number(p.id)===Number(value.idTipoPago)))types.push({id:value.idTipoPago,nombre:value.tipo,disabled:true});
       const cls=Number((historyConfig?.tiposPago||[]).find(p=>Number(p.id)===Number(value.idTipoPago))?.clase||value.clase),cards=[{id:0,nombre:'Ninguna'},...valueCards(value)],plans=[{id:0,nombre:'0'},...(historyConfig?.tarjetasCuotas||[]).filter(p=>Number(p.idTarjeta)===Number(value.idTarjeta)).map(p=>({id:p.cuotas,nombre:p.cuotas}))];
-      if(value.idTarjeta&&!cards.some(c=>Number(c.id)===Number(value.idTarjeta)))cards.push({id:value.idTarjeta,nombre:value.tarjeta});
+      if(value.idTarjeta&&!cards.some(c=>Number(c.id)===Number(value.idTarjeta)))cards.push({id:value.idTarjeta,nombre:value.tarjeta,disabled:true});
       return [valueSelect(value,index,'idTipoPago',types),[3,5].includes(cls)?valueSelect(value,index,'idTarjeta',cards):escape(value.tarjeta||'Ninguna'),cls===5?valueSelect(value,index,'cuotas',plans):escape(value.cuotas??0)];
     }
     function fitReceiptDetail(){
@@ -3043,6 +3123,12 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
         if(request!==detailSequence||detail.hidden)return;
         // Los controles editan una copia y el detalle precargado conserva los datos de SQL.
         const result=JSON.parse(JSON.stringify(data));
+        if(canEditValues(result)&&window.CorralonMediosPago?.refreshSharedRules){
+          try{result.paymentRules=await window.CorralonMediosPago.refreshSharedRules(historyConfig);}
+          catch{result.valueRulesUnavailable=true;}
+          if(request!==detailSequence||detail.hidden)return;
+          if(result.valueRulesUnavailable)detail.querySelector('[data-action-status]').textContent='No se pudieron cargar las reglas de medios de pago. Volvé a abrir la boleta para editar.';
+        }
         const h=result.comprobante;detailData=result;detailData.headerOriginal=headerState(h);detailData.headerResolvedCustomer=String(h.idCliente??'');receiptValuesBasis(result);const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
         const typeName=h.tipo||(historyConfig?.comprobantes||[]).find(t=>Number(t.id)===Number(h.idComprobante))?.nombre||row.tipo;
         detail.querySelector('[data-title]').textContent='Boleta '+h.numero+(typeName?' · '+typeName:'');
@@ -3422,6 +3508,7 @@ window.CorralonSidebarMenu={refresh};window.addEventListener('menu-user-validate
     formatClipboardTable,
     parseFechaFlexible,
     whatsappNumber,
+    collectionReminderDates,
     collectionWhatsAppReminder,
     isPrintableTypingKey,
     bindDropdownOnlyWhenTyping,

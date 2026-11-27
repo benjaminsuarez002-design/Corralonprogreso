@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '..', 'gestion.html'), 'utf8');
 const shared = fs.readFileSync(path.join(__dirname, '..', 'presupuesto-shared.js'), 'utf8');
 const from = html.indexOf('function reserveBudgetPreview(){');
-const to = html.indexOf('async function issue(){', from);
+const to = html.indexOf('async function issue(', from);
 assert.ok(from >= 0 && to > from);
 
 test('la fecha SQL del presupuesto se muestra como fecha argentina', () => {

@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {JSDOM}=require('../.codex-staging/importer-dom-test/node_modules/jsdom');
 const tick=()=>new Promise(r=>setTimeout(r,20));
-async function setup(nivel='administrador',failure=false,discounted=false,customResult=null){
+async function setup(nivel='administrador',failure=false,discounted=false,customResult=null,sharedOptions={}){
  const dom=new JSDOM('<button id="consultInvoices">Consultar</button>',{url:'http://localhost:8080/gestion.html',runScripts:'outside-only'}),w=dom.window,calls=[];
  const config={sucursales:[],tiposPago:[{id:1,nombre:'Efectivo',clase:1},{id:3,nombre:'Cta. Cte.',clase:6},{id:5,nombre:'Transferencia',clase:3},{id:6,nombre:'Tarjeta',clase:5}],tarjetas:[{id:10,nombre:'Banco'},{id:11,nombre:'Visa'}],tarjetasCuotas:[{idTarjeta:11,cuotas:3}]};
  const result={ok:true,versionValores:'version-original',comprobante:{idRecibo:42,numero:'0007-00034062',idCliente:10883,idComprobante:13,confirmado:-1,anulada:0,total:100,efectivo:100,tarjeta:0,cuentaCorriente:0,cheque:0},articulos:[],valores:[{orden:8,idTipoPago:1,tipo:'Efectivo',clase:1,importe:100,impRec:0,total:100,idTarjeta:0,cuotas:0}]};
@@ -10,7 +10,8 @@ async function setup(nivel='administrador',failure=false,discounted=false,custom
  w.CorralonFunciones={menuSessionUser:()=>({id:'admin-test',nivel}),menuUserIsAdministrator:(_page,user)=>user.nivel==='administrador'};
  const shared=fs.readFileSync(path.join(__dirname,'../funciones.js'),'utf8');w.eval(shared.slice(shared.indexOf('  function focusField('),shared.indexOf('  function bindLinearNavigation('))+';window.CorralonFunciones.focusField=focusField;');
  w.fetch=async(url,options={})=>{calls.push({url,options});let data;
- if(url.endsWith('bootstrap'))data={ok:true,...config};
+ if(url.includes('/configuracion/mediosPagoFacturacion'))data={ok:true,fields:sharedOptions};
+ else if(url.endsWith('bootstrap'))data={ok:true,...config};
  else if(options.method==='POST'){const edit=JSON.parse(options.body).valores[0];Object.assign(result.valores[0],edit);if(!failure){result.comprobante.efectivo=0;result.comprobante.cuentaCorriente=100;}data=failure?{ok:false,error:'La boleta cambió en otro equipo.'}:{ok:true};}
  else data=structuredClone(result);
  return{ok:data.ok,json:async()=>data};};
@@ -21,6 +22,21 @@ async function setup(nivel='administrador',failure=false,discounted=false,custom
 function change(s,key,value){const input=s.w.document.querySelector(`[data-value-key="${key}"]`);assert.ok(input);input.value=String(value);input.dispatchEvent(new s.w.Event('change',{bubbles:true}));}
 function amount(s,label){return [...s.w.document.querySelectorAll('.receipt-field')].find(e=>e.firstChild.textContent===label)?.querySelector('span')?.textContent;}
 function enterAmount(s,key,value,index=0){const input=s.w.document.querySelector(`[data-value-index="${index}"][data-value-key="${key}"]`);input.focus();input.value=String(value);input.dispatchEvent(new s.w.Event('input',{bubbles:true}));assert.equal(s.w.document.activeElement,s.w.document.querySelector(`[data-value-index="${index}"][data-value-key="${key}"]`));}
+
+test('Consulta carga reglas compartidas y filtra las tarjetas del tipo de valor',async()=>{
+ const excluded=ids=>({arrayValue:{values:ids.map(id=>({integerValue:String(id)}))}});
+ const rules={medios:{mapValue:{fields:{
+  5:{mapValue:{fields:{tarjetasExcluidas:excluded([11])}}},
+  6:{mapValue:{fields:{tarjetasExcluidas:excluded([10])}}}
+ }}}};
+ const s=await setup('administrador',false,false,null,rules);
+ try{
+  assert(s.calls.some(call=>call.url.includes('/configuracion/mediosPagoFacturacion')));
+  const options=()=>[...s.w.document.querySelector('[data-value-key="idTarjeta"]').options].map(option=>option.value);
+  change(s,'idTipoPago',5);assert.deepEqual(options(),['0','10']);
+  change(s,'idTipoPago',6);assert.deepEqual(options(),['0','11']);
+ }finally{s.dom.window.close();}
+});
 
 test('elegir transferencia en consulta abre Cuenta/Tarjeta y seleccionar cuenta avanza',async()=>{
  const s=await setup(),opened=[];try{s.w.HTMLSelectElement.prototype.showPicker=function(){opened.push(this.dataset.valueKey);};change(s,'idTipoPago',5);assert.equal(s.w.document.activeElement.dataset.valueKey,'idTarjeta');assert.deepEqual(opened,['idTarjeta']);change(s,'idTarjeta',10);assert.equal(s.w.document.activeElement.dataset.valueKey,'descripcion');}finally{s.dom.window.close();}

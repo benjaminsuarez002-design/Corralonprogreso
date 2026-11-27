@@ -30,6 +30,30 @@
   const allowsVoucher = (rules, paymentId, voucherId) => !(rule(rules, paymentId).comprobantesExcluidos || []).includes(Number(voucherId));
   const allowsCard = (rules, paymentId, cardId) => !(rule(rules, paymentId).tarjetasExcluidas || []).includes(Number(cardId));
   const usesCards = payment => [3, 5].includes(Number(payment?.clase));
+  const cacheKey = 'corralon_facturacion_medios_pago_v1';
+  async function refreshSharedRules(catalog) {
+    try {
+      const url = 'https://firestore.googleapis.com/v1/projects/corralon-progreso/databases/(default)/documents/configuracion/mediosPagoFacturacion?mask.fieldPaths=medios';
+      const response = await root.fetch(url, { cache:'no-store', signal:AbortSignal.timeout(5000) });
+      if (!response.ok && response.status !== 404) throw new Error('No se pudo leer la configuración de medios de pago.');
+      const doc = response.ok ? await response.json() : {};
+      const fields = doc.fields?.medios?.mapValue?.fields || {};
+      const readIds = value => (value?.arrayValue?.values || []).map(item => Number(item.integerValue ?? item.doubleValue ?? item.stringValue));
+      const medios = Object.fromEntries(Object.entries(fields).map(([id, value]) => {
+        const stored = value.mapValue?.fields || {};
+        return [id, { comprobantesExcluidos:readIds(stored.comprobantesExcluidos), tarjetasExcluidas:readIds(stored.tarjetasExcluidas) }];
+      }));
+      const rules = normalize({ medios }, catalog);
+      try { root.localStorage.setItem(cacheKey, JSON.stringify(rules)); } catch {}
+      return rules;
+    } catch (error) {
+      try {
+        const cached = JSON.parse(root.localStorage.getItem(cacheKey) || 'null');
+        if (cached?.medios) return normalize(cached, catalog);
+      } catch {}
+      throw error;
+    }
+  }
   function adjustValue(row, source, parse = Number, round = value => Math.round((value + Number.EPSILON) * 100) / 100) {
     if (source === 'total') {
       const target = round(parse(row.total));
@@ -40,5 +64,5 @@
     row.total = round(parse(row.importe) + parse(row.impRec));
     return row;
   }
-  root.CorralonMediosPago = { normalize, rule, allowsVoucher, allowsCard, usesCards, adjustValue };
+  root.CorralonMediosPago = { normalize, rule, allowsVoucher, allowsCard, usesCards, adjustValue, refreshSharedRules };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -2,7 +2,9 @@ param([switch]$SoloCompilar,[switch]$SinAbrir)
 $ErrorActionPreference = 'Stop'
 $apiSource = Join-Path $PSScriptRoot 'facturacion-copia-api.cs'
 $cajaSource = Join-Path $PSScriptRoot 'caja-sql-api.cs'
+$printLinkSource = Join-Path $PSScriptRoot 'PrintLinkTicket.cs'
 $serverSource = Join-Path $PSScriptRoot 'CorralonWebServer.cs'
+$chatSource = Join-Path $PSScriptRoot 'CorralonLocalChat.cs'
 $runtimeDirectory = Join-Path $PSScriptRoot 'servidor'
 $legacyDirectory = Join-Path $PSScriptRoot '.codex-staging'
 $legacyApi = Join-Path $legacyDirectory 'FacturacionCopiaApi.exe'
@@ -14,15 +16,17 @@ $serverNext = Join-Path $runtimeDirectory 'CorralonWebServer.next.exe'
 $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $apiChanged = -not (Test-Path -LiteralPath $apiOutput) -or (Get-Item -LiteralPath $apiSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $apiOutput -ErrorAction SilentlyContinue).LastWriteTimeUtc
 $apiChanged = $apiChanged -or (Get-Item -LiteralPath $cajaSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $apiOutput -ErrorAction SilentlyContinue).LastWriteTimeUtc
+$apiChanged = $apiChanged -or (Get-Item -LiteralPath $printLinkSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $apiOutput -ErrorAction SilentlyContinue).LastWriteTimeUtc
 $serverChanged = -not (Test-Path -LiteralPath $serverOutput) -or (Get-Item -LiteralPath $serverSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $serverOutput -ErrorAction SilentlyContinue).LastWriteTimeUtc
+$serverChanged = $serverChanged -or (Get-Item -LiteralPath $chatSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $serverOutput -ErrorAction SilentlyContinue).LastWriteTimeUtc
 
 # Compilar antes de interrumpir el servicio: un error deja la versión actual funcionando.
 if ($apiChanged -or $SoloCompilar) {
-    & $compiler /nologo /target:exe "/out:$apiNext" /reference:System.Data.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $apiSource $cajaSource
+    & $compiler /nologo /target:exe "/out:$apiNext" /reference:System.Data.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $apiSource $cajaSource $printLinkSource
     if ($LASTEXITCODE -ne 0) { throw 'No se pudo compilar la API de facturación. La versión actual sigue activa.' }
 }
 if ($serverChanged -or $SoloCompilar) {
-    & $compiler /nologo /target:winexe "/out:$serverNext" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Data.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $serverSource
+    & $compiler /nologo /target:winexe "/out:$serverNext" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Data.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $serverSource $chatSource
     if ($LASTEXITCODE -ne 0) { throw 'No se pudo compilar el servidor web. La versión actual sigue activa.' }
 }
 if ($SoloCompilar) { Write-Output $apiNext; Write-Output $serverNext; return }

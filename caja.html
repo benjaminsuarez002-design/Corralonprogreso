@@ -1,4 +1,4 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Control de caja — Corralón Progreso</title><link rel="icon" href="favicon.png"><link rel="stylesheet" href="theme-corralon.css"><link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;900&display=swap" rel="stylesheet"><script src="menu-auth-guard.js" data-menu-guard="caja" data-menu-login="menu.html"></script><script src="funciones.js"></script><script src="corralon-system.js?v=1.0.34"></script><script src="corralon-cache-db.js"></script><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--corralon-bg,#f3f8ff)}#cajaContent{height:100dvh;width:100%}body.corralon-sidebar-enabled[data-page-theme="caja"]>.corralon-menu-toggle.corralon-menu-floating{display:none!important}#cajaPrintHost{width:min(1200px,98vw);height:95dvh;max-width:98vw;max-height:95dvh;padding:0;border:1px solid var(--corralon-line-strong);border-radius:10px;overflow:hidden}#cajaPrintHost::backdrop{background:#17283a66}#cajaPrintHost>header{height:44px;display:flex;align-items:center;justify-content:space-between;padding:5px 12px;background:var(--corralon-soft,#e6f1fb)}#cajaPrintHost>iframe{display:block;width:100%;height:calc(100% - 44px);border:0}#cajaPrintHost:not([open]){display:block;position:fixed;inset:auto auto 0 -12000px;visibility:hidden;width:1100px;height:800px;pointer-events:none}</style></head><body data-page-theme="caja"><main id="cajaContent" aria-label="Control de caja"></main>
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Control de caja — Corralón Progreso</title><link rel="icon" href="favicon.png"><link rel="stylesheet" href="theme-corralon.css"><link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600;700;900&display=swap" rel="stylesheet"><script src="menu-auth-guard.js" data-menu-guard="caja" data-menu-login="menu.html"></script><script src="funciones.js"></script><script src="facturacion-medios-pago.js"></script><script src="corralon-system.js?v=1.0.35"></script><script src="corralon-cache-db.js"></script><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--corralon-bg,#f3f8ff)}#cajaContent{height:100dvh;width:100%}body.corralon-sidebar-enabled[data-page-theme="caja"]>.corralon-menu-toggle.corralon-menu-floating{display:none!important}#cajaPrintHost{width:min(1200px,98vw);height:95dvh;max-width:98vw;max-height:95dvh;padding:0;border:1px solid var(--corralon-line-strong);border-radius:10px;overflow:hidden}#cajaPrintHost::backdrop{background:#17283a66}#cajaPrintHost>header{height:44px;display:flex;align-items:center;justify-content:space-between;padding:5px 12px;background:var(--corralon-soft,#e6f1fb)}#cajaPrintHost>iframe{display:block;width:100%;height:calc(100% - 44px);border:0}#cajaPrintHost:not([open]){display:block;position:fixed;inset:auto auto 0 -12000px;visibility:hidden;width:1100px;height:800px;pointer-events:none}</style></head><body data-page-theme="caja"><main id="cajaContent" aria-label="Control de caja"></main>
 <template id="systemCajaTemplate"><style>:host{display:block;width:100%;height:100dvh;overflow:hidden}</style><style>
     *, *::before, *::after { box-sizing: border-box; }
     html {
@@ -7362,19 +7362,21 @@ CajaSQL = window.CajaSQL = (() => {
   let bootPromise, bootData, bootUser = '', daySequence = 0, pendingWrites=0,writeEpoch=0;
   const endpoint = '/api/facturacion/caja';
   const snapshots = new Map(), chains = new Map();
-  async function bootstrap() {
+  async function bootstrap({ refresh = false } = {}) {
     const activeId = String(cajaSessionUser()?.id || '');
-    if (bootUser && bootUser !== activeId) { bootPromise = null; bootData = null; snapshots.clear(); }
-    if (bootPromise) return bootPromise;
-    bootPromise = (async () => {
-      const user = cajaSessionUser();
-      if (!user?.id) throw new Error('Iniciá sesión desde el menú para abrir Caja SQL.');
-      const response = await fetch(`${endpoint}?accion=bootstrap&usuarioId=${encodeURIComponent(user.id)}`, { cache: 'no-store' });
+    if (bootUser !== activeId) { bootPromise = null; bootData = null; bootUser = activeId; snapshots.clear(); }
+    if (!activeId) throw new Error('Iniciá sesión desde el menú para abrir Caja SQL.');
+    if (bootPromise && (!refresh || !bootData)) return bootPromise;
+    bootData = null;
+    const pending = (async () => {
+      const response = await fetch(`${endpoint}?accion=bootstrap&usuarioId=${encodeURIComponent(activeId)}`, { cache: 'no-store' });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'No se pudo conectar con Caja SQL.');
-      bootData = result; bootUser = user.id; return result;
-    })().catch(error => { bootPromise = null; throw error; });
-    return bootPromise;
+      if (bootPromise === pending) bootData = result;
+      return result;
+    })().catch(error => { if (bootPromise === pending) bootPromise = null; throw error; });
+    bootPromise = pending;
+    return pending;
   }
   async function request(action, params = {}, body = null, renewed = false) {
     const boot = await bootstrap();
@@ -8466,7 +8468,7 @@ initializeCashHistory(true);
     <p class="cc-status" role="status" aria-live="polite" hidden></p><div class="cc-layout"><div class="cc-tables">
     <div class="cc-panel cc-invoices"><div class="cc-panel-title"><h2>${ccIcon('invoice')}Facturas a cobrar</h2><span data-cc-pending></span></div><div class="cc-scroll"><table><colgroup><col style="width:12%"><col style="width:14%"><col style="width:23%"><col style="width:6%"><col style="width:12%"><col style="width:13%"><col style="width:12%"><col style="width:8%"></colgroup><thead><tr><th>Tipo comp.</th><th>N.º comprobante</th><th>Cliente</th><th>Pagada</th><th>Importe</th><th>Paga con</th><th>Vuelto</th><th>Hora</th></tr></thead><tbody data-cc-queue></tbody></table></div><div class="cc-foot"><span data-cc-count></span><span>Total pendiente <strong data-cc-total-pending></strong></span></div></div>
     <div class="cc-panel cc-articles"><div class="cc-panel-title"><h2>${ccIcon('box')}Artículos de la factura</h2><span data-cc-detail-label></span></div><div class="cc-scroll"><table><colgroup><col style="width:11%"><col style="width:43%"><col style="width:11%"><col style="width:17%"><col style="width:18%"></colgroup><thead><tr><th>IDArt</th><th>Descripción</th><th>Cantidad</th><th>Precio unitario</th><th>Importe</th></tr></thead><tbody data-cc-items></tbody></table></div><div class="cc-foot cc-right" data-cc-article-count></div></div>
-    <div class="cc-panel cc-payments"><div class="cc-panel-title"><h2>${ccIcon('card')}Tipo de pago</h2></div><div class="cc-scroll"><table><colgroup><col style="width:10%"><col style="width:12%"><col style="width:14%"><col style="width:6%"><col style="width:8%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:15%"></colgroup><thead><tr><th>Tipo de valor</th><th>Importe</th><th>Tarjeta / cuenta</th><th>Cuotas</th><th>Coef.</th><th>Recargo / dto.</th><th>Importe final</th><th>Fecha vto.</th><th>Descripción</th></tr></thead><tbody data-cc-values></tbody></table></div><div class="cc-foot"><small>Paga con y Vuelto son un cálculo local.</small><span>Total a cobrar <strong data-cc-total-payment></strong></span></div></div>
+    <div class="cc-panel cc-payments"><div class="cc-panel-title"><h2>${ccIcon('card')}Tipo de pago</h2><div class="cc-payment-actions" data-cc-payment-actions hidden><button type="button" data-cc-revert-payments>Cancelar</button><button type="button" data-cc-save-payments class="primary">Guardar valores</button></div></div><div class="cc-scroll"><table><colgroup>${[14,12,17,6,15,8,9,9,8,2].map(width=>`<col style="width:${width}%">`).join('')}</colgroup><thead><tr><th>Tipo de valor</th><th>Importe</th><th>Tarjeta / cuenta</th><th>Cuotas</th><th>Descripción</th><th>% Dto./Rec.</th><th>$ Dto./Rec.</th><th>Total</th><th>Fecha vto.</th><th></th></tr></thead><tbody data-cc-values></tbody></table></div><div class="cc-foot"><span class="cc-payment-actions"><button type="button" data-cc-add-payment hidden>+ Renglón</button><small data-cc-payment-status role="status"></small></span><span><small data-cc-payment-difference hidden></small> Total a cobrar <strong data-cc-total-payment></strong></span></div></div>
     </div></div>`;
   if(window.cajaInSystem){
     const menuButton=document.createElement('button');menuButton.id='cajaCollectionsMenuToggle';menuButton.type='button';menuButton.textContent='☰ Menú';menuButton.setAttribute('aria-label','Abrir menú del sistema');
@@ -8511,7 +8513,7 @@ initializeCashHistory(true);
     finally{printing=false;printClose.disabled=false;printerChoice.disabled=false;printSubmit.disabled=!printerChoice.value;}
   };
   function closeSendMenu(){sendMenu.hidden=true;}
-  $('[data-cc-queue]').addEventListener('contextmenu',e=>{const row=e.target.closest('[data-cc-id]');if(!row||busy||editing)return;e.preventDefault();closeSendMenu();sendId=Number(row.dataset.ccId);select(sendId);sendMenu.hidden=false;const rect=sendMenu.getBoundingClientRect(),scale=rect.width/sendMenu.offsetWidth||1;sendMenu.style.left=Math.max(4,Math.min(e.clientX,innerWidth-rect.width-8))/scale+'px';sendMenu.style.top=Math.max(4,Math.min(e.clientY,innerHeight-rect.height-8))/scale+'px';sendMenu.querySelector('button').focus({preventScroll:true});});
+  $('[data-cc-queue]').addEventListener('contextmenu',e=>{const row=e.target.closest('[data-cc-id]');if(!row||busy||editing||paymentDraft)return;e.preventDefault();closeSendMenu();sendId=Number(row.dataset.ccId);select(sendId);sendMenu.hidden=false;const rect=sendMenu.getBoundingClientRect(),scale=rect.width/sendMenu.offsetWidth||1;sendMenu.style.left=Math.max(4,Math.min(e.clientX,innerWidth-rect.width-8))/scale+'px';sendMenu.style.top=Math.max(4,Math.min(e.clientY,innerHeight-rect.height-8))/scale+'px';sendMenu.querySelector('button').focus({preventScroll:true});});
   document.addEventListener('pointerdown',e=>{if(!sendMenu.contains(e.target))closeSendMenu();});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSendMenu();});
   sendMenu.querySelector('[data-cc-reprint]').onclick=()=>{
     const id=sendId;closeSendMenu();if(busy||editing||!rows.some(row=>Number(row.id)===id))return;
@@ -8532,16 +8534,453 @@ initializeCashHistory(true);
   const request=(action,params={},body=null)=>window.CajaSQL.request(action,{fecha:today(),...params},body?{...body,fecha:today()}:null);
   function status(text,error=false){$('.cc-status').textContent=text;$('.cc-status').classList.toggle('error',error);$('.cc-status').hidden=!error;}
   let backgroundRefresh=false;
-  function controls(){for(const el of section.querySelectorAll('button,select,[data-cc-paid]'))el.disabled=(busy&&!backgroundRefresh)||editing||(el.matches('[data-cc-paid]')&&!boot?.editar); openInvoiceOption.disabled=busy||editing||!detail;}
-  function clearDetail(){$('[data-cc-items]').textContent='';$('[data-cc-values]').innerHTML=blankPaymentRows(0);$('[data-cc-detail-label]').textContent='';$('[data-cc-article-count]').textContent='';$('[data-cc-total-payment]').textContent=money(0);detail=null;controls();}
-  function blankPaymentRows(count){return ('<tr class="cc-empty-row" aria-hidden="true">'+Array(9).fill('<td></td>').join('')+'</tr>').repeat(Math.max(0,3-count));}
+  const paymentBody=$('[data-cc-values]');
+  const paymentPanel=paymentBody.closest('.cc-payments');
+  const paymentTable=paymentBody.closest('table');
+  const paymentColumns=['tipo','importe','tarjeta','cuotas','descripcion','coef','impRec','total','vencimiento'];
+  const paymentFields=['idTipoPago','importe','idTarjeta','cuotas','descripcion','coef','impRec','total'];
+  const paymentSelector='input[data-cc-payment-field]';
+  let newPaymentId=0;
+  const paymentKey=row=>String(row.orden??row.uiId);
+  const moneyFields=['importe','coef','impRec','total'];
+  const paymentCombos=new Map();
+  const roundMoney=value=>Math.sign(value)*Math.round((Math.abs(value)+Number.EPSILON)*100)/100;
+  let paymentCatalog=null,paymentRules=null,paymentDraft=null,savingPayments=false,paymentConfigError='';
+  const paymentFocused=()=>paymentBody.contains(document.activeElement);
+  const canEditPayments=()=>Boolean(boot?.administrador&&paymentRules&&detail?.version
+    &&paymentCatalog.comprobantesEmitibles.includes(Number(detail.idComprobante)));
+  const shownPayments=()=>paymentDraft?.rows||detail?.valores||[];
+  const paymentTypes=()=>paymentCatalog.tiposPago.filter(type=>[1,3,5,6].includes(Number(type.clase))
+    &&Number(type.id)!==14&&window.CorralonMediosPago.allowsVoucher(paymentRules,type.id,detail.idComprobante));
+  const paymentCards=row=>paymentCatalog.tarjetas.filter(card=>window.CorralonMediosPago.allowsCard(paymentRules,row.idTipoPago,card.id));
+  const paymentPlans=row=>paymentCatalog.tarjetasCuotas.filter(plan=>Number(plan.idTarjeta)===Number(row.idTarjeta));
+  const paymentLocked=row=>Number(row.vinculado)>0||Number(row.clase)===2;
+
+  async function loadPaymentCatalog(){
+    paymentCatalog=null;paymentRules=null;paymentConfigError='';
+    if(!boot?.administrador)return;
+    try{
+      const response=await fetch('/api/facturacion/bootstrap',{cache:'no-store'});
+      const config=await response.json();
+      if(!response.ok||!config.ok)throw Error(config.error||'No se pudo cargar el catálogo de pagos.');
+      paymentRules=await window.CorralonMediosPago.refreshSharedRules(config);
+      paymentCatalog=config;
+    }catch(error){paymentConfigError='No se pudo cargar la configuración de pagos. Pulsá Actualizar para reintentar.';}
+  }
+  function paymentBalance(values=shownPayments()){
+    const sum=key=>roundMoney(values.reduce((total,row)=>total+Number(row[key]||0),0));
+    const received=sum('total'),base=sum('importe'),adjustment=sum('impRec');
+    const issued=Math.abs(Number(detail?.total||0));
+    const articles=roundMoney(Math.abs((detail?.articulos||[]).reduce((total,row)=>total+Number(row.importe||0),0)));
+    const due=roundMoney(issued-received),remainingBase=roundMoney(articles-base),remainingAdjustment=roundMoney(issued-articles-adjustment);
+    return {received,due,remainingBase,remainingAdjustment,balanced:due===0&&remainingBase===0&&remainingAdjustment===0};
+  }
+  function paintPaymentTotals(){
+    const balance=paymentBalance(),difference=$('[data-cc-payment-difference]');
+    $('[data-cc-total-payment]').textContent=money(balance.received);
+    difference.hidden=!canEditPayments();
+    difference.classList.toggle('cc-unbalanced',!balance.balanced);
+    difference.textContent='Diferencia '+money(balance.due||balance.remainingBase||balance.remainingAdjustment);
+    difference.title='Importe faltante '+money(balance.due)+' · Base '+money(balance.remainingBase)+' · Ajuste '+money(balance.remainingAdjustment);
+  }
+  function controls(){
+    const blocked=(busy&&!backgroundRefresh)||editing;
+    for(const control of section.querySelectorAll('button,select,[data-cc-paid],[data-cc-tender]')){
+      if(paymentPanel.contains(control))continue;
+      control.disabled=blocked||Boolean(paymentDraft)||(control.matches('[data-cc-paid]')&&!boot?.editar);
+    }
+    openInvoiceOption.disabled=busy||editing||Boolean(paymentDraft)||!detail;
+    $('[data-cc-payment-actions]').hidden=!paymentDraft;
+    $('[data-cc-add-payment]').hidden=!canEditPayments();
+    paymentPanel.querySelectorAll('button,select,input').forEach(control=>control.disabled=blocked||savingPayments);
+  }
+  function fieldMarkup(row,index,key,label,combo=false){
+    const attrs=`data-cc-payment-field="${key}" data-index="${index}" aria-label="${label}, renglón ${index+1}"`;
+    if(combo){
+      const value=key==='idTipoPago'?row.tipo:key==='idTarjeta'?row.tarjeta:row.cuotas||'';
+      return `<input ${attrs} data-cc-payment-combo value="${esc(value||'')}" placeholder="Elegir…">`;
+    }
+    const format=key==='descripcion'?' maxlength="30"':key==='coef'?' inputmode="decimal" data-payment-percent class="cc-money-field"':' inputmode="decimal" data-number-format="currency" class="cc-money-field"';
+    return `<input ${attrs}${format} autocomplete="off" value="${esc(formatPaymentField(row,key))}">`;
+  }
+  function formatPaymentField(row,key){
+    if(key==='descripcion')return row.descripcion||'';
+    if(key==='coef')return qty(Number(row.coef||0)*100)+' %';
+    return money(row[key]);
+  }
+  function dependentPaymentField(row,index,key,writable){
+    const isAccount=key==='idTarjeta';
+    if(writable&&(isAccount?[3,5].includes(Number(row.clase)):Number(row.clase)===5&&Number(row.idTarjeta)>0))
+      return fieldMarkup(row,index,key,isAccount?'Tarjeta / cuenta':'Cuotas',true);
+    return esc(isAccount?(row.tarjeta||'Ninguna'):qty(row.cuotas));
+  }
+  function bindPaymentCombo(input,row,types){
+    const key=input.dataset.ccPaymentField;
+    const choices=key==='idTipoPago'?types:key==='idTarjeta'?paymentCards(row):paymentPlans(row).map(plan=>({id:plan.cuotas,nombre:plan.cuotas}));
+    const combo=window.CorralonFunciones.bindTextDropdown({input,items:choices.map(item=>({value:item.id,label:item.nombre})),
+      selectedValue:row[key],minWidth:0,visibleToggle:true,fixedMenu:true,menuScale:()=>1,allowEmptyPick:true,advanceOnEnter:false,pickFirstOnExit:true,
+      openOnFocus:key==='idTipoPago'||key==='idTarjeta',verticalArrowsNavigateGrid:true,
+      rank:key==='idTipoPago'?(_item,query,label)=>label.startsWith(query)?0:label.startsWith(query[0])?1:2:undefined,
+      listId:'cc-'+key+'-'+input.dataset.index,menuClass:'cc-payment-options'});
+    input.parentElement.querySelector('button').tabIndex=-1;
+    paymentCombos.set(input,combo);
+  }
+  function refreshPaymentDependents(row,index,key){
+    const fields=key==='idTipoPago'?[['idTarjeta',2],['cuotas',3]]:key==='idTarjeta'?[['cuotas',3]]:[];
+    for(const [field,col] of fields){
+      const paymentRow=paymentBody.querySelector('[data-cc-payment-row="'+index+'"]');
+      const cell=paymentRow.cells[col],previous=cell.querySelector('[data-cc-payment-combo]');
+      const hadFocus=cell.contains(document.activeElement);
+      paymentCombos.get(previous)?.destroy();
+      paymentCombos.delete(previous);
+      cell.innerHTML=dependentPaymentField(row,index,field,true);
+      const input=cell.querySelector('[data-cc-payment-combo]');
+      if(input)bindPaymentCombo(input,row);
+      if(hadFocus&&!focusPayment(index,field))paymentRow.focus({preventScroll:true});
+    }
+  }
+  function paymentRowMarkup(row,index,editable){
+    const writable=editable&&!paymentLocked(row);
+    const render=(key,label,choices=null)=>writable?fieldMarkup(row,index,key,label,choices):esc(formatPaymentField(row,key));
+    const type=writable?fieldMarkup(row,index,'idTipoPago','Tipo de valor',true):esc(row.tipo);
+    const card=dependentPaymentField(row,index,'idTarjeta',writable);
+    const plan=dependentPaymentField(row,index,'cuotas',writable);
+    const date=esc(String(row.vencimiento||'').replace(/^(\d{4})-(\d{2})-(\d{2}).*$/,'$3/$2/$1'));
+    return `<tr data-cc-payment-row="${index}" data-payment-id="${esc(paymentKey(row))}" tabindex="-1"${writable?' aria-keyshortcuts="Delete"':''}${paymentLocked(row)?' title="Valor vinculado o de solo lectura"':''}><td>${type}</td><td class="num">${render('importe','Importe')}</td><td>${card}</td><td>${plan}</td><td>${render('descripcion','Descripción')}</td><td class="num">${render('coef','Porcentaje de descuento o recargo')}</td><td class="num">${render('impRec','Importe de descuento o recargo')}</td><td class="num">${render('total','Total')}</td><td>${date}</td><td>${writable?`<button type="button" data-cc-remove-payment="${index}" aria-label="Quitar renglón ${index+1}">×</button>`:''}</td></tr>`;
+  }
+  function paymentNode(row){
+    return [...paymentBody.querySelectorAll('[data-payment-id]')].find(node=>node.dataset.paymentId===paymentKey(row));
+  }
+  function sortPaymentRows(){
+    const {key,dir}=paymentSort.getState();
+    for(const cell of paymentTable.tHead.querySelectorAll('[data-sort-key]'))cell.setAttribute('aria-sort',cell.dataset.sortKey===key?(dir==='asc'?'ascending':'descending'):'none');
+    const values=shownPayments(),nodes=values.map(paymentNode).filter(Boolean);
+    if(key)nodes.sort((a,b)=>{
+      const left=values[Number(a.dataset.ccPaymentRow)][key]??'',right=values[Number(b.dataset.ccPaymentRow)][key]??'';
+      const order=typeof left==='number'||typeof right==='number'?Number(left)-Number(right):String(left).localeCompare(String(right),'es',{numeric:true});
+      return dir==='desc'?-order:order;
+    });
+    const firstBlank=paymentBody.querySelector('.cc-empty-row');
+    nodes.forEach(node=>paymentBody.insertBefore(node,firstBlank));
+  }
+  function paymentFiller(){
+    const newFields=paymentBody.querySelector('[data-cc-new-payment]');
+    if(!newFields&&canEditPayments()){
+      paymentBody.insertAdjacentHTML('beforeend','<tr class="cc-empty-row" data-cc-new-payment><td><input data-cc-new-type aria-label="Tipo de valor del próximo renglón" placeholder="Elegir tipo…" tabindex="-1"></td>'+'<td></td>'.repeat(9)+'</tr>');
+      const input=paymentBody.querySelector('[data-cc-new-type]');
+      const binding=window.CorralonFunciones.bindTextDropdown({input,items:paymentTypes().map(type=>({value:type.id,label:type.nombre})),
+        minWidth:0,visibleToggle:true,fixedMenu:true,menuScale:()=>1,pickFirstOnExit:true,verticalArrowsNavigateGrid:true,
+        advanceOnEnter:false,listId:'cc-new-type',menuClass:'cc-payment-options'});
+      input.parentElement.querySelector('button').tabIndex=-1;
+      paymentCombos.set(input,binding);
+    }
+    const fillers=[...paymentBody.querySelectorAll('.cc-empty-row:not([data-cc-new-payment])')];
+    const needed=Math.max(0,3-shownPayments().length-Number(Boolean(paymentBody.querySelector('[data-cc-new-payment]'))));
+    fillers.slice(needed).forEach(row=>row.remove());
+    paymentBody.insertAdjacentHTML('beforeend',('<tr class="cc-empty-row" aria-hidden="true">'+'<td></td>'.repeat(10)+'</tr>').repeat(Math.max(0,needed-fillers.length)));
+  }
+  function renderPayments(){
+    const values=shownPayments(),editable=canEditPayments(),types=editable?paymentTypes():[];
+    for(const combo of paymentCombos.values())combo.destroy();
+    paymentCombos.clear();
+    paymentClipboard.clearSelection();
+    paymentBody.innerHTML=values.map((row,index)=>paymentRowMarkup(row,index,editable)).join('');
+    for(const input of paymentBody.querySelectorAll('[data-cc-payment-combo]'))bindPaymentCombo(input,values[Number(input.dataset.index)],types);
+    paymentFiller();
+    if(paymentSort.getState().key)sortPaymentRows();
+    paymentEditor.paint();
+    paintPaymentTotals();
+    controls();
+  }
+  function refreshPaymentAmounts(active,previousAuto){
+    const values=shownPayments(),auto=values.find(row=>row.automatic),firstBlank=paymentBody.querySelector('.cc-empty-row');
+    if(previousAuto&&!values.includes(previousAuto)){
+      const stale=paymentNode(previousAuto);
+      for(const input of stale?.querySelectorAll('[data-cc-payment-combo]')||[]){
+        paymentCombos.get(input)?.destroy();paymentCombos.delete(input);
+      }
+      stale?.remove();
+      paymentClipboard.clearSelection();
+    }
+    if(auto&&!paymentNode(auto)){
+      const index=values.indexOf(auto);
+      firstBlank.insertAdjacentHTML('beforebegin',paymentRowMarkup(auto,index,true));
+      for(const input of paymentNode(auto).querySelectorAll('[data-cc-payment-combo]'))bindPaymentCombo(input,auto,paymentTypes());
+    }
+    values.forEach((row,index)=>{
+      const node=paymentNode(row);
+      node.dataset.ccPaymentRow=index;
+      node.querySelector('[data-cc-remove-payment]')?.setAttribute('data-cc-remove-payment',index);
+      node.querySelectorAll(paymentSelector).forEach(input=>{
+        input.dataset.index=index;
+        if(input!==active&&moneyFields.includes(input.dataset.ccPaymentField))input.value=formatPaymentField(row,input.dataset.ccPaymentField);
+      });
+    });
+    paymentFiller();
+    paymentEditor.paint();
+    paintPaymentTotals();
+    controls();
+  }
+  function clearDetail(){
+    paymentEditor.resetHistory();
+    paymentClipboard.clearSelection();
+    detail=null;
+    $('[data-cc-items]').textContent='';
+    $('[data-cc-detail-label]').textContent='';
+    $('[data-cc-article-count]').textContent='';
+    $('[data-cc-payment-status]').textContent='';
+    renderPayments();
+  }
+  function beginPayments(){
+    if(!canEditPayments()||savingPayments||editing||(busy&&!backgroundRefresh))return false;
+    if(!paymentDraft)paymentDraft={id:detail.idRecibo,version:detail.version,rows:detail.valores.map(row=>({...row}))};
+    return true;
+  }
+  function focusPayment(index,key){
+    const input=paymentBody.querySelector(`[data-index="${index}"][data-cc-payment-field="${key}"]`);
+    return window.CorralonFunciones.focusField(input);
+  }
+  function newPayment(type){
+    return {orden:null,uiId:'new-'+(++newPaymentId),idTipoPago:Number(type.id),tipo:type.nombre,clase:Number(type.clase),idTarjeta:0,tarjeta:'',cuotas:0,
+      descripcion:'',importe:0,coef:0,impRec:0,total:0,vencimiento:today()};
+  }
+  function balanceWithCash(){
+    const automatic=paymentDraft.rows.find(row=>row.automatic);
+    const manual=paymentDraft.rows.filter(row=>!row.automatic);
+    const cash=paymentTypes().find(type=>Number(type.clase)===1);
+    const balance=paymentBalance(manual);
+    if(!cash||balance.remainingBase<=0||balance.due<=0)return manual;
+    const row=automatic||{...newPayment(cash),automatic:true};
+    Object.assign(row,{importe:balance.remainingBase,impRec:balance.remainingAdjustment,coef:balance.remainingAdjustment/balance.remainingBase,total:balance.due});
+    return [...manual,row];
+  }
+  function paymentStatus(message,error=false){
+    const target=$('[data-cc-payment-status]');
+    target.textContent=message;
+    target.classList.toggle('cc-unbalanced',error);
+  }
+  function setPaymentChoice(row,key,value){
+    if(key==='idTipoPago'){
+      const type=paymentTypes().find(item=>Number(item.id)===value);
+      if(!type)return false;
+      if(Number(row.idTipoPago)!==value)Object.assign(row,{idTipoPago:value,tipo:type.nombre,clase:Number(type.clase),idTarjeta:0,tarjeta:'',cuotas:0});
+    }else if(key==='idTarjeta'){
+      const card=paymentCards(row).find(item=>Number(item.id)===value);
+      if(!card||![3,5].includes(Number(row.clase)))return false;
+      if(Number(row.idTarjeta)!==value){
+        row.idTarjeta=value;row.tarjeta=card.nombre;
+        row.cuotas=Number(row.clase)===5?Number(paymentPlans(row)[0]?.cuotas||0):0;
+      }
+    }else{
+      if(Number(row.clase)!==5||!paymentPlans(row).some(plan=>Number(plan.cuotas)===value))return false;
+      row.cuotas=value;
+    }
+    return true;
+  }
+  function setPaymentAmount(row,key,value){
+    row[key]=key==='coef'?value/100:roundMoney(value);
+    if(key==='total'&&Number(row.coef||0)>-1){
+      row.importe=roundMoney(row.total/(1+Number(row.coef||0)));
+      row.impRec=roundMoney(row.total-row.importe);
+      row.coef=row.importe?row.impRec/row.importe:0;
+    }else window.CorralonMediosPago.adjustValue(row,key,Number,roundMoney);
+  }
+  function updatePayment(input,chosenValue=input.value,leaving=false){
+    const {index,ccPaymentField:key}=input.dataset;
+    const current=shownPayments()[Number(index)];
+    if(!current||paymentLocked(current)||!beginPayments())return;
+    const row=paymentDraft.rows[Number(index)];
+    const previousAuto=paymentDraft.rows.find(item=>item.automatic);
+    row.automatic=false;
+    if(moneyFields.includes(key)){
+      setPaymentAmount(row,key,window.CorralonFunciones.parseLocaleNumber(input.value)||0);
+      paymentDraft.rows=balanceWithCash();
+      refreshPaymentAmounts(input,previousAuto);
+    }else if(key==='descripcion'){
+      row.descripcion=input.value;
+      controls();
+    }else{
+      if(!setPaymentChoice(row,key,Number(chosenValue)))return;
+      if(leaving){
+        refreshPaymentDependents(row,Number(index),key);
+        controls();
+      }else{
+        paymentEditor.finish();
+        renderPayments();
+        const next=key==='idTipoPago'?([3,5].includes(row.clase)?'idTarjeta':'importe')
+          :key==='idTarjeta'&&row.clase===5?'cuotas':'descripcion';
+        focusPayment(index,next);
+      }
+    }
+    paymentStatus('Cambios sin guardar.');
+  }
+  function removePayments(keys,field='idTipoPago'){
+    const values=shownPayments(),removable=values.filter(row=>keys.includes(paymentKey(row))&&!paymentLocked(row));
+    if(!removable.length||!beginPayments())return;
+    const index=values.indexOf(removable[0]);
+    paymentEditor.finish();
+    const removed=new Set(removable.map(paymentKey));
+    paymentDraft.rows=paymentDraft.rows.filter(row=>!removed.has(paymentKey(row)));
+    paymentDraft.rows=balanceWithCash();
+    renderPayments();
+    paymentStatus('Fila eliminada. Cambios sin guardar.');
+    const nextIndex=Math.min(index,paymentDraft.rows.length-1);
+    if(nextIndex<0)paymentBody.querySelector('[data-cc-new-type]')?.focus();
+    else if(!focusPayment(nextIndex,field)&&!focusPayment(nextIndex,'idTipoPago'))
+      paymentNode(paymentDraft.rows[nextIndex])?.focus({preventScroll:true});
+  }
+  function addPayment(id,leaving=false){
+    const types=canEditPayments()?paymentTypes():[];
+    const type=id?types.find(item=>Number(item.id)===Number(id)):types.find(item=>Number(item.clase)===1)||types[0];
+    if(!type||!beginPayments())return;
+    paymentEditor.finish();
+    const balance=paymentBalance();
+    const row=newPayment(type);
+    if(balance.remainingBase>0&&balance.due>0)Object.assign(row,{importe:balance.remainingBase,impRec:balance.remainingAdjustment,
+      coef:balance.remainingAdjustment/balance.remainingBase,total:balance.due});
+    paymentDraft.rows.push(row);
+    renderPayments();paymentStatus('Cambios sin guardar.');
+    if(!leaving)focusPayment(paymentDraft.rows.indexOf(row),id?([3,5].includes(row.clase)?'idTarjeta':'importe'):'idTipoPago');
+  }
+  function paymentSnapshot(key){
+    const row=shownPayments().find(item=>paymentKey(item)===key);
+    if(!row)return null;
+    const automatic=shownPayments().find(item=>item!==row&&item.automatic)||null;
+    return {row,automatic};
+  }
+  function restorePayment(key,before){
+    if(!before||!beginPayments())return;
+    const index=paymentDraft.rows.findIndex(item=>paymentKey(item)===key);
+    if(index<0)return;
+    paymentDraft.rows[index]=before.row;
+    paymentDraft.rows=paymentDraft.rows.filter(item=>!item.automatic||item===before.row);
+    if(before.automatic)paymentDraft.rows.push(before.automatic);
+    const comparable=rows=>JSON.stringify(rows.map(({automatic,...row})=>row));
+    if(comparable(paymentDraft.rows)===comparable(detail.valores))paymentDraft=null;
+    renderPayments();
+    paymentStatus(paymentDraft?'Cambios sin guardar.':'');
+  }
+  function pastePayments(text,start,event){
+    if(!start||!canEditPayments())return false;
+    const matrix=window.CorralonFunciones.parseClipboardTable(text);
+    const visibleRows=[...paymentBody.querySelectorAll('[data-payment-id]')];
+    const selectedColumns=[...new Set(paymentClipboard.getSelectedCells().map(cell=>cell.cellIndex))].sort((a,b)=>a-b);
+    const fromHeader=Boolean(event.target.closest('th'));
+    const startRow=fromHeader?0:visibleRows.indexOf(start.parentElement);
+    const startColumn=fromHeader&&selectedColumns.length?selectedColumns[0]:start.cellIndex;
+    const normalize=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+    if(startRow<0)return false;
+    let changed=false;
+    matrix.forEach((line,r)=>line.forEach((raw,c)=>{
+      const node=visibleRows[startRow+r],index=Number(node?.dataset.ccPaymentRow);
+      const previous=shownPayments()[index],column=fromHeader&&selectedColumns.length>1?selectedColumns[c]:startColumn+c;
+      const field=paymentFields[column];
+      if(!previous||!field||paymentLocked(previous))return;
+      const row={...previous,automatic:false};
+      if(field==='descripcion')row.descripcion=raw.slice(0,30);
+      else if(moneyFields.includes(field)){
+        if(!/\d/.test(raw))return;
+        setPaymentAmount(row,field,window.CorralonFunciones.parseLocaleNumber(raw));
+      }else{
+        const choices=field==='idTipoPago'?paymentTypes():field==='idTarjeta'?paymentCards(row):paymentPlans(row).map(plan=>({id:plan.cuotas,nombre:plan.cuotas}));
+        const match=choices.find(item=>normalize(item.nombre)===normalize(raw)||String(item.id)===raw.trim());
+        if(!match||!setPaymentChoice(row,field,Number(match.id)))return;
+      }
+      if(!beginPayments())return;
+      paymentDraft.rows[index]=row;
+      changed=true;
+    }));
+    if(changed){
+      paymentDraft.rows=balanceWithCash();
+      paymentEditor.finish();
+      renderPayments();
+      paymentStatus('Cambios sin guardar.');
+      const index=paymentDraft.rows.findIndex(row=>paymentKey(row)===visibleRows[startRow]?.dataset.paymentId);
+      if(index>=0)focusPayment(index,paymentFields[startColumn]);
+    }
+    return changed;
+  }
+  const sharedPayments=window.CorralonFunciones;
+  const paymentEditor=sharedPayments.bindEditableTable({
+    root:paymentTable,selector:paymentSelector,rowSelector:'[data-payment-id]',rowKey:node=>node?.dataset.paymentId,
+    fieldKey:input=>input.dataset.ccPaymentField,columnIndex:input=>input.closest('td').cellIndex,selectFields:true,deleteWithSupr:true,
+    readRow:paymentSnapshot,restoreRow:restorePayment,deleteRows:(keys,input)=>removePayments(keys,input?.dataset.ccPaymentField),
+    navigateNewRowVertically:true,newRowTarget:()=>paymentBody.querySelector('[data-cc-new-type]:not(:disabled)')
+  });
+  [...paymentTable.tHead.rows[0].cells].slice(0,paymentColumns.length).forEach((cell,col)=>{
+    cell.dataset.col=col;cell.dataset.sortKey=paymentColumns[col];cell.tabIndex=0;cell.setAttribute('aria-sort','none');
+  });
+  const paymentClipboard=sharedPayments.bindTableSelectPaste({
+    root:paymentTable,cellSelector:'[data-payment-id] > td',selectOnCellMouseDown:false,clearOnDelete:false,selectAllOnCtrlA:false,
+    getPosition:cell=>({row:cell.parentElement.sectionRowIndex,col:cell.cellIndex}),
+    getCellValue:cell=>cell.querySelector(paymentSelector)?.value??cell.textContent,
+    pasteText:pastePayments
+  });
+  const paymentSort=sharedPayments.bindTableSort({root:paymentTable,ignoreModifiedClick:true,sort:sortPaymentRows});
+  paymentTable.tHead.addEventListener('mousedown',event=>{
+    const header=event.target.closest('th[data-col]');
+    if(header){paymentEditor.clearSelection();header.focus({preventScroll:true});}
+  });
+  paymentTable.tHead.addEventListener('keydown',event=>{
+    const header=event.target.closest('th[data-sort-key]');
+    if(header&&['Enter',' '].includes(event.key)){event.preventDefault();paymentSort.setSort(header.dataset.sortKey);}
+  });
+  sharedPayments.bindNumericExpressions({root:paymentBody,selector:paymentSelector+'[data-number-format="currency"]',commitOnChange:true});
+  sharedPayments.bindNumericExpressions({root:paymentBody,selector:'[data-payment-percent]',literalSuffix:' %',commitOnChange:true});
+  sharedPayments.bindLiveCurrency({root:paymentBody,preserveCaret:true,fixedOnBlur:true});
+  sharedPayments.bindLiveCurrency({root:paymentBody,selector:'[data-payment-percent]',prefix:'',suffix:' %',decimals:4,preserveCaret:true,fixedOnBlur:true});
+  paymentBody.addEventListener('input',event=>{
+    if(event.target.matches(paymentSelector+':not([data-cc-payment-combo])'))updatePayment(event.target);
+  });
+  paymentBody.addEventListener('change',event=>{
+    const input=event.target,key=input.dataset.ccPaymentField;
+    if(input.matches('[data-cc-new-type]')&&event.dropdownValue!=null){addPayment(event.dropdownValue,event.dropdownExit);return;}
+    if(!key)return;
+    if(event.dropdownValue!=null){
+      if(Number(shownPayments()[Number(input.dataset.index)][key]||0)!==Number(event.dropdownValue))
+        updatePayment(input,event.dropdownValue,event.dropdownExit);
+    }else if(moneyFields.includes(key))input.value=formatPaymentField(shownPayments()[Number(input.dataset.index)],key);
+  });
+  paymentBody.addEventListener('click',event=>{
+    const row=event.target.closest('[data-payment-id]');
+    if(!row)return;
+    if(event.target.closest('[data-cc-remove-payment]')){removePayments([row.dataset.paymentId]);return;}
+    if(!event.target.closest('input,select,button')&&row.hasAttribute('aria-keyshortcuts'))row.focus({preventScroll:true});
+  });
+  $('[data-cc-add-payment]').onclick=()=>addPayment();
+  $('[data-cc-revert-payments]').onclick=()=>{
+    if(!paymentDraft||savingPayments)return;
+    paymentDraft=null;paymentEditor.resetHistory();paymentStatus('');renderPayments();refresh();
+  };
+  $('[data-cc-save-payments]').onclick=async()=>{
+    if(!paymentDraft||!canEditPayments()||savingPayments||editing||(busy&&!backgroundRefresh))return;
+    const draft=paymentDraft;
+    const values=draft.rows.filter(row=>row.orden!=null||row.importe||row.impRec||String(row.descripcion||'').trim());
+    if(!values.length||values.some(row=>Number(row.importe)<=0)){paymentStatus('Ingresá un importe mayor que cero en cada valor.',true);return;}
+    if(!paymentBalance(values).balanced){paymentStatus('Los valores deben coincidir con la base, el ajuste y el total de la boleta.',true);return;}
+    const missing=values.findIndex(row=>!paymentLocked(row)&&(([3,5].includes(Number(row.clase))&&!Number(row.idTarjeta))
+      ||(Number(row.clase)===5&&!Number(row.cuotas))));
+    if(missing>=0){paymentStatus('Completá la tarjeta, cuenta o plan de cuotas.',true);return;}
+    savingPayments=true;controls();paymentStatus('Guardando valores…');
+    try{
+      const valores=values.map(({orden,idTipoPago,idTarjeta,cuotas,importe,impRec,coef,descripcion})=>
+        ({orden,idTipoPago,idTarjeta:idTarjeta||0,cuotas:cuotas||0,importe,impRec:impRec||0,coef:coef||0,descripcion:descripcion||''}));
+      await request('cobranza-valores',{}, {idRecibo:draft.id,version:draft.version,valores});
+      paymentDraft=null;
+      await select(draft.id);
+      if(detail?.idRecibo===draft.id)paymentStatus('Valores guardados.');
+    }catch(error){paymentStatus(error.message,true);}
+    finally{savingPayments=false;controls();}
+  };
   async function select(id,quiet=false){
     const same=selected===id;selected=id;const ticket=++sequence;if(!quiet||!same)clearDetail();section.querySelectorAll('[data-cc-id]').forEach(r=>r.setAttribute('aria-selected',String(Number(r.dataset.ccId)===id)));
     if(!id){clearDetail();return;}
-    try{const data=await request('cobranza-detalle',{id});if(ticket!==sequence||section.hidden)return;detail=data;
+    try{const data=await request('cobranza-detalle',{id});if(ticket!==sequence||section.hidden||(quiet&&(editing||paymentDraft||paymentFocused())))return;
+      if(quiet&&same&&detail?.version===data.version)return;
+      detail=data;
       $('[data-cc-items]').innerHTML=data.articulos.map(a=>`<tr><td>${esc(a.idart)}</td><td>${esc(a.descripcion)}</td><td class="num">${qty(a.cantidad)}</td><td class="num">${money(a.precio)}</td><td class="num">${money(a.importe)}</td></tr>`).join('');
-      $('[data-cc-values]').innerHTML=data.valores.map(v=>`<tr><td>${esc(v.tipo)}</td><td class="num">${money(v.importe)}</td><td>${esc(v.tarjeta||'Ninguna')}</td><td class="num">${qty(v.cuotas)}</td><td class="num">${qty(v.coef)}</td><td class="num">${money(v.impRec)}</td><td class="num">${money(v.total)}</td><td>${esc(String(v.vencimiento||'').replace(/^(\d{4})-(\d{2})-(\d{2}).*$/,'$3/$2/$1'))}</td><td>${esc(v.descripcion)}</td></tr>`).join('')+blankPaymentRows(data.valores.length);
-      const row=rows.find(row=>Number(row.id)===id);$('[data-cc-detail-label]').textContent=[row?.numero,row?.cliente].filter(Boolean).join(' · ');$('[data-cc-article-count]').textContent=data.articulos.length+' artículos · '+qty(data.articulos.reduce((sum,item)=>sum+Number(item.cantidad||0),0))+' unidades';$('[data-cc-total-payment]').textContent=money(data.valores.reduce((sum,item)=>sum+Number(item.total||0),0));controls();
+      renderPayments();
+      const row=rows.find(row=>Number(row.id)===id);$('[data-cc-detail-label]').textContent=[row?.numero,row?.cliente].filter(Boolean).join(' · ');$('[data-cc-article-count]').textContent=data.articulos.length+' artículos · '+qty(data.articulos.reduce((sum,item)=>sum+Number(item.cantidad||0),0))+' unidades';controls();
     }catch(error){if(ticket===sequence)status(error.message,true);}
   }
   function render(){
@@ -8550,9 +8989,17 @@ initializeCashHistory(true);
     section.querySelectorAll('[data-cc-tender]').forEach(calculate);controls();
   }
   function calculate(input){const tr=input.closest('[data-cc-id]'),row=rows.find(r=>Number(r.id)===Number(tr.dataset.ccId));const text=input.value.trim();const value=window.CorralonFunciones.parseLocaleNumber(text);tr.querySelector('[data-cc-change]').textContent=text&&Number.isFinite(value)?money(value-Number(row.total)):'';}
-  async function refresh(silent=false){
-    if(busy||editing||section.hidden)return;const branch=Number($('[data-cc-branch]').value);busy=true;backgroundRefresh=silent;controls();if(!silent)status('Consultando pendientes de hoy…');
-    try{const data=await request('cobranzas',{sucursal:branch});if(section.hidden||branch!==Number($('[data-cc-branch]').value))return;
+  async function refresh(silent=false,renewPermissions=false){
+    if(busy||editing||paymentDraft||(silent&&paymentFocused())||section.hidden)return;let branch=Number($('[data-cc-branch]').value);busy=true;backgroundRefresh=silent;controls();if(!silent)status('Consultando pendientes de hoy…');
+    try{
+      if(renewPermissions){
+        boot=await window.CajaSQL.bootstrap({refresh:true});
+        await loadPaymentCatalog();
+        const branchSelect=$('[data-cc-branch]');
+        branchSelect.hidden=boot.restringido;
+        if(boot.restringido)branch=Number(branchSelect.value=String(boot.sucursal));
+      }
+      const data=await request('cobranzas',{sucursal:branch});if(section.hidden||editing||paymentDraft||(silent&&paymentFocused())||branch!==Number($('[data-cc-branch]').value))return;
       const changed=JSON.stringify(rows)!==JSON.stringify(data.filas),active=document.activeElement,focusId=active?.matches('[data-cc-tender]')?Number(active.closest('[data-cc-id]').dataset.ccId):null,start=active?.selectionStart,end=active?.selectionEnd;
       const scrolls=Array.from(section.querySelectorAll('.cc-scroll')).map(el=>[el,el.scrollTop,el.scrollLeft]);
       rows=data.filas;const existing=new Set(rows.map(r=>Number(r.id)));for(const id of tenders.keys())if(!existing.has(id))tenders.delete(id);
@@ -8562,32 +9009,32 @@ initializeCashHistory(true);
     catch(error){status(error.message,true);}finally{busy=false;backgroundRefresh=false;controls();if(!section.hidden&&branch!==Number($('[data-cc-branch]').value))refresh(true);}
   }
   async function paid(id,checkbox){
-    checkbox.checked=false;if(busy||editing||!boot.editar)return;
+    checkbox.checked=false;if(busy||editing||paymentDraft||!boot.editar)return;
     busy=true;controls();
     try{await select(id);if(!detail||detail.idRecibo!==id)throw new Error('Volvé a seleccionar el comprobante.');if(!window.confirm(`¿Marcar como pagada la boleta ${rows.find(r=>Number(r.id)===id)?.numero}?`))return;
       await request('cobranza-pagada',{}, {idRecibo:id,version:detail.version});tenders.delete(id);status('Comprobante marcado como pagado.');
     }catch(error){status(error.message,true);return;}finally{busy=false;controls();}
     await refresh();
   }
-  async function openInvoice(){if(!detail||busy||editing)return;editing=true;controls();try{
-    await window.CorralonInvoiceHistory.openInvoice(selected,rows.map(r=>({idRecibo:r.id,numero:r.numero})),{allowEditValues:boot.editar,allowAnnul:boot.administrador,actions:{reprint:async id=>{openPrintDialog(id);return {preview:true};}},cancelInvoice:payload=>request('cobranza-anular',{},payload),saveValues:async payload=>{await request('cobranza-valores',{},payload);},onClose:()=>{editing=false;controls();refresh();}});
+  async function openInvoice(){if(!detail||(busy&&!backgroundRefresh)||editing||paymentDraft)return;editing=true;controls();try{
+    await window.CorralonInvoiceHistory.openInvoice(selected,rows.map(r=>({idRecibo:r.id,numero:r.numero})),{allowEditValues:boot.administrador,allowAnnul:boot.administrador,readOnly:!boot.administrador,actions:{reprint:async id=>{openPrintDialog(id);return {preview:true};}},cancelInvoice:payload=>request('cobranza-anular',{},payload),saveValues:async payload=>{await request('cobranza-valores',{},payload);},onClose:()=>{editing=false;controls();refresh();}});
   }catch(error){editing=false;controls();status(error.message,true);}}
-  $('[data-cc-queue]').addEventListener('click',e=>{const tr=e.target.closest('[data-cc-id]');if(!tr||busy||editing)return;const id=Number(tr.dataset.ccId);if(e.target.closest('[data-cc-paid-cell]')){paid(id,tr.querySelector('[data-cc-paid]'));return;}if(e.target.matches('input'))return;select(id);});
-  $('[data-cc-queue]').addEventListener('keydown',e=>{if(e.target.matches('input')||busy||editing)return;const tr=e.target.closest('[data-cc-id]');if(!tr)return;const index=rows.findIndex(r=>Number(r.id)===Number(tr.dataset.ccId));if(e.key==='Enter'){e.preventDefault();select(Number(tr.dataset.ccId));}if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const next=rows[index+(e.key==='ArrowDown'?1:-1)];if(next){select(Number(next.id));section.querySelector(`[data-cc-id="${Number(next.id)}"]`).focus();}}});
+  $('[data-cc-queue]').addEventListener('click',e=>{const tr=e.target.closest('[data-cc-id]');if(!tr||busy||editing||paymentDraft)return;const id=Number(tr.dataset.ccId);if(e.target.closest('[data-cc-paid-cell]')){paid(id,tr.querySelector('[data-cc-paid]'));return;}if(e.target.matches('input'))return;select(id);});
+  $('[data-cc-queue]').addEventListener('keydown',e=>{if(e.target.matches('input')||busy||editing||paymentDraft)return;const tr=e.target.closest('[data-cc-id]');if(!tr)return;const index=rows.findIndex(r=>Number(r.id)===Number(tr.dataset.ccId));if(e.key==='Enter'){e.preventDefault();select(Number(tr.dataset.ccId));}if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();const next=rows[index+(e.key==='ArrowDown'?1:-1)];if(next){select(Number(next.id));section.querySelector(`[data-cc-id="${Number(next.id)}"]`).focus();}}});
   window.CorralonFunciones.bindLiveCurrency({root:$('[data-cc-queue]'),selector:'[data-cc-tender]',preserveCaret:true,fixedOnBlur:true});
   $('[data-cc-queue]').addEventListener('focusout',event=>{if(event.target.matches('[data-cc-tender]')){tenders.set(Number(event.target.closest('[data-cc-id]').dataset.ccId),event.target.value);calculate(event.target);}});
   $('[data-cc-queue]').addEventListener('keydown',event=>{
     if(!event.target.matches('[data-cc-tender]')||!['Enter','Tab'].includes(event.key)||!boot.editar)return;
-    event.preventDefault();event.stopPropagation();if(event.repeat||busy||editing)return;
+    event.preventDefault();event.stopPropagation();if(event.repeat||busy||editing||paymentDraft)return;
     const input=event.target,tr=input.closest('[data-cc-id]'),id=Number(tr.dataset.ccId);
     if(input.value.trim())input.value=money(window.CorralonFunciones.parseLocaleNumber(input.value));
     tenders.set(id,input.value);calculate(input);paid(id,tr.querySelector('[data-cc-paid]'));
   });
   $('[data-cc-queue]').addEventListener('input',e=>{if(e.target.matches('[data-cc-tender]')){tenders.set(Number(e.target.closest('[data-cc-id]').dataset.ccId),e.target.value);calculate(e.target);}});
-  $('[data-cc-branch]').onchange=()=>{selected=0;refresh();};$('[data-cc-refresh]').onclick=()=>refresh();openInvoiceOption.onclick=async()=>{const id=sendId||selected;closeSendMenu();await select(id);if(detail?.idRecibo===id)await openInvoice();};
-  $('[data-cc-back]').onclick=async()=>{if(busy||editing)return;section.hidden=true;++sequence;options.main.hidden=false;await options.onBack();};
+  $('[data-cc-branch]').onchange=()=>{selected=0;refresh();};$('[data-cc-refresh]').onclick=()=>refresh(false,true);openInvoiceOption.onclick=async()=>{const id=sendId||selected;closeSendMenu();await select(id);if(detail?.idRecibo===id)await openInvoice();};
+  $('[data-cc-back]').onclick=async()=>{if(busy||editing||paymentDraft)return;section.hidden=true;++sequence;options.main.hidden=false;await options.onBack();};
   let openSequence=0;
-  window.CajaCobranzas={canLeave:()=>!editing&&!sendSaving&&!printing&&(!busy||backgroundRefresh),close(){++openSequence;++sequence;section.hidden=true;if(options?.main)options.main.hidden=false;},async open(config){const ticket=++openSequence;options=config;boot=await window.CajaSQL.bootstrap();if(ticket!==openSequence)return;$('[data-cc-branch]').value=String(boot.restringido?boot.sucursal:config.branch||0);$('[data-cc-branch]').hidden=boot.restringido;$('[data-cc-date]').textContent=new Date().toLocaleDateString('es-AR');config.main.hidden=true;section.hidden=false;await refresh();if(ticket===openSequence&&!section.hidden&&!window.cajaSystemInactive)$('[data-cc-back]').focus();}};
+  window.CajaCobranzas={canLeave:()=>!editing&&!paymentDraft&&!sendSaving&&!printing&&(!busy||backgroundRefresh),close(){++openSequence;++sequence;section.hidden=true;if(options?.main)options.main.hidden=false;},async open(config){const ticket=++openSequence;options=config;boot=await window.CajaSQL.bootstrap({refresh:true});await loadPaymentCatalog();if(ticket!==openSequence)return;$('[data-cc-branch]').value=String(boot.restringido?boot.sucursal:config.branch||0);$('[data-cc-branch]').hidden=boot.restringido;$('[data-cc-date]').textContent=new Date().toLocaleDateString('es-AR');config.main.hidden=true;section.hidden=false;await refresh();if(ticket===openSequence&&!section.hidden&&!window.cajaSystemInactive)$('[data-cc-back]').focus();}};
   setInterval(()=>{if(!window.cajaSystemInactive&&!section.hidden&&!document.hidden&&!document.querySelector('.invoice-history-overlay:not([hidden])'))refresh(true);},2000);
 })();
 
@@ -8704,7 +9151,7 @@ initializeCashHistory(true);
       const field=[...detail.querySelectorAll('.receipt-field')].find(el=>el.firstChild.textContent===label)?.querySelector('span');if(field)field.textContent=money(value);
     }
   }
-  function canEditValues(){if(detailOptions.readOnly===true)return false;const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return (allowed || detailOptions.allowEditValues===true)&&Number(detailData?.comprobante?.confirmado)!==0&&!Number(detailData?.comprobante?.anulada)&&Boolean(detailData?.versionValores)}
+  function canEditValues(data=detailData){if(data?.valueRulesUnavailable)return false;if(detailOptions.readOnly===true)return false;const user=valuesUser(),allowed=String(user.nivel||'').toLowerCase()==='administrador'||(user.permisos?.includes('facturacion')&&user.permisosEdicion?.includes('facturacion'));return (allowed || detailOptions.allowEditValues===true)&&Number(data?.comprobante?.confirmado)!==0&&!Number(data?.comprobante?.anulada)&&Boolean(data?.versionValores)}
   function canEditHeader(){if(!canEditValues())return false;const user=valuesUser(),isAdministrator=window.CorralonFunciones?.menuUserIsAdministrator;if(typeof isAdministrator==='function')return Boolean(isAdministrator('facturacion',user));return String(user.nivel||'').trim().toLowerCase()==='administrador'||(Array.isArray(user.permisos)&&user.permisos.includes('facturacion')&&Array.isArray(user.permisosEdicion)&&user.permisosEdicion.includes('facturacion'))}
   function headerState(header){return {idCliente:String(header.idCliente??''),completo:Boolean(Number(header.Completo??header.Pagada??0)),actualizaStock:Boolean(Number(header.stockActualizado)),enInformeVentas:Boolean(Number(header.EnInfVtas))}}
   function receiptHeaderChanges(){if(!canEditHeader())return {};const current=headerState(detailData.comprobante),original=detailData.headerOriginal||current,changes={};for(const key of Object.keys(current))if(current[key]!==original[key])changes[key]=current[key];if('idCliente' in changes){if(!/^[1-9]\d*$/.test(changes.idCliente))throw Error('Ingresá un ID de cliente válido.');changes.idCliente=Number(changes.idCliente)}return changes}
@@ -8724,15 +9171,15 @@ initializeCashHistory(true);
   detail.addEventListener('change',event=>{const input=event.target.closest('[data-header-key]');if(!input||!canEditHeader()||actionBusy)return;const key=input.dataset.headerKey;if(key==='idCliente'){detailData.comprobante.idCliente=input.value.trim();markHeaderDirty();resolveReceiptCustomer();return}const field={completo:'Completo',actualizaStock:'stockActualizado',enInformeVentas:'EnInfVtas'}[key];if(field){detailData.comprobante[field]=input.checked;markHeaderDirty()}});
   detail.addEventListener('keydown',async event=>{const input=event.target.closest('[data-header-key="idCliente"]');if(!input||!canEditHeader()||actionBusy)return;if(event.key==='Enter'){event.preventDefault();event.stopPropagation();detailData.comprobante.idCliente=input.value.trim();if(await resolveReceiptCustomer())detail.querySelector('[data-header-key="completo"]')?.focus()}});
 
-  function valueRules(){try{return window.CorralonMediosPago?.normalize(JSON.parse(localStorage.getItem('corralon_facturacion_medios_pago_v1')||'null'),historyConfig)}catch{return window.CorralonMediosPago?.normalize(null,historyConfig)}}
+  function valueRules(){if(detailData?.paymentRules)return detailData.paymentRules;try{return window.CorralonMediosPago?.normalize(JSON.parse(localStorage.getItem('corralon_facturacion_medios_pago_v1')||'null'),historyConfig)}catch{return window.CorralonMediosPago?.normalize(null,historyConfig)}}
   function valueTypes(){const rules=valueRules();return(historyConfig?.tiposPago||[]).filter(p=>[1,3,5,6].includes(Number(p.clase))&&Number(p.id)!==14&&(!window.CorralonMediosPago||window.CorralonMediosPago.allowsVoucher(rules,p.id,detailData.comprobante.idComprobante)))}
   function valueCards(value){const rules=valueRules();return(historyConfig?.tarjetas||[]).filter(c=>!window.CorralonMediosPago||window.CorralonMediosPago.allowsCard(rules,value.idTipoPago,c.id))}
-  function valueSelect(value,index,key,choices){return `<select data-value-index="${index}" data-value-key="${key}" aria-label="${key==='idTipoPago'?'Tipo de valor':key==='idTarjeta'?'Tarjeta o cuenta':'Cuotas'}" style="width:100%;font:inherit;border:1px solid #bbb;background:white">${choices.map(c=>`<option value="${Number(c.id)}" ${Number(c.id)===Number(value[key])?'selected':''}>${escape(c.nombre)}</option>`).join('')}</select>`}
+  function valueSelect(value,index,key,choices){return `<select data-value-index="${index}" data-value-key="${key}" aria-label="${key==='idTipoPago'?'Tipo de valor':key==='idTarjeta'?'Tarjeta o cuenta':'Cuotas'}" style="width:100%;font:inherit;border:1px solid #bbb;background:white">${choices.map(c=>`<option value="${Number(c.id)}" ${Number(c.id)===Number(value[key])?'selected':''} ${c.disabled?'disabled':''}>${escape(c.nombre)}</option>`).join('')}</select>`}
   function valueCells(value,index){
     if(!canEditValues())return [escape(value.tipo||value.idTipoPago),escape(value.tarjeta||'Ninguna'),escape(value.cuotas??0)];
-    const types=valueTypes();if(!types.some(p=>Number(p.id)===Number(value.idTipoPago)))types.push({id:value.idTipoPago,nombre:value.tipo});
+    const types=valueTypes();if(!types.some(p=>Number(p.id)===Number(value.idTipoPago)))types.push({id:value.idTipoPago,nombre:value.tipo,disabled:true});
     const cls=Number((historyConfig?.tiposPago||[]).find(p=>Number(p.id)===Number(value.idTipoPago))?.clase||value.clase),cards=[{id:0,nombre:'Ninguna'},...valueCards(value)],plans=[{id:0,nombre:'0'},...(historyConfig?.tarjetasCuotas||[]).filter(p=>Number(p.idTarjeta)===Number(value.idTarjeta)).map(p=>({id:p.cuotas,nombre:p.cuotas}))];
-    if(value.idTarjeta&&!cards.some(c=>Number(c.id)===Number(value.idTarjeta)))cards.push({id:value.idTarjeta,nombre:value.tarjeta});
+    if(value.idTarjeta&&!cards.some(c=>Number(c.id)===Number(value.idTarjeta)))cards.push({id:value.idTarjeta,nombre:value.tarjeta,disabled:true});
     return [valueSelect(value,index,'idTipoPago',types),[3,5].includes(cls)?valueSelect(value,index,'idTarjeta',cards):escape(value.tarjeta||'Ninguna'),cls===5?valueSelect(value,index,'cuotas',plans):escape(value.cuotas??0)];
   }
   function fitReceiptDetail(){
@@ -9029,7 +9476,14 @@ initializeCashHistory(true);
       notifyDetailSection(true);
     }
     const body=detail.querySelector('[data-detail-body]');const footer=detail.querySelector('.invoice-history-footer');if(footer&&body.contains(footer))detail.querySelector('.invoice-history-card').appendChild(footer);body.textContent='Consultando detalle…';
-    try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;const h=result.comprobante;detailData=result;detailData.headerOriginal=headerState(h);detailData.headerResolvedCustomer=String(h.idCliente??'');receiptValuesBasis(result);const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
+    try{const result=await sql('comprobante?id='+encodeURIComponent(row.idRecibo),controller);if(request!==detailSequence||detail.hidden)return;
+      if(canEditValues(result)&&window.CorralonMediosPago?.refreshSharedRules){
+        try{result.paymentRules=await window.CorralonMediosPago.refreshSharedRules(historyConfig);}
+        catch{result.valueRulesUnavailable=true;}
+        if(request!==detailSequence||detail.hidden)return;
+        if(result.valueRulesUnavailable)detail.querySelector('[data-action-status]').textContent='No se pudieron cargar las reglas de medios de pago. Volvé a abrir la boleta para editar.';
+      }
+      const h=result.comprobante;detailData=result;detailData.headerOriginal=headerState(h);detailData.headerResolvedCustomer=String(h.idCliente??'');receiptValuesBasis(result);const unavailable=!Number(h.confirmado)||Number(h.anulada)!==0;const adapters=historyActions();detail.querySelector('[data-preview]').disabled=unavailable||!adapters.preview;detail.querySelector('[data-reprint]').disabled=unavailable||!adapters.reprint;detail.querySelector('[data-recall]').disabled=!Number(h.confirmado)||!adapters.recall;
       const typeName=h.tipo||(historyConfig?.comprobantes||[]).find(t=>Number(t.id)===Number(h.idComprobante))?.nombre||row.tipo;
       detail.querySelector('[data-title]').textContent='Boleta '+h.numero+(typeName?' · '+typeName:'');
       if(sectionActive)notifyDetailSection(true);
@@ -9120,7 +9574,9 @@ initializeCashHistory(true);
       rows=context.map(row=>({...row,idRecibo:Number(row.idRecibo??row.id)}));
       let index=rows.findIndex(row=>row.idRecibo===id);
       if(index<0){rows=[{idRecibo:id,numero:''}];index=0;}
-      await openDetail(index);detail.querySelector('[data-detail-close]').focus();
+      await openDetail(index);
+      const valueField=options.focusValues&&detail.querySelector('[data-value-key="idTipoPago"]');
+      (valueField||detail.querySelector('[data-detail-close]')).focus();
     },
     close:closeDetail
   };

@@ -42,6 +42,7 @@
     #articleListTable #articles button[data-id]{max-width:100%;border:0!important;box-shadow:none!important;background:transparent!important}
     #articles td[data-list-field]:not([data-list-field="suspendido"]){cursor:text}
     #articleListTable td[data-list-key="suspendido"]{text-align:center}
+    #articleListTable [data-suspend-article]:disabled{pointer-events:none}
     #articleListTable :is(input[data-suspend-article],input[data-new-field="suspendido"]){width:14px;height:14px;margin:0;vertical-align:middle}
     #articleListTable #articles > tr:is(:focus-within,:has(> td.is-selected)) > td,
     #articleListTable #articles:not(:has(td.is-selected,td:focus-within)) > tr.article-current > td,
@@ -64,7 +65,11 @@
     #articleRowMenu{position:fixed;z-index:1000;margin:0;padding:3px;border:1px solid var(--corralon-line,#aaa);background:var(--corralon-white,#fff);box-shadow:0 3px 12px #0002}
     #articleRowMenu button{display:block;width:100%;border:0;border-radius:0;background:transparent;text-align:left}
     #articleRowMenu button:is(:hover,:focus-visible){background:var(--corralon-selection,#d8eaff)}
-    #articleListTable th[data-sort-key]{cursor:grab;user-select:none}
+    #articleListTable th[data-sort-key]{cursor:grab;user-select:none;padding-right:16px}
+    #articleListTable .article-column-resizer{position:absolute;top:0;right:0;bottom:0;width:10px;cursor:col-resize;z-index:1}
+    #articleListTable .article-column-resizer::after{content:"";position:absolute;right:3px;top:3px;bottom:3px;width:1px;background:var(--corralon-line-strong,#b9cde4)}
+    #articleListTable .article-column-resizer:hover::after{background:var(--corralon-primary);width:2px}
+    body.article-columns-resizing,body.article-columns-resizing #articleListTable th{cursor:col-resize;user-select:none}
     #articleListTable th.article-column-dragging{cursor:grabbing;opacity:.65}
     #articleListTable th[data-column-drop="before"]{box-shadow:inset 3px 0 var(--corralon-text)}
     #articleListTable th[data-column-drop="after"]{box-shadow:inset -3px 0 var(--corralon-text)}
@@ -99,7 +104,7 @@
   </style>
   <link rel="stylesheet" href="theme-corralon.css">
   <script src="funciones.js"></script>
-  <script src="corralon-system.js?v=0.0.5"></script>
+  <script src="corralon-system.js?v=0.0.6"></script>
 
 </head>
 <body data-page-theme="articulos-sql">
@@ -177,7 +182,7 @@
   let savedDraft=null, pendingArticleSave=null, articleSavePromise=null;
   const listSaves=new Map();
   let listEditor=null,listRefreshPending=false;
-  let creatingArticle=false, newListRequest=null, newListValues={};
+  let creatingArticle=false, newListRequest=null, newListTemplate=null, newListValues={};
   let sheetArticleIds=null;
   const articleViewToggle=$('articleViewToggle');articleViewToggle.hidden=!workspace;
   const articlePricePesos=$('articlePricePesos');
@@ -909,7 +914,9 @@
   const articleNewRow=articleTable.createTFoot();
   articleNewRow.id='articleNewRow';articleNewRow.hidden=true;
   const articleOrderKey='articulos-sql.columnas';
+  const articleWidths=[];
   let articleColumns=[...articleHeaders.cells];
+  const articleWidthIndex=new Map(articleColumns.map((header,index)=>[header.dataset.sortKey,index]));
   try {
     const saved=JSON.parse(localStorage.getItem(articleOrderKey));
     if(Array.isArray(saved)&&saved.length===articleColumns.length&&new Set(saved).size===saved.length&&saved.every(key=>articleColumns.some(header=>header.dataset.sortKey===key))){
@@ -935,23 +942,23 @@
         const attributes=key==='costoLista'?'inputmode="decimal" data-number-format="money" data-nonnegative="1"':`maxlength="${key==='descripcion'?100:30}"`;
         content=`<input type="text" data-new-field="${key}" aria-label="${label} del artículo nuevo" autocomplete="off" value="${esc(value)}" ${attributes}>`;
       }
-      return `<td data-list-key="${key}">${content}</td>`;
+      return `<td tabindex="-1" data-list-key="${key}">${content}</td>`;
     }).join('');
     articleNewRow.innerHTML=`<tr>${cells}</tr>`;
     if(saving)for(const control of articleNewRow.querySelectorAll('input,select,button'))control.disabled=true;
   }
   function newArticleFromList(){
-    const article=blankArticle(newListRequest??=FX.createUuid());
+    const article={...blankArticle(newListRequest??=FX.createUuid()),...newListTemplate};
     article.codigoProveedor=String(newListValues.codigoProveedor||'').trim();
     article.descripcion=String(newListValues.descripcion||'').trim().toUpperCase();
-    article.descripcionWeb=article.descripcion;
+    if(!newListTemplate||article.descripcion!==newListTemplate.descripcion)article.descripcionWeb=article.descripcion;
     article.suspendido=Boolean(newListValues.suspendido);
     article.idProveedor=Number(newListValues.proveedor)||null;
     article.idRubro=Number(newListValues.rubro)||null;
     const cost=articleNewRow.querySelector('[data-new-field="costoLista"]');
     article.costoLista=readNumber(cost,0);
     if(article.costoLista===undefined){cost.reportValidity();return null;}
-    if(article.costoLista!=null)recalculate(article,'costoLista');
+    if(article.costoLista!=null&&(!newListTemplate||article.costoLista!==newListTemplate.costoLista))recalculate(article,'costoLista');
     return article;
   }
   async function openNewArticle(fromList=false){
@@ -983,7 +990,7 @@
       const data=await api({},{accion:'nuevo',solicitud:article.solicitud,articulo:{...article,descripcion:description},stock:[]});
       const id=String(data.articulo.id);
       storeArticleInList(data.articulo,id);
-      if(newListRequest===article.solicitud){newListRequest=null;newListValues={};}
+      if(newListRequest===article.solicitud){newListRequest=null;newListTemplate=null;newListValues={};}
       if(inForm){
         creatingArticle=false;selected=id;
         drawForm(data.articulo,data.stock||[],{stockMinimo:article.stockMinimo,stockMaximo:article.stockMaximo,fechaAlta:data.articulo.ultimaActualizacion,...data.auditoria});
@@ -1039,7 +1046,22 @@
     const checkbox=els.articles.querySelector(`tr[data-article-id="${CSS.escape(id)}"] [data-suspend-article]`);
     if(checkbox)checkbox.disabled=true;
   }
-  function beginListEdit(cell){
+  function listCaretAtClick(cell,click){
+    const text=cell.firstChild;
+    if(!click?.detail||text?.nodeType!==Node.TEXT_NODE)return null;
+    const range=document.createRange();
+    range.selectNodeContents(text);
+    const bounds=range.getBoundingClientRect();
+    const x=click.clientX;
+    if(x<=bounds.left)return 0;
+    if(x>=bounds.right)return text.length;
+    const y=(bounds.top+bounds.bottom)/2;
+    const caret=document.caretPositionFromPoint?.(x,y);
+    if(caret?.offsetNode===text)return caret.offset;
+    const legacyCaret=document.caretRangeFromPoint?.(x,y);
+    return legacyCaret?.startContainer===text?legacyCaret.startOffset:null;
+  }
+  function beginListEdit(cell,click){
     const key=cell?.dataset.listField;
     if(!canEditArticleList()||!key||key==='suspendido'||listEditor)return;
     const article=filtered[Number(cell.dataset.row)];
@@ -1068,9 +1090,13 @@
       event.preventDefault();
       finishListEdit(event.key==='Enter',true);
     });
+    const caret=lookup?null:listCaretAtClick(cell,click);
     cell.replaceChildren(input);
     FX.focusField(input,{select:false,openDropdown:Boolean(lookup)});
-    if(!lookup)input.setSelectionRange(input.value.length,input.value.length);
+    if(!lookup){
+      const offset=Math.min(caret??input.value.length,input.value.length);
+      input.setSelectionRange(offset,offset);
+    }
   }
   function finishListEdit(commit=true,restoreFocus=false){
     if(!listEditor)return;
@@ -1089,25 +1115,30 @@
     if(restoreFocus)cell.focus({preventScroll:true});
     queueMicrotask(refreshPendingArticleList);
   }
-  const articleBaseWidth=articleColumns.reduce((width,header)=>width+Number(header.dataset.width),0);
-  const articleMinWidth=articleColumns.reduce((width,header)=>width+Number(header.dataset.minWidth??header.dataset.width),0);
-  const flexibleColumns=Object.fromEntries(articleColumns.filter(header=>header.dataset.minWidth).map(header=>[header.dataset.sortKey,header.dataset]));
+  const flexibleColumnKeys=['descripcion','codigoProveedor'];
   function sizeArticleColumns(){
-    const tableWidth=Math.max(articleMinWidth,articleTableScroll.clientWidth);
-    const extra=tableWidth-articleBaseWidth;
-    const description=flexibleColumns.descripcion;
-    const supplierCode=flexibleColumns.codigoProveedor;
-    const flexibleWidth=Number(description.width)+Number(supplierCode.width)+extra;
-    const descriptionWidth=Math.max(Number(description.minWidth),Math.min(
-      flexibleWidth-Number(supplierCode.minWidth),
-      Number(description.width)+Math.round(extra*0.7)
-    ));
-    const widths={descripcion:descriptionWidth,codigoProveedor:flexibleWidth-descriptionWidth};
+    const widths=Object.fromEntries(articleColumns.map(header=>{
+      const key=header.dataset.sortKey;
+      return [key,articleWidths[articleWidthIndex.get(key)]??Number(header.dataset.width)];
+    }));
+    const flexible=flexibleColumnKeys.filter(key=>articleWidths[articleWidthIndex.get(key)]==null);
+    const minWidth=key=>Number(articleColumns.find(header=>header.dataset.sortKey===key).dataset.minWidth);
+    const extra=articleTableScroll.clientWidth-Object.values(widths).reduce((total,width)=>total+width,0);
+    if(flexible.length===2){
+      const [description,supplierCode]=flexible;
+      const descriptionMin=minWidth(description),supplierMin=minWidth(supplierCode);
+      const available=Math.max(descriptionMin+supplierMin,widths[description]+widths[supplierCode]+extra);
+      widths[description]=Math.max(descriptionMin,Math.min(available-supplierMin,widths[description]+Math.round(extra*.7)));
+      widths[supplierCode]=available-widths[description];
+    }else if(flexible.length===1){
+      const key=flexible[0];
+      widths[key]=Math.max(minWidth(key),widths[key]+extra);
+    }
     const cols=articleTable.querySelector('colgroup').children;
     articleColumns.forEach((header,index)=>{
-      cols[index].style.width=(widths[header.dataset.sortKey]??header.dataset.width)+'px';
+      cols[index].style.width=widths[header.dataset.sortKey]+'px';
     });
-    articleTable.style.setProperty('--article-table-width',tableWidth+'px');
+    articleTable.style.setProperty('--article-table-width',Object.values(widths).reduce((total,width)=>total+width,0)+'px');
   }
   function layoutArticleColumns(){
     const cols=articleColumns.map((header,index)=>{
@@ -1119,13 +1150,24 @@
     sizeArticleColumns();
   }
   layoutArticleColumns();
+  for(const header of articleColumns){
+    const grip=document.createElement('span');
+    grip.className='article-column-resizer';
+    grip.title='Arrastrá para cambiar el ancho';
+    grip.setAttribute('aria-hidden','true');
+    header.append(grip);
+  }
+  FX.bindResizableColumns({root:articleHeaders,handleSelector:'.article-column-resizer',headerSelector:'th[data-sort-key]',
+    getIndex:header=>articleWidthIndex.get(header?.dataset.sortKey),widths:articleWidths,storageKey:'articulos-sql.anchosColumnas',
+    minWidth:56,resizingClass:'article-columns-resizing',apply:sizeArticleColumns});
   new ResizeObserver(sizeArticleColumns).observe(articleTableScroll);
 
   let columnDrag=null, suppressHeaderClick=false;
   articleHeaders.addEventListener('pointerdown',event=>{
     const header=event.target.closest('th[data-sort-key]');
     if(!header||event.pointerType!=='mouse'||(event.button!==0&&event.button!==2))return;
-    suppressHeaderClick=false;
+    suppressHeaderClick=Boolean(event.target.closest('.article-column-resizer'));
+    if(suppressHeaderClick)return;
     columnDrag={header,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,active:false,target:null};
   });
   document.addEventListener('pointermove',event=>{
@@ -1163,7 +1205,7 @@
   document.addEventListener('pointerup',finishArticleColumnDrag);
   document.addEventListener('pointercancel',finishArticleColumnDrag);
   articleTable.addEventListener('click',event=>{
-    if(suppressHeaderClick&&event.target.closest('th')){
+    if(event.target.closest('.article-column-resizer')||(suppressHeaderClick&&event.target.closest('th'))){
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -1172,7 +1214,7 @@
   articleHeaders.addEventListener('contextmenu',event=>{if(columnDrag?.active||suppressHeaderClick)event.preventDefault();});
   articleTable.addEventListener('mousedown',event=>{
     if(event.button!==0||event.target.closest('input,select,button'))return;
-    event.target.closest('td[data-row]')?.focus({preventScroll:true});
+    event.target.closest('td[data-row],#articleNewRow td')?.focus({preventScroll:true});
   });
   articleTable.addEventListener('keydown',event=>{
     const cell=event.target.closest('td[data-row]');if(!cell)return;
@@ -1288,10 +1330,18 @@
   FX.bindLinearNavigation({root:document.querySelector('.filters'),selector:'input',selectOnAnyFocus:true,selectOnFirstPointerFocus:true,navigateLeftRight:true,smartCaret:true});
 
   els.articles.addEventListener('click',event=>{
+    if(event.ctrlKey){event.preventDefault();return;}
     const button=event.target.closest('button[data-id]');
     if(button){select(button.dataset.id,false,true,null);return;}
-    if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||event.target.closest('input,select'))return;
-    beginListEdit(event.target.closest('td[data-list-field]'));
+    if(event.metaKey||event.shiftKey||event.altKey||event.target.closest('input,select'))return;
+    beginListEdit(event.target.closest('td[data-list-field]'),event);
+  });
+  els.articles.addEventListener('dblclick',event=>{
+    if(!event.ctrlKey||event.button!==0||event.shiftKey||event.altKey||event.metaKey)return;
+    const id=event.target.closest('tr[data-article-id]')?.dataset.articleId;
+    if(!id)return;
+    event.preventDefault();
+    select(id,false,true,null);
   });
   els.articles.addEventListener('keydown',event=>{
     const cell=event.target.closest('td[data-row]');
@@ -1364,11 +1414,14 @@
   let articleTemplateText='', pastingArticleTemplate=false;
   function copyArticleTemplate(){
     if(!draft||creatingArticle||loadingDetail||!$('articleForm')?.reportValidity())return;
+    writeArticleTemplate(draft,classicArticle);
+  }
+  function writeArticleTemplate(article,classic){
     const values=blankArticle(null);
     delete values.id;
     delete values.solicitud;
     for(const key of Object.keys(values)){
-      const value=draft[key]??classicArticle?.[key];
+      const value=article[key]??classic?.[key];
       if(value!=null)values[key]=typeof values[key]==='boolean'?flag(value):value;
     }
     articleTemplateText=articleTemplateHeader+'\n'+JSON.stringify(values);
@@ -1377,7 +1430,7 @@
     const copyFallback=()=>{
       const previous=document.activeElement,field=document.createElement('textarea');
       field.value=text;field.style.cssText='position:fixed;opacity:0;pointer-events:none';
-      els.articleDialog.append(field);field.select();
+      (els.articleDialog.open?els.articleDialog:document.body).append(field);field.select();
       try{document.execCommand('copy');}
       catch(_){}
       finally{field.remove();previous?.focus({preventScroll:true});}
@@ -1385,12 +1438,13 @@
     if(navigator.clipboard?.writeText)navigator.clipboard.writeText(text).catch(copyFallback);
     else copyFallback();
   }
-  function applyArticleTemplate(text){
+  function articleFromTemplate(text,requestId){
+    if(!isArticleTemplate(text))throw new Error('Copiá primero un artículo con Ctrl + Shift + C.');
     const values=JSON.parse(text.slice(articleTemplateHeader.length+1));
     if(!values||typeof values!=='object'||Array.isArray(values)||typeof values.descripcion!=='string'){
       throw new Error('La plantilla del artículo no es válida.');
     }
-    const original=savedDraft,article=blankArticle(draft.solicitud);
+    const article=blankArticle(requestId);
     for(const key of Object.keys(article)){
       if(key==='id'||key==='solicitud'||!Object.hasOwn(values,key))continue;
       const value=values[key];
@@ -1401,6 +1455,10 @@
     article.descripcion=copiedName(article.descripcion);
     article.descripcionWeb=values.descripcionWeb?copiedName(values.descripcionWeb):article.descripcion;
     recalculate(article);
+    return article;
+  }
+  function applyArticleTemplate(text){
+    const original=savedDraft,article=articleFromTemplate(text,draft.solicitud);
     closeCombo();
     drawForm(article,[],null);
     savedDraft=original;
@@ -1414,11 +1472,7 @@
     const initialDraft=draft;
     pastingArticleTemplate=true;
     try{
-      let text=clipboardText||(fromButton?articleTemplateText:'');
-      if(!text&&navigator.clipboard?.readText){
-        try{text=await navigator.clipboard.readText();}catch(_){}
-      }
-      if(!text)text=articleTemplateText||await FX.requestClipboardText();
+      const text=clipboardText||await readArticleTemplate(fromButton);
       if(!text||draft!==initialDraft||!creatingArticle||saving||loadingDetail||!els.articleDialog.open)return;
       if(!fromButton&&text.startsWith('CORRALON_PRECIO_ARTICULO_V1')){await pasteProviderPrice(text);return;}
       if(dirty){status('Abrí un formulario nuevo y vacío para pegar la plantilla.',true);return;}
@@ -1429,6 +1483,46 @@
     }catch(error){status(error instanceof SyntaxError?'La plantilla del artículo no es válida.':error.message,true);}
     finally{pastingArticleTemplate=false;}
   }
+  async function readArticleTemplate(preferLocal=false){
+    let text=preferLocal?articleTemplateText:'';
+    if(!text&&navigator.clipboard?.readText){
+      try{text=await navigator.clipboard.readText();}catch(_){}
+    }
+    return text||articleTemplateText||await FX.requestClipboardText();
+  }
+  let listTemplateCopy=0;
+  async function copyListArticleTemplate(id){
+    const ticket=++listTemplateCopy;
+    try{
+      const data=await api({id,vista:'clasico'});
+      if(ticket===listTemplateCopy)writeArticleTemplate(articleDraft(data.articulo),data.clasico);
+    }catch(error){if(ticket===listTemplateCopy)status(error.message,true);}
+  }
+  async function pasteListArticleTemplate(){
+    if(!canEditArticleList()||saving||pastingArticleTemplate||newListTemplate||Object.values(newListValues).some(Boolean))return;
+    pastingArticleTemplate=true;
+    try{
+      const text=await readArticleTemplate();
+      if(!text||!canEditArticleList()||saving||els.articleDialog.open||Object.values(newListValues).some(Boolean))return;
+      const article=articleFromTemplate(text,newListRequest??=FX.createUuid());
+      newListTemplate=article;
+      newListValues={codigoProveedor:article.codigoProveedor,descripcion:article.descripcion,suspendido:article.suspendido,
+        proveedor:String(article.idProveedor??''),rubro:String(article.idRubro??''),costoLista:article.costoLista==null?'':numericText(article.costoLista,'money')};
+      renderNewArticleRow();
+      articleNewRow.querySelector('[data-new-field="descripcion"]')?.focus({preventScroll:true});
+      status('Plantilla pegada. Revisá la fila y pulsá Guardar.');
+    }catch(error){status(error instanceof SyntaxError?'La plantilla del artículo no es válida.':error.message,true);}
+    finally{pastingArticleTemplate=false;}
+  }
+  articleTable.addEventListener('keydown',event=>{
+    if(els.articleDialog.open||!(event.ctrlKey||event.metaKey)||!event.shiftKey||event.altKey||event.isComposing)return;
+    const key=event.key.toLowerCase(),row=event.target.closest('tr[data-article-id]');
+    if((key!=='c'||!row)&&(key!=='v'||!articleNewRow.contains(event.target)))return;
+    event.preventDefault();event.stopPropagation();
+    if(event.repeat)return;
+    if(key==='c')copyListArticleTemplate(row.dataset.articleId);
+    else pasteListArticleTemplate();
+  },true);
   els.detail.addEventListener('paste',event=>{
     if(!creatingArticle)return;
     const text=event.clipboardData?.getData('text/plain')||'';

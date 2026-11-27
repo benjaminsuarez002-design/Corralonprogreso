@@ -215,15 +215,15 @@ internal static partial class FacturacionCopiaApi
     private static int CajaInputId(Dictionary<string,object> input) {return (int)Number(Value(input,"id") ?? (object)0);}
     private const string CajaPendingFrom=" FROM dbo.FacturasATP f JOIN dbo.[Depósitos] d ON d.[IDDepósito]=f.[IDDepósito] AND d.IDEmp=f.IDEmp JOIN dbo.TipoComprobantes t ON t.IDComprob=f.IDComprob WHERE f.IDEmp=1 AND f.Fecha>=@p0 AND f.Fecha<@p1 AND f.Confirmado<>0 AND f.Anulada=0 AND ISNULL(f.Pagada,0)=0 AND (@p2=0 OR d.IDSucAsoc=@p2)";
     private static Dictionary<string,object> CajaPendingHeader(SqlConnection c,SqlTransaction tx,int receipt,CajaSession session) {
-        var rows=CajaRows(c,tx,"SELECT f.IDRecibo,f.Total,f.TotalME,f.IDCaja"+CajaPendingFrom+" AND f.IDRecibo=@p3",DateTime.Today,DateTime.Today.AddDays(1),session.Restricted?session.Branch:0,receipt);
+        var rows=CajaRows(c,tx,"SELECT f.IDRecibo,f.Total,f.TotalME,f.IDCaja,f.IDComprob"+CajaPendingFrom+" AND f.IDRecibo=@p3",DateTime.Today,DateTime.Today.AddDays(1),session.Restricted?session.Branch:0,receipt);
         if(rows.Count!=1)throw new InvalidOperationException("El comprobante ya fue cobrado, anulado o no pertenece a los pendientes de hoy. Actualizá la lista.");
         return rows[0];
     }
     private static object CajaPendingDetail(SqlConnection c,SqlTransaction tx,int receipt,CajaSession session) {
         var h=CajaPendingHeader(c,tx,receipt,session);
-        return new {ok=true,idRecibo=receipt,version=InvoiceValuesVersion(c,tx,receipt),
+        return new {ok=true,idRecibo=receipt,idComprobante=h["IDComprob"],total=h["Total"],version=InvoiceValuesVersion(c,tx,receipt),
             articulos=CajaRows(c,tx,"SELECT IDArt idart,ArtDesc descripcion,Cantidad cantidad,PrecioUni precio,Importe importe FROM dbo.FacturasATS WHERE IDRecibo=@p0 ORDER BY Orden",receipt),
-            valores=CajaRows(c,tx,"SELECT v.Orden orden,p.TipoPago tipo,t.[Descripción] tarjeta,v.Cuotas cuotas,v.Coef coef,v.Importe importe,v.ImpRec impRec,v.ImpEnt total,CONVERT(varchar(10),v.FechaVto,23) vencimiento,v.Concepto descripcion FROM dbo.FacturasTSVal v LEFT JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta WHERE v.IDRecibo=@p0 ORDER BY v.Orden",receipt)};
+            valores=CajaRows(c,tx,"SELECT v.Orden orden,v.IDTipoPago idTipoPago,p.IDClasePago clase,p.TipoPago tipo,v.IDTarjeta idTarjeta,t.[Descripción] tarjeta,v.Cuotas cuotas,v.Coef coef,v.Importe importe,v.ImpRec impRec,v.ImpEnt total,CASE WHEN v.IDMovBco>0 THEN 1 ELSE 0 END vinculado,CONVERT(varchar(10),v.FechaVto,23) vencimiento,v.Concepto descripcion FROM dbo.FacturasTSVal v LEFT JOIN dbo.TiposPagos p ON p.IDTipoPago=v.IDTipoPago LEFT JOIN dbo.Tarjetas t ON t.IDTarjeta=v.IDTarjeta WHERE v.IDRecibo=@p0 ORDER BY v.Orden",receipt)};
     }
     private static object CajaPendingWrite(SqlConnection c,SqlTransaction tx,Dictionary<string,object> input,CajaSession session,bool values) {
         int receipt=RequiredId(Value(input,"idRecibo"),"el comprobante");
@@ -278,6 +278,7 @@ internal static partial class FacturacionCopiaApi
             }
             throw new InvalidOperationException("Consulta de Caja no disponible.");
         }
+        if(action=="cobranza-valores"&&!session.Admin)throw new InvalidOperationException("Solo los administradores de Caja pueden editar valores de cobranzas.");
         if(action=="eliminar")CajaVerifyAdministrator(input);
         else if(action!="valores-boleta" && !session.Edit)throw new InvalidOperationException("Tu usuario no tiene permiso de edición de Caja.");
         using(var tx=c.BeginTransaction(IsolationLevel.Serializable)){

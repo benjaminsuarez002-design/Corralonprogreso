@@ -10,7 +10,7 @@
   <script defer src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script defer src="vendor/jspdf.umd.min.js"></script>
   <script src="presupuesto-shared.js"></script>
-<script src="corralon-system.js?v=1.0.60"></script>
+<script src="corralon-system.js?v=1.0.61"></script>
   <script src="corralon-cache-db.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -1585,12 +1585,18 @@ body[data-page-theme="pedidos"][data-pedidos-layout="desktop"] .head,body[data-p
   .order-recommendations-grid td:nth-child(3){width:100%;min-width:210px;white-space:normal;overflow-wrap:anywhere}
   .order-recommendations-grid th{position:sticky;top:0;z-index:1;background:#e1ecfb;border-top:1px solid #d4e2f1}
   .order-recommendations-grid tbody tr:nth-child(even){background:#f4f8fd}
-  #orderRecommendationsModal .order-recommendations-grid td:nth-child(7),#orderRecommendationsModal .order-recommendations-grid td:nth-child(8){background:#e8f2ff!important}
+  #orderRecommendationsModal .order-recommendations-grid td:nth-child(7){background:#e8f2ff!important}
   .order-recommendations-grid tr[hidden]{display:none}
   .order-recommendations-grid input[type=checkbox]{width:16px;height:16px;margin:0;vertical-align:middle;accent-color:#205bb4}
   .order-recommendations-grid input[data-recommendation-quantity]{width:94px;min-height:29px;padding:4px 6px;text-align:right;border:1px solid #c4d6ed;border-radius:4px;background:#fff}
   .order-recommendations-grid input[data-recommendation-quantity]:disabled{background:#edf2f8}
   .order-recommendations-grid input[aria-invalid=true]{border-color:#c62c43}
+  .order-recommendations-grid [data-recommendation-remove]{display:block;margin-top:3px;color:#a92339;font-size:11px;font-weight:700}
+  .order-recommendations-grid [data-recommendation-remove][hidden]{display:none}
+  #orderRecommendationsModal [data-open-recommendation-match]{min-height:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;color:#15509b!important;font:inherit!important;text-decoration:underline;text-underline-offset:2px}
+  #orderRecommendationsModal [data-open-recommendation-match].recommendation-linked-article{display:block;margin:2px 0 0 auto;font-size:11px!important}
+  #rankingConfirmMatch{align-self:flex-end;margin-left:auto}
+  #rankingConfirmMatch[hidden],#rankingConsultModal[data-selecting-match] :is(.ranking-pending-controls,.ranking-pending-help){display:none!important}
   .order-recommendations-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px 14px;border-top:1px solid #d4e2f1;background:#f2f7fd}
   .order-recommendations-footer p{margin:0;font-size:13px}
   .order-recommendations-footer>div{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
@@ -1665,7 +1671,7 @@ body[data-page-theme="pedidos"][data-pedidos-layout="desktop"] .head,body[data-p
       <table>
         <thead><tr><th scope="col"><input id="orderRecommendationsSelectAll" type="checkbox" aria-label="Seleccionar sugerencias positivas visibles" disabled></th>
           <th scope="col">Cód. proveedor</th><th scope="col">Descripción</th><th scope="col">Cant. actual</th>
-          <th scope="col">Ventas</th><th scope="col">Unid. vendidas</th><th scope="col">Sugerido 2 meses</th><th scope="col">Máx. 4 meses</th><th scope="col">Cant. a aplicar</th>
+          <th scope="col">Stock actual</th><th scope="col" title="v: cantidad de ventas; u: unidades vendidas">Ventas / unid.</th><th scope="col" title="Sugerido para 2 meses y máximo para 4 meses">Sug. 2 m / Máx. 4 m</th><th scope="col">Cant. a aplicar</th>
         </tr></thead>
         <tbody id="orderRecommendationsRows"></tbody>
       </table>
@@ -2810,7 +2816,7 @@ function pushFieldMovement(snapshot,currentRow){const movement=createFieldMoveme
 function finishFieldEdit(input){const info=fieldEditInfo(input);if(!info)return;const snapshot=rowEditSnapshots.get(info.key);if(!snapshot)return;pushFieldMovement(snapshot,info.row);rowEditSnapshots.delete(info.key)}
 function focusRestoredField(rowUid,col){requestAnimationFrame(()=>{const rowEl=[...els.rows.querySelectorAll('.row[data-uid]')].find(element=>String(element.dataset.uid)===String(rowUid));const input=rowEl?.querySelector(`[data-col="${col}"]`);if(!input)return;activeCell={row:Number(rowEl.dataset.row),col};input.focus();beginFieldEdit(input)})}
 function restoreFieldMovement(movement,{keepEditing=true}={}){let rowIndex=rows.findIndex(row=>String(row.localUid)===String(movement.rowUid));const restored={...blankRow(),...movement.before,localUid:movement.rowUid};if(rowIndex<0){rowIndex=Math.max(0,Math.min(Number(movement.rowIndex)||0,Math.max(0,rows.length-1)));rows.splice(rowIndex,0,restored)}else rows[rowIndex]=restored;rowEditSnapshots.clear();suppressArticleChange.delete(movement.rowUid);if(movement.pending&&!isBlank(restored))pendingRows.add(movement.rowUid);else pendingRows.delete(movement.rowUid);ensureBlank();queueSave(isBlank(restored)?null:restored);saveLocal();refreshRowsWithoutRebuild();syncPendingRows();if(keepEditing)focusRestoredField(movement.rowUid,movement.col);els.status.textContent=`Movimiento ${movement.idMov} deshecho`;return true}
-function undoLastChange(){const state=undoStack.pop();if(!state)return false;if(state._fieldMove)return restoreFieldMovement(state);if(state._faltantesMove){undoFaltantesMove(state);return true}restoreOrderState(state);return true}
+function undoLastChange(){const state=undoStack.pop();if(!state)return false;if(state._fieldMove)return restoreFieldMovement(state);if(state._faltantesMove){undoFaltantesMove(state);return true}restoreOrderState(state);if(state._recommendationFaltantes)markFaltantesForOrder(state._recommendationFaltantes).catch(error=>{console.warn(error);els.status.textContent='Fila restaurada. No se pudo actualizar Faltantes.'});return true}
 function cancelFieldEdit(input,onlyIfChanged=false){const info=fieldEditInfo(input);if(!info)return false;const snapshot=rowEditSnapshots.get(info.key);if(!snapshot)return false;if(onlyIfChanged&&statesEqual(snapshot.row,info.row)){rowEditSnapshots.delete(info.key);return false}rowEditSnapshots.delete(info.key);const restored=restoreFieldMovement({_fieldMove:true,idMov:fieldMovementSequence,rowUid:snapshot.rowUid,rowIndex:snapshot.rowIndex,col:snapshot.col,before:snapshot.row,pending:snapshot.pending});els.status.textContent='Edición actual deshecha';return restored}
 function removeOrderRowWithEmptyDescription(input,rowIndex,row){const info=fieldEditInfo(input),snapshot=info?rowEditSnapshots.get(info.key):null,wasFilled=snapshot?!isBlank(snapshot.row):!isBlank(row);if(!wasFilled)return false;const previous=cloneOrderState();if(snapshot){previous.rows[rowIndex]=cloneRow(snapshot.row);pushFieldMovement(snapshot,row);rowEditSnapshots.delete(info.key)}else pushUndoState(previous);const removed=cloneRow(snapshot?.row||row);pendingRows.delete(row.localUid);suppressArticleChange.delete(row.localUid);rows.splice(rowIndex,1);ensureBlank();saveLocal();paint();saveRemote();unmarkFaltantesForOrder([removed]).catch(error=>{console.warn(error);restoreOrderState(previous);els.status.textContent='No se pudo actualizar faltantes; se restauró la fila';show('La fila volvió a aparecer porque falló Firebase.')});requestAnimationFrame(()=>focusCell(Math.min(rowIndex,rows.length-1),3,false));els.status.textContent='Fila eliminada porque la descripción quedó vacía';return true}
 function updateCell(input,repaint=false){const rowIndex=Number(input.closest('.row')?.dataset.row);const col=Number(input.dataset.col);const row=rows[rowIndex];if(!row)return false;activeCell={row:rowIndex,col};const val=input.value;if(repaint&&col===3&&!String(val||'').trim()&&removeOrderRowWithEmptyDescription(input,rowIndex,row))return true;if(col===1)row.codProv=val;if(col===2)row.filtro=val;if(col===3){if(val!==row.articulo)clearArticleData(row);row.articulo=val}if(col===4)row.cantidad=parseMoney(val)||val;if(col===5)row.precioSiva=parseMoney(val);if(col===6)row.precioSiva=parseMoney(val)/1.21;if(col===7)row.antes=parseMoney(val);recalc(row);ensureBlank();queueSave(row);if(repaint)refreshRowsWithoutRebuild();return false}
@@ -2880,8 +2886,66 @@ const recommendationApply=document.getElementById('confirmOrderRecommendationsBt
 const recommendationClose=document.getElementById('closeOrderRecommendationsBtn');
 const recommendationCancel=document.getElementById('cancelOrderRecommendationsBtn');
 const recommendationNumber=new Intl.NumberFormat('es-AR',{maximumFractionDigits:2});
+const recommendationDraftFallback=new Map();
 let recommendationPreview=null;
 
+function recommendationRowKey(row){
+  return JSON.stringify([row.localUid,row.codProv,row.articulo,row.idart,row.idProveedor]);
+}
+function recommendationEntry(row,metrics){
+  const defaultChecked=metrics?.suggested>0;
+  return {row,metrics,key:recommendationRowKey(row),search:normProv(`${row.codProv||''} ${row.articulo||''}`),
+    defaultChecked,defaultQuantity:defaultChecked?String(metrics.suggested).replace('.',','):''};
+}
+function renderRecommendationRow({row,metrics,defaultChecked,defaultQuantity},previous){
+  const display=value=>value==null?'—':recommendationNumber.format(Number(value)||0);
+  const hasRecommendation=metrics?.suggested!=null,canMatch=!metrics||metrics.manual;
+  const editable=hasRecommendation||canMatch;
+  const article=esc(row.articulo||row.codProv||'Artículo');
+  const checked=editable&&(previous?.checked??defaultChecked);
+  const quantity=previous?.quantity??defaultQuantity;
+  const suggested=hasRecommendation?`Sug. ${display(metrics.suggested)} / Máx. ${display(metrics.maximum)}`:metrics?'Sin stock informado':'';
+  const matchLabel=metrics?`IDArt ${esc(metrics.idart)}`:'Sin coincidencia';
+  const matchTitle=metrics?`Cambiar coincidencia manual con ${esc(metrics.articleName)}`:'Doble clic para marcar la coincidencia';
+  const match=canMatch?`<button type="button" data-open-recommendation-match class="${metrics?'recommendation-linked-article':''}" title="${matchTitle}">${matchLabel}</button>`:'';
+  return `<tr><td><input type="checkbox" data-recommendation-check aria-label="Aplicar a ${article}" ${checked?'checked':''} ${editable?'':'disabled'}></td>
+    <td>${esc(row.codProv||'')}</td><td>${esc(row.articulo||'')}</td><td>${row.cantidad==null||row.cantidad===''?'—':display(parseMoney(row.cantidad))}</td>
+    <td>${display(metrics?.stock)}</td><td>${metrics?`${display(metrics.sales)} v/${display(metrics.units)}u`:'—'}</td>
+    <td ${canMatch?'data-recommendation-match-cell':''}>${suggested}${match}</td>
+    <td><input data-recommendation-quantity inputmode="decimal" aria-label="Cantidad a aplicar a ${article}" value="${esc(quantity)}" ${editable?'':'disabled'} autocomplete="off"><small data-recommendation-remove hidden>Se eliminará</small></td></tr>`;
+}
+function readRecommendationDraft(key){
+  if(recommendationDraftFallback.has(key))return recommendationDraftFallback.get(key);
+  try{return JSON.parse(localStorage.getItem(key)||'null');}
+  catch{return null;}
+}
+function writeRecommendationDraft(key,draft){
+  try{
+    if(draft)localStorage.setItem(key,JSON.stringify(draft));
+    else localStorage.removeItem(key);
+    recommendationDraftFallback.delete(key);
+  }catch{recommendationDraftFallback.set(key,draft);}
+}
+function saveRecommendationChanges(){
+  updateRecommendationSelection();
+  const preview=recommendationPreview;
+  if(!preview?.entries||preview.saving)return;
+  const rows={};
+  preview.entries.forEach((entry,index)=>{
+    const tr=recommendationBody.rows[index];
+    const checkbox=tr.querySelector('[data-recommendation-check]');
+    const quantity=tr.querySelector('[data-recommendation-quantity]').value;
+    if(checkbox.disabled){
+      const saved=preview.draft?.rows?.[entry.key];
+      if(saved)rows[entry.key]=saved;
+    }else if(checkbox.checked!==entry.defaultChecked||quantity!==entry.defaultQuantity){
+      rows[entry.key]={checked:checkbox.checked,quantity};
+    }
+  });
+  const search=recommendationSearch.value;
+  preview.draft=search||Object.keys(rows).length?{search,rows}:null;
+  writeRecommendationDraft(preview.draftKey,preview.draft);
+}
 function recommendationOrderSnapshot(){
   return JSON.stringify([currentOrderListKey(),selectedBranch(),headerProviderId,selectedProviderName(),
     rows.filter(row=>!isBlank(row)).map(row=>[row.localUid,row.codProv,row.articulo,row.cantidad,row.idart,row.idProveedor])]);
@@ -2891,8 +2955,9 @@ function recommendationQuantity(value){
   const number=Number(text.replace(',','.'));
   return /^\d+(?:[,.]\d{1,2})?$/.test(text)&&Number.isFinite(number)?number:null;
 }
-function closeOrderRecommendations(){
+function closeOrderRecommendations({discard=false}={}){
   if(recommendationPreview?.saving)return;
+  if(discard&&recommendationPreview)writeRecommendationDraft(recommendationPreview.draftKey,null);
   recommendationPreview=null;
   recommendationModal.classList.remove('visible');
 }
@@ -2900,14 +2965,17 @@ function updateRecommendationSelection(){
   const preview=recommendationPreview;
   if(!preview?.entries)return;
   const words=normProv(recommendationSearch.value).split(' ').filter(Boolean);
-  let checked=0,visibleChecked=0,visibleEligible=0,unavailable=0;
+  let checked=0,visibleChecked=0,visibleEligible=0,unavailable=0,removing=0;
   preview.entries.forEach((entry,index)=>{
     const tr=recommendationBody.rows[index];
     tr.hidden=!words.every(word=>entry.search.includes(word));
     const checkbox=tr.querySelector('[data-recommendation-check]');
+    const zero=recommendationQuantity(tr.querySelector('[data-recommendation-quantity]').value)===0;
+    tr.querySelector('[data-recommendation-remove]').hidden=!(checkbox.checked&&zero);
     if(checkbox.checked)checked++;
+    if(checkbox.checked&&zero)removing++;
     if(entry.metrics?.suggested==null)unavailable++;
-    if(!tr.hidden&&entry.metrics?.suggested>0){
+    if(!tr.hidden&&entry.metrics?.suggested>0&&!zero){
       visibleEligible++;
       if(checkbox.checked)visibleChecked++;
     }
@@ -2917,6 +2985,7 @@ function updateRecommendationSelection(){
   recommendationSelectAll.indeterminate=visibleChecked>0&&visibleChecked<visibleEligible;
   recommendationApply.disabled=preview.saving||!checked;
   recommendationStatus.textContent=`${checked} seleccionados · Cantidades de 2 meses precargadas`
+    +(removing?` · ${removing} por eliminar`:'')
     +(unavailable?` · ${unavailable} sin recomendación`:'')
     +(preview.cached?' · Última copia disponible de Rotación':'');
 }
@@ -2926,10 +2995,13 @@ async function openOrderRecommendations(){
   const orderRows=rows.filter(row=>!isBlank(row));
   if(!orderRows.length)return;
   if(!branch){show('Elegí la sucursal del pedido antes de calcular las cantidades recomendadas.');return;}
-  const preview={snapshot:recommendationOrderSnapshot(),entries:null,saving:false,cached:false};
+  const orderScope=[currentOrderListKey(),headerProviderId,selectedProviderName()];
+  const draftKey=orderLocalKey()+'_recomendados_'+JSON.stringify([orderScope[0],branch,...orderScope.slice(1)]);
+  const matchKey=orderLocalKey()+'_coincidencias_recomendados_'+JSON.stringify(orderScope);
+  const preview={snapshot:recommendationOrderSnapshot(),entries:null,saving:false,cached:false,draftKey,matchKey,draft:readRecommendationDraft(draftKey)};
   recommendationPreview=preview;
   document.getElementById('orderRecommendationsContext').textContent=[`Pedido N° ${orderId()}`,selectedProviderName(),selectedBranchLabel()].filter(Boolean).join(' · ');
-  recommendationSearch.value='';
+  recommendationSearch.value=preview.draft?.search||'';
   recommendationBody.replaceChildren();
   recommendationSelectAll.checked=false;recommendationSelectAll.indeterminate=false;recommendationSelectAll.disabled=true;
   recommendationApply.disabled=true;
@@ -2938,31 +3010,47 @@ async function openOrderRecommendations(){
   try{
     const ranking=window.CorralonPedidosRanking;
     if(!ranking)throw new Error('No se pudo cargar Rotación.');
-    const result=await ranking.recommendForOrder(orderRows,branch,headerProviderId);
+    const matches=readRecommendationDraft(matchKey)||{};
+    const result=await ranking.recommendForOrder(orderRows,branch,headerProviderId,orderRows.map(row=>matches[recommendationRowKey(row)]));
     if(recommendationPreview!==preview)return;
     if(preview.snapshot!==recommendationOrderSnapshot()){
       recommendationStatus.textContent='El pedido cambió. Cerrá la vista y abrila de nuevo para recalcular.';
       return;
     }
     preview.cached=result.cached;
-    preview.entries=orderRows.map((row,index)=>({row,metrics:result.metrics[index],search:normProv(`${row.codProv||''} ${row.articulo||''}`)}));
-    const display=value=>value==null?'—':recommendationNumber.format(Number(value)||0);
-    recommendationBody.innerHTML=preview.entries.map(({row,metrics})=>{
-      const suggested=metrics?.suggested;
-      const selectable=suggested!=null,preselected=suggested>0;
-      const article=esc(row.articulo||row.codProv||'Artículo');
-      const quantity=preselected?String(suggested).replace('.',','):'';
-      return `<tr><td><input type="checkbox" data-recommendation-check aria-label="Aplicar a ${article}" ${preselected?'checked':''} ${selectable?'':'disabled'}></td>
-        <td>${esc(row.codProv||'')}</td><td>${esc(row.articulo||'')}</td><td>${row.cantidad==null||row.cantidad===''?'—':display(parseMoney(row.cantidad))}</td>
-        <td>${display(metrics?.sales)}</td><td>${display(metrics?.units)}</td>
-        <td>${selectable?display(suggested):metrics?'Sin stock informado':'Sin coincidencia'}</td><td>${display(metrics?.maximum)}</td>
-        <td><input data-recommendation-quantity inputmode="decimal" aria-label="Cantidad a aplicar a ${article}" value="${quantity}" ${selectable?'':'disabled'} autocomplete="off"></td></tr>`;
-    }).join('');
+    preview.entries=orderRows.map((row,index)=>recommendationEntry(row,result.metrics[index]));
+    recommendationBody.innerHTML=preview.entries.map(entry=>renderRecommendationRow(entry,preview.draft?.rows?.[entry.key])).join('');
     recommendationBody.closest('.order-recommendations-grid').scrollTo(0,0);
     updateRecommendationSelection();
   }catch(error){
     if(recommendationPreview===preview)recommendationStatus.textContent=error.message||'No se pudieron calcular las cantidades recomendadas.';
   }
+}
+function openRecommendationMatch(event){
+  const preview=recommendationPreview;
+  if(!preview?.entries||preview.saving)return;
+  const cell=event.target.closest('[data-recommendation-match-cell]');
+  if(!cell)return;
+  const tr=cell.closest('tr'),index=tr.sectionRowIndex,entry=preview.entries[index];
+  const ranking=window.CorralonPedidosRanking;
+  if(!entry||!ranking)return;
+  tr.querySelector('[data-open-recommendation-match]').focus({preventScroll:true});
+  const matches=readRecommendationDraft(preview.matchKey)||{};
+  ranking.openConsult(entry.row,null,article=>{
+    if(recommendationPreview!==preview)return;
+    if(preview.snapshot!==recommendationOrderSnapshot()){
+      recommendationStatus.textContent='El pedido cambió. Cerrá la vista y abrila de nuevo para recalcular.';
+      return;
+    }
+    const metrics={...ranking.orderRecommendationMetrics(article,selectedBranch()),manual:true};
+    const next=recommendationEntry(entry.row,metrics);
+    const previous=preview.draft?.rows?.[entry.key];
+    writeRecommendationDraft(preview.matchKey,{...readRecommendationDraft(preview.matchKey),[entry.key]:metrics.idart});
+    preview.entries[index]=next;
+    tr.outerHTML=renderRecommendationRow(next,previous?.quantity===''?{...previous,quantity:next.defaultQuantity}:previous);
+    saveRecommendationChanges();
+    requestAnimationFrame(()=>recommendationBody.rows[index]?.querySelector('[data-open-recommendation-match]')?.focus({preventScroll:true}));
+  },matches[entry.key]);
 }
 async function applyOrderRecommendations(){
   const preview=recommendationPreview;
@@ -2983,61 +3071,96 @@ async function applyOrderRecommendations(){
       recommendationStatus.textContent='Revisá la cantidad seleccionada. Usá un número con hasta dos decimales.';
       return;
     }
-    if(quantity!==parseMoney(row.cantidad))changes.push({row,quantity,previous:row.cantidad});
+    if(quantity===0||quantity!==parseMoney(row.cantidad))changes.push({row,quantity,previous:row.cantidad});
   }
-  if(!changes.length){closeOrderRecommendations();els.status.textContent='El pedido ya tenía esas cantidades.';return;}
+  if(!changes.length){closeOrderRecommendations({discard:true});els.status.textContent='El pedido ya tenía esas cantidades.';return;}
+  const removing=new Set(changes.filter(change=>change.quantity===0).map(change=>change.row));
   const undo=cloneOrderState(),previousPending=new Set(pendingRows),previousCache=localOrderDataCache;
+  const previousRows=rows,orderKey=currentOrderListKey();
+  const linked=orderRowsFromFaltantes([...removing]);
+  const orderWithRemovedRows={...undo.header,detalles:linked};
   clearTimeout(saveTimer);saveTimer=null;
   preview.saving=true;
   recommendationClose.disabled=true;recommendationCancel.disabled=true;recommendationApply.disabled=true;
   recommendationSearch.disabled=true;recommendationSelectAll.disabled=true;recommendationBody.inert=true;
   recommendationStatus.textContent='Guardando las cantidades en el pedido…';
-  touchLocalChange();
-  changes.forEach(({row,quantity})=>setRowValue(row,4,quantity));
-  let saved=false;
-  try{saved=await saveRemote();}catch(error){console.warn(error);}
+  let saved=false,affectedRows=null,unmarked=0;
+  try{
+    if(linked.length)unmarked=await unmarkFaltantesForOrder(orderWithRemovedRows);
+    if(preview.snapshot!==recommendationOrderSnapshot())throw new Error('El pedido cambió mientras se aplicaban las cantidades.');
+    touchLocalChange();
+    if(removing.size){
+      rows=rows.filter(row=>!removing.has(row));
+      for(const row of removing)pendingRows.delete(row.localUid);
+      ensureBlank();
+    }
+    affectedRows=rows;
+    changes.forEach(({row,quantity})=>{if(quantity>0)setRowValue(row,4,quantity);});
+    if(hasOrderContent())saved=await saveRemote();
+    else{
+      await removeLocalDraft(orderKey);
+      await saveLocal();
+      saved=true;
+    }
+  }catch(error){console.warn(error);}
+  if(!saved){
+    if(affectedRows&&rows===affectedRows){
+      rows=previousRows;
+      changes.forEach(({row,previous})=>{row.cantidad=previous;recalc(row);});
+      pendingRows=previousPending;localOrderDataCache=previousCache;
+      if(localSavePending||pendingRows.size)queueSave();
+    }
+    if(unmarked)await markFaltantesForOrder(orderWithRemovedRows).catch(console.warn);
+  }
   preview.saving=false;
   recommendationClose.disabled=false;recommendationCancel.disabled=false;
   recommendationSearch.disabled=false;recommendationBody.inert=false;
   if(!saved){
-    changes.forEach(({row,previous})=>{row.cantidad=previous;recalc(row);});
-    pendingRows=previousPending;localOrderDataCache=previousCache;
-    if(localSavePending||pendingRows.size)queueSave();
     updateRecommendationSelection();
     recommendationStatus.textContent='No se pudieron guardar las cantidades. Podés reintentar.';
     return;
   }
+  if(unmarked)undo._recommendationFaltantes=orderWithRemovedRows;
   localSavePending=false;
   pushUndoState(undo);
   rowEditSnapshots.clear();
-  closeOrderRecommendations();
+  if(removing.size)clearSelection();
+  closeOrderRecommendations({discard:true});
   paint();
-  els.status.textContent=`${changes.length} cantidades actualizadas en el pedido.`;
+  els.status.textContent=removing.size
+    ?`${changes.length-removing.size} cantidades actualizadas · ${removing.size} filas eliminadas`
+    :`${changes.length} cantidades actualizadas en el pedido.`;
 }
 document.getElementById('applyRecommendedOrderBtn').addEventListener('click',openOrderRecommendations);
 recommendationClose.addEventListener('click',closeOrderRecommendations);
 recommendationCancel.addEventListener('click',closeOrderRecommendations);
 recommendationModal.addEventListener('mousedown',event=>{if(event.target===recommendationModal)closeOrderRecommendations();});
-recommendationSearch.addEventListener('input',updateRecommendationSelection);
+recommendationSearch.addEventListener('input',saveRecommendationChanges);
+recommendationBody.addEventListener('dblclick',openRecommendationMatch);
+recommendationBody.addEventListener('click',event=>{
+  if((event.detail===0||event.pointerType==='touch')&&event.target.closest('[data-open-recommendation-match]'))openRecommendationMatch(event);
+});
 recommendationBody.addEventListener('input',event=>{
   if(!event.target.matches('[data-recommendation-quantity]')||recommendationPreview?.saving)return;
   event.target.removeAttribute('aria-invalid');
   if(recommendationQuantity(event.target.value)!==null)event.target.closest('tr').querySelector('[data-recommendation-check]').checked=true;
-  updateRecommendationSelection();
+  saveRecommendationChanges();
 });
 recommendationBody.addEventListener('change',event=>{
   if(!event.target.matches('[data-recommendation-check]')||recommendationPreview?.saving)return;
   const tr=event.target.closest('tr'),input=tr.querySelector('[data-recommendation-quantity]');
-  if(event.target.checked&&!input.value)input.value=String(recommendationPreview.entries[tr.sectionRowIndex].metrics.suggested).replace('.',',');
-  updateRecommendationSelection();
+  const suggested=recommendationPreview.entries[tr.sectionRowIndex].metrics?.suggested;
+  if(event.target.checked&&!input.value&&suggested>0)input.value=String(suggested).replace('.',',');
+  saveRecommendationChanges();
 });
 recommendationSelectAll.addEventListener('change',()=>{
   const checked=recommendationSelectAll.checked;
   recommendationPreview.entries.forEach((entry,index)=>{
     const tr=recommendationBody.rows[index];
-    if(!tr.hidden&&entry.metrics?.suggested>0)tr.querySelector('[data-recommendation-check]').checked=checked;
+    const quantity=recommendationQuantity(tr.querySelector('[data-recommendation-quantity]').value);
+    if(!tr.hidden&&entry.metrics?.suggested>0&&quantity!==0)tr.querySelector('[data-recommendation-check]').checked=checked;
   });
-  updateRecommendationSelection();
+  saveRecommendationChanges();
 });
 recommendationApply.addEventListener('click',applyOrderRecommendations);
 els.compareRowBtn.addEventListener('click',()=>{hideRowContextMenu();if(!selectedRows.size)return;openCompareForContextRow()})
@@ -3655,6 +3778,7 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
   let articlePromise = null;
   let syncPromise = null;
   let selectedArticle = null;
+  let consultation = null;
   let rankPage = 1;
   let supplierNames = new Map();
   let pendingReceipts = {};
@@ -3691,12 +3815,13 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
     const rawStock = branch === '1' ? article.stockSucursalProgresoRuta : article.stockSucursalCalle5Espana;
     // Stock desconocido no equivale a cero. Evita recomendar compras sin ese dato.
     const knownStock = rawStock !== '' && rawStock != null && Number.isFinite(Number(rawStock));
-    const stock = Math.max(0, Number(rawStock) || 0), pending = pendingFor(article, branch);
-    const available = stock + pending;
-    const precision = [sold, stock, pending].some(value => !Number.isInteger(value)) ? 100 : 1;
+    const stock = knownStock ? Number(rawStock) : null;
+    const availableStock = Math.max(0,stock??0), pending = pendingFor(article, branch);
+    const available = availableStock + pending;
+    const precision = [sold, availableStock, pending].some(value => !Number.isInteger(value)) ? 100 : 1;
     const needed = target => Math.ceil(Math.max(0, target - available) * precision - 1e-8) / precision;
     return { monthly: sold / 4, suggested: knownStock ? needed(sold / 2) : null,
-      maximum: knownStock ? needed(sold) : null, pending };
+      maximum: knownStock ? needed(sold) : null, pending, stock };
   }
   const quantityText = value => value == null ? 'Sin stock informado' : fmt(value);
   const rankingBoxIcon='<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10M7.5 4.5l9 5"/></svg>';
@@ -3716,9 +3841,24 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
       <label>Buscar artículo de Index<div class="ranking-consult-search"><input id="rankingArticleSearch" autocomplete="off" placeholder="Código o descripción"><button type="button" data-ranking-clear aria-label="Limpiar búsqueda">×</button></div></label>
       <div class="ranking-mobile-results-heading" hidden><strong>Resultados</strong><span data-ranking-mobile-count></span></div><div class="ranking-suggestions" id="rankingSuggestions"></div>
       <div class="ranking-result" id="rankingConsultResult">Elegí un artículo de Index.</div>
-    </div><footer class="ranking-consult-footer"><span data-ranking-period></span><span data-ranking-updated></span></footer>
+    </div><footer class="ranking-consult-footer"><span data-ranking-period></span><span data-ranking-updated></span><button id="rankingConfirmMatch" class="primary" type="button" hidden disabled>Usar coincidencia</button></footer>
   </section>`;
   document.body.appendChild(consult);
+  const confirmMatch = consult.querySelector('#rankingConfirmMatch');
+  function clearConsultSelection(){
+    selectedArticle=null;
+    confirmMatch.disabled=true;
+  }
+  function closeConsult(){
+    consult.classList.remove('visible');
+    consultation=null;
+    clearConsultSelection();
+  }
+  confirmMatch.addEventListener('click',()=>{
+    if(!selectedArticle||!consultation?.onMatch)return;
+    consultation.onMatch(selectedArticle);
+    closeConsult();
+  });
   function fitRankingConsult(){consult.style.setProperty('--ranking-consult-scale',String(Math.max(.1,Math.min((innerWidth-32)/1224,(innerHeight-32)/834))));}
   window.addEventListener('resize',fitRankingConsult);fitRankingConsult();
 
@@ -3902,6 +4042,7 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
   function displayArticle(article) {
     if (!article) return;
     selectedArticle = article;
+    confirmMatch.disabled=!consultation?.onMatch;
     const data=statsFor(idOf(article)),one=replenishment(article,'1'),two=replenishment(article,'2');
     const value=number=>state.version?fmt(number):'—';
     const suggested=row=>state.version?quantityText(row.suggested):'—';
@@ -3913,9 +4054,15 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
     updateConsultPeriod();
   }
 
-  async function recommendForOrder(orderRows, branchId, providerId) {
-    const branch=branchId==='progreso_ruta'?'1':branchId==='calle5_espana'?'2':'';
-    if(!branch)throw new Error('Elegí la sucursal del pedido.');
+  const rankingBranchForOrder=branchId=>branchId==='progreso_ruta'?'1':branchId==='calle5_espana'?'2':'';
+  function orderRecommendationMetrics(article,branchId){
+    const branch=rankingBranchForOrder(branchId),idart=idOf(article);
+    const data=statsFor(idart),supply=replenishment(article,branch);
+    return {idart,articleName:article.nombre||article.descripcion||'',stock:supply.stock,
+      sales:saleCount(data,branch),units:units(data,branch),suggested:supply.suggested,maximum:supply.maximum};
+  }
+  async function recommendForOrder(orderRows, branchId, providerId, manualIds=[]) {
+    if(!rankingBranchForOrder(branchId))throw new Error('Elegí la sucursal del pedido.');
     const [catalogResult,rankingResult]=await Promise.allSettled([catalogue(),sync(),pendingReady]);
     if(catalogResult.status==='rejected')throw new Error('No se pudo cargar el catálogo de artículos.');
     if(!state.version)throw new Error('No hay datos de Rotación disponibles para calcular los recomendados.');
@@ -3939,7 +4086,9 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
       index(byCode,codeKey(provider,norm(article.codprov||article.idartprov)),article);
       index(byDescription,description(article),article);
     }
-    const metrics=orderRows.map(row=>{
+    const metrics=orderRows.map((row,rowIndex)=>{
+      const manual=byArticleId.get(articleNumber(manualIds[rowIndex]))||[];
+      if(manual.length===1)return {...orderRecommendationMetrics(manual[0],branchId),manual:true};
       const provider=cleanProviderId(row.idProveedor||providerId);
       const articleName=norm(row.articulo),code=norm(row.codProv);
       const candidates=byCode.get(codeKey(provider,code))||[];
@@ -3950,8 +4099,7 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
         :exactIdentity.length===1?exactIdentity[0]
           :candidates.length===0&&exactDescription.length===1?exactDescription[0]:null;
       if(!article)return null;
-      const data=statsFor(idOf(article)), supply=replenishment(article,branch);
-      return {sales:saleCount(data,branch),units:units(data,branch),suggested:supply.suggested,maximum:supply.maximum};
+      return orderRecommendationMetrics(article,branchId);
     });
     return {metrics,cached:rankingResult.status==='rejected'};
   }
@@ -3961,19 +4109,20 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
     const target = norm(input.value);
     const words = target.split(' ').filter(Boolean);
     const list = consult.querySelector('#rankingSuggestions');
-    if (!target) { list.innerHTML = ''; list.hidden = true; consult.querySelector('.ranking-mobile-results-heading').hidden=true; return; }
-    const matched = articles.filter((row) => {
+    if (!target&&!consultation?.onMatch) { list.innerHTML = ''; list.hidden = true; consult.querySelector('.ranking-mobile-results-heading').hidden=true; return 0; }
+    const matched = target ? articles.filter((row) => {
       const haystack = norm(`${idOf(row)} ${row.codprov || ''} ${row.nombre || row.descripcion || ''}`);
       return words.every((word) => haystack.includes(word));
     }).sort((a, b) => {
       const exactA = norm(a.codprov) === target || norm(idOf(a)) === target ? 0 : 1;
       const exactB = norm(b.codprov) === target || norm(idOf(b)) === target ? 0 : 1;
       return exactA - exactB || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
-    }).slice(0, 35);
+    }).slice(0, 35) : articles.slice(0,35);
     consult.querySelector('.ranking-mobile-results-heading').hidden=false;consult.querySelector('[data-ranking-mobile-count]').textContent=matched.length+' artículos';
     list.innerHTML = matched.length ? '<div class="ranking-results-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Artículo</span><span class="ranking-stock-heading">Stock por sucursal</span><span class="ranking-result-score-heading">Puntaje</span><span class="ranking-result-stock-one">Progreso</span><span class="ranking-result-stock-two">Calle 5</span></div>'+matched.map((a) => `<button type="button" data-ranking-id="${html(idOf(a))}" aria-pressed="${idOf(a)===idOf(selectedArticle)}"><b>${html(idOf(a))}</b><span>${html(a.codprov || '')}</span><strong>${html(a.nombre || a.descripcion || '')}</strong><span class="ranking-stock" title="Stock Progreso"><b>${stockText(a.stockSucursalProgresoRuta)}</b></span><span class="ranking-stock" title="Stock Calle 5"><b>${stockText(a.stockSucursalCalle5Espana)}</b></span><span class="ranking-suggestion-score" title="Puntaje de ambas sucursales"><small>Puntaje</small><b>${state.version ? scoreText(statsFor(idOf(a)),a) : '—'}</b></span></button>`).join('')
       : '<p>No hay artículos de Index con esa búsqueda.</p>';
     list.hidden = false;
+    return matched.length;
   }
 
   function rankingRows() {
@@ -4024,20 +4173,32 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
     renderRanking();
   }
 
-  async function openConsult(orderRow, preferredArticle = null) {
-    selectedArticle = null;
+  async function openConsult(orderRow, preferredArticle = null, onMatch = null, manualId = '') {
+    const session={onMatch};
+    consultation=session;
+    clearConsultSelection();
+    consult.toggleAttribute('data-selecting-match',Boolean(onMatch));
+    confirmMatch.hidden=!onMatch;
+    consult.querySelector('#rankingConsultTitle').textContent=onMatch?'Vincular artículo':'Consultar artículo';
     consult.querySelector('#rankingOrigin').textContent = `Cód. proveedor: ${orderRow?.codProv || '—'} · ${orderRow?.articulo || ''}`;
     consult.querySelector('#rankingConsultResult').textContent = 'Elegí un artículo de Index.';
     const input = consult.querySelector('#rankingArticleSearch');
-    input.value = String(orderRow?.codProv || String(orderRow?.articulo || '').split(/\s+/).slice(0, 3).join(' ')).trim();
+    const description=String(orderRow?.articulo||'').trim().split(/\s+/);
+    input.value=onMatch?description.slice(0,2).join(' '):String(orderRow?.codProv||description.slice(0,3).join(' ')).trim();
     const initialSearch = input.value;
     updateConsultPeriod();
     consult.classList.add('visible');
     if(!matchMedia('(max-width:760px), (pointer:coarse) and (max-device-width:900px)').matches)input.focus();
     const [catalogResult, rankingResult] = await Promise.allSettled([catalogue(), sync(), pendingReady]);
+    if(consultation!==session)return;
     if (catalogResult.status === 'fulfilled') {
-      if (preferredArticle && input.value === initialSearch) {suggest();displayArticle(preferredArticle);}
-      else suggest();
+      const preferred=onMatch?articles.find(article=>idOf(article)===manualId):preferredArticle;
+      if(preferred&&input.value===initialSearch){
+        if(onMatch)input.value=idOf(preferred);
+        suggest();displayArticle(preferred);
+      }else if(!suggest()&&onMatch&&input.value===initialSearch){
+        input.value='';suggest();
+      }
     }
     else { console.warn(catalogResult.reason); consult.querySelector('#rankingConsultResult').textContent = 'No pude cargar los artículos de Index. Volvé a intentar.'; }
     if (rankingResult.status === 'rejected') console.warn('El ranking todavía no está disponible', rankingResult.reason);
@@ -4062,8 +4223,8 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
     displayArticle(selectedArticle);
     renderRanking();
   });
-  consult.querySelector('[data-ranking-clear]').addEventListener('click',()=>{const input=consult.querySelector('#rankingArticleSearch');input.value='';selectedArticle=null;suggest();input.focus();});
-  consult.querySelector('#rankingArticleSearch').addEventListener('input', () => { selectedArticle = null; suggest(); });
+  consult.querySelector('[data-ranking-clear]').addEventListener('click',()=>{const input=consult.querySelector('#rankingArticleSearch');input.value='';clearConsultSelection();suggest();input.focus();});
+  consult.querySelector('#rankingArticleSearch').addEventListener('input', () => { clearConsultSelection(); suggest(); });
   consult.querySelector('#rankingArticleSearch').addEventListener('focus', (event) => { event.target.select(); suggest(); });
   consult.querySelector('#rankingArticleSearch').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { const first = consult.querySelector('[data-ranking-id]'); if (first) { event.preventDefault(); first.click(); } }
@@ -4077,6 +4238,7 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
           input.setSelectionRange(input.value.length, input.value.length);
         else input.select();
       } else if (event.key === 'Escape') {
+        if(consultation?.onMatch&&input.id==='rankingArticleSearch')return;
         event.preventDefault();
         event.stopPropagation();
         input.value = input.dataset.beforeFocus || '';
@@ -4156,8 +4318,8 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
   for (const overlay of [consult, panel]) {
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay || event.target.closest('[data-ranking-close]')) {
-        overlay.classList.remove('visible');
-        if (overlay === panel) closeFilterMenus();
+        if(overlay===consult)closeConsult();
+        else{overlay.classList.remove('visible');closeFilterMenus();}
       }
     });
   }
@@ -4165,7 +4327,7 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
     if (event.key !== 'Escape') return;
     if (consult.classList.contains('visible')) {
       event.preventDefault();
-      consult.classList.remove('visible');
+      closeConsult();
     } else if (panel.classList.contains('visible')) {
       event.preventDefault();
       closeFilterMenus();
@@ -4180,7 +4342,7 @@ window.addEventListener('DOMContentLoaded',()=>init().catch(console.warn),{once:
     }
   }).catch((error) => console.warn('No se pudo iniciar el ranking', error));
   loadSupplierNames();
-  window.CorralonPedidosRanking = { openConsult, openRanking, sync, recommendForOrder };
+  window.CorralonPedidosRanking = { openConsult, openRanking, sync, recommendForOrder, orderRecommendationMetrics };
 })();
 
 </script>

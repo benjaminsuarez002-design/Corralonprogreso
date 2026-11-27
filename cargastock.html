@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.62"></script>
+<script src="corralon-system.js?v=1.0.63"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
@@ -2972,7 +2972,8 @@ async function openNewArticlesModal(rowIndex = null, editableSource = false, app
       idart: applyPrices ? String(row.idart || '').trim() : '',
       codigo: String(row.codigo || '').trim(),
       descripcion: String(row.descripcion || '').trim(),
-      costo: Number(calcPrecioFinal(row).toFixed(2))
+      costo: row.unidadesBultoAplicadas ? calcPrecioFinal(row) : Number(calcPrecioFinal(row).toFixed(2)),
+      divisorBultoAplicado: row.unidadesBultoAplicadas
     })),
     catalogRows: stockSqlCatalogRows,
     catalogSource: 'sql',
@@ -2999,6 +3000,14 @@ function stockApplyImportedArticleIds(candidates,appliedRows){
     if(!target)continue;
     target.idart=id;target.idartManual=true;
     target.codigo=String(imported.codigo||'').trim();target.descripcion=String(imported.descripcion||target.descripcion).trim();
+    const units=Number(imported.unidadesBulto);
+    if(Number.isFinite(units)&&units>0&&target.conteo==null&&!/^['’]/.test(String(target.cantidad??'').trim())){
+      const previous=Number(target.unidadesBultoAplicadas)||1;
+      if(String(target.cantidad??'').trim()&&units!==previous){
+        target.cantidad=rawNumber(quantityNumber(target.cantidad)*units/previous);
+      }
+      target.unidadesBultoAplicadas=units;
+    }
     if(Number(imported.costo)>0){target.precio=precioUnitarioDesdeFinal(target,Number(imported.costo));target.precioExpression='';}
   }
   render();saveRows();
@@ -3626,6 +3635,7 @@ function normalizeRow(row = {}, index = 0) {
     cantidad: /^['’]/.test(String(row.cantidad ?? '').trim()) ? String(row.cantidad).trim() : (String(row.cantidad ?? '').trim() ? rawNumber(quantityNumber(row.cantidad)) : ''),
     precio: moneyNumber(row.precio ?? 0),
     precioExpression: String(row.precioExpression || ''),
+    unidadesBultoAplicadas: Number(row.unidadesBultoAplicadas) || 0,
     stockAdditionalPriceSource: row.stockAdditionalPriceSource || null,
     precioOriginal: moneyNumber(row.precioOriginal ?? 0),
     precioDivisor: String(row.precioDivisor ?? ''),

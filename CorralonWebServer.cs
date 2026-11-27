@@ -359,6 +359,7 @@ internal sealed class ServerForm : Form
 {
     private const int Port = 8080;
     private readonly string root;
+    private readonly LocalInvoiceChat invoiceChat;
     private HttpListener listener;
     private Thread listenThread;
     private System.Windows.Forms.Timer facturacionWatchdog;
@@ -388,6 +389,7 @@ internal sealed class ServerForm : Form
     public ServerForm(bool startInTray)
     {
         root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+        invoiceChat = new LocalInvoiceChat(Path.Combine(root, "servidor", "chat"));
         Text = "Corralon Web";
         Width = 440;
         Height = 258;
@@ -853,6 +855,11 @@ internal sealed class ServerForm : Form
             if (string.Equals(requestPath, "updates/manifest.json", StringComparison.OrdinalIgnoreCase))
             {
                 WriteJson(context, 200, BuildUpdateManifest());
+                return;
+            }
+            if (requestPath.StartsWith("api/chat/", StringComparison.OrdinalIgnoreCase))
+            {
+                invoiceChat.Handle(context);
                 return;
             }
             if (requestPath.StartsWith("api/facturacion/", StringComparison.OrdinalIgnoreCase))

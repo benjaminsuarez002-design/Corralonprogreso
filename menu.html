@@ -703,7 +703,7 @@
     }
   </script>
   <script src="nav-helper.js"></script>
-<script src="corralon-system.js?v=1.0.49"></script>
+<script src="corralon-system.js?v=1.0.50"></script>
   <link rel="stylesheet" href="theme-corralon.css?v=20260722-19">
 <script>document.documentElement.toggleAttribute('data-menu-public-domain', /(^|\.)corralonprogreso\.com$/i.test(location.hostname));</script>
 <script src="funciones.js" defer></script>
@@ -1662,6 +1662,7 @@
         if (!usuariosMenu.length) await cargarUsuariosMenu();
         const usuarioIngresado = String(loginUserInput.value || '').trim().toLowerCase();
         const passIngresada = String(loginInput.value || '');
+        const recordar = rememberLogin.checked;
         const usuario = usuariosMenu.find((u) => String(u.usuario || u.nombre || '').trim().toLowerCase() === usuarioIngresado);
         const loginOk = usuario && passIngresada === String(usuario.password || '');
         if (usuario && loginOk) {
@@ -1670,7 +1671,7 @@
             if (!editorSession?.login) {
               throw new Error('El módulo de edición no terminó de cargar. Actualizá esta página e intentá nuevamente.');
             }
-            await editorSession.login(usuario.id, passIngresada, rememberLogin.checked, usuario);
+            await editorSession.login(usuario.id, passIngresada, recordar, usuario);
           } catch (error) {
             console.error('No se pudo habilitar el editor de artículos', error);
             loginError.textContent = `❌ ${error?.message || 'No se pudo habilitar el editor de artículos'}`;
@@ -1679,7 +1680,7 @@
             return;
           }
           guardarUsuarioActivo(usuario);
-          recordarSesion(usuario, rememberLogin.checked);
+          recordarSesion(usuario, recordar);
           accesoManualEnPagina = true;
           loginError.textContent = '';
           await mostrarMenu(usuario);
@@ -1701,6 +1702,7 @@
     }
 
     function cerrarSesion() {
+      if (location.port === '8080') fetch('/api/chat/salir',{method:'POST',keepalive:true}).catch(()=>{});
       window.CorralonSystem?.catalogEditorSession?.logout?.();
       localStorage.removeItem(HISTORIAL_LOGIN_STORAGE_KEY);
       localStorage.removeItem(MENU_ACTIVE_USER_KEY);

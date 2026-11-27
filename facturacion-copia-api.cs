@@ -174,9 +174,15 @@ internal static partial class FacturacionCopiaApi
         {
             if (source.Width < 150 || source.Width > 2000 || source.Height < 100 || source.Height > 30000)
                 throw new InvalidOperationException("Las medidas del ticket no son válidas.");
+            string printLinkQueue = PrintLinkTicket.QueueFor(printer);
             const int printableWidth = 560, rasterWidth = 576, leftMargin = 8;
             int height = (int)Math.Ceiling(source.Height * printableWidth / (double)source.Width);
             if (height > 30000) throw new InvalidOperationException("El ticket es demasiado largo.");
+            if (printLinkQueue.Length > 0)
+            {
+                PrintLinkTicket.Send(printLinkQueue, jobName, PrintLinkTicket.Pdf(source));
+                return;
+            }
             using (var raster = new Bitmap(printableWidth, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
             using (var graphics = Graphics.FromImage(raster))
             using (var output = new MemoryStream())
@@ -5838,6 +5844,16 @@ DROP TABLE #StockGeneral;DROP TABLE #CambiosStock;DROP TABLE #AntesSucursales;";
                 }
                 if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/consultar-comprobantes")
                 {
+                    if (request.QueryString["ultimo"] == "1")
+                    {
+                        int selectedPoint = RequiredId(request.QueryString["puntoVenta"], "el punto de venta");
+                        var latest = Rows(connection,
+                            "SELECT TOP (1) IDRecibo AS idRecibo,NroFactura AS numero FROM dbo.FacturasATP " +
+                            "WHERE IDDepósito=@p0 AND IDEmp=1 AND Confirmado<>0 AND ISNULL(Anulada,0)=0 " +
+                            "AND IDComprob IN (1,2,13) ORDER BY IDRecibo DESC", selectedPoint);
+                        Reply(context, 200, new { ok = true, comprobante = latest.Count == 0 ? null : latest[0] });
+                        return;
+                    }
                     int page;
                     if(!Int32.TryParse(request.QueryString["pagina"]??"0",out page)||page<0||page>100000)
                         throw new InvalidOperationException("Página inválida.");

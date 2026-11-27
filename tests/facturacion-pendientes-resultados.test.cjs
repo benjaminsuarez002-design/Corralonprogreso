@@ -5,7 +5,7 @@ test('rechazo explicito ofrece X conservando la venta y no emite automaticamente
  const dom=new JSDOM('<input id="docNumber">',{runScripts:'outside-only'}),w=dom.window;try{
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'))};
  const context={document:w.document,$:s=>w.document.querySelector(s),sqlConfig:{comprobantes:[{id:13,idPuntoVenta:4}]},draftId:'draft',issuedReceipt:null,recoveryPending:false,selected:0,saves:0,renderVoucherTypes(id){context.selected=id},async saveDraft(){context.saves++},setMsg(){}};vm.createContext(context);
- const a=h.indexOf('async function showRejectedInvoiceOptions('),b=h.indexOf('async function issue(){',a);vm.runInContext(h.slice(a,b),context);
+ const a=h.indexOf('async function showRejectedInvoiceOptions('),b=h.indexOf('async function issue(',a);vm.runInContext(h.slice(a,b),context);
  await context.showRejectedInvoiceOptions({id:'draft',idPuntoVenta:4},new Error('Documento invalido'));
  const button=[...w.document.querySelectorAll('button')].find(x=>x.textContent==='Continuar como X-venta');assert.ok(button);await button.onclick();assert.equal(context.selected,13);assert.equal(context.saves,1);assert.equal(w.document.querySelector('dialog'),null);
  }finally{w.close()}

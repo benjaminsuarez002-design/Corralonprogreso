@@ -22,14 +22,14 @@ test('no modifica una venta emitida ni una pendiente de recuperación',()=>{
  for(const property of ['issuedReceipt','recoveryPending']){const s=setup();s.ctx[property]=true;assert.equal(s.ctx.completeGenericConsumerDocument(),false);assert.equal(s.fields.docNumber.value,'');}
 });
 test('se completa al salir del campo y antes de bloquear/preparar el nuevo envío, sin alterar el contrato fiscal',()=>{
- const issue=html.slice(html.indexOf('async function issue(){'),html.indexOf('async function issue(){')+15000);
+ const issue=html.slice(html.indexOf('async function issue('),html.indexOf('async function issue(')+15000);
  assert.ok(issue.indexOf('completeGenericConsumerDocument();')<issue.indexOf('issueInProgress=true;'));
  assert.match(html,/\$\('#docNumber'\)\.addEventListener\('blur',\(\)=>\{if\(completeGenericConsumerDocument\(\)\)scheduleDraft\(\);\}\);/);
  const api=fs.readFileSync('facturacion-copia-api.cs','utf8');assert.match(api,/customer == 1 && docId == 50 && \(doc.Length == 0 \|\| doc == "00000001000" \|\| doc == "00001000000"\)\) \{ docId = 32; doc = ""; \}/);
 });
 
 test('bloquea documentos con letras sin convertirlos silenciosamente a números',()=>{
- const ctx={};vm.createContext(ctx);vm.runInContext(html.slice(html.indexOf('function billingDocumentError('),html.indexOf('async function issue(){')),ctx);
+ const ctx={};vm.createContext(ctx);vm.runInContext(html.slice(html.indexOf('function billingDocumentError('),html.indexOf('async function issue(')),ctx);
  for(const value of ['f4287197','42f87197','42 87197'])assert.match(ctx.billingDocumentError('DNI',value),/Documento inválido/);
  assert.equal(ctx.billingDocumentError('DNI','4287197'),'');
  assert.equal(ctx.billingDocumentError('CUIT','20-36911157-4'),'');

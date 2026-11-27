@@ -318,9 +318,15 @@ internal static class ImpresoraLocal
         {
             if (source.Width < 150 || source.Width > 2000 || source.Height < 100 || source.Height > 30000)
                 throw new InvalidOperationException("Las medidas del ticket no son válidas.");
+            string printLinkQueue = PrintLinkTicket.QueueFor(printer);
             const int printableWidth = 560, rasterWidth = 576, leftMargin = 8;
             int height = (int)Math.Ceiling(source.Height * printableWidth / (double)source.Width);
             if (height > 30000) throw new InvalidOperationException("El ticket es demasiado largo.");
+            if (printLinkQueue.Length > 0)
+            {
+                PrintLinkTicket.Send(printLinkQueue, jobName, PrintLinkTicket.Pdf(source));
+                return;
+            }
             using (var raster = new Bitmap(printableWidth, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
             using (var graphics = Graphics.FromImage(raster))
             using (var output = new MemoryStream())

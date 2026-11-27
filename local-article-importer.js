@@ -153,7 +153,7 @@ export async function open(options, window = globalThis.window, document = globa
       });
     }
     const bulto=action('Definir cant. x bulto',()=>{
-      const value=window.prompt('Cantidad por bulto (se guarda al aplicar el lote):',String(row.unidadesBulto ?? row.original?.unidadesBulto ?? 1));
+      const value=window.prompt('Cantidad por bulto (se guarda al aplicar el lote):',String(row.unidadesBulto ?? row.divisorBultoAplicado ?? row.original?.unidadesBulto ?? 1));
       if(value==null)return;
       try {
         const amount=window.CorralonFunciones.evaluateBasicArithmetic(value);
@@ -291,13 +291,26 @@ export async function open(options, window = globalThis.window, document = globa
     const oldCost = Number(row.original?.costo);
     if (!row.original || !Number.isFinite(oldCost) || oldCost <= 0) return '—';
     const difference = (row.costo - oldCost) / oldCost * 100;
+    if (Math.abs(difference) < .005) return '';
     return `${difference > 0 ? '+' : ''}${difference.toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })} %`;
   }
+  function isUnchangedPriceRow(row) {
+    const original = row?.original;
+    return options.applyPrices && original && row.mode === 'update' && row.id && row.version
+      && !row.loading && !row.sqlSaved && !row.reactivar && !row.loadWeb && !row.costoExpression && row.unidadesBulto == null
+      && row.costo > 0 && money(row.costo) === money(original.costo)
+      && row.codigo === String(original.codigo ?? '').trim() && row.descripcion === original.descripcion
+      && Number(row.rubro) === Number(original.rubro) && Number(row.iva) === Number(original.iva)
+      && Math.abs(row.margen - row.originalMargin) < .000001;
+  }
   function summary() {
-    const updates=rows.filter(row=>row.mode==='update'&&row.id&&row.version).length;
-    const unresolved=rows.filter(row=>row.mode==='update'&&(!row.id||!row.version)).length;
-    backdrop.querySelector('[data-summary]').textContent=`${rows.length-updates-unresolved} nuevos · ${updates} para actualizar${unresolved?` · ${unresolved} por identificar`:''}`;
-    apply.disabled=busy||!rows.length||Boolean(unresolved)||rows.some(row=>row.loading);
+    const visible=rows.filter(row=>!isUnchangedPriceRow(row));
+    const unchanged=rows.length-visible.length;
+    const updates=visible.filter(row=>row.mode==='update'&&row.id&&row.version).length;
+    const unresolved=visible.filter(row=>row.mode==='update'&&(!row.id||!row.version)).length;
+    backdrop.querySelectorAll('tr[data-row]').forEach(tr=>{tr.hidden=Boolean(isUnchangedPriceRow(rows[Number(tr.dataset.row)]));});
+    backdrop.querySelector('[data-summary]').textContent=`${visible.length-updates-unresolved} nuevos · ${updates} para actualizar${unresolved?` · ${unresolved} por identificar`:''}${unchanged?` · ${unchanged} sin cambios`:''}`;
+    apply.disabled=busy||!visible.length||Boolean(unresolved)||visible.some(row=>row.loading);
   }
   function canEditSupplierCode(row) {
     return options.editableSource || row.codigoManual === true || !row.codigo.trim();
@@ -597,7 +610,7 @@ export async function open(options, window = globalThis.window, document = globa
       if (e.shiftKey && selectionAnchor) {
         const start = rows.findIndex(row => row.uid === selectionAnchor);
         const end = Number(tr.dataset.row);
-        if (start >= 0) backdrop.querySelectorAll('tr[data-row]').forEach((element, index) => element.classList.toggle('local-selected', index >= Math.min(start,end) && index <= Math.max(start,end)));
+        if (start >= 0) backdrop.querySelectorAll('tr[data-row]').forEach((element, index) => element.classList.toggle('local-selected', !element.hidden && index >= Math.min(start,end) && index <= Math.max(start,end)));
       } else {
         selectedRowUid = current?.uid || '';
         selectionAnchor = selectedRowUid;
@@ -658,6 +671,7 @@ export async function open(options, window = globalThis.window, document = globa
     }
     if(row && e.target.dataset.field==='costo')finishCost(e.target,row);
     finishFieldEdit(e.target);
+    if(options.applyPrices)summary();
   });
   backdrop.addEventListener('input', e => {
     const input = e.target.closest('[data-field]'); if (!input || busy) return;
@@ -706,14 +720,20 @@ export async function open(options, window = globalThis.window, document = globa
     }
   });
   function finishCost(input,row){
-    try{const cost=window.CorralonFunciones.evaluateBasicArithmetic(input.value);if(cost<=0)throw new Error('El costo debe ser mayor que cero.');row.costo=cost;delete row.costoExpression;input.value=money(cost);input.setCustomValidity('');changed();return true;}
+    try{
+      const keepUnitCost=Number(row.divisorBultoAplicado)>0&&!row.costoExpression&&input.value===money(row.costo);
+      const cost=keepUnitCost?row.costo:window.CorralonFunciones.evaluateBasicArithmetic(input.value);
+      if(cost<=0)throw new Error('El costo debe ser mayor que cero.');
+      row.costo=cost;delete row.costoExpression;input.value=money(cost);input.setCustomValidity('');changed();return true;
+    }
     catch(error){input.setCustomValidity(error.message);setStatus(error.message,true);return false;}
   }
   const editableFields = [...(options.editableSource ? ['id'] : []), 'codigo', 'descripcion', 'rubro', 'iva', 'margen', 'costo'];
-  function focusGrid(rowIndex, fieldIndex) {
-    if (!rows.length) return;
-    if (rowIndex >= rows.length) { apply.focus(); return; }
-    if (rowIndex < 0) rowIndex = 0;
+  function focusGrid(rowIndex, fieldIndex, direction = 1) {
+    while (rowIndex >= 0 && rowIndex < rows.length && isUnchangedPriceRow(rows[rowIndex])) rowIndex += direction;
+    if (rowIndex >= rows.length) { (apply.disabled ? backdrop.querySelector('[data-close]') : apply).focus(); return; }
+    if (rowIndex < 0) rowIndex = rows.findIndex(row=>!isUnchangedPriceRow(row));
+    if (rowIndex < 0) return;
     const field = editableFields[Math.max(0, Math.min(editableFields.length-1, fieldIndex))];
     const target = field === 'codigo' && !canEditSupplierCode(rows[rowIndex]) ? 'descripcion' : field;
     backdrop.querySelector(`tr[data-row="${rowIndex}"] [data-field="${target}"]`)?.focus({ preventScroll:true });
@@ -724,14 +744,14 @@ export async function open(options, window = globalThis.window, document = globa
     hideMenu();
     if (direction === 'up' || direction === 'down') {
       const nextRow = direction === 'up' ? (edge ? 0 : rowIndex - 1) : (edge ? rows.length - 1 : rowIndex + 1);
-      focusGrid(nextRow, editableFields.indexOf(field));
+      focusGrid(nextRow, editableFields.indexOf(field),edge?(direction==='up'?1:-1):(direction==='up'?-1:1));
       return;
     }
     const fields = canEditSupplierCode(rows[rowIndex]) ? editableFields : editableFields.filter(name => name !== 'codigo');
     const forward = direction === 'right';
     const nextField = edge ? (forward ? fields.length - 1 : 0) : fields.indexOf(field) + (forward ? 1 : -1);
     if (nextField >= fields.length) focusGrid(rowIndex + 1, 0);
-    else if (nextField < 0) focusGrid(rowIndex - 1, editableFields.length - 1);
+    else if (nextField < 0) focusGrid(rowIndex - 1, editableFields.length - 1,-1);
     else focusGrid(rowIndex, editableFields.indexOf(fields[nextField]));
   }
   function atTextEdge(input, direction) {
@@ -822,12 +842,14 @@ export async function open(options, window = globalThis.window, document = globa
   window.addEventListener('keydown', handleDialogKeydown, true);
   apply.addEventListener('click', async () => {
     if (busy) return;
-    for(const input of backdrop.querySelectorAll('[data-field="costo"]')){
+    for(const input of backdrop.querySelectorAll('tr:not([hidden]) [data-field="costo"]')){
       const row=rowAt(input);if(!row.sqlSaved && !finishCost(input,row)){input.focus();return;}
     }
-    const sqlRows=rows.filter(r=>!r.sqlSaved);
+    const batch=rows.filter(row=>!isUnchangedPriceRow(row));
+    if(!batch.length){summary();return;}
+    const sqlRows=batch.filter(r=>!r.sqlSaved);
     for (const row of sqlRows) if (!confirmNew(row, true)) return;
-    const invalid = rows.find(r => (r.mode==='update'&&(!r.id||!r.version)) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
+    const invalid = batch.find(r => (r.mode==='update'&&(!r.id||!r.version)) || !r.rubro || !r.descripcion.trim() || !Number.isFinite(r.margen) || r.margen<0 || !(r.costo>0));
     if(invalid) { setStatus('Completá artículo, rubro, costo y margen en todas las filas.',true); return; }
     const descriptions = new Set();
     for (const row of sqlRows.filter(row => row.mode !== 'update')) {
@@ -843,7 +865,7 @@ export async function open(options, window = globalThis.window, document = globa
     try { await flushDraft(true); } catch(error) { setStatus(error.message,true); return; }
     busy=true; apply.disabled=true;
     try {
-      await enqueue({operation,provider:providerId,providerName:options.provider.proveedor||options.provider.nombre||'',draftScope,rows},options.onImported,token,()=>open(options,window,document));
+      await enqueue({operation,provider:providerId,providerName:options.provider.proveedor||options.provider.nombre||'',draftScope,rows:batch},options.onImported,token,()=>open(options,window,document));
       busy=false; close(true);
       try { options.showMessage?.('Carga en cola. Continúa en segundo plano.'); } catch(error) { console.warn(error); }
     } catch(error) {
@@ -872,7 +894,7 @@ export async function open(options, window = globalThis.window, document = globa
         const importedCode = source => String(source?.codigo || source?.cod_proveedor || source?.codProveedor || '').trim();
         const seedRow=source=>{
           const costo=Number(source.costo ?? source.precio_costo ?? source.precioFinal ?? 0);
-          return {uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),sourceRowId:source.sourceRowId||'',mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo,sourceCost:costo,rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:60,newConfirmed:true,needsNewConfirmation:false};
+          return {uid:(window.CorralonFunciones?.createUuid?.() || crypto.randomUUID()),sourceRowId:source.sourceRowId||'',mode:'new',id:'',codigo:importedCode(source),descripcion:importedText(source),importedDescription:importedText(source),costo,sourceCost:costo,divisorBultoAplicado:Number(source.divisorBultoAplicado)||undefined,rubro:Number(source.idRubro || source.id_rubro || defaultRubro),iva:.21,margen:60,newConfirmed:true,needsNewConfirmation:false};
         };
         if(options.applyPrices&&importedRows.length){
           setStatus('Identificando artículos existentes y leyendo sus costos en SQL…');
