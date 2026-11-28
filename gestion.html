@@ -303,6 +303,7 @@ body:is([data-system-section="invoice-consult"],[data-system-section="customers"
   #invoiceChat li.chat-important{border-color:#dd858a;background:#fff0f1}
   #invoiceChat .chat-important-label{display:block;margin:0 0 4px;color:#a42025;font-size:11px;font-weight:700}
   #invoiceChat button.chat-message-options{padding:0 3px;margin-left:3px;border:0;background:transparent;line-height:1}
+  #invoiceChat .chat-read-receipt{color:#145bb4;font-weight:700;white-space:nowrap}
   #invoiceChatMessageMenu{position:fixed;z-index:1;display:grid;min-width:180px;max-width:calc(100% - 16px);padding:4px;border:1px solid #a9c6e4;border-radius:7px;background:#fff;box-shadow:0 4px 14px #12243b40}
   #invoiceChatMessageMenu button{border:0;text-align:left}
   #invoiceChatMessageMenu button:is(:hover,:focus-visible){background:#e6f0ff}
@@ -415,7 +416,7 @@ body:is([data-system-section="invoice-consult"],[data-system-section="customers"
 <div class="modal-wrap" id="trialModal" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante de prueba"><section class="modal trial-modal"><header class="modal-head"><h2>Vista previa de prueba</h2><button id="closeTrial" type="button">Cerrar</button></header><div class="trial-preview"><article class="trial-ticket" id="trialTicket"></article></div><div class="preview-printer" id="previewPrinterWrap" hidden><label for="previewPrinter">Elegí el destino del ticket</label><select id="previewPrinter"><option value="">Seleccionar impresora…</option></select><small id="previewPrinterError" role="alert"></small></div><footer class="trial-actions"><button id="refreshPrinters" type="button" hidden>Actualizar impresoras</button><button id="closeTrialBottom" type="button">Cerrar</button><button id="doPrintTrial" class="primary" type="button">Imprimir</button></footer></section></div>
 <div id="paymentOptions" class="payment-options" role="listbox"></div>
 <div id="classicVoucherOptions" popover="manual" role="listbox" aria-label="Comprobantes"></div>
-<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.67"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
+<script src="funciones.js?v=20260824-table-selection"></script><script src="corralon-system.js?v=1.0.68"></script><script src="vendor/qrcode-generator.js"></script><script src="vendor/html2canvas.min.js"></script><script src="vendor/jspdf.umd.min.js"></script><script src="presupuesto-shared.js"></script><script>
 function invoiceDocumentEvent(type, callback, options){
  document.addEventListener(type,function(event){
   if(event.target.closest?.('#invoiceChat,#invoiceChatToggle')&&['keydown','keyup','click','mousedown','pointerdown','paste','copy','contextmenu'].includes(type))return;
@@ -6233,6 +6234,8 @@ window.CorralonSQLModules={openArticle};
   const state={revision:null,identity:'',conversation:'',directoryOpen:false,directoryLoading:false,directoryError:'',
     rows:new Map(),contacts:new Map(),drafts:new Map(),seen:new Map(),
     ready:false,unavailable:false,polling:false,sending:false,attachment:null,upload:'',sendError:false,operation:''};
+  const reportedReads=new Set();
+  let readFrame=0,reportingReads=false;
   const menuUser=()=>window.CorralonFunciones.menuSessionUser()?.id||'';
   let bindingMenu=null,boundAttempt=null;
   function menuTickets(user){
@@ -6319,6 +6322,7 @@ window.CorralonSQLModules={openArticle};
   }
   function markChatSeen(){
     if(!viewing(state.conversation))return;
+    scheduleReadReceipts();
     const announced=state.rows.get(normalNoticeId);
     if(announced&&conversationOf(announced.message)===state.conversation)hideNotice();
     if(state.revision>seenRevision(state.conversation)){
@@ -6327,6 +6331,38 @@ window.CorralonSQLModules={openArticle};
       try{localStorage.setItem(key,String(state.revision));}catch(_){}
     }
     updateImportantNotice();
+  }
+  function scheduleReadReceipts(){
+    if(readFrame||reportingReads||!state.identity||!state.conversation)return;
+    readFrame=requestAnimationFrame(()=>{
+      readFrame=0;
+      reportVisibleReads();
+    });
+  }
+  async function reportVisibleReads(){
+    const {identity,conversation}=state;
+    if(!conversation||!identity||identity!==menuUser()||!viewing(conversation)||!document.hasFocus())return;
+    const bounds=messages.getBoundingClientRect(),ids=[];
+    for(const row of messages.children){
+      const rect=row.getBoundingClientRect();
+      if(rect.top>=bounds.bottom)break;
+      if(Math.min(rect.bottom,bounds.bottom)-Math.max(rect.top,bounds.top)<Math.min(32,rect.height))continue;
+      const id=Number(row.dataset.messageId),item=state.rows.get(id)?.message;
+      if(item?.destinatario===identity&&!item.leidoEn&&!reportedReads.has(id)){
+        ids.push(id);
+        if(ids.length===100)break;
+      }
+    }
+    if(!ids.length)return;
+    reportingReads=true;
+    try{
+      await request('mensajes/lectura',{ids});
+      if(identity===state.identity&&identity===menuUser())ids.forEach(id=>reportedReads.add(id));
+    }catch(_){
+      // A later poll will retry if the messages are still on screen.
+    }finally{
+      reportingReads=false;
+    }
   }
   function chooseFile(file){
     if(file&&!file.size){status('El archivo está vacío.',true);return;}
@@ -6379,11 +6415,19 @@ window.CorralonSQLModules={openArticle};
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();imageViewer.close();}
   });
   imageViewer.addEventListener('close',()=>{if(!imageViewer.open)largeImage.removeAttribute('src');markChatSeen();});
+  function showReadReceipt(caption,message){
+    if(!message.destinatario||!message.leidoEn||!ownMessage(message)||caption.querySelector('.chat-read-receipt'))return;
+    const receipt=document.createElement('span'),date=new Date(message.leidoEn);
+    receipt.className='chat-read-receipt';receipt.textContent='✓✓ Visto';
+    if(!Number.isNaN(date.getTime()))receipt.title='Visto el '+time.format(date);
+    caption.querySelector('time').after(receipt);
+  }
   function render(batch,newRevision){
     const first=state.revision===null,following=messages.scrollHeight-messages.scrollTop-messages.clientHeight<55;
     let latest;
     for(const message of batch){
       const id=Number(message.id),existing=state.rows.get(id);
+      if(message.eliminado||message.leidoEn)reportedReads.delete(id);
       if(message.eliminado){
         existing?.row.remove();state.rows.delete(id);
         if(id===normalNoticeId)hideNotice();
@@ -6397,7 +6441,11 @@ window.CorralonSQLModules={openArticle};
       }else if(!first&&!existing&&isUnread(message)&&!viewing(thread)){
         latest=message;
       }
-      if(existing&&existing.message.revision===message.revision)continue;
+      if(existing&&existing.message.revision===message.revision){
+        existing.message=message;
+        showReadReceipt(existing.row.querySelector('.chat-caption'),message);
+        continue;
+      }
       const row=document.createElement('li'),caption=document.createElement('div');
       row.dataset.messageId=id;
       if(mine)row.classList.add('chat-mine');
@@ -6410,6 +6458,7 @@ window.CorralonSQLModules={openArticle};
       const date=new Date(message.fecha);
       if(!Number.isNaN(date.getTime())){stamp.dateTime=date.toISOString();stamp.textContent=time.format(date);}
       caption.className='chat-caption';caption.append(name,stamp);
+      showReadReceipt(caption,message);
       if(mine){
         const options=document.createElement('button');options.type='button';options.className='chat-message-options';options.textContent='⋯';
         options.setAttribute('aria-label','Opciones del mensaje');options.setAttribute('aria-haspopup','menu');
@@ -6507,7 +6556,7 @@ window.CorralonSQLModules={openArticle};
     hideMessageMenu();
     if(imageViewer.open)imageViewer.close();
     state.identity=identity;state.revision=null;state.conversation='';state.directoryError='';
-    state.contacts.clear();state.rows.clear();state.drafts.clear();input.value='';
+    state.contacts.clear();state.rows.clear();state.drafts.clear();reportedReads.clear();input.value='';
     chooseFile(null);hideNotice();
     if(state.directoryOpen){
       messages.replaceChildren();
@@ -6606,7 +6655,7 @@ window.CorralonSQLModules={openArticle};
   }
   messageMenu.addEventListener('pointerdown',event=>event.stopPropagation());
   panel.addEventListener('pointerdown',event=>{if(!messageMenu.hidden&&!messageMenu.contains(event.target))hideMessageMenu();});
-  messages.addEventListener('scroll',()=>{if(!messageMenu.hidden)hideMessageMenu();});
+  messages.addEventListener('scroll',()=>{if(!messageMenu.hidden)hideMessageMenu();scheduleReadReceipts();});
   messageMenu.addEventListener('keydown',event=>{
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();hideMessageMenu(true);return;}
     if(event.key==='Tab'){hideMessageMenu(true);return;}
@@ -6701,6 +6750,7 @@ window.CorralonSQLModules={openArticle};
   };
   new MutationObserver(sync).observe(document.body,{attributes:true,attributeFilter:['data-system-section']});
   window.addEventListener('resize',()=>{hideMessageMenu();positionNotice();});
+  window.addEventListener('focus',scheduleReadReceipts);
   window.addEventListener('storage',event=>{
     if(event.key==='corralon_catalogo_editor_session_v1'){
       boundAttempt=null;

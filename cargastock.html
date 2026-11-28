@@ -9,14 +9,15 @@
   <title>Carga Stock</title>
   <link rel="icon" type="image/png" href="favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@500;700;800&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>window.CORRALON_DISABLE_CATALOG_REALTIME = true;</script>
-<script src="corralon-system.js?v=1.0.63"></script>
+<script src="corralon-system.js?v=1.0.64"></script>
   <script src="corralon-cache-db.js"></script>
   <script src="funciones.js?v=20260708-funciones"></script>
   <script src="nav-helper.js"></script>
   <script src="menu-auth-guard.js?v=20260710-guard4" data-menu-guard="carga_stock"></script>
   <style>
+    #rows > .row{content-visibility:auto}
+    #rows > .stock-duplicate-review{outline:2px solid #c7192c;outline-offset:-2px}
     *{box-sizing:border-box}
     :root{--red:#e8183a;--purple:#6d5df7;--line:#8bc7ff;--soft:#eef8ff;--bg:#f6fcff;--row:#f7fbff;--text:#20223a;--muted:#6d7190;--ok:#d9f8e4;--ok2:#079a52;--bad:#ffe0e6;--bad2:#d7163c}
     html,body{margin:0;height:100%;overflow:hidden}
@@ -505,7 +506,7 @@ body[data-page-theme="cargastock"].stock-additional-open .stock-footer{flex-shri
     > .table-wrap {margin-left:26px}
     > .table-wrap > .head {border:1px solid #aaa;border-bottom:0}
     > .table-wrap :is(.head,#rows > .row) {grid-template-columns:19px 114px 94px minmax(220px,1fr) 85px 85px 107px 143px!important}
-    > .table-wrap :is(.head,#rows > .row) > :is(.stock-classic-filter,.stock-classic-calc,:nth-child(8),:nth-child(9)) {display:none!important}
+    > .table-wrap :is(.head,#rows > .row) > :is(.stock-classic-calc,:nth-child(8),:nth-child(9)) {display:none!important}
     > .table-wrap > .head .stock-classic-title {display:inline}
     > .table-wrap > .head .stock-web-title {display:none}
     > .table-wrap #rows > .row > div {border-color:#d5d5d5}
@@ -876,7 +877,7 @@ body[data-page-theme="cargastock"].stock-additional-open .stock-footer{flex-shri
       <div data-col-select="3" data-sort-key="precio"><span class="stock-web-title">Precio unit.</span><span class="stock-classic-title">PrecioUni</span><button type="button" class="sort-control" data-sort-control="precio" title="Ordenar">↕</button></div>
       <div data-col-select="4" data-sort-key="descuento"><span>Desc. adicional</span><button type="button" class="sort-control" data-sort-control="descuento" title="Ordenar">↕</button></div>
       <div data-col-select="5" data-sort-key="precioFinal"><span>Precio final</span><button type="button" class="sort-control" data-sort-control="precioFinal" title="Ordenar">↕</button></div>
-      <div data-col-select="6" data-sort-key="precioFinalCantidad"><span>Importe</span><button type="button" class="sort-control" data-sort-control="precioFinalCantidad" title="Ordenar">↕</button></div><div class="access-only stock-classic-filter">Filtrar</div><div class="access-only stock-classic-calc">Calc ▾</div><div class="access-only stock-classic-calc">Diferen ▾</div>
+      <div data-col-select="6" data-sort-key="precioFinalCantidad"><span>Importe</span><button type="button" class="sort-control" data-sort-control="precioFinalCantidad" title="Ordenar">↕</button></div><div class="access-only stock-classic-calc">Calc ▾</div><div class="access-only stock-classic-calc">Diferen ▾</div>
     </div>
     <div class="rows" id="rows"></div>
     <div class="foot">
@@ -1115,9 +1116,6 @@ body[data-page-theme="cargastock"].stock-additional-open .stock-footer{flex-shri
 })();
 </script>
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDocFromServer, getDoc, collection, query, where, getDocsFromServer, updateDoc, serverTimestamp, Timestamp, runTransaction, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
 const firebaseConfig = {
   apiKey: "AIzaSyCxwUGX-rVusOI13j7oTfQuAtkeNXdAYH0",
   authDomain: "corralon-progreso.firebaseapp.com",
@@ -1127,8 +1125,18 @@ const firebaseConfig = {
   appId: "1:466583614632:web:42cb839f83e97475fabe9d"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+let stockFirestoreLoading;
+function stockFirestore() {
+  if(!stockFirestoreLoading){
+    stockFirestoreLoading=Promise.all([
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js')
+    ]).then(([firebase, firestore])=>({
+      ...firestore, db:firestore.getFirestore(firebase.initializeApp(firebaseConfig))
+    })).catch(error=>{stockFirestoreLoading=null;throw error;});
+  }
+  return stockFirestoreLoading;
+}
 let CACHE_KEY = 'corralon_carga_stock_rows_v1';
 let PROVIDER_KEY = 'corralon_carga_stock_provider_v1';
 const PROVIDERS_VERSION_CACHE_KEY = 'corralon_carga_stock_providers_version_v1';
@@ -1216,7 +1224,7 @@ document.getElementById('openPurchaseInvoiceBtn').addEventListener('click', () =
   if (!FX.menuUserHasAccess('cargar_facturas')) { htmlNotice('Tu usuario no tiene permiso para Cargar facturas.', false); return; }
   window.open('cargar-facturas.html', '_blank');
 });
-function htmlNotice(text, confirmation = true, {title, choices} = {}) {
+function htmlNotice(text, confirmation = true, {title, choices, warning = false, confirmLabel, cancelLabel = 'Cancelar'} = {}) {
   return new Promise(resolve => {
     const previous = document.activeElement;
     const dialog = document.createElement('dialog');
@@ -1227,13 +1235,16 @@ function htmlNotice(text, confirmation = true, {title, choices} = {}) {
     const label = document.createElement('h2');
     label.textContent = heading;
     label.style.cssText = 'margin:0 0 14px;font-size:20px';
+    if (warning) {
+      label.style.cssText += ';margin:-20px -20px 8px;padding:20px 20px 6px;border-radius:9px 9px 0 0;background:#ffdf8b;color:#553500';
+    }
     const message = document.createElement('p');
     message.textContent = text;
     message.style.cssText = 'white-space:pre-wrap;margin:0 0 20px';
     const actions = document.createElement('div');
     actions.style.cssText = choices ? 'display:grid;gap:10px' : 'display:flex;justify-content:flex-end;gap:10px';
-    const cancel = {value:false,label:'Cancelar'};
-    const accept = {value:true,label:confirmation ? 'Confirmar' : 'Aceptar',primary:true};
+    const cancel = {value:false,label:cancelLabel};
+    const accept = {value:true,label:confirmLabel || (confirmation ? 'Confirmar' : 'Aceptar'),primary:true};
     const buttons = choices ? [...choices,cancel] : confirmation ? [cancel,accept] : [accept];
     const finish = value => { dialog.close(); dialog.remove(); previous?.focus(); resolve(value); };
     buttons.forEach(choice => {
@@ -1242,6 +1253,10 @@ function htmlNotice(text, confirmation = true, {title, choices} = {}) {
       button.textContent = choice.label;
       button.disabled = Boolean(choice.disabled);
       button.style.cssText = choice.primary ? 'background:var(--corralon-red,#f50916);color:white;padding:9px 16px;border:0' : 'padding:9px 16px';
+      if (warning && choice === accept) {
+        button.style.cssText += ';background:#ffbf45;color:#352100';
+      }
+      if (warning && choice === cancel) button.autofocus = true;
       button.onclick = () => finish(choice.value);
       actions.append(button);
     });
@@ -1249,7 +1264,7 @@ function htmlNotice(text, confirmation = true, {title, choices} = {}) {
     dialog.append(label, message, actions);
     document.body.append(dialog);
     dialog.showModal();
-    actions.lastElementChild.focus();
+    (warning ? actions.querySelector('[autofocus]') : actions.lastElementChild)?.focus();
   });
 }
 
@@ -1352,8 +1367,11 @@ function stockPlainNumber(value) {
   if(!Number.isFinite(number)) throw new Error('Ingresá un número válido.');
   return number;
 }
+const stockMoneyFormat = new Intl.NumberFormat('es-AR', {minimumFractionDigits:2,maximumFractionDigits:2});
+const stockUnitsFormat = new Intl.NumberFormat('es-AR', {maximumFractionDigits:4});
+const stockArticleCollator = new Intl.Collator('es');
 function money(value) {
-  return `$ ${Number(value || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$ ${stockMoneyFormat.format(Number(value || 0))}`;
 }
 function parseCalcFactor(value, fallback = 1) {
   const text = String(value ?? '').trim();
@@ -1404,8 +1422,9 @@ function topVisibleModalBackdrop() {
   return visibleModalBackdrops().at(-1) || null;
 }
 document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab') return;
   const active = topVisibleModalBackdrop();
-  if (!active || event.key !== 'Tab') return;
+  if (!active) return;
   const focusable = modalFocusableElements(active);
   if (!focusable.length) return;
   const currentIndex = focusable.indexOf(document.activeElement);
@@ -1454,9 +1473,11 @@ function stockWorkspaceIndicator() {
 }
 let stockReloadReady=false,stockReloadRestoring=false,stockReloadTimer=null;
 let stockReloadWrite=Promise.resolve();
+let stockReloadSavedArticles,stockReloadSavedProviderArticles,stockReloadCatalogVersion;
 const stockReloadTab=sessionStorage.getItem('corralon_stock_reload_tab')||FX.createUuid();
 sessionStorage.setItem('corralon_stock_reload_tab',stockReloadTab);
 const stockReloadKey='corralon_stock_reload_v1_'+stockReloadTab;
+const stockReloadCatalogKey=stockReloadKey+'_catalog';
 function stockSaveReloadView(){
   if(!stockReloadReady||stockReloadRestoring||stockWorkspaceSwitching||stockAdditionalSwitching)return;
   const focused=document.activeElement;
@@ -1470,16 +1491,30 @@ function stockSaveReloadView(){
 function stockSaveReloadSnapshot(){
   if(!stockReloadReady||stockReloadRestoring||stockWorkspaceSwitching||stockAdditionalSwitching||!stockSqlMeta)return stockReloadWrite;
   stockSaveReloadView();
+  const articles=stockSqlArticles, providerArticles=stockProviderListArticles;
   const state=structuredClone({user:String(FX.menuSessionUser()?.id||''),workspace:stockWorkspaceSnapshot(),
     additional:stockAdditionalPopup.classList.contains('visible'),active:stockActiveWorkspace,count:stockWorkspaceCount,
-    meta:stockSqlMeta,articles:stockSqlArticles,providerArticles:stockProviderListArticles,providers,
+    meta:stockSqlMeta,providers,
     options:[...document.querySelectorAll('[data-stock-header]')].filter(node=>node.tagName==='SELECT').map(node=>({id:node.id,html:node.innerHTML})),
     fields:[...document.querySelectorAll('[data-stock-header],#stockNumero,#stockOperador')].map(node=>({id:node.id,value:node.value})),
     confirmed:stockConfirmed,receipt:stockField('stockPrintBtn').hidden?'':stockField('stockPrintBtn').dataset.receipt||''});
-  stockReloadWrite=stockReloadWrite.catch(()=>{}).then(()=>window.CorralonCacheDB.set(stockReloadKey,state));
+  stockReloadWrite=stockReloadWrite.catch(()=>{}).then(async()=>{
+    const cache=window.CorralonCacheDB;
+    if(stockReloadSavedArticles===articles && stockReloadSavedProviderArticles===providerArticles){
+      state.catalogVersion=stockReloadCatalogVersion;
+      await cache.set(stockReloadKey,state);
+      return;
+    }
+    state.catalogVersion=FX.createUuid();
+    await cache.updateMany([[stockReloadKey,state],[stockReloadCatalogKey,{version:state.catalogVersion,articles,providerArticles}]]);
+    stockReloadSavedArticles=articles;
+    stockReloadSavedProviderArticles=providerArticles;
+    stockReloadCatalogVersion=state.catalogVersion;
+  });
   return stockReloadWrite;
 }
-function stockScheduleReloadSnapshot(){
+function stockScheduleReloadSnapshot(event){
+  if(event?.target?.closest?.('.local-articles-backdrop,.local-articles-search'))return;
   clearTimeout(stockReloadTimer);
   stockReloadTimer=setTimeout(()=>stockSaveReloadSnapshot().catch(console.warn),1000);
 }
@@ -1494,7 +1529,18 @@ async function stockRestoreReloadView(){
   const invoiceTransfer=JSON.parse(localStorage.getItem(`corralon_stock_factura_${FX.menuSessionUser()?.id||''}`)||'null');
   if(invoiceTransfer&&invoiceTransfer.target===sessionStorage.getItem('corralon_stock_tab_id'))return false;
   const state=await window.CorralonCacheDB.get(stockReloadKey);
-  if(!state||state.user!==String(FX.menuSessionUser()?.id||'')||!state.meta||!Array.isArray(state.articles))return false;
+  if(!state||state.user!==String(FX.menuSessionUser()?.id||'')||!state.meta)return false;
+  const savedCatalog=state.catalogVersion?await window.CorralonCacheDB.get(stockReloadCatalogKey):null;
+  const articles=state.catalogVersion
+    ? (savedCatalog?.version===state.catalogVersion?savedCatalog.articles:null)
+    : state.articles;
+  const providerArticles=(savedCatalog?.providerArticles??state.providerArticles)||[];
+  if(!Array.isArray(articles))return false;
+  if(savedCatalog){
+    stockReloadSavedArticles=articles;
+    stockReloadSavedProviderArticles=providerArticles;
+    stockReloadCatalogVersion=savedCatalog.version;
+  }
   stockReloadRestoring=true;
   try{
     if(state.additional){
@@ -1515,7 +1561,7 @@ async function stockRestoreReloadView(){
       await window.CorralonCacheDB.set(STOCK_WORKSPACE_KEY+'_'+state.active,recoveredWorkspace);
     }
     stockActiveWorkspace=state.active;stockWorkspaceCount=state.count;
-    stockSqlMeta=state.meta;providers=state.providers;stockSqlArticles=state.articles;stockProviderListArticles=state.providerArticles||[];
+    stockSqlMeta=state.meta;providers=state.providers;stockSqlArticles=articles;stockProviderListArticles=providerArticles;
     stockSqlById=new Map();stockSqlByCode=new Map();
     stockSqlArticles.forEach(article=>{stockSqlById.set(String(article.idart),article);const key=`${article.proveedor}:${codeKey(article.codProv)}`;const matches=stockSqlByCode.get(key)||[];matches.push(article);stockSqlByCode.set(key,matches);});
     state.options.forEach(item=>{const node=stockField(item.id);if(node)node.innerHTML=item.html;});
@@ -2429,14 +2475,14 @@ function filteredProviderArticles(cell) {
       if(Object.hasOwn(item,'stockSucursal')&&Number(item.stockSucursal)!==branch)return false;
       if(onlyProvider&&(!providerId||(!useList&&Number(item.proveedor)!==providerId)))return false;
       if(field==='codigo'&&!String(item.codProv||'').trim())return false;
-      const text=norm([item.descripcion,item.idart,item.codProv].join(' '));
+      const text=providerArticleSearch.get(item)?.text ?? norm([item.descripcion,item.idart,item.codProv].join(' '));
       return terms.every(term=>text.includes(term));
     });
     const ranks=new Map();
     if(field==='descripcion'&&terms.length){
       for(const item of rows)ranks.set(item,firstWordRank(item,terms[0]));
     }
-    rows.sort((a,b)=>(ranks.get(a)??0)-(ranks.get(b)??0)||String(a[key]||'').localeCompare(String(b[key]||''),'es'));
+    rows.sort((a,b)=>(ranks.get(a)??0)-(ranks.get(b)??0)||stockArticleCollator.compare(a[key]||'',b[key]||''));
     articleProviderPage=CorralonSystem.articleOptionPager.create(rows,{preordered:true,isMatch:()=>true,hasSearch:false,matchLimit:100});
     articleProviderHasSearchMatch=rows.length>0;
     return articleProviderPage.options;
@@ -2609,7 +2655,7 @@ function scheduleArticleProviderList(cell) {
   articleProviderInputTimer = setTimeout(() => {
     articleProviderInputTimer = null;
     if (cell.isConnected && document.activeElement === cell) openArticleProviderList(cell);
-  }, 50);
+  }, 160);
 }
 function extendArticleProviderList(direction) {
   if (articleProviderPaging || !articleProviderPage || !el.articleProviderMenu.classList.contains('open')) return;
@@ -2617,6 +2663,10 @@ function extendArticleProviderList(direction) {
   const oldHeight = el.articleProviderMenu.scrollHeight;
   const oldTop = el.articleProviderMenu.scrollTop;
   const added = CorralonSystem.articleOptionPager.extend(articleProviderPage, direction);
+  if (!added.length) {
+    articleProviderPaging = false;
+    return;
+  }
   if (direction === 'up') {
     articleProviderOptions = [...added, ...articleProviderOptions];
     articleProviderActive += added.length;
@@ -2644,7 +2694,7 @@ function pickArticleProviderOption(index = articleProviderActive) {
   commitCellEditSnapshot(cell);
   saveRows();
   closeArticleProviderList();
-  render();
+  stockRenderEditedArticle(rowIndex);
   const nextCell = editableCellAt(rowIndex, ['codigo','idart'].includes(cell.dataset.field) ? 2 : 1);
   focusNavigationTarget(nextCell);
   show('Artículo seleccionado');
@@ -2675,7 +2725,7 @@ function applyExactProviderCode(cell) {
   stockUpdateSelectedArticlePrice(row, stockSelectedArticleCost(item));
   commitCellEditSnapshot(cell);
   saveRows();
-  render();
+  stockRenderEditedArticle(rowIndex);
   requestAnimationFrame(() => focusNavigationTarget(editableCellAt(rowIndex, 2)));
   show('Artículo seleccionado');
   return true;
@@ -2975,7 +3025,6 @@ async function openNewArticlesModal(rowIndex = null, editableSource = false, app
       costo: row.unidadesBultoAplicadas ? calcPrecioFinal(row) : Number(calcPrecioFinal(row).toFixed(2)),
       divisorBultoAplicado: row.unidadesBultoAplicadas
     })),
-    catalogRows: stockSqlCatalogRows,
     catalogSource: 'sql',
     showMessage: show,
     onClose(){importerReturned=true;returnToSourceRow();},
@@ -3040,6 +3089,20 @@ function newArticlesForAccess() {
     };
   });
 }
+let stockXlsxLoading;
+function stockLoadXlsx() {
+  if(window.XLSX)return Promise.resolve();
+  if(!stockXlsxLoading){
+    stockXlsxLoading=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      script.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+      script.onload=()=>window.XLSX?resolve():reject(new Error('No se pudo cargar el módulo XLSX'));
+      script.onerror=()=>{script.remove();reject(new Error('No se pudo cargar el módulo XLSX'));};
+      document.head.appendChild(script);
+    }).catch(error=>{stockXlsxLoading=null;throw error;});
+  }
+  return stockXlsxLoading;
+}
 async function importNewArticlesToAccess() {
   if (updateNewArticlesValidation().length || newArticlesImporting) return;
   newArticlesImporting = true;
@@ -3048,9 +3111,9 @@ async function importNewArticlesToAccess() {
   el.newArticlesValidation.className = 'new-articles-validation';
   el.newArticlesValidation.textContent = 'Verificando Access y preparando Articulos.xls...';
   try {
-    if (!window.XLSX) throw new Error('No se pudo cargar el módulo XLSX');
     const valid = await validateNewArticlesAccessMax();
     if (!valid) return;
+    await stockLoadXlsx();
     newArticlesServerError = '';
     const blob = CorralonSystem.buildNewArticlesXlsBlob(newArticlesForAccess());
     const response = await fetch(`/api/articulos-nuevos/import?maxIndex=${encodeURIComponent(newArticlesIndexMax)}`, { method: 'POST', body: blob });
@@ -3719,10 +3782,25 @@ function stockRowHtml(row, rowIndex) {
     <div class="num" contenteditable="true" data-field="precio" data-row="${rowIndex}" data-col="3" data-currency-cell="1">${blank ? '' : escapeHtml(row.precioExpression || money(row.precio))}</div>
     <div class="num" contenteditable="true" data-field="descuento" data-row="${rowIndex}" data-col="4">${row.descuentoAdicional ? percent(row.descuentoAdicional) : ''}</div>
     <div class="num${priceMismatch ? ' stock-price-mismatch' : ''}" tabindex="0" data-field="precioFinal" data-row="${rowIndex}" data-col="5" data-readonly-cell="1" data-currency-cell="1" title="${sqlArticle ? escapeHtml('Costo sin IVA SQL: ' + money(sqlCost)) : ''}">${blank ? '' : money(calcPrecioFinal(row))}</div>
-    <div class="num" tabindex="0" data-field="precioFinalCantidad" data-row="${rowIndex}" data-col="6" data-readonly-cell="1" data-currency-cell="1">${blank ? '' : money(calcPrecioFinalCantidad(row))}</div><div class="access-only stock-classic-filter"></div><div class="access-only stock-classic-calc">${row.conteo == null ? "" : escapeHtml(rawNumber(Number(row.conteo)))}</div><div class="access-only stock-classic-calc">${row.conteo == null ? "" : escapeHtml(rawNumber(quantityNumber(row.cantidad)))}</div>
+    <div class="num" tabindex="0" data-field="precioFinalCantidad" data-row="${rowIndex}" data-col="6" data-readonly-cell="1" data-currency-cell="1">${blank ? '' : money(calcPrecioFinalCantidad(row))}</div><div class="access-only stock-classic-calc">${row.conteo == null ? "" : escapeHtml(rawNumber(Number(row.conteo)))}</div><div class="access-only stock-classic-calc">${row.conteo == null ? "" : escapeHtml(rawNumber(quantityNumber(row.cantidad)))}</div>
   </div>`;
 }
 let stockTableRendering = false;
+function stockRenderEditedArticle(index) {
+  const previous=el.rows.children[index],row=rowsData[index];
+  if(!previous||!row)return;
+  stockTableRendering=true;
+  try{
+    previous.insertAdjacentHTML('afterend',stockRowHtml(row,index));
+    previous.remove();
+    ensureTrailingBlankRow();
+    if(el.rows.children.length<rowsData.length){
+      const last=rowsData.length-1;
+      el.rows.insertAdjacentHTML('beforeend',stockRowHtml(rowsData[last],last));
+    }
+  }finally{stockTableRendering=false;}
+  scheduleStockTotals();
+}
 function render() {
   if (stockTableRendering) return;
   stockTableRendering = true;
@@ -3732,6 +3810,7 @@ function render() {
   ensureTrailingBlankRow();
   const view = rowsData;
   el.rows.innerHTML = view.map(stockRowHtml).join('');
+  if (stockDuplicateReview) stockPaintDuplicateRows();
   const okCount = rowsData.filter(isGreen).length;
   const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
   const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
@@ -3747,41 +3826,53 @@ function render() {
 }
 let calculatedTotalsFrame = null;
 function updateCalculatedCells(rowIndex = null) {
+  const costsOpen = stockCostOptionsActive();
   const refreshRow = (row, rowEl) => {
-    if (!rowEl) return;
-    stockArticleForRow(row);
-    const blank = isBlankStockRow(row), valid = isGreen(row);
-    rowEl.classList.toggle('ok', stockCostOptionsActive() && !blank && valid);
-    rowEl.classList.toggle('bad', stockCostOptionsActive() && !blank && !valid);
-    const ambiguous = !stockCostOptionsActive() && !blank && stockMatchesForRow(row).length > 1;
+    if (!row || !rowEl) return;
+    const article = stockArticleForRow(row);
+    const blank = isBlankStockRow(row), valid = costsOpen && !blank && isGreen(row);
+    rowEl.classList.toggle('ok', valid);
+    rowEl.classList.toggle('bad', costsOpen && !blank && !valid);
+    const ambiguous = !costsOpen && !blank && stockMatchesForRow(row).length > 1;
     rowEl.classList.toggle('stock-ambiguous', ambiguous);
     const idCell = rowEl.querySelector('[data-field="idart"]');
     if (idCell) {
       idCell.toggleAttribute('data-stock-id-open', ambiguous);
       idCell.title = ambiguous ? 'Elegir IDArt coincidente' : '';
     }
-    if (idCell && document.activeElement !== idCell) idCell.textContent = row.idart || '';
+    if (idCell && document.activeElement !== idCell && idCell.textContent !== (row.idart || '')) idCell.textContent = row.idart || '';
+    const stockCell = rowEl.querySelector('.stock-current');
+    const stockText = blank || row.stock == null ? '' : Number(row.stock).toLocaleString('es-AR');
+    if (stockCell && stockCell.textContent !== stockText) stockCell.textContent = stockText;
     const finalCell = rowEl.querySelector('[data-col="5"]');
-    if (finalCell && document.activeElement !== finalCell) finalCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinal(row));
+    const price = blank ? 0 : calcPrecioFinal(row);
     if(finalCell){
-      const article=stockArticleForRow(row),cost=Number(article?.precioCosto),price=calcPrecioFinal(row);
-      finalCell.classList.toggle('stock-price-mismatch',stockCostOptionsActive() && !isBlankStockRow(row) && Boolean(article) && Number.isFinite(cost) && (cost===0 ? Math.abs(price)>0 : Math.abs(price-cost)/Math.abs(cost)>.01));
+      const text = blank ? '' : money(price);
+      if (document.activeElement !== finalCell && finalCell.textContent !== text) finalCell.textContent = text;
+      const cost=Number(article?.precioCosto);
+      finalCell.classList.toggle('stock-price-mismatch',costsOpen && !blank && Boolean(article) && Number.isFinite(cost) && (cost===0 ? Math.abs(price)>0 : Math.abs(price-cost)/Math.abs(cost)>.01));
       finalCell.title=article?'Costo sin IVA SQL: '+money(cost):'';
     }
     const finalQuantityCell = rowEl.querySelector('[data-col="6"]');
-    if (finalQuantityCell && document.activeElement !== finalQuantityCell) finalQuantityCell.textContent = isBlankStockRow(row) ? '' : money(calcPrecioFinalCantidad(row));
+    const quantityText = blank ? '' : money(price * quantityNumber(row.cantidad));
+    if (finalQuantityCell && document.activeElement !== finalQuantityCell && finalQuantityCell.textContent !== quantityText) finalQuantityCell.textContent = quantityText;
   };
   if (rowIndex === null) rowsData.forEach((row, index) => refreshRow(row, el.rows.children[index]));
   else refreshRow(rowsData[rowIndex], el.rows.children[rowIndex]);
+  scheduleStockTotals();
+}
+function scheduleStockTotals() {
   if (calculatedTotalsFrame !== null) return;
   calculatedTotalsFrame = requestAnimationFrame(() => {
     calculatedTotalsFrame = null; stockUpdateTotals();
-    const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
-    const totalFinal = rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0);
-    el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
-    el.totalFinal.textContent = `Costo final: ${money(totalFinal)}`;
-    el.totalDescuentoSobreTotal.textContent = `Subtotal factura: ${money(calcSubtotalFactura())}`;
-    el.copySummary.textContent = `${rowsData.filter(isGreen).length.toLocaleString('es-AR')} listos para copiar`;
+    if (stockDuplicateReview) stockPaintDuplicateRows();
+    if (stockCostOptionsActive()) {
+      const totalUnitario = rowsData.reduce((sum, row) => sum + ((quantityNumber(row.cantidad) || 0) * (Number(row.precio) || 0)), 0);
+      el.totalUnitario.textContent = `Bruto: ${money(totalUnitario)}`;
+      el.totalFinal.textContent = `Costo final: ${money(rowsData.reduce((sum, row) => sum + calcPrecioFinalCantidad(row), 0))}`;
+      el.totalDescuentoSobreTotal.textContent = `Subtotal factura: ${money(calcSubtotalFactura())}`;
+    }
+    if (!el.copySummary.hidden) el.copySummary.textContent = `${rowsData.filter(isGreen).length.toLocaleString('es-AR')} listos para copiar`;
     el.totalRows.textContent = `${rowsData.filter((row) => !isBlankStockRow(row)).length.toLocaleString('es-AR')} filas`;
   });
 }
@@ -4493,21 +4584,14 @@ function selectEditableCellText(cell) {
     cell.select();
     return;
   }
-  const range = document.createRange();
-  range.selectNodeContents(cell);
   const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(range);
+  if(selection.anchorNode!==cell || selection.focusNode!==cell || selection.anchorOffset!==0 || selection.focusOffset!==cell.childNodes.length)
+    selection.setBaseAndExtent(cell,0,cell,cell.childNodes.length);
 }
 function placeCaretEnd(cell) {
   if (!cell) return;
   cell.dataset.fullSelected = '0';
-  const range = document.createRange();
-  range.selectNodeContents(cell);
-  range.collapse(false);
-  const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(range);
+  window.getSelection().collapse(cell,cell.childNodes.length);
 }
 function restoreStockPasteFocus(position) {
   const cell = editableCellAt(position.row, position.col);
@@ -5609,6 +5693,7 @@ async function stockToggleBudgetState(budget) {
   paint();
   status.textContent = `Guardando estado del presupuesto Nº ${number}…`;
   try {
+    const { db, doc, runTransaction, serverTimestamp, Timestamp } = await stockFirestore();
     const reference = doc(db, 'historialNotificaciones', docId);
     await runTransaction(db, async transaction => {
       const snapshot = await transaction.get(reference);
@@ -5651,6 +5736,7 @@ async function stockReadBudgetNotifications() {
   stockBudgetNotificationsReady = stockNotificationRecord.initialized;
   if (stockWebBudgets.length) stockRenderBudgets();
   const cursor = stockNotificationRecord.cursor;
+  const { db, collection, query, where, Timestamp, getDocsFromServer } = await stockFirestore();
   const source = collection(db, 'historialNotificaciones');
   const target = cursor ? query(source, where('updatedAt', '>=', new Timestamp(cursor.seconds, cursor.nanoseconds || 0))) : source;
   const snapshot = await getDocsFromServer(target);
@@ -5672,6 +5758,8 @@ async function stockResolveConfirmedBudgets(numbers = []) {
   const queued = JSON.parse(localStorage.getItem(STOCK_BUDGET_RESOLUTION_KEY) || '[]');
   const remaining = [...new Set([...queued, ...numbers].map(String).filter(Boolean))];
   localStorage.setItem(STOCK_BUDGET_RESOLUTION_KEY, JSON.stringify(remaining));
+  if (!remaining.length) return;
+  const { db, doc, getDocFromServer, updateDoc, serverTimestamp } = await stockFirestore();
   for (const number of [...remaining]) {
     const docId = stockBudgetNotifications.get(number)?.docId || `presupuesto_${number.replace(/[^\w-]/g, '_')}`;
     const reference = doc(db, 'historialNotificaciones', docId);
@@ -5868,7 +5956,7 @@ function stockCompleteIdArt(cell, focusQuantity = true){
   row.descripcion=String(article.descripcion||'');row.stock=Number(article.stock||0);
   stockUpdateSelectedArticlePrice(row, stockSelectedArticleCost(article));
   if(row.conteo!=null)row.cantidad=rawNumber(Number(row.conteo)-row.stock);
-  commitCellEditSnapshot(cell);closeArticleProviderList();render();saveRows();
+  commitCellEditSnapshot(cell);closeArticleProviderList();stockRenderEditedArticle(Number(cell.dataset.row));saveRows();
   if (focusQuantity) focusNavigationTarget(editableCellAt(Number(cell.dataset.row),2));
   return true;
 }
@@ -5951,16 +6039,22 @@ async function stockRefreshSql(options = {}) {
   } catch (error) { stockIngresoMessage(error.message,'error'); if(options.throwOnError)throw error; }
 }
 function stockUpdateTotals() {
-  const list = rowsData.filter(row => !isBlankStockRow(row));
-  let missing=0;
-  const sqlTotal=list.reduce((sum,row)=>{
-    const article=stockArticleForRow(row);
-    if(!article){missing++;return sum;}
-    return sum+quantityNumber(row.cantidad)*(Number(article.precioCosto)||0);
-  },0);
-  stockField('stockSqlCostTotal').textContent=`Costo SQL: ${money(sqlTotal)}${missing?' · '+missing+' sin identificar':''}`;
-  stockField('stockTotalUnits').textContent = list.reduce((sum,row)=>sum+quantityNumber(row.cantidad),0).toLocaleString('es-AR',{maximumFractionDigits:4});
-  stockField('stockTotalAmount').textContent = money(list.reduce((sum,row)=>sum+calcPrecioFinalCantidad(row),0));
+  const costsOpen=stockCostOptionsActive();
+  let units=0,total=0,sqlTotal=0,missing=0;
+  for(const row of rowsData){
+    if(isBlankStockRow(row))continue;
+    const quantity=quantityNumber(row.cantidad);
+    units+=quantity;
+    total+=quantity*calcPrecioFinal(row);
+    if(costsOpen){
+      const article=stockArticleForRow(row);
+      if(article)sqlTotal+=quantity*(Number(article.precioCosto)||0);
+      else missing++;
+    }
+  }
+  if(costsOpen)stockField('stockSqlCostTotal').textContent=`Costo SQL: ${money(sqlTotal)}${missing?' · '+missing+' sin identificar':''}`;
+  stockField('stockTotalUnits').textContent=stockUnitsFormat.format(units);
+  stockField('stockTotalAmount').textContent=money(total);
 }
 function stockSetQuantity(row, value) {
   const text = String(value ?? '').trim();
@@ -5971,7 +6065,10 @@ function stockSetQuantity(row, value) {
     if (!/^[0-9]+(?:[.,][0-9]+)?$/.test(raw) || quantityNumber(raw) < 0) throw new Error('Ingresá una cantidad contada válida manteniendo Ctrl.');
     row.conteo = quantityNumber(raw);
     row.cantidad = rawNumber(row.conteo - Number(row.stock));
-    stockField('stockTipoMovimiento').value = '35'; stockMovementFields(); stockHeaderSave();
+    const movement=stockField('stockTipoMovimiento');
+    if(movement.value!=='35'){
+      movement.value='35'; stockMovementFields(); stockHeaderSave();
+    }
   } else {
     if (row.conteo != null && text === String(row.cantidad)) return;
     row.conteo = null; row.cantidad = text ? rawNumber(stockPlainNumber(text)) : '';
@@ -6087,6 +6184,38 @@ function stockIngresoData() {
   if (!fecha || fecha > stockToday() || !stockField('stockFecha').checkValidity()) throw new Error('Ingresá una fecha válida, igual o anterior a hoy.');
   return {fecha,sucursal:branch,puntoVenta:Number(point.id),proveedor:stockProviderId(),tipoMovimiento:Number(stockField('stockTipoMovimiento').value),sucursalDestino:Number(stockField('stockDestino').value),idFactura:Number(stockField('stockCompra').value),idRelacionado:Number(stockField('stockRelacionado').value),numeroFactura:stockField('stockIngresoFactura').value.trim(),numeroRemito:stockField('stockRemito').value.trim(),nota:stockField('stockIngresoNota').value.trim(),articulos};
 }
+let stockDuplicateReview = false;
+function stockGroupMovementArticles(articles) {
+  const groups = new Map();
+  for (const article of articles) {
+    const key = String(article.idart || '').trim().toUpperCase();
+    if (!key) continue;
+    const group = groups.get(key);
+    if (group) group.push(article);
+    else groups.set(key, [article]);
+  }
+  return groups;
+}
+function stockMergeMovementArticles(group) {
+  if (group.length === 1) return group[0];
+  let counted, adjustment = 0;
+  for (const article of group) {
+    if (article.conteo == null) adjustment += article.cantidad;
+    else counted = (counted ?? 0) + article.conteo;
+  }
+  // En un conteo, SQL resta el stock actual una sola vez por artículo.
+  return counted == null ? {...group[0], cantidad:adjustment}
+    : {...group[0], cantidad:adjustment, conteo:counted + adjustment};
+}
+function stockPaintDuplicateRows() {
+  const duplicates = new Set();
+  if (stockDuplicateReview) {
+    for (const group of stockGroupMovementArticles(rowsData).values()) {
+      if (group.length > 1) group.forEach(row => duplicates.add(row.id));
+    }
+  }
+  for (const element of el.rows.children) element.classList.toggle('stock-duplicate-review', duplicates.has(element.dataset.id));
+}
 async function stockIngresoCall(data, action) {
   const actor = FX.menuSessionUser();
   if (!actor?.id) throw new Error('Iniciá sesión desde el menú.');
@@ -6122,11 +6251,29 @@ async function confirmStockIngreso() {
     document.activeElement?.blur();
     if (!stockCanEditDate()) stockField('stockFecha').value=stockDateText(stockToday());
     let pending=JSON.parse(localStorage.getItem(STOCK_INGRESO_DRAFT_KEY)||'null');
-    const data=pending?.status==='uncertain' ? JSON.parse(pending.fingerprint) : stockIngresoData(), fingerprint=JSON.stringify(data);
+    const recovering=pending?.status==='uncertain';
+    let data=recovering ? JSON.parse(pending.fingerprint) : stockIngresoData();
+    stockIngresoBusy=true; stockFreeze(true);
+    if(stockDuplicateReview){stockDuplicateReview=false; stockPaintDuplicateRows();}
+    if(!recovering){
+      const groups=stockGroupMovementArticles(data.articulos);
+      const duplicated=[...groups.values()].filter(group=>group.length>1);
+      if(duplicated.length){
+        const detail=`${duplicated.length} artículos repetidos en ${duplicated.reduce((sum,group)=>sum+group.length,0)} filas.\nSi los permitís, se sumarán las cantidades por artículo al guardar.`;
+        if(!await htmlNotice(detail,true,{title:'Hay artículos duplicados',warning:true,confirmLabel:'Permitir duplicados',cancelLabel:'No, revisar filas'})){
+          stockDuplicateReview=true;stockPaintDuplicateRows();
+          el.rows.querySelector('.stock-duplicate-review')?.scrollIntoView({block:'nearest'});
+          stockIngresoMessage('Revisá las filas marcadas en rojo. El movimiento sigue sin confirmar.','error');
+          return;
+        }
+        data={...data,articulos:[...groups.values()].map(stockMergeMovementArticles)};
+      }
+    }
+    const fingerprint=JSON.stringify(data);
     if (!pending || pending.fingerprint !== fingerprint) pending={id:stockIngresoUuid(),fingerprint,status:'draft',presupuestosWeb:[...new Set(rowsData.filter(row=>!isBlankStockRow(row)).map(row=>row.presupuestoWeb).filter(Boolean))]};
     if(pending.status!=='uncertain')pending.additionalOrigin=Number(data.tipoMovimiento)===23?JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}').stockAdditionalOrigin||null:null;
     confirmedAdditionalOrigin=pending.additionalOrigin||null;
-    stockIngresoBusy=true; stockFreeze(true); stockIngresoMessage('Verificando y confirmando el movimiento en SQL…');
+    stockIngresoMessage('Verificando y confirmando el movimiento en SQL…');
     CorralonSystem.articleSync.set('syncing', 'Verificando el movimiento en SQL…');
     const request={...data,id:pending.id};
     const preview=await stockIngresoCall(request,'previsualizar');
@@ -6134,7 +6281,10 @@ async function confirmStockIngreso() {
     const documentWarning = hasDocument ? '' : 'Este movimiento no tiene factura ni remito vinculado.\nPodés continuar igualmente.\n\n';
     const withoutDifference=Number(data.tipoMovimiento)===35?data.articulos.length-preview.articulos.length:0;
     const skipped=withoutDifference>0?`\nSin diferencia: ${withoutDifference}.`:'';
-    if (!preview.yaCargado && !(await htmlNotice(`${documentWarning}¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${preview.articulos.length} artículos · Total ${money(preview.total)}${skipped}`))) {
+    const confirmationOptions = hasDocument ? undefined : {
+      title:'Ingreso sin factura ni remito', warning:true, confirmLabel:'Confirmar sin comprobante'
+    };
+    if (!preview.yaCargado && !(await htmlNotice(`${documentWarning}¿Confirmar ${stockField('stockTipoMovimiento').selectedOptions[0].textContent}?\n${preview.articulos.length} artículos · Total ${money(preview.total)}${skipped}`, true, confirmationOptions))) {
       CorralonSystem.articleSync.set('success', 'Confirmación cancelada · Movimiento sin guardar');
       return;
     }
@@ -6146,6 +6296,7 @@ async function confirmStockIngreso() {
     const pedidoOrigin=JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}').stockPedidoOrigen;
     if(pedidoOrigin?.startsWith('draft_')){
       try{
+        const { db, doc, runTransaction, serverTimestamp } = await stockFirestore();
         const originalRef=doc(db,'configuracion',`stockPedido_${pedidoOrigin}`),movementRef=doc(db,'configuracion',`stockPedido_mov_${data.sucursal}_${result.numeroMovimiento}`);
         await runTransaction(db,async transaction=>{const original=await transaction.get(originalRef),linked=await transaction.get(movementRef);if(original.exists()&&!linked.exists())transaction.set(movementRef,{...original.data(),createdAt:serverTimestamp()});});
       }catch(error){budgetResolutionWarning+='\nEl stock se guardó, pero no se pudo vincular su pedido previo. Reintentá Cargar en Pedidos desde esta carga antes de abrirla desde Consultar.';console.warn(error);}
@@ -6155,7 +6306,15 @@ async function confirmStockIngreso() {
     try { await stockResolveConfirmedBudgets(pending.presupuestosWeb || []); }
     catch (error) { console.warn('Movimiento confirmado; notificación pendiente de sincronización', error); budgetResolutionWarning = '\nNo se pudo marcar el presupuesto como resuelto en el menú. Se reintentará al abrir Importar presupuesto web.'; }
     const confirmedLines=new Map(result.articulos.map(line=>[String(line.idart),line]));
-    if(Number(data.tipoMovimiento)===35)rowsData=rowsData.filter(row=>confirmedLines.has(String(row.idart)));
+    const reconciledArticles=new Set();
+    const adjustment=Number(data.tipoMovimiento)===35;
+    rowsData=rowsData.filter(row=>{
+      const id=String(row.idart);
+      if(!confirmedLines.has(id))return !adjustment;
+      if(reconciledArticles.has(id))return false;
+      reconciledArticles.add(id);
+      return true;
+    });
     rowsData.forEach(row=>{
       const line=confirmedLines.get(String(row.idart));
       if(!line)return;
@@ -6284,6 +6443,7 @@ setInterval(stockInvoicePresence, 4000);
 let stockArticleRevision=null,stockArticleSyncBusy=false;
 async function stockCheckArticleChanges(){
  if(stockArticleSyncBusy||stockIngresoBusy||stockReloadRestoring||!stockSqlMeta||!stockField('stockIngresoSucursal').value||document.hidden)return;
+ if(document.querySelector('.local-articles-backdrop'))return;
  if(document.activeElement?.matches?.('#tbody [contenteditable="true"],#tbody input'))return;
  stockArticleSyncBusy=true;try{const result=await stockSqlGet('revision-articulos');if(stockArticleRevision!==null&&stockArticleRevision!==result.revision)await stockRefreshSql({throwOnError:true});stockArticleRevision=result.revision;}catch(error){console.warn('No se pudo actualizar artículos de Stock',error.message);}finally{stockArticleSyncBusy=false;}
 }
@@ -7235,6 +7395,7 @@ async function cargarStockEnPedidos(sourceContext=null){
     const header=sourceContext?{stockPedidoOrigen:sourceContext.source}:JSON.parse(localStorage.getItem(STOCK_HEADER_KEY)||'{}');
     if(!header.stockPedidoOrigen){header.stockPedidoOrigen=stockConfirmed?`mov_${movement.sucursal}_${stockField('stockNumero').value}`:`draft_${stockIngresoUuid()}`;localStorage.setItem(STOCK_HEADER_KEY,JSON.stringify(header));await flushRowsSave();}
     const source=header.stockPedidoOrigen;
+    const { db, doc, getDocFromServer, getDocsFromServer, collection, runTransaction, serverTimestamp, increment } = await stockFirestore();
     const sourceRef=doc(db,'configuracion',`stockPedido_${source}`),counterRef=doc(db,'configuracion','pedidosNumeracion');
     const counter=await getDocFromServer(counterRef);
     let observedMax=0;
@@ -7814,12 +7975,17 @@ document.addEventListener('keydown', (event) => {
 });
 window.addEventListener('blur', closeTableContextMenu);
 let stockTypingCalculationTimer=null;
-function stockScheduleTypingCalculation(rowIndex,rowId){
+const stockTypingRows=new Map();
+function stockScheduleTypingCalculation(rowIndex,rowId,delay=140){
+  stockTypingRows.set(rowIndex,rowId);
   clearTimeout(stockTypingCalculationTimer);
   stockTypingCalculationTimer=setTimeout(()=>{
     stockTypingCalculationTimer=null;
-    if(rowsData[rowIndex]?.id===rowId)updateCalculatedCells(rowIndex);
-  },400);
+    for(const [index,id] of stockTypingRows){
+      if(rowsData[index]?.id===id)updateCalculatedCells(index);
+    }
+    stockTypingRows.clear();
+  },delay);
 }
 el.rows.addEventListener('input', (event) => {
   const cell = event.target.closest('[data-field]');
@@ -7860,8 +8026,7 @@ el.rows.addEventListener('input', (event) => {
     el.rows.insertAdjacentHTML('beforeend', stockRowHtml(nextRow, rowsData.length - 1));
   }
   saveRows();
-  if(typingSearch)stockScheduleTypingCalculation(rowIndex,row.id);
-  else updateCalculatedCells(rowIndex);
+  stockScheduleTypingCalculation(rowIndex,row.id,typingSearch?400:140);
   if (['descripcion','codigo'].includes(field)) scheduleArticleProviderList(cell);
 });
 // Ctrl + digits enters counted stock; ordinary quantity entry keeps its normal meaning.
@@ -7870,7 +8035,8 @@ el.rows.addEventListener('keydown',event=>{
  if(!cell||!event.ctrlKey||event.metaKey||event.altKey||stockConfirmed||stockIngresoBusy||cell.getAttribute('contenteditable')!=='true')return;
  if(!/^[0-9.,]$/.test(event.key)&&!(['Backspace','Delete'].includes(event.key)&&cell.dataset.stockCtrlCount==='1'))return;
  event.preventDefault();event.stopImmediatePropagation();
- const row=rowFromCell(cell);if(!row)return;stockArticleForRow(row);
+ const row=rowFromCell(cell);if(!row)return;
+ if(cell.dataset.stockCtrlCount!=='1')stockArticleForRow(row);
  if(row.stock==null){stockIngresoMessage('Primero identificá el artículo y consultá el stock de la sucursal.','error');return;}
  const previous=cell.dataset.stockCtrlCount==='1'?cell.textContent:'';
  let next=event.key==='Backspace'?previous.slice(0,-1):event.key==='Delete'?'':previous+event.key;
@@ -7880,8 +8046,8 @@ el.rows.addEventListener('keydown',event=>{
  cell.textContent=next;
  if(next){try{stockSetQuantity(row,"'"+next.replace(/,$/,''));cell.title='Conteo: '+row.conteo+' · Ajuste: '+row.cantidad;}catch(error){stockIngresoMessage(error.message,'error');}}
  else{row.conteo=null;row.cantidad='';cell.title='';}
- const selection=window.getSelection(),range=document.createRange();range.selectNodeContents(cell);range.collapse(false);selection.removeAllRanges();selection.addRange(range);
- saveRows();updateCalculatedCells(Number(cell.dataset.row));
+ window.getSelection().collapse(cell,cell.childNodes.length);
+ saveRows();stockScheduleTypingCalculation(Number(cell.dataset.row),row.id);
 },true);
 el.rows.addEventListener('keyup',event=>{
  if(event.key!=='Control')return;const cell=event.target.closest('[data-field="cantidad"]');if(!cell||cell.dataset.stockCtrlCount!=='1')return;
@@ -7892,9 +8058,12 @@ function finalizeQuantityCell(cell) {
   if (!cell?.matches?.('[data-field="cantidad"]')) return false;
   const row = rowFromCell(cell);
   if (!row || !String(cell.textContent || '').trim()) {delete cell.dataset.stockCtrlCount;return false;}
+  if(cell.dataset.stockCtrlCount!=='1' && cell.dataset.stockQuantityFinalized===cell.textContent &&
+      row.cantidad===cell.textContent)return true;
   try { stockSetQuantity(row, cell.dataset.stockCtrlCount==='1'?"'"+cell.textContent.replace(/[.,]$/,''):cell.textContent); } catch(error) { stockIngresoMessage(error.message, 'error'); return false; }
   delete cell.dataset.stockCtrlCount;
   cell.textContent = row.cantidad;
+  cell.dataset.stockQuantityFinalized = row.cantidad;
   cell.title=row.conteo==null?'':'Conteo: '+row.conteo;
   saveRows();
   updateCalculatedCells(Number(cell.dataset.row));
@@ -8049,6 +8218,7 @@ document.addEventListener('mousedown', (event) => {
 window.addEventListener('resize', () => { closeArticleProviderList(); hideArticleProviderToggle(); });
 el.rows.addEventListener('scroll', () => { closeArticleProviderList(); hideArticleProviderToggle(); });
 el.rows.addEventListener('blur', (event) => {
+  if (stockTableRendering) return;
   const cell = event.target.closest('[data-field]');
   if (!cell) return;
   cell.classList.remove('text-caret-visible');
@@ -8062,7 +8232,6 @@ el.rows.addEventListener('blur', (event) => {
   if (el.calcBackdrop.classList.contains('visible') || window.CorralonSystem?.numericCalculator?.isOpen?.()) return;
   if (!document.hasFocus()) return;
   if (!cell.closest('.row')?.contains(event.relatedTarget)) cell.closest('.row')?.classList.remove('has-focused-cell');
-  if (!el.rows.contains(event.relatedTarget)) render();
 }, true);
 window.addEventListener('focus', () => {
   if (!lastFocusedTableCell || document.activeElement?.closest?.('[data-field][data-row][data-col]')) return;

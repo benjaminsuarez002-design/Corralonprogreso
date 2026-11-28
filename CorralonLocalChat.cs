@@ -45,8 +45,18 @@ internal sealed class LocalInvoiceChat
         public long bytes { get; set; }
         public string operacion { get; set; }
         public long revision { get; set; }
+        public string leidoEn { get; set; }
+        public long revisionLectura { get; set; }
         public bool importante { get; set; }
         public bool eliminado { get; set; }
+
+        internal Message WithReceipt(string date, long nextRevision)
+        {
+            var updated = (Message)MemberwiseClone();
+            updated.leidoEn = date;
+            updated.revisionLectura = nextRevision;
+            return updated;
+        }
     }
 
     public sealed class Account
@@ -84,6 +94,7 @@ internal sealed class LocalInvoiceChat
             if (route == "/api/chat/avisos" && method == "GET") { ListNotices(context); return; }
             if (route == "/api/chat/mensajes" && method == "GET") { ReadMessages(context); return; }
             if (route == "/api/chat/mensajes" && method == "POST") { SendMessage(context); return; }
+            if (route == "/api/chat/mensajes/lectura" && method == "POST") { MarkRead(context); return; }
             if (route == "/api/chat/mensajes/accion" && method == "POST") { ChangeMessage(context); return; }
             if (route == "/api/chat/subir" && method == "POST") { UploadFile(context); return; }
             if (route == "/api/chat/archivo" && method == "GET") { ReadFile(context); return; }
@@ -352,8 +363,10 @@ internal sealed class LocalInvoiceChat
             catch (InvalidOperationException) { }
         }
         messages = loaded.OrderBy(item => item.id).ToList();
-        revision = messages.Count == 0 ? 0 : messages.Max(item => Math.Max(item.id, item.revision));
+        revision = messages.Count == 0 ? 0 : messages.Max(item => Math.Max(item.id, ChangeRevision(item)));
     }
+
+    private static long ChangeRevision(Message item) { return Math.Max(item.revision, item.revisionLectura); }
 
     private void ListNotices(HttpListenerContext context)
     {
@@ -386,8 +399,8 @@ internal sealed class LocalInvoiceChat
             lastRevision = revision;
             if (!accountChanged && Int64.TryParse(query["cambio"], out after) && after >= 0)
             {
-                result = after == revision ? new Message[0] : messages.Where(item => item.revision > after && CanRead(item, account)).OrderBy(item => item.revision).Take(100).ToArray();
-                if (result.Length == 100) lastRevision = result[result.Length - 1].revision;
+                result = after == revision ? new Message[0] : messages.Where(item => ChangeRevision(item) > after && CanRead(item, account)).OrderBy(ChangeRevision).Take(100).ToArray();
+                if (result.Length == 100) lastRevision = ChangeRevision(result[result.Length - 1]);
             }
             else if (Int64.TryParse(query["despues"], out after))
             {
@@ -561,6 +574,40 @@ internal sealed class LocalInvoiceChat
         else File.Move(temp, metadata);
     }
 
+    private void MarkRead(HttpListenerContext context)
+    {
+        var account = CurrentAccount(context.Request);
+        if (account == null) throw new ChatException(401, "Se requiere la sesión del menú.");
+        var input = ReadJson(context.Request, 4096);
+        var ids = Value(input, "ids") as object[];
+        if (ids == null || ids.Length == 0 || ids.Length > 100)
+            throw new ChatException(400, "La lista de mensajes no es válida.");
+        var wanted = new HashSet<long>();
+        foreach (object value in ids)
+        {
+            long id;
+            if (!Int64.TryParse(Convert.ToString(value), out id) || id <= 0)
+                throw new ChatException(400, "El mensaje no es válido.");
+            wanted.Add(id);
+        }
+        lock (gate)
+        {
+            LoadMessages();
+            string date = DateTime.UtcNow.ToString("o");
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var item = messages[i];
+                if (item.destinatario != account.User || item.eliminado || !String.IsNullOrEmpty(item.leidoEn) ||
+                    !wanted.Contains(item.id)) continue;
+                var updated = item.WithReceipt(date, revision + 1);
+                WriteMessage(updated, true);
+                messages[i] = updated;
+                revision = updated.revisionLectura;
+            }
+        }
+        Reply(context, 200, new { ok = true });
+    }
+
     private void ChangeMessage(HttpListenerContext context)
     {
         var input = ReadJson(context.Request, 4096);
@@ -588,6 +635,7 @@ internal sealed class LocalInvoiceChat
                 {
                     id = old.id, usuario = old.usuario, nombre = old.nombre, fecha = old.fecha, operacion = old.operacion,
                     remitente = old.remitente, destinatario = old.destinatario, destinatarioNombre = old.destinatarioNombre,
+                    leidoEn = old.leidoEn, revisionLectura = old.revisionLectura,
                     revision = revision + 1, importante = !deleting, eliminado = deleting,
                     texto = deleting ? "" : old.texto, archivo = deleting ? "" : old.archivo,
                     imagen = deleting ? "" : old.imagen, bytes = deleting ? 0 : old.bytes

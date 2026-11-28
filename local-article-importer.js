@@ -12,15 +12,10 @@ const normalizeIndexFilter = value => String(value ?? '')
   .replace(/\s+/g, ' ')
   .trim();
 const compactIndexFilter = value => normalizeIndexFilter(value).replace(/\s+/g, '');
-function indexDescriptionFilterRank(description, queryText, prepared) {
-  const query = prepared?.query ?? normalizeIndexFilter(queryText);
+function indexDescriptionFilterRank(article, { query, compactQuery, terms }) {
   if (!query) return 0;
-  const text = prepared?.text ?? normalizeIndexFilter(description);
+  const { searchDescription:text, searchCompact:compactText, searchWords:words } = article;
   if (!text) return Number.POSITIVE_INFINITY;
-  const compactQuery = prepared?.compactQuery ?? compactIndexFilter(query);
-  const compactText = prepared?.compactText ?? compactIndexFilter(text);
-  const terms = prepared?.terms ?? query.split(' ').filter(Boolean);
-  const words = prepared?.words ?? text.split(' ').filter(Boolean);
   if (text === query) return 0;
   if (compactQuery && compactText === compactQuery) return 1;
   if (text.startsWith(query)) return 2;
@@ -31,7 +26,10 @@ function indexDescriptionFilterRank(description, queryText, prepared) {
   return Number.POSITIVE_INFINITY;
 }
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const money = value => Number(value || 0).toLocaleString('es-AR', { style:'currency', currency:'ARS' });
+const moneyFormatter = new Intl.NumberFormat('es-AR', { style:'currency', currency:'ARS' });
+const money = value => moneyFormatter.format(Number(value || 0));
+const descriptionCollator = new Intl.Collator('es', { sensitivity:'base' });
+const articleOptionHeight = 36;
 let active = false;
 export function hasDraft(providerId) {
   const key=importDraftKey(providerId);
@@ -53,11 +51,14 @@ export async function open(options, window = globalThis.window, document = globa
   const returnFocus = document.activeElement;
   const backdrop = document.createElement('div');
   backdrop.className = 'local-articles-backdrop';
+  const isStock = document.body.dataset.pageTheme === 'cargastock';
+  if (isStock) backdrop.style.backdropFilter = 'none';
   backdrop.innerHTML = `<section class="local-articles-dialog" role="dialog" aria-modal="true" aria-labelledby="localArticlesTitle">
     <header><div><h2 id="localArticlesTitle">Importar o actualizar artículos</h2><p data-provider></p><p data-original-description hidden></p></div><button type="button" data-close>Cerrar</button></header>
     <div class="local-articles-scroll"><table class="new-articles-table"><colgroup><col style="width:105px"><col style="width:150px"><col><col style="width:155px"><col style="width:75px"><col style="width:92px"><col style="width:112px"><col style="width:112px"><col style="width:85px"><col style="width:130px"></colgroup><thead><tr><th>IDArt</th><th>Cód. proveedor</th><th>Artículo</th><th>Rubro</th><th>IVA</th><th>Margen %</th><th>Costo nuevo</th><th>Precio viejo</th><th title="Diferencia entre el costo nuevo y el precio viejo">Dif. %</th><th></th></tr></thead><tbody></tbody></table></div>
     <div data-status role="status"><span data-status-text>Leyendo artículos de la base local…</span><button type="button" data-reconnect hidden>Restablecer conexión</button></div><footer><span data-summary></span><button type="button" data-cancel>Cancelar</button><button type="button" class="primary" data-apply disabled>Aplicar todos</button></footer>
   </section>`;
+  if (isStock) backdrop.querySelector('header').style.backdropFilter = 'none';
   document.body.append(backdrop);
   // La ficha SQL se reutiliza y su diálogo nativo gestiona el foco al abrirse.
   const backgroundElements = [...document.body.children].filter(element => element !== backdrop && element.id !== 'sqlArticlePopup');
@@ -84,7 +85,9 @@ export async function open(options, window = globalThis.window, document = globa
   const draftCache=window.CorralonSystem.localCache;
   let draftWrite=Promise.resolve();
   let menu = null, menuInput = null, menuIndex = -1, menuKind = '', matches = [];
-  let articlePage = null, articleHasMatch = false;
+  let articlePage = null, articleOptions = null;
+  let paintedStart = -1, paintedEnd = -1;
+  let pendingArticleInput = null, articleSearchTimer = 0;
   let showSuspended = false;
   let articleContext = null;
   function hideArticleContext() { articleContext?.remove(); articleContext = null; }
@@ -208,7 +211,13 @@ export async function open(options, window = globalThis.window, document = globa
       return draft && Array.isArray(draft.rows) && draft.rows.every(row => row && typeof row.codigo === 'string' && typeof row.descripcion === 'string') ? draft : null;
     } catch(error) { throw new Error(`No se pudo recuperar el borrador del importador. No se reemplazó la carga pendiente: ${error.message}`); }
   }
-  function hideMenu() { menu?.remove(); menu = null; menuInput = null; menuIndex = -1; menuKind = ''; }
+  function hideMenu() {
+    clearTimeout(articleSearchTimer);
+    pendingArticleInput = null;
+    menu?.remove();
+    menu = null; menuInput = null; menuIndex = -1; menuKind = ''; matches = [];
+    articlePage = null; articleOptions = null; paintedStart = -1; paintedEnd = -1;
+  }
   function close(discard = false) {
     if (busy || articleEditor) return;
     hideArticleContext();
@@ -304,12 +313,18 @@ export async function open(options, window = globalThis.window, document = globa
       && Math.abs(row.margen - row.originalMargin) < .000001;
   }
   function summary() {
-    const visible=rows.filter(row=>!isUnchangedPriceRow(row));
+    const hidden = rows.map(isUnchangedPriceRow);
+    const visible = rows.filter((_, index) => !hidden[index]);
     const unchanged=rows.length-visible.length;
     const updates=visible.filter(row=>row.mode==='update'&&row.id&&row.version).length;
     const unresolved=visible.filter(row=>row.mode==='update'&&(!row.id||!row.version)).length;
-    backdrop.querySelectorAll('tr[data-row]').forEach(tr=>{tr.hidden=Boolean(isUnchangedPriceRow(rows[Number(tr.dataset.row)]));});
-    backdrop.querySelector('[data-summary]').textContent=`${visible.length-updates-unresolved} nuevos · ${updates} para actualizar${unresolved?` · ${unresolved} por identificar`:''}${unchanged?` · ${unchanged} sin cambios`:''}`;
+    backdrop.querySelectorAll('tr[data-row]').forEach(tr=>{
+      const hide = Boolean(hidden[tr.dataset.row]);
+      if (tr.hidden !== hide) tr.hidden = hide;
+    });
+    const summaryText = `${visible.length-updates-unresolved} nuevos · ${updates} para actualizar${unresolved?` · ${unresolved} por identificar`:''}${unchanged?` · ${unchanged} sin cambios`:''}`;
+    const summaryLabel = backdrop.querySelector('[data-summary]');
+    if (summaryLabel.textContent !== summaryText) summaryLabel.textContent = summaryText;
     apply.disabled=busy||!visible.length||Boolean(unresolved)||visible.some(row=>row.loading);
   }
   function canEditSupplierCode(row) {
@@ -458,35 +473,44 @@ export async function open(options, window = globalThis.window, document = globa
   function descriptionMatchesOnly(){
     try{return localStorage.getItem('corralon_stock_description_matches_only_v1')==='1';}catch{return false;}
   }
+  function queueArticleSearch(input, row) {
+    hideMenu();
+    pendingArticleInput = input;
+    articleSearchTimer = setTimeout(() => {
+      if (input.isConnected && !busy) search(input, row);
+      else pendingArticleInput = null;
+    }, 140);
+  }
   function search(input, row) {
     hideMenu(); menuInput = input; menuKind = 'article';
     const queryText = input.value;
     const query = normalize(queryText);
     const normalizedQuery = normalizeIndexFilter(queryText);
-    const queryFilter = { query:normalizedQuery, compactQuery:compactIndexFilter(normalizedQuery), terms:normalizedQuery.split(' ').filter(Boolean) };
+    const queryFilter = { query:normalizedQuery, compactQuery:compactIndexFilter(queryText), terms:normalizedQuery ? normalizedQuery.split(' ') : [] };
+    const firstTerm = queryFilter.terms[0];
     const rowCode = normalize(row?.codigo);
     const hasSameProviderCode = Boolean(rowCode) && catalogSorted.some(article => article.searchCode === rowCode);
     const ranks = new Map();
-    const filterRank = article => {
-      if (ranks.has(article)) return ranks.get(article);
-      const base = rowCode && article.searchCode === rowCode ? -2 : article.searchCode === query ? -1 :
-        indexDescriptionFilterRank(article.descripcion, queryText, { ...queryFilter, text:article.searchDescription, compactText:article.searchCompact, words:article.searchWords });
-      const firstWord = (article.searchWords || normalizeIndexFilter(article.descripcion).split(' '))[0] || '';
-      const firstTerm = queryFilter.terms[0] || '';
-      const value = Number.isFinite(base) && firstTerm ? (firstWord === firstTerm ? 0 : firstWord.startsWith(firstTerm) ? 1 : 2) * 20 + base : base;
-      ranks.set(article,value);
-      return value;
-    };
-    const isMatch = article => Number.isFinite(filterRank(article));
-    articlePage = window.CorralonSystem.articleOptionPager.create(descriptionMatchesOnly() && query ? catalogSorted.filter(isMatch) : catalogSorted, {
+    if (query || hasSameProviderCode) {
+      for (const article of catalogSorted) {
+        const matchesRowCode = Boolean(rowCode) && article.searchCode === rowCode;
+        const rank = matchesRowCode ? -2 : article.searchCode === query ? -1 : indexDescriptionFilterRank(article, queryFilter);
+        if (!Number.isFinite(rank)) continue;
+        const firstWord = article.searchWords[0] || '';
+        const firstWordRank = !firstTerm || firstWord === firstTerm ? 0 : firstWord.startsWith(firstTerm) ? 1 : 2;
+        ranks.set(article, firstWordRank * 20 + rank);
+      }
+    }
+    const onlyMatches = descriptionMatchesOnly();
+    articlePage = window.CorralonSystem.articleOptionPager.create(onlyMatches && query ? [...ranks.keys()] : catalogSorted, {
       key: article => String(article.id),
       description: article => article.descripcion,
-      isMatch,
-      rank: filterRank,
+      isMatch: article => ranks.has(article),
+      rank: article => ranks.get(article),
       hasSearch: Boolean(query) || hasSameProviderCode, beforeCount:hasSameProviderCode ? 0 : 20, afterCount:40, matchLimit:100, preordered:true
     });
-    articleHasMatch = articlePage.options.some(isMatch);
     menu = document.createElement('div'); menu.className = 'local-articles-search article'; menu.setAttribute('role','listbox');
+    menu.style.overflowAnchor = 'none';
     const rect = input.getBoundingClientRect();
     const width = Math.min(Math.max(rect.width * 2, 1000), innerWidth - 16);
     menu.style.left = `${Math.max(8,Math.min(rect.left,innerWidth-width-8))}px`;
@@ -495,7 +519,13 @@ export async function open(options, window = globalThis.window, document = globa
     const openUp = below < 240 && above > below;
     menu.style.maxHeight = `${Math.max(120,Math.min(340,openUp ? above : below))}px`;
     if (openUp) menu.style.bottom = `${innerHeight-rect.top+3}px`; else menu.style.top = `${rect.bottom+3}px`;
-    renderArticleMenu(query);
+    matches = articlePage.options;
+    menuIndex = query && ranks.size ? articlePage.focusIndex : -1;
+    menu.innerHTML = `<div class="local-articles-search-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Proveedor</span><span>Suspendido SQL</span></div>
+      <div data-article-options></div>
+      <div class="stock-description-footer"><button type="button" class="stock-description-filter" data-description-filter aria-pressed="${onlyMatches}" ${query?'':'disabled'}>${onlyMatches?'▾ Mostrar lista':'▴ Filtrar'}</button><button type="button" class="stock-description-filter" data-show-suspended aria-pressed="${showSuspended}">Mostrar suspendidos</button></div>`;
+    articleOptions = menu.querySelector('[data-article-options]');
+    renderArticleOptions();
     menu.addEventListener('mousedown', e => e.preventDefault());
     menu.addEventListener('click', e => {
       if(e.target.closest('[data-show-suspended]')){
@@ -514,45 +544,60 @@ export async function open(options, window = globalThis.window, document = globa
       }
       const button=e.target.closest('[data-match]');if(button)pick(row,matches[Number(button.dataset.match)].id);
     });
-    menu.addEventListener('scroll', () => {
-      if (menuKind !== 'article' || !articlePage) return;
-      if (menu.scrollTop < 16 && articlePage.beforeCursor >= 0) {
-        const oldHeight = menu.scrollHeight, oldTop = menu.scrollTop;
-        const added = window.CorralonSystem.articleOptionPager.extend(articlePage,'up');
-        if (!added.length) return;
-        const selectedId = matches[menuIndex]?.id;
-        renderArticleMenu(query,selectedId);
-        menu.scrollTop = oldTop + menu.scrollHeight - oldHeight;
-      } else if (menu.scrollTop + menu.clientHeight >= menu.scrollHeight - 16 && articlePage.afterCursor < articlePage.source.length) {
-        const oldTop = menu.scrollTop;
-        const added = window.CorralonSystem.articleOptionPager.extend(articlePage,'down');
-        if (!added.length) return;
-        const selectedId = matches[menuIndex]?.id;
-        renderArticleMenu(query,selectedId);
-        menu.scrollTop = oldTop;
-      }
-    });
+    menu.addEventListener('scroll', scrollArticleOptions, { passive:true });
     document.body.append(menu);
     if (query && menuIndex >= 0) {
       const currentMenu = menu;
       requestAnimationFrame(() => { if (currentMenu.isConnected && menu === currentMenu) showActiveArticle(true); });
     }
   }
-  function renderArticleMenu(query, selectedId = articlePage?.options[articlePage.focusIndex]?.id) {
-    if (!menu) return;
-    matches = articlePage?.options || [];
-    menuIndex = query && articleHasMatch ? matches.findIndex(article => article.id === selectedId) : -1;
-    menu.innerHTML = '<div class="local-articles-search-head" aria-hidden="true"><span>IDArt</span><span>Cód. proveedor</span><span>Descripción</span><span>Proveedor</span><span>Suspendido SQL</span></div>' + (matches.length ? matches.map((article,index) => `<button type="button" data-match="${index}" role="option"${index === menuIndex ? ' class="active"' : ''}><span>${escape(article.id)}</span><span title="${escape(article.codigo)}">${escape(article.codigo)}</span><span title="${escape(article.descripcion)}">${escape(article.descripcion)}</span><span title="${escape(article.proveedorNombre || 'Sin nombre')}">${escape(article.proveedorNombre || 'Sin nombre')}</span><span>${article.suspendido===true||Number(article.suspendido)===1?'Sí':'No'}</span></button>`).join('') : '<p>Sin coincidencias en la base local.</p>') + `<div class="stock-description-footer"><button type="button" class="stock-description-filter" data-description-filter aria-pressed="${descriptionMatchesOnly()}" ${query?'':'disabled'}>${descriptionMatchesOnly()?'▾ Mostrar lista':'▴ Filtrar'}</button><button type="button" class="stock-description-filter" data-show-suspended aria-pressed="${showSuspended}">Mostrar suspendidos</button></div>`;
+  function scrollArticleOptions(event) {
+    if (event.currentTarget !== menu) return;
+    const top = menu.scrollTop;
+    const direction = top < 16 && articlePage.beforeCursor >= 0 ? 'up'
+      : top + menu.clientHeight >= menu.scrollHeight - 16 && articlePage.afterCursor < articlePage.source.length ? 'down'
+      : '';
+    const added = direction ? window.CorralonSystem.articleOptionPager.extend(articlePage, direction).length : 0;
+    matches = articlePage.options;
+    if (direction === 'up' && added) {
+      if (menuIndex >= 0) menuIndex += added;
+      const anchoredTop = top + added * articleOptionHeight;
+      renderArticleOptions(anchoredTop, true);
+      menu.scrollTop = anchoredTop;
+    } else renderArticleOptions(top);
+  }
+  function renderArticleOptions(top = menu.scrollTop, force = false) {
+    // Reserve the full scroll height while rendering only the rows near the viewport.
+    const firstVisible = Math.floor(top / articleOptionHeight);
+    const start = matches.length <= 32 ? 0 : Math.min(matches.length, Math.max(0, firstVisible - 8));
+    const end = matches.length <= 32 ? matches.length : Math.min(matches.length, firstVisible + 24);
+    articleOptions.style.paddingTop = `${start * articleOptionHeight}px`;
+    articleOptions.style.paddingBottom = `${(matches.length - end) * articleOptionHeight}px`;
+    if (!force && start === paintedStart && end === paintedEnd) return;
+    paintedStart = start;
+    paintedEnd = end;
+    articleOptions.innerHTML = matches.length ? matches.slice(start, end).map((article, offset) => {
+      const index = start + offset;
+      const provider = escape(article.proveedorNombre || 'Sin nombre');
+      return `<button type="button" data-match="${index}" role="option" style="box-sizing:border-box;height:${articleOptionHeight}px"${index === menuIndex ? ' class="active"' : ''}><span>${escape(article.id)}</span><span title="${escape(article.codigo)}">${escape(article.codigo)}</span><span title="${escape(article.descripcion)}">${escape(article.descripcion)}</span><span title="${provider}">${provider}</span><span>${article.suspendido===true||Number(article.suspendido)===1?'Sí':'No'}</span></button>`;
+    }).join('') : '<p>Sin coincidencias en la base local.</p>';
   }
   function showActiveArticle(alignTop = false) {
-    if (!menu || menuKind !== 'article') return;
-    const active = menu.querySelector('[data-match].active');
-    if (!active) return;
-    const headerBottom = (menu.querySelector('.local-articles-search-head')?.getBoundingClientRect().bottom || menu.getBoundingClientRect().top) + 4;
-    const rowRect = active.getBoundingClientRect();
-    const bottom = menu.getBoundingClientRect().bottom - 4;
+    if (menuIndex < 0) return;
+    const selected = articleOptions.querySelector(`[data-match="${menuIndex}"]`);
+    if (!selected) {
+      menu.scrollTop = menuIndex * articleOptionHeight;
+      renderArticleOptions();
+      return;
+    }
+    articleOptions.querySelector('.active')?.classList.remove('active');
+    selected.classList.add('active');
+    const headerBottom = menu.firstElementChild.getBoundingClientRect().bottom + 4;
+    const rowRect = selected.getBoundingClientRect();
+    const bottom = Math.min(menu.getBoundingClientRect().bottom, menu.lastElementChild.getBoundingClientRect().top || Infinity) - 4;
     if (alignTop || rowRect.top < headerBottom) menu.scrollTop = Math.max(0, menu.scrollTop + rowRect.top - headerBottom);
     else if (rowRect.bottom > bottom) menu.scrollTop += rowRect.bottom - bottom;
+    renderArticleOptions();
   }
   function pickRubro(row, id) {
     const sourceInput = menuInput;
@@ -664,7 +709,10 @@ export async function open(options, window = globalThis.window, document = globa
       }
       if(menuInput === e.target) hideMenu();
     }
-    if (row && e.target.dataset.field === 'descripcion') confirmNew(row);
+    if (row && e.target.dataset.field === 'descripcion') {
+      if (pendingArticleInput === e.target) hideMenu();
+      confirmNew(row);
+    }
     if (row && e.target.dataset.field === 'margen') {
       row.margen = parseMargin(e.target.value);
       if (Number.isFinite(row.margen)) e.target.value = displayMargin(row.margen);
@@ -677,12 +725,17 @@ export async function open(options, window = globalThis.window, document = globa
     const input = e.target.closest('[data-field]'); if (!input || busy) return;
     const tr = input.closest('[data-row]'), row = rows[Number(tr.dataset.row)], field = input.dataset.field;
     if (field === 'descripcion') {
+      const updateSummary = row.mode !== 'new' || Boolean(row.resolutionMessage);
       row.descripcion = input.value;
       row.mode = 'new'; row.id = ''; row.original = null; row.version = ''; row.lookup = null;
       row.needsNewConfirmation = true; row.newConfirmed = false; row.declinedDescription = '';
       delete row.resolutionMessage;
-      search(input,row); summary();
-      tr.querySelector('td:first-child input').value = options.editableSource?'':'Automático';
+      if (isStock) queueArticleSearch(input,row);
+      else search(input,row);
+      if (updateSummary) summary();
+      const idInput = tr.querySelector('td:first-child input');
+      const idValue = options.editableSource?'':'Automático';
+      if(idInput.value !== idValue) idInput.value = idValue;
     }
     if (field === 'rubro') {
       const selected = rubros.find(item => normalize(item.nombre) === normalize(input.value));
@@ -806,6 +859,7 @@ export async function open(options, window = globalThis.window, document = globa
       else searchRubro(input,rowAt(input));
       return;
     }
+    if (pendingArticleInput === input && ['ArrowDown','ArrowUp','Enter'].includes(e.key)) search(input,rowAt(input));
     if (menu && input === menuInput && ['ArrowDown','ArrowUp','Enter'].includes(e.key)) {
       e.preventDefault();
       if (e.key === 'Enter') {
@@ -820,9 +874,13 @@ export async function open(options, window = globalThis.window, document = globa
       }
       if (matches.length) {
         menuIndex = Math.max(0,Math.min(matches.length-1,menuIndex+(e.key==='ArrowDown'?1:-1)));
-        menu.querySelectorAll('[data-match],[data-rubro-match]').forEach((button,index)=>button.classList.toggle('active',index===menuIndex));
         if (menuKind === 'article') showActiveArticle();
-        else menu.querySelector('.active')?.scrollIntoView({block:'nearest'});
+        else {
+          menu.querySelector('.active')?.classList.remove('active');
+          const selected = menu.querySelector(`[data-rubro-match="${menuIndex}"]`);
+          selected?.classList.add('active');
+          selected?.scrollIntoView({block:'nearest'});
+        }
       }
       return;
     }
@@ -883,7 +941,7 @@ export async function open(options, window = globalThis.window, document = globa
         return {...a, searchCode:normalize(a.codigo), searchDescription,
           searchCompact:searchDescription.replace(/\s+/g,''), searchWords:searchDescription.split(' ').filter(Boolean)};
       }); rubros=data.rubros;
-      catalogSorted=catalog.slice().sort((a,b)=>String(a.descripcion || '').localeCompare(String(b.descripcion || ''),'es',{sensitivity:'base'}) || String(a.id).localeCompare(String(b.id)));
+      catalogSorted=catalog.slice().sort((a,b)=>descriptionCollator.compare(a.descripcion || '',b.descripcion || '') || String(a.id).localeCompare(String(b.id)));
       backdrop.querySelector('[data-provider]').textContent=`${options.provider.proveedor || options.provider.nombre || ''} · ${catalog.length.toLocaleString('es-AR')} artículos leídos desde SQL Server`;
       if (!catalogReady) {
         const draft = await loadDraft();
